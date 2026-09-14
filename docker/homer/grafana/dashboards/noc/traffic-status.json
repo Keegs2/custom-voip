@@ -48,7 +48,7 @@
       "transparent": true,
       "options": {
         "mode": "markdown",
-        "content": "## Traffic Status — live ops wall\n**Every panel is real-time** (VictoriaMetrics `voip-metrics-vm` — Kamailio + FreeSWITCH `mod_prometheus`, scraped ~15s), so this reflects the fleet as it is **right now**, not the retrospective CDR view (all CDR-delayed volume/ASR/carrier-split/hangup analytics moved to **Call Quality**). **CPS** = live seizures/sec; **connected calls** = FreeSWITCH `calls_active`; **dialogs** = Kamailio signaling concurrency; **Live ASR / failure %** = Kamailio INVITE reply-class rates over 5m. Carrier UP/DOWN is the only non-VM source — the SBCs' Kamailio-dispatcher OPTIONS probes via `carrier_trunk_health` (`voip-cdr-pg`), poller-fresh (~3–15s), not call-derived. `zone` label comes from `external_labels`; the **Zone** picker (`$zonere`) filters the SBC/dialog/ASR selectors. **Carriers:** Bandwidth Dallas (primary) · Bandwidth LA (secondary) · `local` = on-net. **Active SBC per zone** (top row) = the NLB election per zone, decided by per-SBC scrape LIVENESS (present_over_time of an always-exported Kamailio gauge, 2m window) — with failover-ratio=0 the primary serves whenever its Kamailio is alive, so: green = primary ACTIVE (normal, even at zero traffic) · orange = ⚠ ON STANDBY (primary dark, standby serving) · red = ZONE DARK (both dark). Election truth at all times — it does NOT depend on call volume; per-SBC volume lives in 'Dialogs per SBC — now' + 'CPS per SBC (1m rate)'. **Active FS per zone** (second row) = the MEDIA election per zone, decided by the FS ESL exporter's own health gauge (last_over_time of freeswitch_esl_scrape_ok, 2m — VALUE-aware, so a dead FS container on a live VM reads unhealthy, not merely absent). Kamailio dispatcher priority selection (alg 8, FS-1 prio 10 / FS-2 prio 5) serves FS-1 whenever it is healthy, so: green = FS-1 ACTIVE (normal — a FLAT standby is BY DESIGN, this row is what separates 'standby idle' from 'broken') · orange = ⚠ FAILED OVER (FS-2 serving new calls) · red = MEDIA DOWN (both FS unhealthy — zone media dark). Per-FS volume lives in 'CPS per FreeSWITCH (1m rate)'."
+        "content": "## Traffic Status — live ops wall\n**Every panel is real-time** (VictoriaMetrics `voip-metrics-vm` — Kamailio + FreeSWITCH `mod_prometheus`, scraped ~15s), so this reflects the fleet as it is **right now**, not the retrospective CDR view (all CDR-delayed volume/ASR/carrier-split/hangup analytics moved to **Call Quality**). **CPS** = live seizures/sec; **connected calls** = FreeSWITCH `calls_active`; **dialogs** = Kamailio signaling concurrency; **Live ASR / failure %** = Kamailio INVITE reply-class rates over 5m. Carrier UP/DOWN is the only non-VM source — the SBCs' Kamailio-dispatcher OPTIONS probes via `carrier_trunk_health` (`voip-cdr-pg`), poller-fresh (~3–15s), not call-derived. `zone` label comes from `external_labels`; the **Zone** picker (`$zonere`) filters the SBC/dialog/ASR selectors. **Carriers:** Bandwidth Dallas (primary) · Bandwidth LA (secondary) · `local` = on-net. **Active SBC per zone** (top row — LEFT tile of each zone pair) = the NLB election per zone, decided by per-SBC scrape LIVENESS (present_over_time of an always-exported Kamailio gauge, 2m window) — with failover-ratio=0 the primary serves whenever its Kamailio is alive, so: green = primary ACTIVE (normal, even at zero traffic) · orange = ⚠ ON STANDBY (primary dark, standby serving) · red = ZONE DARK (both dark). Election truth at all times — it does NOT depend on call volume; per-SBC volume lives in 'Dialogs per SBC — now' + 'CPS per SBC (1m rate)'. **Active FS per zone** (top row — RIGHT tile of each zone pair) = the MEDIA election per zone, decided by the FS ESL exporter's own health gauge (last_over_time of freeswitch_esl_scrape_ok, 2m — VALUE-aware, so a dead FS container on a live VM reads unhealthy, not merely absent). Kamailio dispatcher priority selection (alg 8, FS-1 prio 10 / FS-2 prio 5) serves FS-1 whenever it is healthy, so: green = FS-1 ACTIVE (normal — a FLAT standby is BY DESIGN, this row is what separates 'standby idle' from 'broken') · orange = ⚠ FAILED OVER (FS-2 serving new calls) · red = MEDIA DOWN (both FS unhealthy — zone media dark). Per-FS volume lives in 'CPS per FreeSWITCH (1m rate)'."
       },
       "fieldConfig": {
         "defaults": {},
@@ -58,11 +58,11 @@
     {
       "id": 55,
       "type": "stat",
-      "title": "East — active SBC (HA election)",
+      "title": "East · SBC (HA)",
       "description": "NLB election truth for EAST (active/standby pair: poc-custom-voip = east-sbc-1 PRIMARY / kam-g2 = east-sbc-2 STANDBY), valid at ZERO traffic. With failover-ratio=0 the primary serves iff its Kamailio is alive — the /healthz fs_up component is common-mode (shared FreeSWITCH, fails BOTH SBCs together) so it never differentiates the pair — which makes per-SBC scrape liveness THE election signal: value = 1*(east-sbc-1 fresh) + 2*(east-sbc-1 stale AND east-sbc-2 fresh), freshness = present_over_time(kamailio_shmem_used_size{reporting_instance=...}[2m]) on an always-exported gauge. GREEN = primary serving (normal). ORANGE = FAILED OVER, standby serving (detection lag up to ~2m + refresh; the NLB itself flips in ~6s). RED 'ZONE DARK' = BOTH SBCs' metrics absent — zone outage OR metrics path down (vmagent/WAN/VictoriaMetrics): cross-check Infra Overview, the GCM 'SBC failover state' alert and gcloud backend-services get-health. Always shown regardless of the Zone filter. Runbook: docs/SBC_ACTIVE_STANDBY_RUNBOOK.md MAINTENANCE-AWARE (drain plane): a maintenance-drained SBC keeps exporting metrics, so raw scrape freshness alone would keep claiming it active — eligibility is now freshness AND NOT drained: kamailio_maint_drain{reporting_instance=...} (gauge refreshed every few seconds by the /healthz handler the NLB probes, [2m]-freshness-clamped, `or vector(0)`-guarded so a fully stopped kamailio reads 0 and the row degrades to the legacy DOWN/STANDBY states — a dead node can never fake MAINT). Encoding: value = 1*E1 + 2*E2*(1-E1) + 10*M1 + 20*M2 with E = fresh*(1-maint) — ones digit = elected eligible node (legacy semantics preserved exactly when neither SBC is drained), tens digits = maint bitmask. States: 0 = ZONE DARK (red, unchanged) | 1 = SBC-1 ACTIVE (green, unchanged) | 2 = ON STANDBY, SBC-2 serving after an UNPLANNED SBC-1 loss (orange, unchanged) | 12 = SBC-1 MAINT -> SBC-2 ACTIVE (yellow: PLANNED drain, standby serving — not a failover page) | 21 = SBC-1 ACTIVE with SBC-2 MAINT (green: primary serving normally but NO standby cover) | 30 = ZONE MAINT (yellow: BOTH SBCs drained — zone intentionally dark, distinct from red ZONE DARK) | 10 = SBC-1 MAINT + SBC-2 DOWN and 20 = SBC-2 MAINT + SBC-1 DOWN (red: the only non-drained SBC is dead — nobody can serve). Codes 11/22/31/32 are unreachable: a drained node is never eligible. Note: if a drained kamailio is then fully stopped for the maintenance work itself, its maint gauge goes stale within 2m and the row intentionally falls back to the legacy reading.",
       "gridPos": {
         "h": 4,
-        "w": 8,
+        "w": 4,
         "x": 0,
         "y": 2
       },
@@ -97,7 +97,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
-        "wideLayout": true
+        "wideLayout": true,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 18
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -198,11 +202,11 @@
     {
       "id": 56,
       "type": "stat",
-      "title": "West — active SBC (HA election)",
+      "title": "West · SBC (HA)",
       "description": "NLB election truth for WEST (active/standby pair: west-sbc-1 PRIMARY / west-sbc-2 STANDBY), valid at ZERO traffic. With failover-ratio=0 the primary serves iff its Kamailio is alive — the /healthz fs_up component is common-mode (shared FreeSWITCH, fails BOTH SBCs together) so it never differentiates the pair — which makes per-SBC scrape liveness THE election signal: value = 1*(west-sbc-1 fresh) + 2*(west-sbc-1 stale AND west-sbc-2 fresh), freshness = present_over_time(kamailio_shmem_used_size{reporting_instance=...}[2m]) on an always-exported gauge. GREEN = primary serving (normal). ORANGE = FAILED OVER, standby serving (detection lag up to ~2m + refresh; the NLB itself flips in ~6s). RED 'ZONE DARK' = BOTH SBCs' metrics absent — zone outage OR metrics path down (vmagent/WAN/VictoriaMetrics): cross-check Infra Overview, the GCM 'SBC failover state' alert and gcloud backend-services get-health. Always shown regardless of the Zone filter. Runbook: docs/SBC_ACTIVE_STANDBY_RUNBOOK.md MAINTENANCE-AWARE (drain plane): a maintenance-drained SBC keeps exporting metrics, so raw scrape freshness alone would keep claiming it active — eligibility is now freshness AND NOT drained: kamailio_maint_drain{reporting_instance=...} (gauge refreshed every few seconds by the /healthz handler the NLB probes, [2m]-freshness-clamped, `or vector(0)`-guarded so a fully stopped kamailio reads 0 and the row degrades to the legacy DOWN/STANDBY states — a dead node can never fake MAINT). Encoding: value = 1*E1 + 2*E2*(1-E1) + 10*M1 + 20*M2 with E = fresh*(1-maint) — ones digit = elected eligible node (legacy semantics preserved exactly when neither SBC is drained), tens digits = maint bitmask. States: 0 = ZONE DARK (red, unchanged) | 1 = SBC-1 ACTIVE (green, unchanged) | 2 = ON STANDBY, SBC-2 serving after an UNPLANNED SBC-1 loss (orange, unchanged) | 12 = SBC-1 MAINT -> SBC-2 ACTIVE (yellow: PLANNED drain, standby serving — not a failover page) | 21 = SBC-1 ACTIVE with SBC-2 MAINT (green: primary serving normally but NO standby cover) | 30 = ZONE MAINT (yellow: BOTH SBCs drained — zone intentionally dark, distinct from red ZONE DARK) | 10 = SBC-1 MAINT + SBC-2 DOWN and 20 = SBC-2 MAINT + SBC-1 DOWN (red: the only non-drained SBC is dead — nobody can serve). Codes 11/22/31/32 are unreachable: a drained node is never eligible. Note: if a drained kamailio is then fully stopped for the maintenance work itself, its maint gauge goes stale within 2m and the row intentionally falls back to the legacy reading.",
       "gridPos": {
         "h": 4,
-        "w": 8,
+        "w": 4,
         "x": 8,
         "y": 2
       },
@@ -237,7 +241,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
-        "wideLayout": true
+        "wideLayout": true,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 18
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -338,11 +346,11 @@
     {
       "id": 57,
       "type": "stat",
-      "title": "Central — active SBC (HA election)",
+      "title": "Central · SBC (HA)",
       "description": "NLB election truth for CENTRAL (active/standby pair: central-sbc-1 PRIMARY / central-sbc-2 STANDBY), valid at ZERO traffic. With failover-ratio=0 the primary serves iff its Kamailio is alive — the /healthz fs_up component is common-mode (shared FreeSWITCH, fails BOTH SBCs together) so it never differentiates the pair — which makes per-SBC scrape liveness THE election signal: value = 1*(central-sbc-1 fresh) + 2*(central-sbc-1 stale AND central-sbc-2 fresh), freshness = present_over_time(kamailio_shmem_used_size{reporting_instance=...}[2m]) on an always-exported gauge. GREEN = primary serving (normal). ORANGE = FAILED OVER, standby serving (detection lag up to ~2m + refresh; the NLB itself flips in ~6s). RED 'ZONE DARK' = BOTH SBCs' metrics absent — zone outage OR metrics path down (vmagent/WAN/VictoriaMetrics): cross-check Infra Overview, the GCM 'SBC failover state' alert and gcloud backend-services get-health. Always shown regardless of the Zone filter. Runbook: docs/SBC_ACTIVE_STANDBY_RUNBOOK.md MAINTENANCE-AWARE (drain plane): a maintenance-drained SBC keeps exporting metrics, so raw scrape freshness alone would keep claiming it active — eligibility is now freshness AND NOT drained: kamailio_maint_drain{reporting_instance=...} (gauge refreshed every few seconds by the /healthz handler the NLB probes, [2m]-freshness-clamped, `or vector(0)`-guarded so a fully stopped kamailio reads 0 and the row degrades to the legacy DOWN/STANDBY states — a dead node can never fake MAINT). Encoding: value = 1*E1 + 2*E2*(1-E1) + 10*M1 + 20*M2 with E = fresh*(1-maint) — ones digit = elected eligible node (legacy semantics preserved exactly when neither SBC is drained), tens digits = maint bitmask. States: 0 = ZONE DARK (red, unchanged) | 1 = SBC-1 ACTIVE (green, unchanged) | 2 = ON STANDBY, SBC-2 serving after an UNPLANNED SBC-1 loss (orange, unchanged) | 12 = SBC-1 MAINT -> SBC-2 ACTIVE (yellow: PLANNED drain, standby serving — not a failover page) | 21 = SBC-1 ACTIVE with SBC-2 MAINT (green: primary serving normally but NO standby cover) | 30 = ZONE MAINT (yellow: BOTH SBCs drained — zone intentionally dark, distinct from red ZONE DARK) | 10 = SBC-1 MAINT + SBC-2 DOWN and 20 = SBC-2 MAINT + SBC-1 DOWN (red: the only non-drained SBC is dead — nobody can serve). Codes 11/22/31/32 are unreachable: a drained node is never eligible. Note: if a drained kamailio is then fully stopped for the maintenance work itself, its maint gauge goes stale within 2m and the row intentionally falls back to the legacy reading.",
       "gridPos": {
         "h": 4,
-        "w": 8,
+        "w": 4,
         "x": 16,
         "y": 2
       },
@@ -377,7 +385,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
-        "wideLayout": true
+        "wideLayout": true,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 18
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -478,13 +490,13 @@
     {
       "id": 59,
       "type": "stat",
-      "title": "East — active FS (media HA election)",
+      "title": "East · FS (HA)",
       "description": "Media (FreeSWITCH) election truth for EAST (strict active/standby pair: fs-media-v2 = FS-1 ACTIVE / east-fs-2 = FS-2 HOT STANDBY), valid at ZERO traffic — a standby FS showing flat/absent call metrics is BY DESIGN, and this panel is what separates 'standby idle' from 'broken'. Kamailio dispatcher priority selection (alg 8, FS-1 prio 10 / FS-2 prio 5) sends every new call to FS-1 while it answers OPTIONS — so FS-1 healthy = FS-1 active. Health signal = the FS ESL exporter's own poll (carrier-monitor sidecar :9103, survives an FS container death): value = 1*(FS-1 healthy) + 2*(FS-1 unhealthy AND FS-2 healthy), healthy = last_over_time(freeswitch_esl_scrape_ok{freeswitch_node=...}[2m]) == 1. VALUE-aware on purpose: an exporter that is still scraped but reports esl_scrape_ok=0 (FS container dead, VM up) correctly counts unhealthy; a dark VM has no samples at all — both roll the election. GREEN = FS-1 active (normal). ORANGE = FAILED OVER — FS-2 serving new calls (detection lag up to ~2m + refresh; the dispatcher itself flips within its probe window, ~15-45s). RED 'MEDIA DOWN' = NEITHER FS healthy — zone media outage (any-FS /healthz darkens the zone VIP, Bandwidth retries other zones) OR the zone's metrics path is down (vmagent/WAN/VictoriaMetrics): cross-check Infra Overview, 'CPS per FreeSWITCH' and kamcmd dispatcher.list on a zone SBC. Dispatcher ADMIN state now folds in: fs_dispatcher_disabled{fs_ip=...} (1 iff the group-1 destination is admin-Disabled on either of this zone's SBCs — max() spans both; Active/Inactive/Trying read 0) marks an FS as MAINT and EXCLUDES it from claiming active, so a maintenance-drained FS can never render as the elected media node. Probe-driven health (Active/Inactive/Trying) is still inferred via ESL, so a sofia-down/ESL-up zombie can still show green after a probe-driven (non-admin) flip — cross-check 'CPS per FreeSWITCH'. Always shown regardless of the Zone filter. Runbook: docs/FS_MEDIA_HA_RUNBOOK.md Encoding: value = 1*E1 + 2*E2*(1-E1) + 10*D1 + 20*D2 with E = esl_healthy*(1-drained) and D = dispatcher-admin-Disabled ([2m]-fresh, `or vector(0)`-guarded — if the fsdisp exporters go dark the D terms read 0 and the row degrades to the legacy ESL-only reading); ones digit = elected eligible FS (legacy semantics preserved exactly when neither FS is drained), tens digits = maint bitmask. States: 0 = MEDIA DOWN (red, unchanged) | 1 = FS-1 ACTIVE (green, unchanged) | 2 = FAILED OVER, FS-2 serving after an UNPLANNED FS-1 loss (orange, unchanged) | 12 = FS-2 ACTIVE with FS-1 MAINT (yellow: PLANNED media drain — not a failover page) | 21 = FS-1 ACTIVE with FS-2 MAINT (green: serving normally but NO hot-standby cover) | 30 = MEDIA MAINT (yellow: BOTH FS drained — intentional media dark, distinct from red MEDIA DOWN) | 10 = FS-1 MAINT + FS-2 unhealthy and 20 = FS-2 MAINT + FS-1 unhealthy (red: the only non-drained FS is unhealthy — no media node available). Codes 11/22/31/32 are unreachable: a drained FS is never eligible.",
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 0,
-        "y": 6
+        "w": 4,
+        "x": 4,
+        "y": 2
       },
       "datasource": {
         "type": "prometheus",
@@ -517,7 +529,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
-        "wideLayout": true
+        "wideLayout": true,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 18
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -618,13 +634,13 @@
     {
       "id": 60,
       "type": "stat",
-      "title": "West — active FS (media HA election)",
+      "title": "West · FS (HA)",
       "description": "Media (FreeSWITCH) election truth for WEST (strict active/standby pair: west-fs = FS-1 ACTIVE / west-fs-2 = FS-2 HOT STANDBY), valid at ZERO traffic — a standby FS showing flat/absent call metrics is BY DESIGN, and this panel is what separates 'standby idle' from 'broken'. Kamailio dispatcher priority selection (alg 8, FS-1 prio 10 / FS-2 prio 5) sends every new call to FS-1 while it answers OPTIONS — so FS-1 healthy = FS-1 active. Health signal = the FS ESL exporter's own poll (carrier-monitor sidecar :9103, survives an FS container death): value = 1*(FS-1 healthy) + 2*(FS-1 unhealthy AND FS-2 healthy), healthy = last_over_time(freeswitch_esl_scrape_ok{freeswitch_node=...}[2m]) == 1. VALUE-aware on purpose: an exporter that is still scraped but reports esl_scrape_ok=0 (FS container dead, VM up) correctly counts unhealthy; a dark VM has no samples at all — both roll the election. GREEN = FS-1 active (normal). ORANGE = FAILED OVER — FS-2 serving new calls (detection lag up to ~2m + refresh; the dispatcher itself flips within its probe window, ~15-45s). RED 'MEDIA DOWN' = NEITHER FS healthy — zone media outage (any-FS /healthz darkens the zone VIP, Bandwidth retries other zones) OR the zone's metrics path is down (vmagent/WAN/VictoriaMetrics): cross-check Infra Overview, 'CPS per FreeSWITCH' and kamcmd dispatcher.list on a zone SBC. Dispatcher ADMIN state now folds in: fs_dispatcher_disabled{fs_ip=...} (1 iff the group-1 destination is admin-Disabled on either of this zone's SBCs — max() spans both; Active/Inactive/Trying read 0) marks an FS as MAINT and EXCLUDES it from claiming active, so a maintenance-drained FS can never render as the elected media node. Probe-driven health (Active/Inactive/Trying) is still inferred via ESL, so a sofia-down/ESL-up zombie can still show green after a probe-driven (non-admin) flip — cross-check 'CPS per FreeSWITCH'. Always shown regardless of the Zone filter. Runbook: docs/FS_MEDIA_HA_RUNBOOK.md Encoding: value = 1*E1 + 2*E2*(1-E1) + 10*D1 + 20*D2 with E = esl_healthy*(1-drained) and D = dispatcher-admin-Disabled ([2m]-fresh, `or vector(0)`-guarded — if the fsdisp exporters go dark the D terms read 0 and the row degrades to the legacy ESL-only reading); ones digit = elected eligible FS (legacy semantics preserved exactly when neither FS is drained), tens digits = maint bitmask. States: 0 = MEDIA DOWN (red, unchanged) | 1 = FS-1 ACTIVE (green, unchanged) | 2 = FAILED OVER, FS-2 serving after an UNPLANNED FS-1 loss (orange, unchanged) | 12 = FS-2 ACTIVE with FS-1 MAINT (yellow: PLANNED media drain — not a failover page) | 21 = FS-1 ACTIVE with FS-2 MAINT (green: serving normally but NO hot-standby cover) | 30 = MEDIA MAINT (yellow: BOTH FS drained — intentional media dark, distinct from red MEDIA DOWN) | 10 = FS-1 MAINT + FS-2 unhealthy and 20 = FS-2 MAINT + FS-1 unhealthy (red: the only non-drained FS is unhealthy — no media node available). Codes 11/22/31/32 are unreachable: a drained FS is never eligible.",
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 8,
-        "y": 6
+        "w": 4,
+        "x": 12,
+        "y": 2
       },
       "datasource": {
         "type": "prometheus",
@@ -657,7 +673,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
-        "wideLayout": true
+        "wideLayout": true,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 18
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -758,13 +778,13 @@
     {
       "id": 61,
       "type": "stat",
-      "title": "Central — active FS (media HA election)",
+      "title": "Central · FS (HA)",
       "description": "Media (FreeSWITCH) election truth for CENTRAL (strict active/standby pair: central-fs = FS-1 ACTIVE / central-fs-2 = FS-2 HOT STANDBY), valid at ZERO traffic — a standby FS showing flat/absent call metrics is BY DESIGN, and this panel is what separates 'standby idle' from 'broken'. Kamailio dispatcher priority selection (alg 8, FS-1 prio 10 / FS-2 prio 5) sends every new call to FS-1 while it answers OPTIONS — so FS-1 healthy = FS-1 active. Health signal = the FS ESL exporter's own poll (carrier-monitor sidecar :9103, survives an FS container death): value = 1*(FS-1 healthy) + 2*(FS-1 unhealthy AND FS-2 healthy), healthy = last_over_time(freeswitch_esl_scrape_ok{freeswitch_node=...}[2m]) == 1. VALUE-aware on purpose: an exporter that is still scraped but reports esl_scrape_ok=0 (FS container dead, VM up) correctly counts unhealthy; a dark VM has no samples at all — both roll the election. GREEN = FS-1 active (normal). ORANGE = FAILED OVER — FS-2 serving new calls (detection lag up to ~2m + refresh; the dispatcher itself flips within its probe window, ~15-45s). RED 'MEDIA DOWN' = NEITHER FS healthy — zone media outage (any-FS /healthz darkens the zone VIP, Bandwidth retries other zones) OR the zone's metrics path is down (vmagent/WAN/VictoriaMetrics): cross-check Infra Overview, 'CPS per FreeSWITCH' and kamcmd dispatcher.list on a zone SBC. Dispatcher ADMIN state now folds in: fs_dispatcher_disabled{fs_ip=...} (1 iff the group-1 destination is admin-Disabled on either of this zone's SBCs — max() spans both; Active/Inactive/Trying read 0) marks an FS as MAINT and EXCLUDES it from claiming active, so a maintenance-drained FS can never render as the elected media node. Probe-driven health (Active/Inactive/Trying) is still inferred via ESL, so a sofia-down/ESL-up zombie can still show green after a probe-driven (non-admin) flip — cross-check 'CPS per FreeSWITCH'. Always shown regardless of the Zone filter. Runbook: docs/FS_MEDIA_HA_RUNBOOK.md Encoding: value = 1*E1 + 2*E2*(1-E1) + 10*D1 + 20*D2 with E = esl_healthy*(1-drained) and D = dispatcher-admin-Disabled ([2m]-fresh, `or vector(0)`-guarded — if the fsdisp exporters go dark the D terms read 0 and the row degrades to the legacy ESL-only reading); ones digit = elected eligible FS (legacy semantics preserved exactly when neither FS is drained), tens digits = maint bitmask. States: 0 = MEDIA DOWN (red, unchanged) | 1 = FS-1 ACTIVE (green, unchanged) | 2 = FAILED OVER, FS-2 serving after an UNPLANNED FS-1 loss (orange, unchanged) | 12 = FS-2 ACTIVE with FS-1 MAINT (yellow: PLANNED media drain — not a failover page) | 21 = FS-1 ACTIVE with FS-2 MAINT (green: serving normally but NO hot-standby cover) | 30 = MEDIA MAINT (yellow: BOTH FS drained — intentional media dark, distinct from red MEDIA DOWN) | 10 = FS-1 MAINT + FS-2 unhealthy and 20 = FS-2 MAINT + FS-1 unhealthy (red: the only non-drained FS is unhealthy — no media node available). Codes 11/22/31/32 are unreachable: a drained FS is never eligible.",
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 16,
-        "y": 6
+        "w": 4,
+        "x": 20,
+        "y": 2
       },
       "datasource": {
         "type": "prometheus",
@@ -797,7 +817,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
-        "wideLayout": true
+        "wideLayout": true,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 18
+        }
       },
       "fieldConfig": {
         "defaults": {
@@ -896,6 +920,190 @@
       }
     },
     {
+      "id": 62,
+      "type": "timeseries",
+      "title": "Inbound call volume — by zone + total",
+      "description": "Calls OFFERED into the platform from carriers, counted at the SBC on each admitted initial INVITE (Kamailio `kamailio_trunk_cps{direction=\"inbound\"}`), bucketed by the dashboard interval — each point is the number of calls in ONE $__interval bucket, so bucket width and therefore point height RESCALE with the time picker: widen the range and each point covers more time and reads higher. Compare shape and zone balance across ranges, not absolute heights. Min step 1m (the 15s scrape would otherwise produce sub-scrape comb buckets on short ranges).\n\nCOUNTED EXACTLY ONCE PER CALL: the counter sits after `t_precheck_trans()` (absorbs INVITE retransmissions), after `bw_dedup` (482 Merged on the duplicate INVITEs Bandwidth sends from multiple edges), and after the `bw_cps` 503 backstop. On-net forwards are counted once at ingress and never re-counted per chain hop (the RCF chain resolves in memory, no SIP per hop). Calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count as OFFERED — pair with 'Live ASR (5m)' to read completion.\n\nNOT INCLUDED — this is carrier ingress, not total platform volume: customer-originated SIP-trunk and API Calling traffic (`route[TRUNK_AUTH]` emits no counter today), runtime DB-admitted carriers (`carrier_trunks` — deliberately no metric, a DB-sourced carrier name is not a bounded label), and SIPp load-test ingress. `direction=\"outbound\"` is deliberately NOT plotted here: it is an ATTEMPT counter (the FreeSWITCH failover loop fires up to 8 bridge attempts per call) and the carrier B-leg of an RCF forward is the same call already counted inbound.\n\nREADING IT: the three zone series are STACKED (group A), so the top of the stack IS the fleet total; the white 'Total' line is that same total drawn unstacked and by construction traces the stack top. All zones are shown regardless of the Zone picker, matching 'CPS over time — by zone (1m rate)'. A zone with NO LINE has stopped reporting — that is missing data, not zero calls, and the Total understates real volume for that period. Zone colours are deliberately NON-STATUS (blue / violet / teal): on this board green, amber and red always mean health, never a zone.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "sum by (zone) (increase(kamailio_trunk_cps{direction=\"inbound\"}[$__interval]))",
+          "range": true,
+          "interval": "1m",
+          "legendFormat": "{{zone}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "sum(increase(kamailio_trunk_cps{direction=\"inbound\"}[$__interval]))",
+          "range": true,
+          "interval": "1m",
+          "legendFormat": "Total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
+          "noValue": "no traffic",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 28,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "calls",
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "east"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "East"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5794F2"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "west"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "West"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#B877D9"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "central"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Central"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#2AC4B8"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#E0E6F0"
+                }
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none",
+                  "group": "A"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max",
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 1,
       "type": "stat",
       "title": "Total CPS — now (1m)",
@@ -904,7 +1112,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 10
+        "y": 14
       },
       "datasource": {
         "type": "prometheus",
@@ -975,7 +1183,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 10
+        "y": 14
       },
       "datasource": {
         "type": "prometheus",
@@ -1039,7 +1247,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 10
+        "y": 14
       },
       "datasource": {
         "type": "prometheus",
@@ -1112,7 +1320,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 10
+        "y": 14
       },
       "datasource": {
         "type": "prometheus",
@@ -1185,7 +1393,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 10
+        "y": 14
       },
       "datasource": {
         "type": "prometheus",
@@ -1251,7 +1459,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 10
+        "y": 14
       },
       "datasource": {
         "type": "prometheus",
@@ -1356,7 +1564,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 14
+        "y": 18
       },
       "datasource": {
         "type": "prometheus",
@@ -1427,7 +1635,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 14
+        "y": 18
       },
       "datasource": {
         "type": "prometheus",
@@ -1609,7 +1817,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 14
+        "y": 18
       },
       "datasource": {
         "type": "prometheus",
@@ -1680,7 +1888,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 20
+        "y": 24
       },
       "datasource": {
         "type": "prometheus",
@@ -1774,7 +1982,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 20
+        "y": 24
       },
       "datasource": {
         "type": "prometheus",
@@ -1868,7 +2076,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 20
+        "y": 24
       },
       "datasource": {
         "type": "prometheus",
@@ -2055,7 +2263,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 27
+        "y": 31
       },
       "datasource": {
         "type": "prometheus",
@@ -2138,7 +2346,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 27
+        "y": 31
       },
       "datasource": {
         "type": "postgres",
@@ -2249,7 +2457,7 @@
         "h": 6,
         "w": 4,
         "x": 16,
-        "y": 27
+        "y": 31
       },
       "datasource": {
         "type": "prometheus",
@@ -2341,7 +2549,7 @@
         "h": 6,
         "w": 4,
         "x": 20,
-        "y": 27
+        "y": 31
       },
       "datasource": {
         "type": "prometheus",
@@ -2433,7 +2641,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 33
+        "y": 37
       },
       "datasource": {
         "type": "prometheus",
@@ -2516,7 +2724,7 @@
         "h": 5,
         "w": 6,
         "x": 8,
-        "y": 33
+        "y": 37
       },
       "datasource": {
         "type": "prometheus",
@@ -2583,7 +2791,7 @@
         "h": 5,
         "w": 4,
         "x": 14,
-        "y": 33
+        "y": 37
       },
       "datasource": {
         "type": "prometheus",
@@ -2653,7 +2861,7 @@
         "h": 5,
         "w": 6,
         "x": 18,
-        "y": 33
+        "y": 37
       },
       "datasource": {
         "type": "prometheus",
@@ -2720,7 +2928,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 42
       },
       "datasource": {
         "type": "prometheus",
