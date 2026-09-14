@@ -922,8 +922,8 @@
     {
       "id": 62,
       "type": "timeseries",
-      "title": "Inbound call volume — by zone + total",
-      "description": "Calls OFFERED into the platform from carriers, counted at the SBC on each admitted initial INVITE (Kamailio `kamailio_trunk_cps{direction=\"inbound\"}`), bucketed by the dashboard interval — each point is the number of calls in ONE $__interval bucket, so bucket width and therefore point height RESCALE with the time picker: widen the range and each point covers more time and reads higher. Compare shape and zone balance across ranges, not absolute heights. Min step 1m (the 15s scrape would otherwise produce sub-scrape comb buckets on short ranges).\n\nCOUNTED EXACTLY ONCE PER CALL: the counter sits after `t_precheck_trans()` (absorbs INVITE retransmissions), after `bw_dedup` (482 Merged on the duplicate INVITEs Bandwidth sends from multiple edges), and after the `bw_cps` 503 backstop. On-net forwards are counted once at ingress and never re-counted per chain hop (the RCF chain resolves in memory, no SIP per hop). Calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count as OFFERED — pair with 'Live ASR (5m)' to read completion.\n\nNOT INCLUDED — this is carrier ingress, not total platform volume: customer-originated SIP-trunk and API Calling traffic (`route[TRUNK_AUTH]` emits no counter today), runtime DB-admitted carriers (`carrier_trunks` — deliberately no metric, a DB-sourced carrier name is not a bounded label), and SIPp load-test ingress. `direction=\"outbound\"` is deliberately NOT plotted here: it is an ATTEMPT counter (the FreeSWITCH failover loop fires up to 8 bridge attempts per call) and the carrier B-leg of an RCF forward is the same call already counted inbound.\n\nREADING IT: the three zone series are STACKED (group A), so the top of the stack IS the fleet total; the white 'Total' line is that same total drawn unstacked and by construction traces the stack top. All zones are shown regardless of the Zone picker, matching 'CPS over time — by zone (1m rate)'. A zone with NO LINE has stopped reporting — that is missing data, not zero calls, and the Total understates real volume for that period. Zone colours are deliberately NON-STATUS (blue / violet / teal): on this board green, amber and red always mean health, never a zone.",
+      "title": "Inbound calls per hour — by zone",
+      "description": "Calls OFFERED into the platform from carriers, counted at the SBC on each admitted initial INVITE (Kamailio `kamailio_trunk_cps{direction=\"inbound\"}`), aggregated into FIXED ONE-HOUR buckets. Unlike a picker-relative panel, bar height does NOT rescale with the time range — one bar is always one clock hour, and the number is an exact integer call count. Bars are drawn ENDING at their timestamp, so a bar between the 13:00 and 14:00 gridlines is the 13:00-14:00 hour. Buckets tile exactly: VictoriaMetrics' non-extrapolating increase() baselines each window on the last sample BEFORE it, so consecutive hours neither double-count nor drop a call. A call landing within ~15s of an hour boundary may be attributed to the next bar (it is counted at the scrape that observes it) — never twice, never zero. The stacked height IS the fleet total; the 'Total' series is hidden from the chart but kept in the legend and tooltip.\n\nTHE CURRENT HOUR IS NOT SHOWN. Grafana rounds the query range DOWN to whole hours, so the newest bar is always the last COMPLETED hour: at 14:23 the rightmost bar is 13:00-14:00 and the last 23 minutes are not on this chart at all. A 'missing' current-hour bar is NORMAL and is NOT a traffic collapse — this panel is 0-59 minutes behind real time by design. For live traffic use 'CPS over time — by zone (1m rate)'; hourly bars have no incident resolution (a 3-minute flood or a 20-minute outage just makes one bar slightly high or low). Renders 25 bars, not 24 — the leftmost covers the hour that ended 24h ago. Bars are wall-clock-hour aligned in every US timezone; across a DST change an hour label repeats (fall) or is skipped (spring), values still correct.\n\nCOUNTED EXACTLY ONCE PER CALL: the counter sits after `t_precheck_trans()` (absorbs INVITE retransmissions), after `bw_dedup` (482 Merged on the duplicate INVITEs Bandwidth sends from multiple edges), and after the `bw_cps` 503 backstop. On-net forwards are counted once at ingress and never re-counted per chain hop. Calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count as OFFERED — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nNOT INCLUDED — this is carrier ingress, not total platform volume: customer-originated SIP-trunk and API Calling traffic (`route[TRUNK_AUTH]` emits no counter today), runtime DB-admitted carriers (`carrier_trunks` — deliberately no metric, a DB-sourced carrier name is not a bounded label), and SIPp load-test ingress. `direction=\"outbound\"` is deliberately NOT plotted: it is an ATTEMPT counter (the FreeSWITCH failover loop fires up to 8 bridge attempts per call) and the carrier B-leg of an RCF forward is the same call already counted inbound.\n\nACCURACY UNDER FAULTS: an SBC active/standby flip costs nothing (the ex-active's counter goes flat, the new active's climbs). A Kamailio container restart resets its counter to 0; that is corrected per-series before the zones are summed, losing at most 15s (one scrape) of that one SBC's calls in the hour containing the restart. If a zone's link blips, vmagent replays its on-disk queue with original timestamps and VictoriaMetrics auto-resets its response cache on backfill — the affected bar SELF-CORRECTS upward on the next refresh, so an unexpectedly low recent bar may simply be data still in flight. A zone with NO BAR has stopped reporting entirely: that is missing data, not zero calls (an idle-but-healthy zone draws a zero-height bar, not a gap). Zone colours are deliberately NON-STATUS (blue / violet / teal): on this board green, amber and red always mean health, never a zone.",
       "gridPos": {
         "h": 8,
         "w": 24,
@@ -934,6 +934,7 @@
         "type": "prometheus",
         "uid": "voip-metrics-vm"
       },
+      "timeFrom": "24h",
       "targets": [
         {
           "refId": "A",
@@ -941,9 +942,9 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "sum by (zone) (increase(kamailio_trunk_cps{direction=\"inbound\"}[$__interval]))",
+          "expr": "sum by (zone) (increase(kamailio_trunk_cps{direction=\"inbound\"}[1h]))",
           "range": true,
-          "interval": "1m",
+          "interval": "1h",
           "legendFormat": "{{zone}}"
         },
         {
@@ -952,9 +953,9 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "sum(increase(kamailio_trunk_cps{direction=\"inbound\"}[$__interval]))",
+          "expr": "sum(increase(kamailio_trunk_cps{direction=\"inbound\"}[1h]))",
           "range": true,
-          "interval": "1m",
+          "interval": "1h",
           "legendFormat": "Total"
         }
       ],
@@ -968,14 +969,15 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
+            "drawStyle": "bars",
+            "barAlignment": -1,
+            "lineInterpolation": "linear",
             "lineWidth": 1,
-            "fillOpacity": 28,
-            "gradientMode": "opacity",
+            "fillOpacity": 100,
+            "gradientMode": "none",
             "showPoints": "never",
             "spanNulls": false,
-            "axisLabel": "calls",
+            "axisLabel": "calls / hour",
             "axisSoftMin": 0,
             "stacking": {
               "mode": "normal",
@@ -1074,12 +1076,36 @@
                 }
               },
               {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineInterpolation",
+                "value": "linear"
+              },
+              {
                 "id": "custom.fillOpacity",
                 "value": 0
               },
               {
                 "id": "custom.lineWidth",
                 "value": 3
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 5
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": false,
+                  "tooltip": false
+                }
               }
             ]
           }
@@ -1088,10 +1114,9 @@
       "options": {
         "legend": {
           "calcs": [
-            "lastNotNull",
+            "sum",
             "mean",
-            "max",
-            "sum"
+            "max"
           ],
           "displayMode": "table",
           "placement": "bottom",
