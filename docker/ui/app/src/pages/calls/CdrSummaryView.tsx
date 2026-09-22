@@ -175,7 +175,7 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
                       </td>
                       <td className="dlx-td">
                         <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink)' }}>
-                          {formatTotalDuration(row.total_duration_sec)}
+                          {formatTotalDuration(row.total_duration_sec ?? 0)}
                         </span>
                       </td>
                       <td className="dlx-td">
@@ -184,7 +184,7 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
                             fontVariantNumeric: 'tabular-nums',
                             fontWeight: 600,
                             // Color only meaningful nonzero money; zero reads neutral.
-                            color: row.total_cost > 0 ? 'var(--rcf-azure-deep)' : 'var(--rcf-ink-dim)',
+                            color: (row.total_cost ?? 0) > 0 ? 'var(--rcf-azure-deep)' : 'var(--rcf-ink-dim)',
                           }}
                         >
                           {fmtMoneySmart(row.total_cost)}

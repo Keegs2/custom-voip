@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from db import database as db
 from auth.dependencies import get_support_read_filter, require_admin
 from services import stir_outcome as stir_oc
+from services import tenant_redaction as tr
 import asyncpg
 import logging
 import math
@@ -1498,10 +1499,20 @@ async def query_cdrs(
     Response: {cdrs, count, total, offset, limit}. `count` is the RETURNED
     page's row count (back-compat); `total` is COUNT(*) over the same filters
     WITHOUT limit/offset — the real-pagination denominator.
+
+    TENANT REDACTION (services/tenant_redaction.py): for a tenant caller the
+    rows carry ONLY the tenant allowlist — no rate/cost/margin/rating/fraud/
+    routing internals and no exact duration (`duration_minutes` replaces
+    `duration_seconds`/`billable_seconds`). The billing/routing-internal
+    filters `rated_only`, `sbc_id` and `zone` are IGNORED for tenants so they
+    cannot be used as an inference oracle. Staff shapes are unchanged.
     """
-    # Tenants are hard-scoped to their own customer (ignore any client value).
-    if customer_filter is not None:
+    # Tenants are hard-scoped to their own customer (ignore any client value)
+    # and may not filter on billing/routing internals.
+    is_tenant = customer_filter is not None
+    if is_tenant:
         customer_id = customer_filter
+        rated_only, sbc_id, zone = False, None, None
 
     # Pin naive datetimes to UTC, then default to the last 24 hours when no
     # explicit range is given (the UI always sends one; this is a safety net).
@@ -1534,6 +1545,22 @@ async def query_cdrs(
     total = count_row["total"]
 
     idx = len(values) + 1
+    if is_tenant:
+        # Defense in depth: sensitive columns are never even SELECTed, and
+        # the row is rebuilt from the allowlist.
+        query = f"""
+        SELECT {tr.tenant_cdr_select_sql()},
+               {_STIR_INTENT_SUBSELECT}
+        FROM cdrs
+        {where_sql}
+        ORDER BY start_time DESC LIMIT ${idx} OFFSET ${idx + 1}
+        """
+        values.extend([limit, offset])
+        results = await db.fetch_all(query, *values)
+        cdrs = [tr.redact_cdr_row(r) for r in results]
+        return {"cdrs": cdrs, "count": len(cdrs), "total": total,
+                "offset": offset, "limit": limit}
+
     query = f"""
         SELECT uuid, customer_id, product_type, trunk_id, direction,
                caller_id, destination, start_time, answer_time, end_time,
@@ -1604,9 +1631,18 @@ async def cdr_summary(
     always sends an explicit range, so the default is only a safety net.
     Also, an unknown `group_by` is now a 422 (it previously fell through to
     the hourly roll-up without any indication).
+
+    TENANT REDACTION: tenants get NO cost and NO second-level duration —
+    `total_minutes` (answered-call total, rounded half-up once at the
+    aggregate) replaces `total_duration_sec`, `avg_duration_minutes`
+    (1 decimal, mean of per-call whole minutes) replaces `avg_duration_sec`,
+    and `total_cost` is absent. `rated_only`/`sbc_id`/`zone` are ignored for
+    tenants. Staff shapes are unchanged.
     """
-    if customer_filter is not None:
+    is_tenant = customer_filter is not None
+    if is_tenant:
         customer_id = customer_filter
+        rated_only, sbc_id, zone = False, None, None
 
     # Pin naive datetimes to UTC, then apply the SAME 24h default window as
     # GET /v1/cdrs (see CHANGED note in the docstring).
@@ -1629,6 +1665,9 @@ async def cdr_summary(
         zone=zone,
         rated_only=rated_only,
     )
+
+    if is_tenant:
+        return await _tenant_summary(where_sql, values, group_by)
 
     if group_by == "day":
         query = f"""
@@ -1678,6 +1717,68 @@ async def cdr_summary(
     return {"summary": [dict(r) for r in results], "group_by": group_by}
 
 
+# Answered-call talk-time total (ms) — the ONLY duration input a tenant
+# summary reads; converted to whole minutes in tr.redact_summary_row().
+_TENANT_ANSWERED_MS_SQL = (
+    "COALESCE(SUM(duration_ms) FILTER (WHERE answer_time IS NOT NULL "
+    "AND duration_ms > 0), 0)::bigint AS answered_duration_ms"
+)
+
+
+async def _tenant_summary(where_sql: str, values: list, group_by: str) -> dict:
+    """Tenant-shaped /summary: counts + minutes only (no cost, no seconds).
+
+    Never SELECTs total_cost; duration leaves the DB only as an answered-call
+    ms total (rounded to whole minutes in Python) or an average of per-call
+    whole minutes (tr.TENANT_CALL_MINUTES_SQL).
+    """
+    if group_by == "day":
+        query = f"""
+            SELECT
+                DATE(start_time) as date,
+                product_type,
+                direction,
+                COUNT(*) as total_calls,
+                COUNT(*) FILTER (WHERE answer_time IS NOT NULL) as answered_calls,
+                {_TENANT_ANSWERED_MS_SQL}
+            FROM cdrs
+            {where_sql}
+            GROUP BY DATE(start_time), product_type, direction
+            ORDER BY date DESC
+        """
+    elif group_by == "destination":
+        query = f"""
+            SELECT
+                SUBSTRING(destination, 1, 4) as prefix,
+                COUNT(*) as total_calls,
+                COUNT(*) FILTER (WHERE answer_time IS NOT NULL) as answered_calls,
+                {_TENANT_ANSWERED_MS_SQL},
+                AVG({tr.TENANT_CALL_MINUTES_SQL})
+                    FILTER (WHERE answer_time IS NOT NULL) as avg_call_minutes
+            FROM cdrs
+            {where_sql}
+            GROUP BY prefix
+            ORDER BY total_calls DESC
+            LIMIT 50
+        """
+    else:  # hour
+        query = f"""
+            SELECT
+                DATE_TRUNC('hour', start_time) as hour,
+                COUNT(*) as total_calls,
+                COUNT(*) FILTER (WHERE answer_time IS NOT NULL) as answered_calls
+            FROM cdrs
+            {where_sql}
+            GROUP BY hour
+            ORDER BY hour DESC
+            LIMIT 168
+        """
+
+    results = await db.fetch_all(query, *values)
+    return {"summary": [tr.redact_summary_row(r) for r in results],
+            "group_by": group_by}
+
+
 @router.get("/{cdr_uuid}")
 async def get_cdr(
     cdr_uuid: str,
@@ -1688,7 +1789,24 @@ async def get_cdr(
     Tenant-scoped and 404-no-leak: the customer predicate is folded into the
     lookup itself, so a foreign-owned CDR is indistinguishable from a missing
     one. Admins and support (customer_filter None) read any CDR.
+
+    TENANT REDACTION: a tenant gets the allowlisted shape only
+    (services/tenant_redaction.py) — sensitive columns are not SELECTed and
+    the row is rebuilt from the allowlist. Staff shape is unchanged.
     """
+    if customer_filter is not None:
+        row = await db.fetch_one(
+            f"""
+            SELECT {tr.tenant_cdr_select_sql()},
+                   {_STIR_INTENT_SUBSELECT}
+            FROM cdrs WHERE uuid = $1 AND customer_id = $2
+            """,
+            cdr_uuid, customer_filter,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="CDR not found")
+        return tr.redact_cdr_row(row)
+
     query = f"""
         SELECT uuid, customer_id, product_type, trunk_id, direction,
                caller_id, destination, destination_prefix,
@@ -1715,12 +1833,7 @@ async def get_cdr(
                {_STIR_INTENT_SUBSELECT}
         FROM cdrs WHERE uuid = $1
     """
-    values: list = [cdr_uuid]
-    if customer_filter is not None:
-        query += " AND customer_id = $2"
-        values.append(customer_filter)
-
-    result = await db.fetch_one(query, *values)
+    result = await db.fetch_one(query, cdr_uuid)
     if not result:
         raise HTTPException(status_code=404, detail="CDR not found")
 

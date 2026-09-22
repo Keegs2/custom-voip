@@ -10,6 +10,16 @@ export type CdrZone = 'east' | 'west' | 'central';
  * CDR row. Extends the shared STIR badge payload (`stir_attestation`,
  * `stir_eff_actual`, `stir_outcome`, `stir_badge`, `stir_badge_source`) —
  * present on GET /cdrs and GET /cdrs/{uuid} since migration 47.
+ *
+ * TWO SHAPES (API services/tenant_redaction.py):
+ *  - STAFF (admin/support): the full row — exact `duration_seconds` /
+ *    `billable_seconds`, money, rating, routing and RTP volume fields.
+ *  - TENANT (customer users): an allowlisted row — NO money/rating/fraud/
+ *    routing internals and NO exact duration. `duration_minutes` (whole
+ *    minutes, ≥1 for any answered call) replaces the seconds fields, and
+ *    `answer_time`/`end_time` are floored to the minute.
+ * Everything below marked "staff only" is ABSENT on tenant rows — read it
+ * through the helpers in utils/callDuration.ts, never assume presence.
  */
 export interface Cdr extends StirBadgeFields {
   uuid: string;
@@ -21,8 +31,13 @@ export interface Cdr extends StirBadgeFields {
   customer_id: number;
   product_type: ProductType;
   direction: CallDirection;
-  duration_seconds: number;
-  billable_seconds: number;
+  /** Staff only — exact start→end seconds. */
+  duration_seconds?: number;
+  /** Staff only — billed seconds. */
+  billable_seconds?: number;
+  /** Tenant only — whole minutes (0 = unanswered; ≥1 for answered calls). */
+  duration_minutes?: number;
+  /** Staff only (this and every money / rating / routing field below). */
   rate_per_min?: number | null;
   total_cost?: number | null;
   carrier_cost?: number | null;
@@ -139,7 +154,12 @@ export interface CdrSearchResult {
   offset: number;
 }
 
-/** Grouped CDR summary row (day / hour / destination), returned by /cdrs/summary. */
+/**
+ * Grouped CDR summary row (day / hour / destination), returned by /cdrs/summary.
+ * Staff rows carry `total_duration_sec` + `total_cost`; tenant rows carry
+ * `total_minutes` (answered-call total, rounded once) and, for
+ * group_by=destination, `avg_duration_minutes` — never seconds or money.
+ */
 export interface CdrSummaryRow {
   date?: string | null;
   hour?: string | null;
@@ -148,8 +168,14 @@ export interface CdrSummaryRow {
   direction?: string | null;
   total_calls: number;
   answered_calls: number;
-  total_duration_sec: number;
-  total_cost: number;
+  /** Staff only. */
+  total_duration_sec?: number;
+  /** Staff only. */
+  total_cost?: number;
+  /** Tenant only. */
+  total_minutes?: number;
+  /** Tenant only (group_by=destination). */
+  avg_duration_minutes?: number | null;
 }
 
 export interface CdrSummaryResponse {

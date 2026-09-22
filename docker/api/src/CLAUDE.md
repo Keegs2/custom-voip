@@ -44,7 +44,51 @@ src/
     __init__.py
     esl_client.py            # FreeSWITCH ESL TCP client
     bandwidth_client.py      # Bandwidth Numbers API (OAuth2 + XML parsing)
+    tenant_redaction.py      # What a CUSTOMER may see of a call (CDR allowlist, minutes-only durations)
 ```
+
+## Tenant redaction (customers never see how we bill/rate)
+
+Owner rule: tenant (non-staff) callers must NEVER receive rates, costs, carrier
+cost, margin, rating state, fraud internals, routing/supplier internals, or an
+exact call duration. "Tenant" = the endpoint's `customer_filter` is not None
+(`get_support_read_filter` → admin + support are staff; `get_customer_filter`
+→ admin only is staff; `user`/`readonly` with a customer_id are tenants).
+Staff shapes are unchanged. Everything lives in `services/tenant_redaction.py`:
+
+- **Two layers.** SQL: tenant queries SELECT only `TENANT_CDR_SELECT_COLUMNS`
+  (sensitive columns are never read). Response: every tenant CDR row is rebuilt
+  by `redact_cdr_row()` from the ALLOWLIST `TENANT_CDR_FIELDS` — a new `cdrs`
+  column does NOT reach tenants unless someone adds it to the allowlist.
+  `FORBIDDEN_TENANT_CDR_KEYS` is the test denylist (money, `rated_at`,
+  `destination_prefix`, `billable_*`/`duration_seconds`, RTP byte/packet
+  counters — duration proxies, `fraud_*`, `traffic_grade`, `carrier_used`,
+  `inbound_carrier*`, `on_net*`, `sbc_id`, `freeswitch_node`, `network_addr`,
+  `sip_user_agent`, `bridge_uuid`).
+- **Duration.** Per call `duration_minutes` = whole minutes, half-up, from
+  `duration_ms`; unanswered → 0; any answered call with >0 ms → at least 1.
+  Totals (`total_minutes`) round the answered-call ms total ONCE (never a sum
+  of per-call minimums — that would mimic billing increments). Averages
+  (`avg_duration_minutes`) are the mean of per-call whole minutes, 1 decimal
+  ("2.3 min") — so a one-call window cannot leak sub-minute precision.
+  `answer_time`/`end_time` are floored to the minute for tenants (otherwise
+  `end - answer` re-derives the exact duration); `start_time` stays exact.
+- **Filters.** `rated_only`, `sbc_id`, `zone` are ignored for tenants on
+  `/v1/cdrs` + `/summary` (no inference oracle for rating state / withheld
+  routing columns). No cost/duration sort or filter params exist.
+- **Applied at:** `GET /v1/cdrs`, `GET /v1/cdrs/{uuid}`, `GET /v1/cdrs/summary`
+  (tenant rows: counts + `total_minutes` [+ `avg_duration_minutes` for
+  group_by=destination]; no `total_cost`), `GET /v1/trunks/{id}/stats`
+  (`last_hour.avg_duration_minutes`; no `total_cost`/`avg_duration_sec`),
+  `GET /v1/calls/{id}` (`duration_minutes`, minute-floored answer/end).
+- **Adding a tenant-reachable endpoint that returns call data?** Route tenant
+  rows through `redact_cdr_row()` / `redact_summary_row()` and add a case to
+  `tests/test_tenant_redaction.py` (asserts the full denylist recursively).
+- **Deliberately NOT redacted:** `/customers/me/billing` (the customer's own
+  contracted plan line items — qty × unit_price), `/trunks/call-paths`
+  (package `monthly_fee` list prices), the x402 402-challenge / `POST /calls`
+  price breakdown (the payer's own quote), and `/billing/ledger` entries (the
+  customer's own money movements; x402 entries carry the quote metadata).
 
 ## main.py -- Application Lifecycle
 
@@ -117,7 +161,7 @@ SIP trunk management with call path packages.
 - Trunk auth types: `ip`, `credential`, `both`
 - Call path packages: predefined capacity tiers stored in `call_path_packages` table, assigned via `PUT /{trunk_id}/call-paths`
 - Sub-resources: `/{trunk_id}/ips` for IP ACL management, `/{trunk_id}/dids` for DID assignment
-- `GET /{trunk_id}/stats`: real-time channel count via ESL `show channels as json`, plus last-hour CDR aggregates (ASR, avg duration, cost)
+- `GET /{trunk_id}/stats`: real-time channel count via ESL `show channels as json`, plus last-hour CDR aggregates (ASR, avg duration, cost). Tenants get `avg_duration_minutes` and no cost (see Tenant redaction); admins keep `avg_duration_sec` + `total_cost`.
 - Cache invalidation on IP delete (`trunk_ip:{ip}`)
 
 ### cdrs.py
@@ -131,7 +175,7 @@ CDR ingestion and querying. The largest router file.
   - Duplicate detection via `WHERE NOT EXISTS` (the cdrs table uses a composite PK for TimescaleDB)
   - **Pre-47 fallback** (`_cdr_insert_sql` / `_execute_cdr_insert`): `stir_outcome`/`stir_eff_actual` are the LAST two entries of the column and value lists, so on `asyncpg.UndefinedColumnError` for either the INSERT is retried without them (`params[:55]`) and the condition logged at ERROR once per 300s — the billable row lands even if the API build is ahead of migration 47. Other missing columns are NOT swallowed.
   - Always returns 200 to prevent FreeSWITCH retry storms
-- **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours.
+- **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours. Tenant callers get the redacted allowlist shape (see the Tenant redaction section).
 - **Summary**: `GET /v1/cdrs/summary` grouped by day, hour, or destination prefix.
 - **Rating**: `POST /v1/cdrs/{uuid}/rate` calls a PostgreSQL function `rate_cdr()`.
 

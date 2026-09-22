@@ -3,7 +3,7 @@
  *
  * Column union of the CDR Search table and the Call Quality table: Time,
  * Customer (staff), Product, Dir, From, To, Duration, MOS pill, Loss %,
- * Status, Carrier, Trunk, Cost Est. (staff). Row click opens the call-detail
+ * Status, Carrier (staff), Trunk, Cost Est. (staff). Row click opens the call-detail
  * modal (the old inline expanded-row idiom is gone — the modal carries all
  * of it and more, including the hangup cause, which no longer gets a column
  * but stays in the modal's Call Info and the CSV export).
@@ -13,6 +13,10 @@
  * outbound rows the terminating carrier_used fold, on-net rows an "On-net"
  * pill. Trunk resolves id → name from the page's already-fetched
  * /v1/trunks list (no per-row fetches); em dash for RCF calls.
+ *
+ * Tenants: the API withholds carrier/routing fields and exact seconds
+ * (services/tenant_redaction.py), so the Carrier column is staff-only and
+ * Duration renders whole minutes via utils/callDuration.ts.
  *
  * Cost is labeled "Cost Est." — RCF-V1 billing is estimates-only by design;
  * the billing of record is Equinox (title attr says so).
@@ -30,6 +34,7 @@
 import { fmt, fmtMoneySmart } from '../../utils/format';
 import { mosTone, packetLossColor, INK_FAINT } from './quality';
 import { carrierLabel, isOnNetCall, trunkLabel, EMPTY } from './callsFormat';
+import { fmtCallDuration } from '../../utils/callDuration';
 import type { Cdr, ProductType, CallDirection } from '../../types/cdr';
 
 /** Table timestamps render in the operator's LOCAL timezone (matches the
@@ -169,7 +174,7 @@ export function CallsTable({
       </div>
 
       <div className="dlx4-tablewrap">
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: isStaff ? 1240 : 1040 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: isStaff ? 1240 : 940 }}>
           <thead>
             <tr>
               <th className="dl-th">Time</th>
@@ -182,7 +187,7 @@ export function CallsTable({
               <th className="dl-th">MOS</th>
               <th className="dl-th">Loss %</th>
               <th className="dl-th">Status</th>
-              <th className="dl-th">Carrier</th>
+              {isStaff && <th className="dl-th">Carrier</th>}
               <th className="dl-th">Trunk</th>
               {isStaff && (
                 <th className="dl-th" title="Estimated cost — billing of record is Equinox">
@@ -194,7 +199,7 @@ export function CallsTable({
           <tbody>
             {cdrs.length === 0 && (
               <tr>
-                <td colSpan={isStaff ? 13 : 11} style={{ padding: 20 }}>
+                <td colSpan={isStaff ? 13 : 10}style={{ padding: 20 }}>
                   <div className="dl-empty">
                     {pageRowCount === 0 ? (
                       <>
@@ -254,7 +259,7 @@ export function CallsTable({
                   </td>
                   <td className="dlx-td">
                     <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink)' }}>
-                      {fmtDurationSec(cdr.duration_seconds)}
+                      {fmtCallDuration(cdr, fmtDurationSec)}
                     </span>
                   </td>
                   <td className="dlx-td"><MosPill mos={cdr.mos} /></td>
@@ -274,20 +279,22 @@ export function CallsTable({
                       {answered ? 'Ans' : 'N/A'}
                     </span>
                   </td>
-                  <td className="dlx-td">
-                    {isOnNetCall(cdr) ? (
-                      <span className="dl-tag">On-net</span>
-                    ) : (
-                      <span
-                        style={{
-                          whiteSpace: 'nowrap',
-                          color: carrier === EMPTY ? INK_FAINT : 'var(--rcf-ink)',
-                        }}
-                      >
-                        {carrier}
-                      </span>
-                    )}
-                  </td>
+                  {isStaff && (
+                    <td className="dlx-td">
+                      {isOnNetCall(cdr) ? (
+                        <span className="dl-tag">On-net</span>
+                      ) : (
+                        <span
+                          style={{
+                            whiteSpace: 'nowrap',
+                            color: carrier === EMPTY ? INK_FAINT : 'var(--rcf-ink)',
+                          }}
+                        >
+                          {carrier}
+                        </span>
+                      )}
+                    </td>
+                  )}
                   <td
                     className="dlx-td"
                     style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}

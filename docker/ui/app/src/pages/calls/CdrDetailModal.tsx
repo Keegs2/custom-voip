@@ -36,7 +36,21 @@ import {
   mosColor, rFactorColor, packetLossColor, jitterColor, qualityPctColor,
   fmtDurationShort, fmtBytes,
 } from './quality';
+import { fmtMinutes, hasExactDuration } from '../../utils/callDuration';
 import type { Cdr } from '../../types/cdr';
+
+/** Minute-precision timestamp — tenant rows are floored to the minute. */
+function fmtDateMinute(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
 
 function fmtDateFull(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -161,6 +175,8 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
 
   const d = detail ?? cdr;
   const answered = d.answer_time != null;
+  // Staff rows carry exact seconds; tenant rows only whole minutes.
+  const exact = hasExactDuration(d);
   const zone = zoneOf(d.sbc_id);
   // Shared callsFormat mapping — same label as the table's Carrier column,
   // so the two can never drift. EMPTY folds to InfoItem's own em dash.
@@ -287,14 +303,22 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
           <SectionTitle>Call Info</SectionTitle>
           <div className="dlx-info-grid">
             <InfoItem label="Start" value={fmtDateFull(d.start_time)} />
-            <InfoItem label="Answered" value={fmtDateFull(d.answer_time)} />
-            <InfoItem label="Ended" value={fmtDateFull(d.end_time)} />
+            {/* Tenant rows carry minute-floored answer/end times (API
+                tenant redaction) — render them at minute precision. */}
+            <InfoItem label="Answered" value={exact ? fmtDateFull(d.answer_time) : fmtDateMinute(d.answer_time)} />
+            <InfoItem label="Ended" value={exact ? fmtDateFull(d.end_time) : fmtDateMinute(d.end_time)} />
             <InfoItem
               label="Duration"
-              value={`${fmtDurationShort(d.duration_seconds)}${d.billable_seconds > 0 ? ` · billable ${fmtDurationShort(d.billable_seconds)}` : ''}`}
+              value={
+                exact
+                  ? `${fmtDurationShort(d.duration_seconds ?? 0)}${isStaff && (d.billable_seconds ?? 0) > 0 ? ` · billable ${fmtDurationShort(d.billable_seconds ?? 0)}` : ''}`
+                  : (d.duration_minutes ?? 0) > 0 ? `about ${fmtMinutes(d.duration_minutes)}` : '—'
+              }
             />
-            <InfoItem label="Zone / SBC" value={d.sbc_id ? `${zone ?? '—'} · ${d.sbc_id}` : null} mono />
-            <InfoItem label="Carrier" value={carrier === EMPTY ? null : carrier} />
+            {isStaff && (
+              <InfoItem label="Zone / SBC" value={d.sbc_id ? `${zone ?? '—'} · ${d.sbc_id}` : null} mono />
+            )}
+            {isStaff && <InfoItem label="Carrier" value={carrier === EMPTY ? null : carrier} />}
             <InfoItem
               label="Codec"
               value={
@@ -316,9 +340,9 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
               mono
               accent={d.hangup_cause === 'NORMAL_CLEARING' ? 'var(--rcf-green)' : d.hangup_cause ? 'var(--rcf-red)' : undefined}
             />
-            {d.traffic_grade && <InfoItem label="Traffic Grade" value={d.traffic_grade} />}
+            {isStaff && d.traffic_grade && <InfoItem label="Traffic Grade" value={d.traffic_grade} />}
             {d.trunk_id && <InfoItem label="Trunk" value={d.trunk_id} mono />}
-            {d.network_addr && <InfoItem label="Network Addr" value={d.network_addr} mono />}
+            {isStaff && d.network_addr && <InfoItem label="Network Addr" value={d.network_addr} mono />}
             {(d.sip_from_user || d.sip_to_user) && (
               <InfoItem
                 label="SIP From / To"
@@ -326,7 +350,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
                 mono
               />
             )}
-            {d.sip_user_agent && <InfoItem label="User Agent" value={d.sip_user_agent} mono wide />}
+            {isStaff && d.sip_user_agent && <InfoItem label="User Agent" value={d.sip_user_agent} mono wide />}
           </div>
 
           {/* STIR / SHAKEN */}
@@ -372,6 +396,11 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
 
               {rtpOpen && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 18, marginTop: 12 }}>
+                  {/* Packet/byte volume counters are staff-only: they scale
+                      1:1 with talk time (an exact-duration proxy), so the
+                      API withholds them from tenants. */}
+                  {isStaff && (
+                  <>
                   <div>
                     <p className="dlx4-subhead" style={{ color: INK_FAINT }}>Audio In (from carrier)</p>
                     <div className="dlx-info-grid" style={{ gridTemplateColumns: '1fr' }}>
@@ -392,6 +421,8 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
                       <InfoItem label="Raw / Media Bytes" value={`${fmtBytes(d.rtp_audio_out_raw_bytes)} / ${fmtBytes(d.rtp_audio_out_media_bytes)}`} mono />
                     </div>
                   </div>
+                  </>
+                  )}
                   <div>
                     <p className="dlx4-subhead" style={{ color: INK_FAINT }}>Jitter &amp; Flaws</p>
                     <div className="dlx-info-grid" style={{ gridTemplateColumns: '1fr' }}>
