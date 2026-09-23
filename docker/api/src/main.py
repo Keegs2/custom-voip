@@ -19,7 +19,7 @@ from routers import (
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
     onboarding, freeswitch, carrier_status, live_trunk_stats,
-    stir, billing, carrier_trunks,
+    stir, billing, carrier_trunks, reports,
 )
 from middleware.auth import JWTAuthMiddleware
 
@@ -78,6 +78,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Let the SPA read the CSV export's filename + truncation flag cross-origin.
+    expose_headers=["Content-Disposition", "X-Report-Truncated"],
 )
 
 # JWT Authentication (runs after CORS so preflight still works)
@@ -148,6 +150,10 @@ app.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
 # (migration 37). The payments demo that used to write to it was removed.
 app.include_router(billing.router, prefix="/v1/billing", tags=["Billing"])
 app.include_router(billing.router, prefix="/billing", tags=["Billing"])
+# Customer Reporting (read-only, tenant-scoped; minutes only — see
+# docs/CUSTOMER_REPORTING_DESIGN.md).
+app.include_router(reports.router, prefix="/v1/reports", tags=["Reports"])
+app.include_router(reports.router, prefix="/reports", tags=["Reports"])
 
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
 # middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so
