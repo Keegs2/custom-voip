@@ -1,8 +1,10 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireAdmin } from './components/auth/RequireAdmin';
 import { RequireSupportOrAdmin } from './components/auth/RequireSupportOrAdmin';
+import { RequireReportingAccess } from './components/auth/RequireReportingAccess';
 import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { RcfPage } from './pages/RcfPage';
@@ -16,6 +18,23 @@ import { TroubleshootingPage } from './pages/TroubleshootingPage';
 import { CallsPage } from './pages/calls/CallsPage';
 import { PaymentsDemoControlPage } from './pages/admin/payments-demo/PaymentsDemoControlPage';
 import { MyAccountPage } from './pages/MyAccountPage';
+import { Spinner } from './components/ui/Spinner';
+
+// Reporting is code-split: its cards/chart/table code (and, one level deeper,
+// the lazily-imported PDF renderer) only download when a customer opens it.
+const ReportingPage = lazy(() =>
+  import('./pages/reporting/ReportingPage').then((m) => ({ default: m.ReportingPage })),
+);
+
+function RouteFallback() {
+  return (
+    <div className="dl-scope">
+      <div className="dl-shell" role="status" aria-label="Loading page" style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--rcf-ink-dim)', fontSize: '0.85rem' }}>
+        <Spinner /> Loading…
+      </div>
+    </div>
+  );
+}
 
 export function App() {
   return (
@@ -38,6 +57,18 @@ export function App() {
               <Route path="trunks"     element={<TrunksPage />} />
               <Route path="ivr"        element={<IvrBuilderPage />} />
               <Route path="voicemail"  element={<VisualVoicemailPage />} />
+              {/* Customer Reporting — every rcf/trunk/hybrid customer + admins
+                  (with a customer picker); support is redirected away. */}
+              <Route
+                path="reporting"
+                element={
+                  <RequireReportingAccess>
+                    <Suspense fallback={<RouteFallback />}>
+                      <ReportingPage />
+                    </Suspense>
+                  </RequireReportingAccess>
+                }
+              />
               <Route path="documentation" element={<Navigate to="/docs/guides" replace />} />
               {/* Old bookmark: the standalone RCF guide is now the Guides hub's RCF tab */}
               <Route path="docs/rcf"                element={<Navigate to="/docs/guides/rcf" replace />} />

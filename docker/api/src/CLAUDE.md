@@ -30,6 +30,7 @@ src/
     calls.py                 # API call origination + CPS enforcement
     trunks.py                # SIP trunk management + call path packages
     cdrs.py                  # CDR ingest (from FreeSWITCH) + query endpoints
+    reports.py               # Customer Reporting (/v1/reports): overview, trend, numbers, calls, calls.csv, my-numbers
     search.py                # Admin DID search, user search
     number_inventory.py      # DID lifecycle management (inventory, assign, sync, reconcile)
     carriers.py              # Carrier gateway CRUD + reachability test (admin)
@@ -45,6 +46,7 @@ src/
     esl_client.py            # FreeSWITCH ESL TCP client
     bandwidth_client.py      # Bandwidth Numbers API (OAuth2 + XML parsing)
     tenant_redaction.py      # What a CUSTOMER may see of a call (CDR allowlist, minutes-only durations)
+    reporting.py             # Customer Reporting pure logic (date/tz validation, buckets, missed reasons, grades, CSV)
 ```
 
 ## Tenant redaction (customers never see how we bill/rate)
@@ -89,6 +91,65 @@ Staff shapes are unchanged. Everything lives in `services/tenant_redaction.py`:
   (package `monthly_fee` list prices), the x402 402-challenge / `POST /calls`
   price breakdown (the payer's own quote), and `/billing/ledger` entries (the
   customer's own money movements; x402 entries carry the quote metadata).
+
+## Reporting (customer-facing, `/v1/reports` + `/reports`)
+
+Contract: `docs/CUSTOMER_REPORTING_DESIGN.md` (implemented exactly — read its
+"Implementation notes" for null/edge semantics). `routers/reports.py` owns the
+SQL; `services/reporting.py` is the pure logic (unit-tested without a DB).
+Tests: `tests/test_reports.py` (ephemeral PG 16).
+
+- **Endpoints:** `GET overview | trend | numbers | calls | calls.csv | my-numbers`.
+  Common params `start`/`end` (inclusive local `YYYY-MM-DD`, span ≤ 366 days),
+  `tz` (IANA, default America/New_York, validated case-insensitively against
+  `pg_timezone_names`, cached 24h per process), `numbers` (comma list),
+  `customer_id` (staff only). Parsed once by the `report_scope` dependency.
+- **Scoping:** `get_support_read_filter`. Tenants forced to their own customer
+  (the `customer_id` param is ignored); staff (admin/support) MUST pass
+  `customer_id` (422). Staff and tenants get the SAME redacted shape — there is
+  no staff-only variant of a report.
+- **Redaction:** minutes only via `tenant_redaction` (`TENANT_CALL_MINUTES_SQL`
+  per call, `aggregate_minutes` on each row/bucket/total ms sum — rounded once,
+  `average_minutes` for avg). Never selected/returned: costs, rates, billable,
+  answer/end times, carrier/SBC/FS/network columns. `hangup_cause` is read only
+  to map to a plain-English missed reason (`services/reporting.MISSED_REASONS`)
+  and never returned; no SIP codes. `tests/test_reports.py::assert_report_safe`
+  walks every response (and the CSV text) for forbidden keys/values.
+- **"The customer's number"** = `destination` for inbound, `caller_id` for
+  outbound (anything not `'outbound'` is inbound), canonicalized in SQL with the
+  `31_did_canonicalize.sql` CASE, matched against `rcf_numbers.did` +
+  `trunk_dids.did` (via `sip_trunks.customer_id`). The `numbers` filter is
+  canonicalized in Python and intersected with the owned set IN SQL (`sel` CTE)
+  — it can only narrow; a not-owned/junk entry is dropped, none left = empty.
+- **Query shape (all endpoints):** one `WITH owned, sel, base, f` prelude; bind
+  layout `$1 customer_id::int, $2 start::date, $3 end::date, $4 tz::text,
+  $5 numbers::text[]` (+ endpoint extras `$6…`), every bind explicitly cast.
+  The time predicate is `start_time >= ($2::date::timestamp AT TIME ZONE $4)`
+  AND `< (($3::date + 1)::timestamp AT TIME ZONE $4)` — stable expressions of
+  binds, so the `(customer_id, start_time DESC)` index range is used
+  (`test_report_scan_uses_customer_time_index` asserts it via EXPLAIN). Local
+  bucketing is `date_trunc(unit, start_time AT TIME ZONE tz)` (portable — no
+  Timescale `time_bucket`); trend zero-fill is `generate_series`. Overview is 2
+  queries (totals+previous-period in one FILTERed pass; day/hour/cause in one
+  `GROUPING SETS` pass), calls 2 (count + page), others 1. All LIMITed.
+- **Statement timeout:** every endpoint runs its queries in ONE
+  `BEGIN READ ONLY` transaction that first does `SET LOCAL statement_timeout =
+  REPORT_STATEMENT_TIMEOUT_MS` (env, default 15000, clamped 1000-60000).
+  `SET LOCAL` is transaction-scoped, so it is safe under PgBouncer transaction
+  pooling (never leaks to another client's server connection — asserted by the
+  test). A cancel → HTTP 503 "try a shorter date range". The pool's
+  `command_timeout=30` stays as the client-side backstop.
+- **CSV:** `StreamingResponse`; a `count(*) … LIMIT cap+1` probe sets
+  `X-Report-Truncated` (always sent, `true`/`false`) BEFORE streaming, then
+  keyset pages of `CSV_CHUNK_ROWS` (5000) on `(start_time, id)` DESC, each its
+  own short read-only transaction — a slow download never pins a pool
+  connection or holds a long snapshot. Cap `rp.CSV_ROW_CAP` = 100,000.
+  Formula-injection guard (`rp.csv_safe`) prefixes `'` on `= @ - \t \r` and on
+  `+` not followed by a phone number. CORS exposes `Content-Disposition` and
+  `X-Report-Truncated` (main.py) so the SPA can read them.
+- **Adding a metric?** Aggregate in SQL inside the existing passes (no N+1, no
+  per-row Python loops over CDRs), minutes through `tenant_redaction`, and extend
+  `assert_report_safe` coverage in the test.
 
 ## main.py -- Application Lifecycle
 

@@ -241,6 +241,17 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | `GET` | `/v1/cdrs/{uuid}` | User | Get single CDR with full RTP metrics |
 | `POST` | `/v1/cdrs/{uuid}/rate` | User | Manually trigger CDR rating |
 
+### Reports (customer reporting — tenant-scoped; staff must pass `customer_id`)
+Read-only ELI5 reports over `cdrs`; whole minutes only, no costs/seconds/internals. Contract: `docs/CUSTOMER_REPORTING_DESIGN.md`; details in `src/CLAUDE.md` → Reporting.
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/v1/reports/overview` | Totals, previous period, quality grade, busiest day/hour, missed reasons |
+| `GET` | `/v1/reports/trend` | Zero-filled day/week/month buckets |
+| `GET` | `/v1/reports/numbers` | Per-number totals for the customer's own numbers (max 500) |
+| `GET` | `/v1/reports/calls` | Paginated call list (start time only, `length_minutes`) |
+| `GET` | `/v1/reports/calls.csv` | Streaming CSV (cap 100k, `X-Report-Truncated`) |
+| `GET` | `/v1/reports/my-numbers` | Number picker list |
+
 ### Search (Admin only)
 | Method | Path | Description |
 |---|---|---|
