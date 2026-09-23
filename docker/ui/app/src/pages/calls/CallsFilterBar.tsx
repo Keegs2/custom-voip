@@ -268,6 +268,9 @@ export function CallsFilterBar({
             />
           </div>
 
+          {/* Rating state is a billing internal — staff only (the API also
+              ignores rated_only for tenants). */}
+          {isStaff && (
           <div className="dlx4-field" style={{ justifyContent: 'flex-end' }}>
             <label
               style={{
@@ -291,6 +294,7 @@ export function CallsFilterBar({
               Rated only
             </label>
           </div>
+          )}
         </div>
 
         {/* Footer — inline validation on the left, actions on the right */}

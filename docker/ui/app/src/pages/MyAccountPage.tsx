@@ -414,9 +414,6 @@ function OverviewTab({ customer }: { customer: MyCustomer }) {
 
           <div>
             <DefRow label="Account type">{accountTypeLabel(customer.account_type)}</DefRow>
-            <DefRow label="Traffic grade">
-              <span className="dl-tag dl-tag-slate">{customer.traffic_grade}</span>
-            </DefRow>
             <DefRow label="Member since">{fmtDate(customer.created_at)}</DefRow>
             <DefRow label="Account ID">
               <span style={{ fontFamily: MONO, fontSize: '0.78rem', color: INK_SOFT }}>

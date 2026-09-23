@@ -12,7 +12,9 @@ export interface MyCustomer {
   name: string;
   account_type: AccountType;
   status: CustomerStatus;
-  traffic_grade: TrafficGrade;
+  /** Internal routing grade — returned to staff (admin/support) only; never
+   *  present for a customer (tenant) caller. Not rendered in the customer UI. */
+  traffic_grade?: TrafficGrade;
   daily_limit: number | null;
   cpm_limit: number | null;
   ucaas_enabled: boolean | null;

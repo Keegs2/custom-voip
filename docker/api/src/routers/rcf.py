@@ -19,6 +19,7 @@ from typing import Optional
 from auth.dependencies import get_current_user, get_customer_filter, require_admin
 from db import database as db
 from db import redis_client as cache
+from services import tenant_redaction as tr
 from utils import phone
 
 router = APIRouter()
@@ -177,8 +178,11 @@ async def get_rcf(did: str, customer_filter: int | None = Depends(get_customer_f
     (or a DID we don't have) returns 404, never 403, so existence is not
     leaked cross-tenant. Admins (customer_filter None) read any DID.
     """
-    query = """
-        SELECT r.*, c.name as customer_name, c.traffic_grade
+    # traffic_grade (internal routing grade) is read for staff only; tenant
+    # responses additionally pass through redact_customer_fields() below.
+    grade = ", c.traffic_grade" if customer_filter is None else ""
+    query = f"""
+        SELECT r.*, c.name as customer_name{grade}
         FROM rcf_numbers r
         JOIN customers c ON r.customer_id = c.id
         WHERE r.did = $1
@@ -194,6 +198,9 @@ async def get_rcf(did: str, customer_filter: int | None = Depends(get_customer_f
     result = await db.fetch_one(query, *values)
     if not result:
         raise HTTPException(status_code=404, detail="RCF number not found")
+    if customer_filter is not None:
+        # Tenant: traffic_grade is an internal routing grade (staff only).
+        return tr.redact_customer_fields(result)
     return dict(result)
 
 

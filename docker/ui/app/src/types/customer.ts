@@ -7,7 +7,8 @@ export interface Customer {
   name: string;
   account_type: AccountType;
   status: CustomerStatus;
-  traffic_grade: TrafficGrade;
+  /** Internal routing grade — staff-only; absent from tenant responses. */
+  traffic_grade?: TrafficGrade;
   daily_limit: number | null;
   cpm_limit: number | null;
   fraud_score: number;

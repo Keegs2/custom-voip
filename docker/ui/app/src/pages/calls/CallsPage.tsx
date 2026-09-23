@@ -270,8 +270,9 @@ export function CallsPage() {
       (c.read_codec ?? '').toLowerCase().includes(q) ||
       (customerNames[c.customer_id] ?? '').toLowerCase().includes(q) ||
       // Carrier: both the rendered label ("bw·dallas", "on-net") and the raw
-      // stored values, so either vocabulary matches.
-      carrierLabel(c).toLowerCase().includes(q) ||
+      // stored values, so either vocabulary matches. Staff only — tenant rows
+      // carry no carrier fields (carrierLabel would fall back to the default).
+      (isStaff && carrierLabel(c).toLowerCase().includes(q)) ||
       (c.carrier_used ?? '').toLowerCase().includes(q) ||
       (c.inbound_carrier ?? '').toLowerCase().includes(q) ||
       // Trunk: resolved name (or the raw id for unresolved trunks).
@@ -279,7 +280,7 @@ export function CallsPage() {
         ? (trunkNames[String(c.trunk_id)] ?? String(c.trunk_id)).toLowerCase().includes(q)
         : false),
     );
-  }, [cdrs, quickFilter, customerNames, trunkNames]);
+  }, [cdrs, quickFilter, customerNames, trunkNames, isStaff]);
 
   /** Full match count — undefined until the API ships `total`. */
   const total = data?.total;

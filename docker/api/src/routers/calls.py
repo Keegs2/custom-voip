@@ -37,6 +37,7 @@ from services.esl_client import (
     originate_call, get_call_status, hangup_call, transfer_call, send_dtmf,
 )
 from services import call_pricing, demo_seed, ledger
+from services import tenant_redaction as tr
 from services.payments import PaymentError, demo_mode_enabled, get_demo_providers
 from routers.payments import (
     H_PAYMENT_REQUIRED, H_PAYMENT_RESPONSE, H_PAYMENT_SIGNATURE,
@@ -556,7 +557,13 @@ async def get_call(
 
     Tenant-scoped: a non-admin caller only sees calls tied to their own customer.
     Cross-tenant / unknown call_ids return 404 (existence is not leaked).
+
+    Tenant redaction (services/tenant_redaction.py): a tenant never gets an
+    exact duration — completed calls carry `duration_minutes` (whole minutes)
+    instead of `duration_seconds`, and answer/end times are floored to the
+    minute so the exact duration cannot be re-derived. Admin shape unchanged.
     """
+    is_tenant = customer_filter is not None
     # Check active calls first. Fold the tenant predicate into the WHERE so a
     # cross-tenant uuid simply misses (admin passes NULL -> no restriction).
     active = await db.fetch_one(
@@ -572,6 +579,9 @@ async def get_call(
     if active:
         # Get real-time status from FreeSWITCH
         fs_status = await get_call_status(call_id)
+        answer_time = active["answer_time"]
+        if is_tenant:
+            answer_time = tr.floor_to_minute(answer_time)
         return {
             "call_id": call_id,
             "status": fs_status.get("state", active["state"]),
@@ -579,20 +589,38 @@ async def get_call(
             "from": active["caller_id"],
             "to": active["destination"],
             "start_time": str(active["start_time"]),
-            "answer_time": str(active["answer_time"]) if active["answer_time"] else None,
+            "answer_time": str(answer_time) if answer_time else None,
         }
 
-    # Check CDRs for completed calls (same tenant predicate).
+    # Check CDRs for completed calls (same tenant predicate). cdrs.uuid is
+    # VARCHAR(64) (05_schema_cdr.sql): binding `$1::uuid` here raised
+    # "operator does not exist: character varying = uuid" -> HTTP 500 for
+    # every completed call. The active_calls lookup above already validated
+    # the value as a UUID, so a text comparison is exact.
     cdr = await db.fetch_one(
         """
         SELECT uuid, direction, caller_id, destination, start_time,
                answer_time, end_time, duration_ms, hangup_cause
         FROM cdrs
-        WHERE uuid = $1::uuid AND ($2::int IS NULL OR customer_id = $2::int)
+        WHERE uuid = $1::varchar AND ($2::int IS NULL OR customer_id = $2::int)
         ORDER BY start_time DESC LIMIT 1
         """,
         call_id, customer_filter
     )
+
+    if cdr and is_tenant:
+        return {
+            "call_id": call_id,
+            "status": "completed",
+            "direction": cdr["direction"],
+            "from": cdr["caller_id"],
+            "to": cdr["destination"],
+            "start_time": str(cdr["start_time"]),
+            "end_time": str(tr.floor_to_minute(cdr["end_time"])),
+            "duration_minutes": tr.duration_minutes(
+                cdr["duration_ms"], cdr["answer_time"] is not None),
+            "hangup_cause": cdr["hangup_cause"]
+        }
 
     if cdr:
         return {

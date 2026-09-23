@@ -465,8 +465,7 @@ function TrunkEndpointsSection() {
     "total_calls": 141,
     "answered_calls": 92,
     "asr": "65.2%",
-    "avg_duration_sec": 187.4,
-    "total_cost": 3.42
+    "avg_duration_minutes": 3.1
   }
 }`}
       />
@@ -660,7 +659,7 @@ curl "https://your-portal-url/api/v1/calls/b0a4f1e2-..." \\
   "from": "+16175551001",
   "to": "+17745556789",
   "start_time": "2026-08-11 14:02:11+00:00",
-  "answer_time": "2026-08-11 14:02:19+00:00"
+  "answer_time": "2026-08-11 14:02:00+00:00"
 }`}
         />
         <CodeBlock
@@ -672,8 +671,8 @@ curl "https://your-portal-url/api/v1/calls/b0a4f1e2-..." \\
   "from": "+16175551001",
   "to": "+17745556789",
   "start_time": "2026-08-11 14:02:11+00:00",
-  "end_time": "2026-08-11 14:05:47+00:00",
-  "duration_seconds": 216.4,
+  "end_time": "2026-08-11 14:05:00+00:00",
+  "duration_minutes": 4,
   "hangup_cause": "NORMAL_CLEARING"
 }`}
         />
@@ -745,7 +744,6 @@ function TelemetryReference() {
           { name: 'direction',    type: 'string',   required: false, description: "'inbound' or 'outbound'." },
           { name: 'destination',  type: 'string',   required: false, description: 'Destination prefix match, e.g. +1617.' },
           { name: 'trunk_id',     type: 'integer',  required: false, description: 'Limit to one of your trunks.' },
-          { name: 'rated_only',   type: 'boolean',  required: false, description: 'true returns only records that have been cost-rated.' },
           { name: 'limit',        type: 'integer',  required: false, description: 'Page size, max 1000. Default 100.' },
           { name: 'offset',       type: 'integer',  required: false, description: 'Pagination offset. Default 0.' },
         ]}
@@ -763,12 +761,11 @@ function TelemetryReference() {
       "caller_id": "+16175550100",
       "destination": "+18005559999",
       "start_time": "2026-08-11T13:58:02+00:00",
-      "answer_time": "2026-08-11T13:58:09+00:00",
-      "end_time": "2026-08-11T14:01:44+00:00",
-      "duration_seconds": 222.1,
-      "billable_seconds": 215.0,
+      "answer_time": "2026-08-11T13:58:00+00:00",
+      "end_time": "2026-08-11T14:01:00+00:00",
+      "duration_minutes": 4,
       "hangup_cause": "NORMAL_CLEARING",
-      "sip_code": "200",
+      "sip_code": 200,
       "mos": 4.38,
       "r_factor": 88.6,
       "jitter_avg_ms": 3.2,
@@ -787,16 +784,19 @@ function TelemetryReference() {
         carries <IC>mos</IC> (1–5 voice-quality score; 4.0+ is excellent), <IC>r_factor</IC>{' '}
         (0–93 transmission rating), running jitter in ms (<IC>jitter_min_ms</IC> floor /{' '}
         <IC>jitter_max_ms</IC> peak / <IC>jitter_avg_ms</IC> mid-band estimate),
-        and network packet loss (<IC>packet_loss_pct</IC>, sequence-gap based), plus codec and
-        RTP byte/packet counters — the response above is trimmed for brevity.
+        and network packet loss (<IC>packet_loss_pct</IC>, sequence-gap based), plus codec
+        details — the response above is trimmed for brevity.{' '}
+        <strong style={{ color: C.text }}>Duration:</strong> <IC>duration_minutes</IC> is whole
+        minutes (any answered call reads at least 1; unanswered calls read 0), and{' '}
+        <IC>answer_time</IC> / <IC>end_time</IC> are reported to the minute.
       </Callout>
 
       <H3>Summary statistics</H3>
-      <Endpoint method="GET" path="/v1/cdrs/summary" description="Aggregated call counts, answer rates, duration, and cost. Defaults to the last 7 days." />
+      <Endpoint method="GET" path="/v1/cdrs/summary" description="Aggregated call counts, answer counts, and minutes. Defaults to the last 24 hours." />
       <ParamTable
         params={[
           { name: 'group_by',   type: 'string',   required: false, description: "'day' (default — split by product and direction), 'hour', or 'destination' (top prefixes)." },
-          { name: 'start_date', type: 'datetime', required: false, description: 'ISO 8601 window start. Default: 7 days ago.' },
+          { name: 'start_date', type: 'datetime', required: false, description: 'ISO 8601 window start. Default: 24 hours ago.' },
           { name: 'end_date',   type: 'datetime', required: false, description: 'ISO 8601 window end. Default: now.' },
           { name: 'customer_id', type: 'integer', required: false, description: 'Restrict to one customer account (yours).' },
         ]}
@@ -812,8 +812,7 @@ function TelemetryReference() {
       "direction": "inbound",
       "total_calls": 412,
       "answered_calls": 361,
-      "total_duration_sec": 61240,
-      "total_cost": 14.86
+      "total_minutes": 1021
     }
   ],
   "group_by": "day"

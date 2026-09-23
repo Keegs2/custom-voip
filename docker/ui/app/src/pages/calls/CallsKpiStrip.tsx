@@ -21,6 +21,7 @@ import {
   GOOD, WARN, BAD, AZURE_DEEP,
   mosColor, packetLossColor, jitterColor, rFactorColor, fmtDurationShort,
 } from './quality';
+import { fmtAvgCallDuration } from '../../utils/callDuration';
 import type { Cdr } from '../../types/cdr';
 
 interface StatCellProps {
@@ -57,7 +58,7 @@ export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
   const stats = useMemo(() => {
     const loaded = cdrs.length;
     let answered = 0;
-    let durSum = 0;
+    const answeredRows: Cdr[] = [];
     let mosSum = 0; let mosCount = 0;
     let plSum = 0; let plCount = 0;
     let jSum = 0; let jCount = 0;
@@ -68,7 +69,7 @@ export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
       // ring time, which would drag a talk-time average toward zero.
       if (c.answer_time != null) {
         answered++;
-        durSum += c.duration_seconds ?? 0;
+        answeredRows.push(c);
       }
       if (c.mos != null) { mosSum += c.mos; mosCount++; }
       if (c.packet_loss_pct != null) { plSum += c.packet_loss_pct; plCount++; }
@@ -85,7 +86,9 @@ export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
       loaded,
       answered,
       asr: loaded > 0 ? (answered / loaded) * 100 : 0,
-      avgDurSec: answered > 0 ? durSum / answered : null,
+      // Staff rows: exact seconds. Tenant rows: mean of whole minutes,
+      // 1 decimal ("2.3 min") — the API never sends tenants seconds.
+      avgDurLabel: fmtAvgCallDuration(answeredRows, fmtDurationShort),
       avgMos: mosCount > 0 ? mosSum / mosCount : null,
       avgLossPct: plCount > 0 ? plSum / plCount : null,
       avgJitterMs: jCount > 0 ? jSum / jCount : null,
@@ -110,7 +113,7 @@ export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
       <StatCell label="ASR" value={`${stats.asr.toFixed(1)}%`} tone={asrTone} />
       <StatCell
         label="Avg Duration"
-        value={stats.avgDurSec != null ? fmtDurationShort(stats.avgDurSec) : '—'}
+        value={stats.avgDurLabel}
         hint="answered calls"
       />
       <StatCell
