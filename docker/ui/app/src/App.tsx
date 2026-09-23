@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { RequireAuth } from './components/auth/RequireAuth';
-import { RequireAdmin } from './components/auth/RequireAdmin';
+import { ProductHomeRedirect } from './components/auth/ProductHomeRedirect';
 import { RequireSupportOrAdmin } from './components/auth/RequireSupportOrAdmin';
 import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
@@ -14,8 +14,8 @@ import { GuidesPage } from './pages/docs/GuidesPage';
 import { ApiDocsPage } from './pages/docs/ApiDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
 import { CallsPage } from './pages/calls/CallsPage';
-import { PaymentsDemoControlPage } from './pages/admin/payments-demo/PaymentsDemoControlPage';
 import { MyAccountPage } from './pages/MyAccountPage';
+import { API_CALLING_ENABLED } from './config/features';
 
 export function App() {
   return (
@@ -34,7 +34,12 @@ export function App() {
             {/* Protected — all other routes require authentication */}
             <Route element={<RequireAuth />}>
               <Route path="rcf"        element={<RcfPage />} />
-              <Route path="api-dids"   element={<ApiDidsPage />} />
+              {/* API Calling is retired (API_CALLING_ENABLED=false): the page
+                  stays in code, but the route bounces to the product home. */}
+              <Route
+                path="api-dids"
+                element={API_CALLING_ENABLED ? <ApiDidsPage /> : <ProductHomeRedirect />}
+              />
               <Route path="trunks"     element={<TrunksPage />} />
               <Route path="ivr"        element={<IvrBuilderPage />} />
               <Route path="voicemail"  element={<VisualVoicemailPage />} />
@@ -65,17 +70,6 @@ export function App() {
 
               {/* Old bookmark: the platform CDRs tab is now the standalone /cdrs page. */}
               <Route path="admin/platform/cdrs" element={<Navigate to="/cdrs" replace />} />
-
-              {/* Machine Payments Demo — standalone daylight page (no tab shell).
-                  The only surviving /admin route; the rest moved to TED. */}
-              <Route
-                path="admin/payments-demo"
-                element={
-                  <RequireAdmin>
-                    <PaymentsDemoControlPage />
-                  </RequireAdmin>
-                }
-              />
             </Route>
           </Route>
 

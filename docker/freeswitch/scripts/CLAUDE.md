@@ -66,9 +66,44 @@ inbound_router.lua executes:
      |
      |-- "rcf" -> terminate_rcf: ON-NET decision at the forward branch point
      |            (see below), else Bridge to forward_to number via carrier
-     |-- "api" -> terminate_api: Answer, then execute voice_webhook.lua
+     |-- "api" -> RETIRED (API_CALLING_ENABLED off, default): hard reject
+     |            CALL_REJECTED (603) + lua_routed=true. Flag on: terminate_api
+     |            (Answer, then execute voice_webhook.lua) — unchanged code.
      |-- "trunk" -> terminate_trunk: Bridge to customer PBX via Kamailio
 ```
+
+### API Calling product — RETIRED (flag `API_CALLING_ENABLED`, default OFF)
+
+The API Calling product (account_type `api`) is switched OFF; its code is KEPT.
+One env flag, `API_CALLING_ENABLED`, read via `os.getenv` like
+`BRIDGE_PROGRESS_TIMEOUT`: enabled ONLY when the value is exactly `true`
+(case-insensitive, trimmed). Unset / empty / `1` / `on` / anything else = OFF.
+Scripts are bind-mounted, so the retirement takes effect on `git pull` with no
+FS restart and no `.env` change. Re-enabling needs `API_CALLING_ENABLED=true` in
+`/opt/revup/.env` + container recreate (passed through `docker-compose.media.yml`).
+
+When OFF:
+- **Direct inbound to an api_did** — STEP 1 lookup order (RCF → API → Trunk) is
+  unchanged, so the DID is still recognized as OURS, but STEP 2 hard-rejects it
+  `CALL_REJECTED` (603) with `lua_routed=true` (dialplan does not mask with 404).
+  Never answered, never handed to `voice_webhook.lua`, never sent to a carrier.
+  `customer_id`/`product_type` carry the API DID's customer / `api`.
+- **On-net RCF chain whose terminal is an api_did** — rejected 603 in the chain
+  loop right beside the disabled/suspended check, same shape: no carrier
+  hairpin, terminal never dispatched, so `customer_id` stays the origin RCF
+  customer and `terminating_customer_id`/`on_net`/`on_net_hops` are not exported
+  (identical to the existing disabled-terminal reject).
+- **`api_outbound.lua` / `outbound_api.lua`** — defensive guard at the top of
+  each (before any Redis/DB load): log `API Calling retired ...` + hang up
+  `CALL_REJECTED`. The API originate endpoint is unmounted, so these are
+  normally unreachable; the `public.xml` `outbound_api` / `api_product_type`
+  extensions are left untouched (no reloadxml needed).
+- `number_routing` view / `db.resolve_destination` / `db.lookup_api_did` are
+  unchanged — the api arm stays so an api DID resolves as "ours → reject", not
+  "not ours → carrier".
+- RCF and SIP Trunking paths never consult the flag. Flag ON = byte-identical
+  to the pre-retirement behavior (harness-verified).
+- Log line to grep: `API Calling retired (API_CALLING_ENABLED off)`.
 
 ### On-Net (Internal) Routing (design: `docs/ONNET_ROUTING_DESIGN.md`)
 
@@ -231,6 +266,10 @@ Call flow:
 
 ### api_outbound.lua
 
+**RETIRED (API Calling product).** With `API_CALLING_ENABLED` off (default) the
+script rejects `CALL_REJECTED` at the very top and does nothing else; the flow
+below applies only with the flag on.
+
 **Called per ESL-originated outbound API call** from the `outbound_api` dialplan extension.
 
 Call flow:
@@ -370,6 +409,9 @@ why `cdrs.freeswitch_node` was NULL on every production row), and
 
 ### outbound_api.lua
 
+**RETIRED (API Calling product)** — same top-of-script `API_CALLING_ENABLED`
+guard as api_outbound.lua (off = reject `CALL_REJECTED`).
+
 **Legacy/alternative outbound API handler.** Similar to api_outbound.lua but simpler:
 - Uses `require()` instead of `loadfile()` (may fail due to mod_lua path issue)
 - No tier-aware CPS checking
@@ -379,6 +421,8 @@ why `cdrs.freeswitch_node` was NULL on every production row), and
 ### voice_webhook.lua
 
 **TwiML-compatible XML execution engine** for API calling product.
+**RETIRED:** only reachable with `API_CALLING_ENABLED=true` (its callers
+terminate_api / api_outbound.lua / outbound_api.lua are gated); code kept.
 
 Supports these verbs: Say, Play, Gather, Dial, Hangup, Pause, Redirect, Reject.
 

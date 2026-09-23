@@ -259,9 +259,9 @@ Primary context. Processing order:
 
 2. **Special numbers**: 9196 (echo), 9195 (delay echo), 9198 (tone), 9197 (milliwatt)
 
-3. **Outbound API calls**: Matches `outbound_api=true` channel variable (set by ESL originate). Runs `api_outbound.lua` with tier-aware CPS limits.
+3. **Outbound API calls** (API Calling product **RETIRED**): Matches `outbound_api=true` channel variable (set by ESL originate). Runs `api_outbound.lua` with tier-aware CPS limits. With `API_CALLING_ENABLED` off (default) the script hangs up `CALL_REJECTED` immediately; the XML extension is intentionally left in place (no reloadxml).
 
-4. **API product type**: Matches `product_type=api` AND `direction=outbound`. Alternative entry for API calls.
+4. **API product type** (RETIRED, same gate): Matches `product_type=api` AND `direction=outbound`. Alternative entry for API calls; runs `api_outbound.lua`, which rejects when the flag is off.
 
 5. **Trunk header debug** (`continue=true`): Non-terminating `^(.*)$` extension that logs the inbound X-Trunk-ID header variants (debugging header casing). Falls through to the next extension.
 

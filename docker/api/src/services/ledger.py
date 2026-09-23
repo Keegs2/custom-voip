@@ -13,10 +13,11 @@ insert, so for customers whose balance moves exclusively through this module::
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  RCF-V1 SCOPE BOUNDARY (deliberate — do not widen without a decision)     ║
 ║                                                                           ║
-║  On this branch the ledger is scoped to (a) the machine-payments DEMO     ║
-║  (``PAYMENTS_DEMO_MODE`` + ``customers.is_demo``) and (b) the upcoming    ║
-║  per-call x402 charges on the API-calling product. ONLY those flows may   ║
-║  call ``post_ledger_entry``.                                              ║
+║  On this branch NOTHING in-tree calls ``post_ledger_entry`` any more:     ║
+║  its writers (the machine-payments DEMO and the demo-only x402 / ledger   ║
+║  per-call fee on API Calling) were REMOVED 2026-09. Only the read-only    ║
+║  ``routers/billing.py`` views (get_balance / get_ledger) remain. Any new  ║
+║  writer needs an explicit product decision.                               ║
 ║                                                                           ║
 ║  RCF-V1 billing is otherwise estimates-only (CDRs → external Equinox):    ║
 ║  the SQL ``rate_cdr()`` function, the customers add-credit path, and all  ║

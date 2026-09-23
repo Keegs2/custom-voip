@@ -18,6 +18,7 @@ import {
 import { HaArchitectureViz } from '../components/layout/HaArchitectureViz';
 import { useAuth } from '../contexts/AuthContext';
 import { productHome } from '../utils/productHome';
+import { API_CALLING_ENABLED } from '../config/features';
 import { SignInModal } from './landing/SignInModal';
 import { RequestAccessSection } from './landing/RequestAccessSection';
 
@@ -34,8 +35,9 @@ import { RequestAccessSection } from './landing/RequestAccessSection';
 
    Positioning: Granite IS the carrier. CRAG is Granite's
    next-generation platform for advanced voice — AI agents,
-   API calling, webhooks, intelligent routing — built directly
-   on the carrier's own network. Never describe CRAG itself as
+   intelligent routing, programmable provisioning — built directly
+   on the carrier's own network. (API Calling was retired 2026-09;
+   its product card + copy only render while API_CALLING_ENABLED is on.) Never describe CRAG itself as
    "our carrier-grade platform".
 
    Narrative arc: what it is (hero) → proof (stats) → what you
@@ -83,11 +85,13 @@ const SIDE_PRODUCTS: Product[] = [
     desc: 'IP-authenticated enterprise trunks with multi-region inbound redundancy and automated DNS failover.',
     status: 'early',
   },
-  {
-    name: 'API Calling',
-    desc: 'Programmable voice for platforms and AI agents — originate, control, and observe calls over REST and webhooks.',
-    status: 'early',
-  },
+  ...(API_CALLING_ENABLED
+    ? [{
+        name: 'API Calling',
+        desc: 'Programmable voice for platforms and AI agents — originate, control, and observe calls over REST and webhooks.',
+        status: 'early' as const,
+      }]
+    : []),
   {
     name: 'Visual Voicemail',
     desc: 'Platform-native mailboxes with transcription and API retrieval — designed in, not bolted on.',
@@ -148,7 +152,9 @@ const BUILD_PILLARS: Capability[] = [
   {
     icon: Braces,
     title: 'Programmable control',
-    desc: 'REST provisioning, webhook call control, intelligent routing, and structured per-call records with quality metrics. Build voice products on primitives, not tickets.',
+    desc: API_CALLING_ENABLED
+      ? 'REST provisioning, webhook call control, intelligent routing, and structured per-call records with quality metrics. Build voice products on primitives, not tickets.'
+      : 'REST provisioning, intelligent routing, and structured per-call records with quality metrics. Build voice products on primitives, not tickets.',
   },
   {
     icon: BadgeCheck,
@@ -277,10 +283,21 @@ export function DashboardPage() {
             </h1>
 
             <p className="landing-lede landing-up landing-d2">
-              CRAG is Granite&rsquo;s next-generation voice platform — built by
-              the carrier for what comes next: AI voice agents, programmable
-              API calling, webhooks, and intelligent routing, running directly
-              on Granite&rsquo;s own nationwide network.
+              {API_CALLING_ENABLED ? (
+                <>
+                  CRAG is Granite&rsquo;s next-generation voice platform — built by
+                  the carrier for what comes next: AI voice agents, programmable
+                  API calling, webhooks, and intelligent routing, running directly
+                  on Granite&rsquo;s own nationwide network.
+                </>
+              ) : (
+                <>
+                  CRAG is Granite&rsquo;s next-generation voice platform — built by
+                  the carrier for what comes next: AI voice agents, intelligent
+                  routing, and programmable provisioning, running directly on
+                  Granite&rsquo;s own nationwide network.
+                </>
+              )}
             </p>
 
             <div className="landing-cta-row landing-up landing-d3">
@@ -340,7 +357,11 @@ export function DashboardPage() {
           <SectionHead
             kicker="Build what's next"
             title="A programmable surface on the carrier itself."
-            blurb="AI voice agents, API calling, webhooks, intelligent routing — CRAG puts modern voice primitives directly on Granite's nationwide network. When you build here, your software talks to the carrier — not to a reseller sitting on top of one."
+            blurb={
+              API_CALLING_ENABLED
+                ? "AI voice agents, API calling, webhooks, intelligent routing — CRAG puts modern voice primitives directly on Granite's nationwide network. When you build here, your software talks to the carrier — not to a reseller sitting on top of one."
+                : "AI voice agents, intelligent routing, programmable provisioning — CRAG puts modern voice primitives directly on Granite's nationwide network. When you build here, your software talks to the carrier — not to a reseller sitting on top of one."
+            }
           />
           <div className="landing-ai-grid">
             {BUILD_PILLARS.map((p) => (

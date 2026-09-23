@@ -12,7 +12,7 @@ closed alongside it:
   * get_customer_filter failed OPEN (non-admin JWT with customer_id=None got
     an unscoped None) -> now 403 "No customer scope".
 
-Harness mirrors tests/test_x402_calls.py (ephemeral local PG, module event
+Harness mirrors tests/test_api_calls.py (formerly test_x402_calls.py) (ephemeral local PG, module event
 loop, db.pool wired as the runtime `api` role) but mounts the routers behind
 the REAL JWTAuthMiddleware and drives them with REAL minted JWTs per role —
 the exact production auth path. The new 39_users_support_role.sql migration is
@@ -629,7 +629,11 @@ def test_support_403_on_trunk_writes(authz_db, client, tokens):
     _run(go())
 
 
-def test_support_403_on_cdr_rate_and_calls(client, tokens):
+def test_support_403_on_cdr_rate_and_calls(client, tokens, monkeypatch):
+    # /v1/calls belongs to the RETIRED API Calling product: with the flag off
+    # the router 404s before authz runs, so turn it on to keep testing authz.
+    monkeypatch.setenv("API_CALLING_ENABLED", "true")
+
     async def go():
         hdrs = _auth(tokens, "support")
         r = await client.post(f"/v1/cdrs/{CDR_A1}/rate", headers=hdrs)

@@ -108,6 +108,7 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 | `API_PORT` | `8000` | FastAPI server port |
 | `ESL_PASSWORD` | `ClueCon` | Event Socket password. CHANGE IN PRODUCTION. |
 | `TEST_MODE` | `false` | When true, plays tone instead of bridging to carrier |
+| `API_CALLING_ENABLED` | `false` | API Calling product (account_type `api`) is **RETIRED**. Only the exact value `true` (case-insensitive, trimmed) re-enables it. Off: api_did inbound (direct or on-net RCF terminal) is hard-rejected `CALL_REJECTED` (603, `lua_routed=true`, no carrier leg, no webhook) and `api_outbound.lua` / `outbound_api.lua` reject `CALL_REJECTED`. RCF/trunk unaffected. See `scripts/CLAUDE.md`. |
 | `BRIDGE_PROGRESS_TIMEOUT` | `10` | Per-attempt `progress_timeout` (seconds) on carrier bridges — max wait for a provisional response (180/183) before failing over. Do NOT replace with originate_timeout (caps time-to-answer incl. ring). |
 
 ## Health Check

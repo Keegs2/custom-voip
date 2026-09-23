@@ -7,7 +7,8 @@ import {
   IconRCF, IconTrunk, IconAPI, IconVoicemail, IconDocs,
   IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen, WalletMinimal } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen } from 'lucide-react';
+import { API_CALLING_ENABLED } from '../../config/features';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -60,14 +61,16 @@ interface ComingSoonItemDef {
 }
 
 // RCF and SIP Trunking are LIVE (gated by account_type in allProductNavItems).
-// API Calling and Visual Voicemail are pre-launch — shown as "Soon" items until
+// Visual Voicemail (and API Calling, when enabled) are pre-launch — shown as "Soon" items until
 // they graduate to live product portals, each linking to its coming-soon
 // showcase page. Like the group itself, these show for ALL authenticated
 // users regardless of account_type — same visibility the IVR item had.
-// (api/hybrid accounts can also reach /api-dids from their product pages; the
-// showcase renders identically for them.)
+// API Calling is RETIRED (2026-09): its item is kept but only listed while
+// API_CALLING_ENABLED is true (the /api-dids route redirects when it is off).
 const COMING_SOON_ITEMS: ComingSoonItemDef[] = [
-  { label: 'API Calling',      icon: <IconAPI size={18} />,       to: '/api-dids',  color: '#3b82f6' },
+  ...(API_CALLING_ENABLED
+    ? [{ label: 'API Calling', icon: <IconAPI size={18} />, to: '/api-dids', color: '#3b82f6' }]
+    : []),
   { label: 'Visual Voicemail', icon: <IconVoicemail size={18} />, to: '/voicemail', color: '#3b82f6' },
 ];
 
@@ -740,10 +743,6 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
 
   /* ── Admin items ───────────────────────────────────────── */
 
-  const paymentsDemoItem: NavItemDef = {
-    label: 'Payments Demo', to: '/admin/payments-demo', color: '#60a5fa', icon: <WalletMinimal size={15} strokeWidth={1.7} />,
-    isActiveFn: (p) => p.startsWith('/admin/payments-demo'),
-  };
   // The merged Calls & Quality page (CDR search + voice-quality analysis in
   // one). Staff enter via /cdrs; the tenant-facing entry keeps the familiar
   // "Call Quality" label via /call-quality — both routes render the same page.
@@ -1022,17 +1021,9 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                   isOpen={groupOpen.administration}
                   onToggle={toggleGroup}
                 >
-                  {/* ── Platform sub-group (admin only) ────
-                       Customer + platform administration moved to TED (the CRAG
-                       console); the Payments Demo is the only admin surface that
-                       still lives in revup. */}
-                  {isAdmin && (
-                    <>
-                      <SubGroupLabel label="Platform" />
-                      <SidebarNavItem item={paymentsDemoItem} onNavigate={closeMobile} small />
-                    </>
-                  )}
-
+                  {/* Customer + platform administration lives in TED (the CRAG
+                       console); the former Platform sub-group's last item, the
+                       Payments Demo, was removed 2026-09. */}
                   {isSupport ? (
                     /* Support role — its entire nav: the platform-read tools
                        the API grants this role. Calls & Quality is the merged

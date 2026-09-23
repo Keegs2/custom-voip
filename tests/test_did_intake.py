@@ -919,19 +919,21 @@ def test_assign_non_rcf_ignores_forward_to(client, tokens, sinch_ids, intake_db)
             "carrier_trunk_id": sinch_ids["denver"]})
         assert r.status_code == 200, r.text
 
-        # product_type='api' with NO forward_to still succeeds (no rcf_numbers
-        # write path). The assign endpoint does not create an api_dids row —
+        # product_type='trunk' with NO forward_to still succeeds (no rcf_numbers
+        # write path). The assign endpoint does not create a trunk_dids row —
         # it only flips did_inventory (product_ref_id stays NULL for api/trunk).
+        # (Was 'api'; API Calling is retired and 'api' assigns now 422 unless
+        # API_CALLING_ENABLED — see tests/test_api_calling_retired.py.)
         r = await client.post(f"/v1/numbers/{did}/assign", headers=hdrs, json={
-            "customer_id": 42, "product_type": "api"})
+            "customer_id": 42, "product_type": "trunk"})
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["status"] == "assigned" and body["product_type"] == "api"
+        assert body["status"] == "assigned" and body["product_type"] == "trunk"
         assert body["product_ref_id"] is None
 
         di = await db.fetch_one(
             "SELECT status, product_type FROM did_inventory WHERE did = $1", did)
-        assert di["status"] == "assigned" and di["product_type"] == "api"
+        assert di["status"] == "assigned" and di["product_type"] == "trunk"
         # No rcf_numbers row was created for a non-RCF assign.
         assert await db.fetch_one(
             "SELECT id FROM rcf_numbers WHERE did = $1", did) is None

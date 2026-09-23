@@ -7,6 +7,10 @@
 #   3. Call status queries
 #   4. Webhook handling
 #
+# RETIRED PRODUCT (2026-09): API Calling is switched OFF by default and this
+# script is no longer part of run_all_tests.sh. It only works against an API
+# started with API_CALLING_ENABLED=true (otherwise /v1/calls is 404).
+#
 set -e
 
 API_URL="${API_URL:-http://localhost:8000}"

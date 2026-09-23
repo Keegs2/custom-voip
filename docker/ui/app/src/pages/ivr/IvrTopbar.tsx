@@ -13,6 +13,7 @@
 import { useState, useEffect } from 'react';
 import { listCustomers } from '../../api/customers';
 import { listApiDids } from '../../api/apiDids';
+import { API_CALLING_ENABLED } from '../../config/features';
 import type { Customer } from '../../types/customer';
 import type { ApiDid } from '../../types/apiDid';
 import type { IvrAction, IvrFlowState } from './useIvrFlow';
@@ -64,8 +65,11 @@ export function IvrTopbar({
   }, []);
 
   // Fetch DIDs whenever customer changes
+  // IVR flows attach to API DIDs; with API Calling retired
+  // (API_CALLING_ENABLED=false) there is no /api-dids endpoint to call, so the
+  // DID dropdown stays empty.
   useEffect(() => {
-    if (!state.customerId) {
+    if (!API_CALLING_ENABLED || !state.customerId) {
       setDids([]);
       return;
     }

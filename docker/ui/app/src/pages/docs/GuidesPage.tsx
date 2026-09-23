@@ -1,7 +1,8 @@
 /**
  * Guides — the product-aware documentation hub for Granite CRAG.
  *
- * One page, four products (RCF, SIP Trunking, API Calling, Visual Voicemail),
+ * One page, three products (RCF, SIP Trunking, Visual Voicemail) — plus API
+ * Calling, retired 2026-09 and only listed while API_CALLING_ENABLED is on —
  * selected via the shared ProductSelector and deep-linked through
  * /docs/guides/:product? (default rcf). The RCF guide carries forward the
  * substance of the retired RcfDocsPage, updated to the current portal UI.

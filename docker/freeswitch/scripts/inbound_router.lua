@@ -149,6 +149,31 @@ do
 end
 
 -- ================================================================
+-- API Calling product gate (API_CALLING_ENABLED=true|<anything else>)
+-- ================================================================
+-- The "API Calling" product (account_type `api`: voice_webhook.lua,
+-- outbound_api.lua / api_outbound.lua) is RETIRED — switched OFF, code KEPT.
+-- DEFAULT OFF. Only the exact value "true" (case-insensitive, trimmed)
+-- re-enables it; unset/empty/anything else = OFF, so a media VM that merely
+-- `git pull`s this bind-mounted script (no env var) retires the product with
+-- no FS restart and no .env change.
+-- When OFF, an api_did is still recognized as OURS (STEP 1 lookup_api_did and
+-- the number_routing view keep their api arms) but its product is retired, so
+-- it is HARD-REJECTED with CALL_REJECTED (603) + lua_routed=true — never
+-- handed to voice_webhook.lua and never hairpinned to the carrier:
+--   * direct inbound to an api_did (STEP 2 non-RCF branch)
+--   * an on-net RCF chain whose terminal resolves to an api_did
+-- RCF and SIP Trunking paths do not consult this flag.
+-- When ON, terminate_api runs exactly as before this gate existed.
+local api_calling_enabled = false
+do
+    local v = tostring(os.getenv("API_CALLING_ENABLED") or ""):lower():match("^%s*(.-)%s*$")
+    if v == "true" then
+        api_calling_enabled = true
+    end
+end
+
+-- ================================================================
 -- SIP display-name hardening
 -- ================================================================
 -- A display name we hand to Kamailio in X-From-Name / X-Original-CID-Name is
@@ -2117,6 +2142,17 @@ if product_type == "rcf" then
             break
         end
 
+        -- Retired product terminal (API Calling, API_CALLING_ENABLED off):
+        -- the number is ours, so hard reject exactly like a disabled
+        -- terminal (603, lua_routed=true, no carrier fallback).
+        if resolved.product_type == "api" and not api_calling_enabled then
+            hard_reject("CALL_REJECTED", string.format(
+                "[%s] API Calling retired (API_CALLING_ENABLED off): "
+                .. "rejecting on-net terminal DID %s (customer=%s) — 603\n",
+                uuid, tostring(resolved.did), tostring(resolved.customer_id)))
+            break
+        end
+
         -- Loop guard: this DID already entered in the chain -> hard reject.
         if ctx.visited[resolved.did] then
             hard_reject("EXCHANGE_ROUTING_ERROR", string.format(
@@ -2164,7 +2200,17 @@ else
     -- `on_net` channel variable (exported in dispatch_terminal for the ESL
     -- metrics exporter's live-channel label) is deterministic, not nil-coerced.
     ctx.on_net = false
-    dispatch_terminal(first_dest, ctx)
+    if product_type == "api" and not api_calling_enabled then
+        -- Retired product (API_CALLING_ENABLED off): the DID is ours but API
+        -- Calling is switched off -> hard reject 603 (lua_routed=true), same
+        -- shape as the on-net disabled/suspended terminal reject.
+        hard_reject("CALL_REJECTED", string.format(
+            "[%s] API Calling retired (API_CALLING_ENABLED off): "
+            .. "rejecting DID %s (customer=%s) — 603\n",
+            uuid, tostring(normalized_did), tostring(customer_id)))
+    else
+        dispatch_terminal(first_dest, ctx)
+    end
 end
 
 freeswitch.consoleLog("INFO", "[" .. uuid .. "] Inbound routing complete\n")

@@ -1,4 +1,30 @@
 -- Outbound API Call Handler
+-- ================================================================
+-- API Calling product RETIRED — gate (API_CALLING_ENABLED, default OFF)
+-- ================================================================
+-- Same contract as inbound_router.lua: only the exact value "true"
+-- (case-insensitive, trimmed) enables; unset/anything else = OFF. When OFF,
+-- any ESL-originated API call that still reaches this script (the API
+-- originate endpoint is unmounted, so this is defensive) is rejected
+-- CALL_REJECTED before any Redis/DB/carrier work. Code below is KEPT intact
+-- so flag ON restores the previous behavior exactly.
+do
+    local v = tostring(os.getenv("API_CALLING_ENABLED") or ""):lower():match("^%s*(.-)%s*$")
+    if v ~= "true" then
+        local u = "unknown"
+        if session then
+            pcall(function() u = session:getVariable("uuid") or "unknown" end)
+        end
+        freeswitch.consoleLog("WARNING", "[outbound_api] [" .. tostring(u)
+            .. "] API Calling retired (API_CALLING_ENABLED off): rejecting API outbound call\n")
+        if session then
+            pcall(function() session:setVariable("hangup_cause", "CALL_REJECTED") end)
+            pcall(function() session:hangup("CALL_REJECTED") end)
+        end
+        return
+    end
+end
+
 local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
 local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 

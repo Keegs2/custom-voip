@@ -1,4 +1,5 @@
 import type { User } from '../types/auth';
+import { API_CALLING_ENABLED } from '../config/features';
 
 /**
  * The signed-in home for a user — the page for the product they
@@ -13,6 +14,10 @@ import type { User } from '../types/auth';
  * Admins land on `/cdrs` (CDR Search) — platform + customer administration
  * moved to TED (the CRAG console), so the revup `/admin` tree no longer
  * exists; sending admins to `/admin` here would loop forever.
+ *
+ * `api` accounts: API Calling is retired (API_CALLING_ENABLED=false), so they
+ * land on My Account instead of the disabled /api-dids page (which itself
+ * redirects here — pointing it back at /api-dids would loop).
  */
 export function productHome(user: User | null, effectiveAdmin: boolean): string {
   if (!user) return '/rcf';
@@ -23,7 +28,7 @@ export function productHome(user: User | null, effectiveAdmin: boolean): string 
     case 'trunk':
       return '/trunks';
     case 'api':
-      return '/api-dids';
+      return API_CALLING_ENABLED ? '/api-dids' : '/my-account';
     case 'rcf':
     case 'hybrid':
     case 'ucaas':

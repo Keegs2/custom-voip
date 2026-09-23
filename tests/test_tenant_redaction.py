@@ -587,7 +587,12 @@ def test_tenant_trunk_stats_no_cost_no_seconds(client, tokens):
     _run(go())
 
 
-def test_tenant_call_status_minutes_only(client, tokens):
+def test_tenant_call_status_minutes_only(client, tokens, monkeypatch):
+    # GET /v1/calls/{id} is part of the RETIRED API Calling product (router
+    # 404s while API_CALLING_ENABLED is off) — enable it to keep the kept code
+    # under the redaction test.
+    monkeypatch.setenv("API_CALLING_ENABLED", "true")
+
     async def go():
         h = _h(tokens, "user_a")
         r = await client.get(f"/v1/calls/{CDR_ANS_95}", headers=h)
@@ -645,7 +650,12 @@ def test_staff_cdr_list_and_detail_unchanged(client, tokens):
     _run(go())
 
 
-def test_staff_summary_and_trunk_stats_unchanged(client, tokens):
+def test_staff_summary_and_trunk_stats_unchanged(client, tokens, monkeypatch):
+    # GET /v1/calls/{id} is part of the RETIRED API Calling product (router
+    # 404s while API_CALLING_ENABLED is off) — enable it to keep the kept code
+    # under the redaction test.
+    monkeypatch.setenv("API_CALLING_ENABLED", "true")
+
     async def go():
         h = _h(tokens, "admin")
         r = await client.get("/v1/cdrs/summary", params={"group_by": "day"}, headers=h)
