@@ -224,3 +224,33 @@ def redact_summary_row(row: Mapping[str, Any]) -> dict[str, Any]:
         out["avg_duration_minutes"] = average_minutes(src.get("avg_call_minutes"))
     return {k: v for k, v in out.items() if k in TENANT_SUMMARY_FIELDS}
 
+
+
+# ---------------------------------------------------------------------------
+# Customer objects (/v1/customers, /v1/customers/me, customer-joined rows)
+# ---------------------------------------------------------------------------
+
+#: Roles that see platform internals. Mirrors `get_support_read_filter`
+#: (admin + support -> unscoped). An admin in the UI's "View as Customer"
+#: mode is still role=admin to the API and therefore still staff.
+STAFF_ROLES: frozenset[str] = frozenset({"admin", "support"})
+
+#: Customer-record keys a tenant must NEVER receive. `traffic_grade` is an
+#: internal routing grade (owner decision 2026-09); `fraud_score` and the
+#: financial/limit columns are already withheld by the tenant SELECTs and are
+#: listed here so a future SELECT regression still cannot leak them.
+FORBIDDEN_TENANT_CUSTOMER_KEYS: frozenset[str] = frozenset({
+    "traffic_grade", "fraud_score", "fraud_flags", "balance", "credit_limit",
+})
+
+
+def is_staff(user: Mapping[str, Any]) -> bool:
+    """True for admin/support callers (full internal shapes)."""
+    return user.get("role") in STAFF_ROLES
+
+
+def redact_customer_fields(obj: Mapping[str, Any]) -> dict[str, Any]:
+    """Tenant view of a customer (or customer-joined) object: drop every
+    forbidden internal key, keep everything else unchanged."""
+    return {k: v for k, v in dict(obj).items()
+            if k not in FORBIDDEN_TENANT_CUSTOMER_KEYS}

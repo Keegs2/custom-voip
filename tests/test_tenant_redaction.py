@@ -14,6 +14,8 @@ Covers:
       - GET /v1/cdrs, /v1/cdrs/{uuid}, /v1/cdrs/summary (day/destination/hour)
       - GET /v1/trunks/{id}/stats
       - GET /v1/calls/{id} (completed + active)
+      - GET /v1/customers, /v1/customers/me, /v1/rcf/{did}: traffic_grade
+        (internal routing grade) absent for tenants, present for staff
     Tenant responses contain NONE of the forbidden keys (full denylist,
     asserted recursively); tenant-ignored filters (rated_only/sbc_id/zone)
     cannot be used as an oracle; staff responses keep the historical keys
@@ -248,6 +250,38 @@ CREATE TABLE active_calls (
   answer_time TIMESTAMPTZ,
   state VARCHAR(20) DEFAULT 'ringing');
 
+-- customers / product tables (02_schema_core.sql shape, trimmed) for the
+-- traffic_grade redaction cases (GET /customers, /customers/me, /rcf/{did}).
+CREATE TABLE customers (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  account_type VARCHAR(20) NOT NULL DEFAULT 'rcf',
+  balance DECIMAL(12,4) DEFAULT 0,
+  credit_limit DECIMAL(12,4) DEFAULT 0,
+  status VARCHAR(20) DEFAULT 'active',
+  traffic_grade VARCHAR(10) DEFAULT 'standard',
+  daily_limit DECIMAL(10,2) DEFAULT 500,
+  cpm_limit INT DEFAULT 60,
+  fraud_score INT DEFAULT 0,
+  ucaas_enabled BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW());
+
+CREATE TABLE rcf_numbers (
+  id SERIAL PRIMARY KEY,
+  customer_id INT NOT NULL REFERENCES customers(id),
+  did VARCHAR(20) UNIQUE NOT NULL,
+  name VARCHAR(100),
+  forward_to VARCHAR(20) NOT NULL,
+  pass_caller_id BOOLEAN DEFAULT true,
+  enabled BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW());
+
+CREATE TABLE api_dids (
+  id SERIAL PRIMARY KEY,
+  customer_id INT NOT NULL,
+  did VARCHAR(20) UNIQUE NOT NULL);
+
 GRANT ALL ON ALL TABLES IN SCHEMA public TO api;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO api;
 """
@@ -296,6 +330,7 @@ CDR_ANS_20 = "a0000000-0000-0000-0000-000000000020"   # yes, 20_000 -> 1 min
 CDR_NOANS = "a0000000-0000-0000-0000-000000000000"    # no,  30_000 ring -> 0 min
 CDR_B = "b0000000-0000-0000-0000-000000000001"        # tenant B, answered 60_000
 ACTIVE_A = "c0000000-0000-0000-0000-00000000000a"     # live call, tenant A
+RCF_DID_A = "+16175550101"                            # tenant A RCF DID
 
 
 @pytest.fixture(scope="module")
@@ -355,6 +390,14 @@ def redact_db():
                     (start + timedelta(minutes=5)) if rated else None,
                 )
 
+            await conn.execute(
+                "INSERT INTO customers (id, name, account_type, traffic_grade, fraud_score) "
+                "VALUES ($1, 'Tenant A', 'trunk', 'premium', 9), "
+                "($2, 'Tenant B', 'rcf', 'economy', 3)", CID_A, CID_B)
+            await conn.execute(
+                "INSERT INTO rcf_numbers (customer_id, did, forward_to) "
+                "VALUES ($1, $2, '+17745550000')", CID_A, RCF_DID_A)
+
             await seed(CDR_ANS_95, CID_A, now - timedelta(minutes=10), 95_000, True,
                        trunk=TRUNK_A, rated=True)
             await seed(CDR_ANS_20, CID_A, now - timedelta(hours=2), 20_000, True)
@@ -395,7 +438,7 @@ def redact_db():
 def client(redact_db):
     from fastapi import FastAPI
     from middleware.auth import JWTAuthMiddleware
-    from routers import calls, cdrs, trunks
+    from routers import calls, cdrs, customers, rcf, trunks
     import services.esl_client as esl
 
     # No FreeSWITCH in tests: ESL returns nothing (trunk channel count 0,
@@ -414,6 +457,8 @@ def client(redact_db):
     app.include_router(cdrs.router, prefix="/v1/cdrs")
     app.include_router(trunks.router, prefix="/v1/trunks")
     app.include_router(calls.router, prefix="/v1/calls")
+    app.include_router(customers.router, prefix="/v1/customers")
+    app.include_router(rcf.router, prefix="/v1/rcf")
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     c = httpx.AsyncClient(transport=transport, base_url="http://test")
     try:
@@ -435,6 +480,8 @@ def tokens(redact_db):
         "support": mint("2", "support", None),
         "user_a": mint("3", "user", CID_A),
         "readonly_a": mint("4", "readonly", CID_A),
+        # admin in "View as Customer" mode: still role=admin to the API
+        "admin_a": mint("5", "admin", CID_A),
     }
 
 
@@ -622,5 +669,76 @@ def test_staff_summary_and_trunk_stats_unchanged(client, tokens):
         r = await client.get(f"/v1/calls/{CDR_ANS_95}", headers=h)
         assert r.status_code == 200, r.text
         assert r.json()["duration_seconds"] == 95.0
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 4) traffic_grade — internal routing grade, staff only (owner rule 2026-09)
+# ---------------------------------------------------------------------------
+def assert_no_tenant_customer_keys(obj, path="$"):
+    if isinstance(obj, dict):
+        hit = tr.FORBIDDEN_TENANT_CUSTOMER_KEYS & set(obj)
+        assert not hit, f"forbidden tenant customer keys at {path}: {sorted(hit)}"
+        for k, v in obj.items():
+            assert_no_tenant_customer_keys(v, f"{path}.{k}")
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            assert_no_tenant_customer_keys(v, f"{path}[{i}]")
+
+
+def test_redact_customer_fields_pure():
+    out = tr.redact_customer_fields(
+        {"id": 1, "name": "x", "traffic_grade": "premium", "fraud_score": 3,
+         "customer_name": "x", "forward_to": "+1"})
+    assert out == {"id": 1, "name": "x", "customer_name": "x", "forward_to": "+1"}
+    assert tr.is_staff({"role": "admin"}) and tr.is_staff({"role": "support"})
+    assert not tr.is_staff({"role": "user"}) and not tr.is_staff({"role": "readonly"})
+    assert not tr.is_staff({})
+
+
+def test_tenant_customer_endpoints_hide_traffic_grade(client, tokens):
+    async def go():
+        for who in TENANTS:
+            h = _h(tokens, who)
+            r = await client.get("/v1/customers", headers=h)
+            assert r.status_code == 200, r.text
+            rows = r.json()
+            assert [c["id"] for c in rows] == [CID_A]
+            assert_no_tenant_customer_keys(rows)
+            assert rows[0]["name"] == "Tenant A"      # rest of the shape intact
+
+            r = await client.get("/v1/customers/me", headers=h)
+            assert r.status_code == 200, r.text
+            me = r.json()
+            assert_no_tenant_customer_keys(me)
+            assert me["id"] == CID_A and me["counts"]["rcf"] == 1
+            assert "daily_limit" in me and "cpm_limit" in me  # unchanged shape
+
+            r = await client.get(f"/v1/rcf/{RCF_DID_A}", headers=h)
+            assert r.status_code == 200, r.text
+            row = r.json()
+            assert_no_tenant_customer_keys(row)
+            assert row["did"] == RCF_DID_A and row["customer_name"] == "Tenant A"
+
+    _run(go())
+
+
+def test_staff_customer_endpoints_keep_traffic_grade(client, tokens):
+    async def go():
+        for who in ("admin", "support"):
+            r = await client.get("/v1/customers", headers=_h(tokens, who))
+            assert r.status_code == 200, r.text
+            grades = {c["id"]: c["traffic_grade"] for c in r.json()}
+            assert grades == {CID_A: "premium", CID_B: "economy"}
+
+        # Admin "View as Customer" (role=admin + customer_id) keeps it on /me.
+        r = await client.get("/v1/customers/me", headers=_h(tokens, "admin_a"))
+        assert r.status_code == 200, r.text
+        assert r.json()["traffic_grade"] == "premium"
+
+        r = await client.get(f"/v1/rcf/{RCF_DID_A}", headers=_h(tokens, "admin"))
+        assert r.status_code == 200, r.text
+        assert r.json()["traffic_grade"] == "premium"
 
     _run(go())

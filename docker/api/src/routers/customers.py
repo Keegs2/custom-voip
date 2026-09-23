@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 from db import database as db
 from auth.dependencies import get_current_user, get_support_read_filter, require_admin
+from services import tenant_redaction as tr
 
 router = APIRouter()
 
@@ -226,15 +227,22 @@ async def list_customers(
     Admins see every row with the full column set. Support sees every row but
     SLIM (financial/ops columns — balance, credit_limit, fraud_score,
     daily_limit, cpm_limit — are withheld). Tenant users see only their own
-    row, also slim. Same response shape otherwise (id + name for dropdowns).
+    row, also slim and additionally WITHOUT `traffic_grade` (internal routing
+    grade; see services/tenant_redaction.py). Same response shape otherwise
+    (id + name for dropdowns).
     """
     if user.get("role") == "admin":
         select_cols = """id, name, account_type, balance, credit_limit, status,
                traffic_grade, daily_limit, cpm_limit, fraud_score,
                ucaas_enabled, created_at"""
-    else:
+    elif customer_filter is None:
+        # Support (staff): slim, but keeps the internal routing grade.
         select_cols = """id, name, account_type, status,
                traffic_grade, ucaas_enabled, created_at"""
+    else:
+        # Tenant: no traffic_grade (internal routing grade — owner rule).
+        select_cols = """id, name, account_type, status,
+               ucaas_enabled, created_at"""
 
     query = f"""
         SELECT {select_cols}
@@ -263,6 +271,8 @@ async def list_customers(
     values.extend([limit, offset])
 
     results = await db.fetch_all(query, *values)
+    if customer_filter is not None:
+        return [tr.redact_customer_fields(r) for r in results]
     return [dict(r) for r in results]
 
 
@@ -325,7 +335,7 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
     )
 
     c = dict(row)
-    return {
+    body = {
         "id": c["id"],
         "name": c["name"],
         "account_type": c["account_type"],
@@ -341,6 +351,9 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
             "trunks": trunk_count["n"],
         },
     }
+    # traffic_grade is an internal routing grade: staff only (an admin in
+    # "View as Customer" mode is still role=admin and keeps it).
+    return body if tr.is_staff(user) else tr.redact_customer_fields(body)
 
 
 # NOTE: like `/me` above, this literal `/me/billing` route MUST be declared
