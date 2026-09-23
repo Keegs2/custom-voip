@@ -17,7 +17,8 @@ by `direction` (inbound/outbound) and the `on_net` channel variable, RENDERS a
 Prometheus text exposition into a string, and CACHES that string.
 
 A tiny separate ThreadingHTTPServer on :9103 serves `GET /metrics` by returning
-that CACHED string verbatim. The HTTP handler NEVER touches ESL — a Prometheus
+that CACHED string verbatim (plus two scrape-time peak gauges computed from
+in-memory windows — see PEAK / HIGH-WATERMARK). The HTTP handler NEVER touches ESL — a Prometheus
 scrape can therefore never block on FreeSWITCH, and a stuck/slow ESL never stalls
 vmagent. This is the same "serve last-good, never block the reader" contract the
 carrier poller uses.
@@ -60,6 +61,8 @@ EMITTED METRICS (names/labels fixed by the reconciled registry — do NOT rename
   freeswitch_channel_max_age_seconds{freeswitch_node}           gauge
   freeswitch_channels_stale{freeswitch_node}                    gauge
   freeswitch_esl_scrape_ok{freeswitch_node}                     gauge (1 ok / 0 fail)
+  freeswitch_calls_active_peak{freeswitch_node}                 gauge (trailing-window max)
+  freeswitch_channels_peak{freeswitch_node}                     gauge (trailing-window max)
 
 STALE-CHANNEL SIGNAL (freeswitch_channel_max_age_seconds / freeswitch_channels_stale)
 ------------------------------------------------------------------------------------
@@ -89,12 +92,68 @@ HERE instead, from the same poll loop over the SAME local Event Socket:
     `show calls count` ("N total."). This is FreeSWITCH's own live call counter
     (a "call" = a bridged/answered two-leg session), which is a truer "connected
     calls now" figure than the channel-derived bridged proxy; the NOC panel
-    "Total connected calls" sums it fleet-wide.
+    "Concurrent calls — live" sums it fleet-wide.
 
 Both degrade fail-open identically to the channel metrics: a failed/garbled
 `status` or `show calls count` read keeps the LAST-GOOD value (0 before the first
 ever success) and flips freeswitch_esl_scrape_ok to 0 — it never raises, never
 blanks the existing channel series, and never blocks a scrape.
+
+PEAK / HIGH-WATERMARK (freeswitch_calls_active_peak / freeswitch_channels_peak)
+------------------------------------------------------------------------------
+WHY: freeswitch_calls_active is SAMPLED — read every OPS_METRICS_INTERVAL (10s),
+scraped by vmagent every 15s, and read by recording rules on a 15-30s eval. A
+dashboard "concurrent-call high-water mark" built as max_over_time() over that
+series is only the max of the samples that happened to be observed; a burst that
+rises and falls between two samples (exactly the shape of a utility-outage call
+flood) is aliased away and the HWM UNDERSTATES the real peak.
+
+WHAT: a SEPARATE lightweight daemon thread (_peak_loop) reads two cheap
+summary verbs every OPS_METRICS_PEAK_INTERVAL seconds (default 2):
+    show calls count      -> "N total."  (parse_calls_active)
+    show channels count   -> "N total."  (parse_channels_count)
+Each FRESH, successfully parsed reading is stored as (monotonic_ts, value) in a
+small lock-protected deque; readings older than OPS_METRICS_PEAK_WINDOW seconds
+(default 30) are pruned. The 10s poll ALSO feeds its own fresh readings in (its
+`show calls count` value into the calls window, its `show channels as json` row
+total into the channels window), so the peaks are always >= what the existing
+freeswitch_calls_active / freeswitch_channels_total gauges show.
+
+    freeswitch_calls_active_peak = max(calls readings in the trailing window)
+    freeswitch_channels_peak     = max(channel readings in the trailing window)
+
+Both are computed at SCRAPE TIME (in the /metrics handler: a max over a deque of
+~15-20 entries — trivially cheap) and appended to the cached 10s body, so a
+scrape sees peaks up to that instant rather than as-of the last 10s poll. Every
+other series keeps the cached-sample design unchanged.
+
+Floor / fallback: each peak is floored at the poll's current last-good value
+(_LAST_CALLS_ACTIVE / _LAST_CHANNELS_TOTAL — the values the cached
+freeswitch_calls_active / freeswitch_channels_total lines carry), so
+peak >= current always holds, even across a partial ESL outage. With an EMPTY
+window (ESL down, startup) the peak IS that last-good value: the series never
+disappears, and it never shows a phantom peak older than the window.
+
+Window sizing (why 30s): the window must cover the gap between two scrapes
+(15s) plus jitter/margin, or a peak that lands just after one scrape could be
+pruned before the next scrape reads it. It must also be >= the 15s vmalert
+evaluation interval of the recording rules that read it, for the same reason
+one layer up. 30s = 2x the 15s scrape/eval cadence: every reading is seen by at
+least one scrape (usually two). The cost of a longer window is only that a peak
+"lingers" up to 30s after it passes — harmless for a max_over_time HWM.
+
+Accuracy: the PER-NODE series is exact to the peak interval (a burst shorter
+than OPS_METRICS_PEAK_INTERVAL can still slip between two reads, but nothing
+longer can). A FLEET sum of per-node peaks, sum(freeswitch_calls_active_peak),
+can OVERSTATE the true coincident fleet peak by at most the non-coincident
+portion within one window (node A peaking at t and node B at t+20s both count).
+It never understates it. Use it as an upper bound; per-node panels are exact.
+
+Fail-open: a failed/garbled peak read is simply NOT recorded (never a zero
+sample). The peak thread NEVER touches freeswitch_esl_scrape_ok or the cached
+sample — its failures cannot flip scrape_ok — and, like _poll_loop, it is
+wrapped so no tick's error can kill it. Two peak series per node: cardinality
+stays bounded.
 """
 
 import json
@@ -104,6 +163,7 @@ import re
 import socket
 import threading
 import time
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ops_esl import esl_api
@@ -168,6 +228,23 @@ FREESWITCH_NODE = (
 # freeswitch_channels_stale. 7200 = 2h: the same figure as the Kamailio dialog
 # default_timeout, so "stale" here and "ghost aged out" on the SBC line up.
 STALE_CHANNEL_SECONDS = _get_int("OPS_METRICS_STALE_SECONDS", 7200, minimum=1)
+
+# Peak / high-watermark sampler cadence (seconds). Two cheap summary verbs
+# (`show calls count` + `show channels count`) — each its own ESL connect+auth —
+# every 2s is ~1 short loopback TCP session per second: negligible for FS.
+PEAK_INTERVAL = _get_int("OPS_METRICS_PEAK_INTERVAL", 2, minimum=1)
+
+# Trailing window (seconds) the peak gauges take their max over. Default 30:
+# must be >= the 15s vmagent scrape interval + margin (so every reading is seen
+# by at least one scrape before it is pruned) AND >= the 15s vmalert eval of the
+# recording rules that read the peak series. See the PEAK section in the module
+# docstring. Setting it BELOW ~20s re-introduces the aliasing this fixes.
+PEAK_WINDOW = _get_int("OPS_METRICS_PEAK_WINDOW", 30, minimum=1)
+
+# Per-read ESL timeout for the peak thread, clamped to the peak interval so a
+# wedged FS can't stall the sampler much past one tick (worst case both verbs
+# time out: ~2 x PEAK_INTERVAL, then the loop simply runs late — never dies).
+PEAK_ESL_TIMEOUT = min(ESL_TIMEOUT, float(PEAK_INTERVAL))
 
 
 # --------------------------------------------------------------------------- #
@@ -246,6 +323,19 @@ def parse_calls_active(raw: str):
         return None
 
 
+def parse_channels_count(raw: str):
+    """
+    Parse the current live-channel count from ESL `show channels count`.
+
+    FreeSWITCH's `show <x> count` prints the same "N total." summary line as
+    `show calls count` (switch's show_callback count mode), so this reuses the
+    exact same LAST-"<int> total" anchored parse. Kept as its own name so the
+    peak sampler reads self-documenting and a future format split for one verb
+    can't silently change the other. Returns int (>= 0) or None. Never raises.
+    """
+    return parse_calls_active(raw)
+
+
 # --------------------------------------------------------------------------- #
 # The cached sample. A single module-level string, swapped atomically under a
 # lock by the poll thread and read (copied) by HTTP handler threads. A str
@@ -265,6 +355,79 @@ _CACHED_SAMPLE = ""  # set to a valid initial exposition by _init_sample()
 # Guarded by _SAMPLE_LOCK (same lock as _CACHED_SAMPLE).
 _LAST_SESSIONS_TOTAL = 0
 _LAST_CALLS_ACTIVE = 0
+
+# Last-good channel total from the 10s `show channels as json` poll — the value
+# the cached freeswitch_channels_total line carries. Held so the channels peak
+# gauge can floor at / fall back to it (see the PEAK section). Written ONLY by
+# the 10s poll (symmetric with _LAST_CALLS_ACTIVE); guarded by _SAMPLE_LOCK.
+_LAST_CHANNELS_TOTAL = 0
+
+
+# --------------------------------------------------------------------------- #
+# Peak / high-watermark windows. Two deques of (monotonic_ts, value) readings,
+# appended by the peak thread AND the 10s poll, pruned to PEAK_WINDOW, and
+# max()'d at scrape time. A SEPARATE lock from _SAMPLE_LOCK so the 2s sampler and
+# scrape-time reads never contend with the poll's render/swap; the two locks are
+# never held at the same time (no ordering / deadlock concerns).
+#
+# maxlen is a pure memory backstop: the time-based prune keeps each deque at
+# ~PEAK_WINDOW/PEAK_INTERVAL + PEAK_WINDOW/POLL_INTERVAL entries (~18 at the
+# defaults). Only a pathological config (e.g. a huge window) could reach it, and
+# then the OLDEST readings drop first — the same thing the prune does.
+# --------------------------------------------------------------------------- #
+
+_PEAK_LOCK = threading.Lock()
+_PEAK_MAXLEN = 4096
+_CALLS_PEAK_SAMPLES = deque(maxlen=_PEAK_MAXLEN)
+_CHANNELS_PEAK_SAMPLES = deque(maxlen=_PEAK_MAXLEN)
+
+
+def _prune_locked(samples, now: float):
+    """Drop readings older than the trailing window. Caller holds _PEAK_LOCK.
+    Readings are appended in (near-)monotonic order, so popleft is enough."""
+    cutoff = now - PEAK_WINDOW
+    while samples and samples[0][0] < cutoff:
+        samples.popleft()
+
+
+def _record_peak_sample(samples, value, now=None):
+    """
+    Record ONE fresh, successfully parsed reading into a peak window.
+
+    Callers pass only parsed ints (never a failed/garbled read — those are simply
+    not recorded, so an ESL blip can never inject a phantom 0 or a garbage value).
+    `now` (time.monotonic seconds) is injectable for tests. Never raises.
+    """
+    try:
+        v = int(value)
+        if v < 0:
+            return
+        ts = time.monotonic() if now is None else float(now)
+        with _PEAK_LOCK:
+            samples.append((ts, v))
+            _prune_locked(samples, ts)
+    except Exception as exc:  # noqa: BLE001 - recording must never poison a caller
+        LOG.debug("peak: failed to record sample %r: %s", value, exc)
+
+
+def _peak_value(samples, floor: int, now=None) -> int:
+    """
+    Max of the readings inside the trailing window, floored at `floor` (the
+    current last-good gauge value, so peak >= current always). An EMPTY window
+    (ESL down / startup) yields `floor` itself — the series never disappears and
+    never reports a peak older than the window. Never raises.
+    """
+    try:
+        ts = time.monotonic() if now is None else float(now)
+        with _PEAK_LOCK:
+            _prune_locked(samples, ts)
+            window_max = max((v for _, v in samples), default=None)
+    except Exception as exc:  # noqa: BLE001
+        LOG.debug("peak: failed to compute window max: %s", exc)
+        window_max = None
+    if window_max is None:
+        return int(floor)
+    return max(int(window_max), int(floor))
 
 
 def _norm_direction(value) -> str:
@@ -487,7 +650,7 @@ def _render(
 
     # freeswitch_calls_active{freeswitch_node} — mod_prometheus replacement.
     # GAUGE: current connected calls from ESL `show calls count` ("N total.").
-    # Feeds the NOC "Total connected calls" panel via sum(freeswitch_calls_active).
+    # Feeds the NOC "Concurrent calls — live" panels via sum(freeswitch_calls_active).
     lines.append(
         "# HELP freeswitch_calls_active Current active FreeSWITCH calls "
         "(from ESL `show calls count`; replaces mod_prometheus)."
@@ -598,6 +761,9 @@ def _refresh_aggregates():
             if parsed is not None:
                 with _SAMPLE_LOCK:
                     _LAST_CALLS_ACTIVE = parsed
+                # Fresh reading -> also into the peak window (so the peak is
+                # always >= the freeswitch_calls_active the poll just exposed).
+                _record_peak_sample(_CALLS_PEAK_SAMPLES, parsed)
             else:
                 LOG.debug(
                     "calls_active: 'N total' not found in show calls count "
@@ -630,7 +796,7 @@ def _refresh_sample() -> bool:
     it. The two aggregate figures (sessions_total / calls_active) are refreshed via
     _refresh_aggregates() as a fail-open side read and never gate scrape_ok.
     """
-    global _CACHED_SAMPLE
+    global _CACHED_SAMPLE, _LAST_CHANNELS_TOTAL
     try:
         ok, out, err = esl_api("show channels as json", timeout=ESL_TIMEOUT)
     except Exception as exc:  # noqa: BLE001 - esl_api shouldn't raise, belt-and-suspenders
@@ -651,6 +817,12 @@ def _refresh_sample() -> bool:
         LOG.error("failed to parse channels (serving last-good, ok=0): %s", exc)
         _mark_scrape_failed()
         return False
+
+    # Fresh channel total -> last-good (peak floor/fallback) + the channels peak
+    # window, so freeswitch_channels_peak >= freeswitch_channels_total always.
+    with _SAMPLE_LOCK:
+        _LAST_CHANNELS_TOTAL = total
+    _record_peak_sample(_CHANNELS_PEAK_SAMPLES, total)
 
     # Channel read succeeded → also refresh the aggregate figures (fail-open;
     # keeps last-good on any miss and never affects scrape_ok).
@@ -727,7 +899,126 @@ def _poll_loop():
 
 
 # --------------------------------------------------------------------------- #
-# The /metrics HTTP listener. Serves the CACHED sample only — never calls ESL.
+# The peak / high-watermark sampler (separate background daemon thread).
+# --------------------------------------------------------------------------- #
+
+# (verb, parser, window, name) for each peak series the sampler feeds. Summary
+# `count` verbs ONLY — never a heavy verb like `show channels as json`, which is
+# the 10s poll's job. Order is irrelevant; each read is isolated.
+_PEAK_READS = (
+    ("show calls count", parse_calls_active, _CALLS_PEAK_SAMPLES, "calls"),
+    ("show channels count", parse_channels_count, _CHANNELS_PEAK_SAMPLES,
+     "channels"),
+)
+
+
+def _peak_tick():
+    """
+    ONE peak sample: read each summary verb and record every FRESH successful
+    parse into its window. A transport failure, a garbled body, or an exception
+    records NOTHING for that verb (the other verb is unaffected).
+
+    Deliberately touches neither _CACHED_SAMPLE, the last-good globals, nor
+    freeswitch_esl_scrape_ok: the peak thread's failures must NEVER flip
+    scrape_ok (that marker tracks only the 10s `show channels as json` poll).
+    Returns the number of readings recorded (0-2; for tests/logging). Never
+    raises.
+    """
+    recorded = 0
+    for verb, parser, samples, name in _PEAK_READS:
+        try:
+            ok, out, err = esl_api(verb, timeout=PEAK_ESL_TIMEOUT)
+            if not ok:
+                LOG.debug("peak %s: ESL %r read failed (not recorded): %s",
+                          name, verb, err)
+                continue
+            parsed = parser(out)
+            if parsed is None:
+                LOG.debug("peak %s: 'N total' not found in %r (not recorded)",
+                          name, verb)
+                continue
+            _record_peak_sample(samples, parsed)
+            recorded += 1
+        except Exception as exc:  # noqa: BLE001 - one verb must not poison the other
+            LOG.debug("peak %s: unexpected error (not recorded): %s", name, exc)
+    return recorded
+
+
+def _peak_loop():
+    """
+    Sample the peak verbs every PEAK_INTERVAL seconds, forever. Same "loop never
+    dies" wrapping as _poll_loop: no tick's error can kill the thread (a dead
+    sampler would silently degrade the peaks to the 10s poll's readings).
+    """
+    LOG.info(
+        "ops-metrics peak sampler started: interval=%ds window=%ds "
+        "esl_timeout=%.0fs node=%s",
+        PEAK_INTERVAL, PEAK_WINDOW, PEAK_ESL_TIMEOUT, FREESWITCH_NODE,
+    )
+    while True:
+        started = time.monotonic()
+        try:
+            _peak_tick()
+        except Exception as exc:  # noqa: BLE001 - the loop must never die
+            LOG.error("ops-metrics peak tick failed unexpectedly: %s", exc)
+        elapsed = time.monotonic() - started
+        deadline = time.monotonic() + max(0.0, PEAK_INTERVAL - elapsed)
+        while time.monotonic() < deadline:
+            time.sleep(min(1.0, deadline - time.monotonic()))
+
+
+def _render_peaks(now=None) -> str:
+    """
+    Render the two peak gauges AT SCRAPE TIME (max over each trailing window,
+    floored at / falling back to the poll's last-good value). Cheap: a max over
+    ~20 tuples. `now` (monotonic) is injectable for tests. Never raises.
+    """
+    with _SAMPLE_LOCK:
+        calls_floor = _LAST_CALLS_ACTIVE
+        channels_floor = _LAST_CHANNELS_TOTAL
+    # _SAMPLE_LOCK released before _peak_value takes _PEAK_LOCK: never nested.
+    calls_peak = _peak_value(_CALLS_PEAK_SAMPLES, calls_floor, now=now)
+    channels_peak = _peak_value(_CHANNELS_PEAK_SAMPLES, channels_floor, now=now)
+
+    node = FREESWITCH_NODE
+    lines = [
+        # freeswitch_calls_active_peak{freeswitch_node} — high-watermark.
+        "# HELP freeswitch_calls_active_peak Peak active FreeSWITCH calls over "
+        "the trailing OPS_METRICS_PEAK_WINDOW (default 30s), sampled every "
+        "OPS_METRICS_PEAK_INTERVAL (default 2s) from ESL `show calls count`.",
+        "# TYPE freeswitch_calls_active_peak gauge",
+        'freeswitch_calls_active_peak{freeswitch_node="%s"} %d'
+        % (node, calls_peak),
+        # freeswitch_channels_peak{freeswitch_node} — high-watermark.
+        "# HELP freeswitch_channels_peak Peak live FreeSWITCH channels over "
+        "the trailing OPS_METRICS_PEAK_WINDOW (default 30s), sampled every "
+        "OPS_METRICS_PEAK_INTERVAL (default 2s) from ESL `show channels count`.",
+        "# TYPE freeswitch_channels_peak gauge",
+        'freeswitch_channels_peak{freeswitch_node="%s"} %d'
+        % (node, channels_peak),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _metrics_body(now=None) -> str:
+    """
+    The full /metrics body: the CACHED 10s sample verbatim (scrape_ok and every
+    other series exactly as the poll rendered them) + the two scrape-time peak
+    gauges appended. If peak rendering ever fails, the cached sample is served
+    alone — a peak problem can never break the scrape. Never raises.
+    """
+    with _SAMPLE_LOCK:
+        sample = _CACHED_SAMPLE
+    try:
+        return sample + _render_peaks(now=now)
+    except Exception as exc:  # noqa: BLE001 - never let peaks break a scrape
+        LOG.debug("peak render failed (serving cached sample only): %s", exc)
+        return sample
+
+
+# --------------------------------------------------------------------------- #
+# The /metrics HTTP listener. Serves the CACHED sample (plus the scrape-time
+# peak gauges, a pure in-memory max) — never calls ESL.
 # --------------------------------------------------------------------------- #
 
 # Prometheus text format 0.0.4 content type (what vmagent expects).
@@ -758,9 +1049,7 @@ class MetricsHandler(BaseHTTPRequestHandler):
         try:
             path = self.path.split("?", 1)[0]
             if path == "/metrics":
-                with _SAMPLE_LOCK:
-                    sample = _CACHED_SAMPLE
-                body = sample.encode("utf-8")
+                body = _metrics_body().encode("utf-8")
                 return self._send(200, body, _METRICS_CONTENT_TYPE)
             if path in ("/", "/healthz"):
                 # Convenience liveness for a Docker healthcheck / manual curl.
@@ -819,7 +1108,10 @@ def start_in_background():
     shape (called from ops_agent.py on the FS role). Never raises: the caller
     wraps this in try/except too, but a failure here must not block the poller.
 
-    Returns (poll_thread, http_thread).
+    Also spawns the peak / high-watermark sampler (_peak_loop) on its own
+    daemon thread alongside the poll loop.
+
+    Returns (poll_thread, http_thread, peak_thread).
     """
     # Always seed a valid zeroed sample FIRST so a scrape arriving before the
     # first poll (or if the poll thread is slow to start) gets parseable metrics.
@@ -830,9 +1122,14 @@ def start_in_background():
     )
     poll_thread.start()
 
+    peak_thread = threading.Thread(
+        target=_peak_loop, name="ops-metrics-peak", daemon=True
+    )
+    peak_thread.start()
+
     http_thread = threading.Thread(
         target=serve_forever, name="ops-metrics-http", daemon=True
     )
     http_thread.start()
 
-    return poll_thread, http_thread
+    return poll_thread, http_thread, peak_thread
