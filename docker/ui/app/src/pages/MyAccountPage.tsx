@@ -40,6 +40,7 @@ import { getMyCustomer, getMyBilling, listMyTeam } from '../api/account';
 import { listRcf } from '../api/rcf';
 import { listTrunks } from '../api/trunks';
 import { listApiDids } from '../api/apiDids';
+import { API_CALLING_ENABLED } from '../config/features';
 import type { MyCustomer, BillingLineItem, TeamMember } from '../types/account';
 import type { User } from '../types/auth';
 import type { AccountType } from '../types/customer';
@@ -86,9 +87,10 @@ function fmtDateTime(iso: string | null | undefined): string {
 function accountTypeLabel(t: AccountType): string {
   switch (t) {
     case 'rcf': return 'Remote Call Forwarding';
-    case 'api': return 'API Calling';
+    case 'api': return API_CALLING_ENABLED ? 'API Calling' : 'API Calling (retired)';
     case 'trunk': return 'SIP Trunking';
-    case 'hybrid': return 'Hybrid (API + Trunk)';
+    // Hybrid = RCF + SIP Trunking (API Calling is retired; see config/features).
+    case 'hybrid': return 'Hybrid (RCF + SIP Trunking)';
     case 'ucaas': return 'UCaaS';
   }
 }
@@ -453,7 +455,9 @@ function OverviewTab({ customer }: { customer: MyCustomer }) {
         >
           <Tile label="RCF numbers" value={customer.counts.rcf} hint="Remote Call Forwarding" />
           <Tile label="SIP trunks" value={customer.counts.trunks} hint="SIP Trunking" />
-          <Tile label="API DIDs" value={customer.counts.api_dids} hint="Programmable Voice" />
+          {API_CALLING_ENABLED && (
+            <Tile label="API DIDs" value={customer.counts.api_dids} hint="Programmable Voice" />
+          )}
         </div>
       </Section>
     </div>
@@ -820,7 +824,10 @@ function ProductsTab({ customer }: { customer: MyCustomer }) {
   const type = customer.account_type;
   const showRcf = type === 'rcf' || type === 'hybrid';
   const showTrunk = type === 'trunk' || type === 'hybrid';
-  const showApi = type === 'api' || type === 'hybrid';
+  // API Calling is retired: its section (and the /api-dids call it makes) only
+  // renders while API_CALLING_ENABLED is on. Hybrid now means RCF + SIP
+  // Trunking, so hybrid never shows the API section.
+  const showApi = API_CALLING_ENABLED && type === 'api';
   // RCF customers must NEVER see UCaaS — gate strictly on the flag and never for rcf.
   const showUcaas = customer.ucaas_enabled === true && type !== 'rcf';
 
@@ -1136,7 +1143,7 @@ function MyAccountHeader({ customer, loaded }: { customer: MyCustomer | undefine
   if (counts) {
     if (counts.rcf > 0) metrics.push({ value: counts.rcf, label: 'RCF Numbers' });
     if (counts.trunks > 0) metrics.push({ value: counts.trunks, label: 'SIP Trunks' });
-    if (counts.api_dids > 0) metrics.push({ value: counts.api_dids, label: 'API DIDs' });
+    if (API_CALLING_ENABLED && counts.api_dids > 0) metrics.push({ value: counts.api_dids, label: 'API DIDs' });
   }
 
   return (

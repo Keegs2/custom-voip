@@ -25,6 +25,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { listCustomers } from '../../api/customers';
 import { listTrunks } from '../../api/trunks';
+import { API_CALLING_ENABLED } from '../../config/features';
 import {
   PRESET_LABELS,
   presetRange,
@@ -160,7 +161,8 @@ export function CallsFilterBar({
             >
               <option value="">All</option>
               <option value="rcf">RCF</option>
-              <option value="api">API</option>
+              {/* API Calling is retired — its product filter only shows while enabled. */}
+              {API_CALLING_ENABLED && <option value="api">API</option>}
               <option value="trunk">Trunk</option>
             </select>
           </div>

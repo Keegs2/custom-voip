@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, ORJSONResponse
 from starlette.middleware.cors import CORSMiddleware
 import logging
 
+import config
 from db.database import init_db, close_db
 from db import schema_check
 from db.redis_client import init_redis, close_redis
@@ -18,7 +19,7 @@ from routers import (
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
     onboarding, freeswitch, carrier_status, live_trunk_stats,
-    stir, payments, billing, carrier_trunks,
+    stir, billing, carrier_trunks,
 )
 from middleware.auth import JWTAuthMiddleware
 
@@ -99,7 +100,6 @@ app.include_router(auth.router, prefix="/v1/auth", tags=["Auth"])
 app.include_router(health.router, tags=["Health"])
 app.include_router(customers.router, prefix="/v1/customers", tags=["Customers"])
 app.include_router(rcf.router, prefix="/v1/rcf", tags=["RCF"])
-app.include_router(calls.router, prefix="/v1/calls", tags=["Calls"])
 app.include_router(trunks.router, prefix="/v1/trunks", tags=["SIP Trunks"])
 app.include_router(cdrs.router, prefix="/v1/cdrs", tags=["CDRs"])
 app.include_router(search.router, prefix="/v1/search", tags=["Search"])
@@ -108,11 +108,18 @@ app.include_router(number_inventory.router, prefix="/v1/numbers", tags=["Number 
 # Backward-compatible routes (no /v1/ prefix) for testing
 app.include_router(customers.router, prefix="/customers", tags=["Customers"])
 app.include_router(rcf.router, prefix="/rcf", tags=["RCF"])
-app.include_router(calls.router, prefix="/calls", tags=["Calls"])
 app.include_router(trunks.router, prefix="/trunks", tags=["SIP Trunks"])
 app.include_router(cdrs.router, prefix="/cdrs", tags=["CDRs"])
 app.include_router(search.router, prefix="/search", tags=["Search"])
 app.include_router(number_inventory.router, prefix="/numbers", tags=["Number Inventory"])
+
+# API Calling (/v1/calls originate + call control) — RETIRED 2026-09, code kept.
+# Mounted ONLY when API_CALLING_ENABLED is exactly "true" (config.py); off (the
+# default) => /v1/calls and /calls are not routes at all (404). The router also
+# carries a live require_api_calling_enabled dependency as defense in depth.
+if config.api_calling_enabled():
+    app.include_router(calls.router, prefix="/v1/calls", tags=["Calls"])
+    app.include_router(calls.router, prefix="/calls", tags=["Calls"])
 
 # Carrier, Rate, Tier, and SIPp management routers
 app.include_router(carriers.router, prefix="/v1/carriers", tags=["Carriers"])
@@ -137,10 +144,8 @@ app.include_router(stir.router, prefix="/v1/stir", tags=["STIR/SHAKEN"])
 app.include_router(stir.router, prefix="/stir", tags=["STIR/SHAKEN"])
 app.include_router(onboarding.router, prefix="/v1/onboarding", tags=["Onboarding"])
 app.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
-# Payments demo (dormant unless PAYMENTS_DEMO_MODE=true — every endpoint 404s
-# otherwise) + read-only tenant-scoped billing views over the ledger.
-app.include_router(payments.router, prefix="/v1/payments", tags=["Payments"])
-app.include_router(payments.router, prefix="/payments", tags=["Payments"])
+# Read-only tenant-scoped billing views over the append-only ledger
+# (migration 37). The payments demo that used to write to it was removed.
 app.include_router(billing.router, prefix="/v1/billing", tags=["Billing"])
 app.include_router(billing.router, prefix="/billing", tags=["Billing"])
 

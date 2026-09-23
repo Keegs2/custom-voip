@@ -7,7 +7,13 @@
 --       presents the MASKING DID to the PBX (effective_caller_id_number).
 --   (2) Direct trunk inbound presents the ORIGINAL caller (sip_from_user)
 --       byte-for-byte unchanged (no on-net hop -> pass_effective==true branch).
---   (3) On-net RCF->API terminal receives fallback_url (set_var "fallback_url").
+--   (3) On-net RCF->API terminal receives fallback_url (set_var "fallback_url")
+--       -- only with API_CALLING_ENABLED=true (API Calling is RETIRED).
+--   (4) API Calling retirement gate (API_CALLING_ENABLED, default OFF):
+--       RCF->API on-net terminal and DIRECT api_did inbound are hard-rejected
+--       CALL_REJECTED (603) + lua_routed=true, no carrier leg, no webhook;
+--       flag parsing ("true" case-insensitive/trimmed only); and RCF/trunk
+--       scenarios produce IDENTICAL captured state with the flag off vs on.
 --
 -- Also runs the RCF->trunk case with a fully-transparent chain to prove the
 -- direct-trunk output is reproduced when every hop passes CID.
@@ -131,6 +137,30 @@ scenarios.rcf_to_api = {
                fallback_url = "https://app.example.com/fallback", kind = "api" },
 }
 
+-- (4) DIRECT api_did inbound. +15550003333 is an API DID; no forward.
+--     Flag OFF (default): 603 hard reject. Flag ON: webhook handoff.
+scenarios.direct_api = {
+    inbound_did   = "+15550003333",
+    sip_from_user = "+14045550155",
+    caller_id     = "+14045550155",
+    step1 = {
+        product_type = "api",
+        customer_id = 21,
+        voice_url = "https://app.example.com/voice2",
+        fallback_url = "https://app.example.com/fallback2",
+    },
+    oracle = {},
+    trunk_endpoints = {},
+}
+
+-- Shallow-copy a scenario with a per-run env override table (os.getenv stub).
+local function with_env(sc, envtab)
+    local c = {}
+    for k, v in pairs(sc) do c[k] = v end
+    c.env = envtab
+    return c
+end
+
 -- ------------------------------------------------------------------
 -- Run one scenario in an isolated environment and return captured state.
 -- ------------------------------------------------------------------
@@ -224,11 +254,23 @@ local function run_scenario(sc)
         end,
     }
 
+    -- ---- os stub: per-scenario env overrides (os.getenv) ----
+    -- API_CALLING_ENABLED is pinned to the scenario's value (nil = unset)
+    -- so the caller's shell env can never leak into the result.
+    local sc_env = sc.env or {}
+    local sandbox_os = setmetatable({
+        getenv = function(k)
+            if sc_env[k] ~= nil then return sc_env[k] end
+            if k == "API_CALLING_ENABLED" then return nil end
+            return os.getenv(k)
+        end,
+    }, { __index = os })
+
     -- ---- sandbox env for the script ----
     local env = setmetatable({
         session = session,
         freeswitch = freeswitch,
-        os = os, string = string, table = table, math = math,
+        os = sandbox_os, string = string, table = table, math = math,
         tonumber = tonumber, tostring = tostring, type = type,
         pcall = pcall, ipairs = ipairs, pairs = pairs, print = print,
         error = error, assert = assert, select = select,
@@ -313,8 +355,8 @@ do
 end
 
 do
-    print("[3] RCF -> API terminal  (expect fallback_url plumbed)")
-    local c = run_scenario(scenarios.rcf_to_api)
+    print("[3] RCF -> API terminal, API_CALLING_ENABLED=true  (expect fallback_url plumbed)")
+    local c = run_scenario(with_env(scenarios.rcf_to_api, { API_CALLING_ENABLED = "true" }))
     check("voice_url set",
           c.setvars["voice_url"] == "https://app.example.com/voice",
           c.setvars["voice_url"])
@@ -324,6 +366,103 @@ do
     check("webhook engine handed off", c.webhook == true, c.webhook)
     check("terminal customer is API customer (20)",
           c.setvars["customer_id"] == "20", c.setvars["customer_id"])
+end
+
+-- Assert a retired-API hard reject: exactly one CALL_REJECTED hangup,
+-- lua_routed=true, no carrier/PBX bridge, no webhook, never answered.
+local function check_api_rejected(c, label)
+    check(label .. ": single hangup CALL_REJECTED (603)",
+          #c.hangups == 1 and c.hangups[1] == "CALL_REJECTED",
+          table.concat(c.hangups, ","))
+    check(label .. ": lua_routed=true (dialplan does not mask with 404)",
+          c.setvars["lua_routed"] == "true", c.setvars["lua_routed"])
+    check(label .. ": hangup_cause var CALL_REJECTED",
+          c.setvars["hangup_cause"] == "CALL_REJECTED", c.setvars["hangup_cause"])
+    check(label .. ": NO bridge emitted (no carrier hairpin)",
+          #c.bridges == 0, table.concat(c.bridges, " | "))
+    check(label .. ": webhook engine NOT invoked", c.webhook == false, c.webhook)
+    check(label .. ": call NOT answered", c.answered == false, c.answered)
+    check(label .. ": voice_url NOT set", c.setvars["voice_url"] == nil,
+          c.setvars["voice_url"])
+end
+
+do
+    print("[3b] RCF -> API terminal, flag UNSET (default)  (expect 603 hard reject)")
+    local c = run_scenario(scenarios.rcf_to_api)
+    check_api_rejected(c, "rcf->api off")
+    -- Same CDR/on-net shape as the disabled/suspended on-net reject: the
+    -- terminal is never dispatched, so customer_id stays the ORIGIN (10) and
+    -- terminating_customer_id / on_net are not exported.
+    check("rcf->api off: customer_id stays origin (10)",
+          c.setvars["customer_id"] == "10", c.setvars["customer_id"])
+    check("rcf->api off: origin_customer_id == 10",
+          c.setvars["origin_customer_id"] == "10", c.setvars["origin_customer_id"])
+    check("rcf->api off: terminating_customer_id not set",
+          c.setvars["terminating_customer_id"] == nil, c.setvars["terminating_customer_id"])
+end
+
+do
+    print("[3c] RCF -> API terminal, flag variants")
+    for _, v in ipairs({ "false", "", "1", "on", "yes", "enabled", "truee" }) do
+        local c = run_scenario(with_env(scenarios.rcf_to_api, { API_CALLING_ENABLED = v }))
+        check(string.format("flag %q => OFF (603, no webhook)", v),
+              c.hangups[1] == "CALL_REJECTED" and c.webhook == false,
+              table.concat(c.hangups, ",") .. " webhook=" .. tostring(c.webhook))
+    end
+    for _, v in ipairs({ "TRUE", "  True \t" }) do
+        local c = run_scenario(with_env(scenarios.rcf_to_api, { API_CALLING_ENABLED = v }))
+        check(string.format("flag %q => ON (webhook handoff)", v),
+              c.webhook == true and #c.hangups == 0,
+              table.concat(c.hangups, ",") .. " webhook=" .. tostring(c.webhook))
+    end
+end
+
+do
+    print("[4] DIRECT api_did inbound, flag UNSET (default)  (expect 603 hard reject)")
+    local c = run_scenario(scenarios.direct_api)
+    check_api_rejected(c, "direct api off")
+    check("direct api off: customer_id is the API DID's (21)",
+          c.setvars["customer_id"] == "21", c.setvars["customer_id"])
+    check("direct api off: product_type api",
+          c.setvars["product_type"] == "api", c.setvars["product_type"])
+end
+
+do
+    print("[4b] DIRECT api_did inbound, API_CALLING_ENABLED=true  (expect today's webhook handoff)")
+    local c = run_scenario(with_env(scenarios.direct_api, { API_CALLING_ENABLED = "true" }))
+    check("voice_url set", c.setvars["voice_url"] == "https://app.example.com/voice2",
+          c.setvars["voice_url"])
+    check("fallback_url set", c.setvars["fallback_url"] == "https://app.example.com/fallback2",
+          c.setvars["fallback_url"])
+    check("answered + webhook engine handed off", c.answered and c.webhook == true, c.webhook)
+    check("no hangup from router", #c.hangups == 0, table.concat(c.hangups, ","))
+    check("on_net false (direct)", c.setvars["on_net"] == "false", c.setvars["on_net"])
+end
+
+-- Serialize captured state deterministically for off-vs-on equality.
+local function dump(c)
+    local keys = {}
+    for k in pairs(c.setvars) do keys[#keys+1] = k end
+    table.sort(keys)
+    local out = {}
+    for _, k in ipairs(keys) do out[#out+1] = k .. "=" .. tostring(c.setvars[k]) end
+    out[#out+1] = "#bridges=" .. table.concat(c.bridges, " | ")
+    out[#out+1] = "#hangups=" .. table.concat(c.hangups, ",")
+    for _, e in ipairs(c.executes) do
+        out[#out+1] = "#exec=" .. tostring(e.app) .. ":" .. tostring(e.data)
+    end
+    out[#out+1] = "#answered=" .. tostring(c.answered) .. " webhook=" .. tostring(c.webhook)
+    return table.concat(out, "\n")
+end
+
+do
+    print("[5] RCF / trunk scenarios unaffected by the flag (off vs on identical)")
+    for _, name in ipairs({ "rcf_mask_to_trunk", "rcf_transparent_to_trunk", "direct_trunk" }) do
+        local off = dump(run_scenario(scenarios[name]))
+        local on  = dump(run_scenario(with_env(scenarios[name], { API_CALLING_ENABLED = "true" })))
+        check(name .. ": captured state identical with flag off vs on", off == on,
+              "\n--- off ---\n" .. off .. "\n--- on ---\n" .. on)
+    end
 end
 
 print("")

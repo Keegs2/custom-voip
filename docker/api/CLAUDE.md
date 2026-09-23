@@ -69,6 +69,30 @@ CMD: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --ht
 | `BANDWIDTH_SIP_PEER_ID` | `1162116` | Bandwidth SIP Peer (location) ID |
 | `TEST_MODE` | `false` | When `true`, ESL uses loopback instead of SBC proxy |
 | `ENABLE_DOCS` | `true` | Set `false` to disable Swagger UI / ReDoc |
+| `API_CALLING_ENABLED` | _(unset = OFF)_ | **API Calling is RETIRED (2026-09).** ON only if exactly `true` (trimmed, case-insensitive; `1`/`yes`/`on` are OFF). Read live by `config.api_calling_enabled()` (`src/config.py`); the `/v1/calls` mount decision is made at import. See "API Calling — RETIRED" below. Mirrors the FreeSWITCH env var + UI `config/features.ts` |
+
+The payments-demo vars (`PAYMENTS_DEMO_MODE`, `PAYMENTS_DEMO_FAKE_ORIGINATE`, `PAYMENTS_DEMO_*`, `PAYMENT_PROVIDER`, `AUTO_RECHARGE_MAX_FAILURES`) are gone with the demo — remove them from any VM `.env`; nothing reads them.
+
+## API Calling — RETIRED (2026-09, code kept, switched OFF)
+
+The "API Calling" product (account_type `api`: `/v1/calls` originate, API CPS tiers, per-call API tier fees) is retired. The FastAPI service itself stays — it serves RCF + SIP Trunking. One flag, `API_CALLING_ENABLED` (above), default OFF. While OFF:
+
+| Surface | Behavior when OFF |
+|---|---|
+| `/v1/calls`, `/calls` (all 3 routes) | Not mounted by `main.py` → 404. The router also carries `Depends(config.require_api_calling_enabled)` (404 `{"detail":"Not Found"}`) so a direct mount can't re-expose it |
+| `GET /v1/tiers/api` | 404 `{"detail":"Not Found"}` (route stays registered so `/api` never falls into `/{tier_id}`'s int parse → 422). `GET /v1/tiers` still lists existing api-type rows |
+| `POST /v1/tiers`, `PATCH /v1/tiers/{id}` | `tier_type: "api"` → 422 (`API Calling is retired: …`) |
+| `POST /v1/customers` | `account_type: "api"` → 422 (`API Calling is retired: …`). `hybrid` stays allowed and now means **RCF + SIP Trunking** (Granite Telephony is hybrid). `PUT` cannot change account_type (no field) |
+| `GET /v1/customers/me/billing`, `/{id}/billing` | No `"product": "api"` / "API Calling" line item for ANY account_type (hybrid → rcf + trunk only; a legacy `api` account → only an rcf line if it has RCF numbers). `api_tier_id` is not even read |
+| `GET /v1/customers/me` | `counts.api_dids` is `0` (key kept for a stable shape; `api_dids` not queried) |
+| `POST /v1/numbers/{did}/assign`, `POST /v1/numbers/{did}/request` | `product_type: "api"` → 422 (`API Calling is retired: …`). Listing (`/inventory`, `/my`, `/stats`), `/reconcile` and `/unassign` of EXISTING api rows keep working (admin cleanup) |
+| `POST /v1/onboarding` | `products.selected` containing `"api"` (alone or mixed) or a non-null `products.api` block → 422 (`API Calling is retired: … deselect it`). Never silently dropped. Stored pre-retirement rows are untouched |
+
+Not changed (reported, deliberately): `esl_client.originate_call` stays (unreachable; `_send_esl_command` is shared with trunks); `redis_client.check_cps_limit/get_current_cps/record_cps_hit` keep their `tier_type="api"` default (only caller is calls.py, which passes it explicitly — no trunk caller); no DB migration — the `set_default_cps_tiers` trigger (`07_cps_tiers.sql`) still assigns `api_basic` to new `api`/`hybrid` customers, harmless while the flag is off (no fee line, no originate path). Restore = set `API_CALLING_ENABLED=true` on the services VM (+ FS + UI constant) and restart.
+
+## Payments demo — REMOVED (2026-09)
+
+`routers/payments.py`, `services/payments/*` (provider seam + Demo Stripe/x402/MPP simulation rails), `services/demo_seed.py` and `services/auto_recharge.py` (only the demo imported it) are deleted, along with their tests. The x402 pay-per-call path, the ledger-posted per-call fee and the fake-originate short-circuit on `POST /v1/calls` were demo-only code (the simulated x402 facilitator accepted ANY signature) and were removed with it — the kept `/v1/calls` code is the exact former flag-off legacy flow (prepaid originate + raw `customers.balance` decrement). **Kept:** migrations `37_payments_ledger.sql` / `38_payments_demo.sql` (tables untouched), `services/ledger.py` + the read-only `routers/billing.py` (`GET /v1/billing/balance`, `GET /v1/billing/ledger` — tenant-scoped; nothing in-tree writes the ledger any more), and `services/call_pricing.py` (rates.py uses it; its `quote_call_price` is now unused).
 
 ## PostgreSQL Connection
 
@@ -121,7 +145,7 @@ Docker healthcheck: `curl -sf http://127.0.0.1:8000/health` every 15s.
 
 ### ESL Client (`services/esl_client.py`)
 Raw TCP socket connection to FreeSWITCH Event Socket (port 8021). Opens a new connection per command (no persistent connection). Supports:
-- `originate_call()` -- builds a `sofia/external/dest@proxy` originate command with channel variables for customer_id, product_type, traffic_grade. The `X-Carrier` SIP header is hardcoded to `primary` (Dallas); `traffic_grade` is only passed as a channel var, it does NOT select the carrier. STIR/SHAKEN (Task 2.2): accepts `stir_attest="A"` (calls.py passes it only after the from_did ownership gate) and adds `stir_attest`/`sip_h_X-Attestation`/`stir_attest_intent`/`stir_inbound_signed` to the originate vars — the direct originate leg IS the carrier-bound INVITE, and Kamailio consumes + strips X-Attestation unconditionally.
+- `originate_call()` -- (only reachable via the RETIRED `/v1/calls`) builds a `sofia/external/dest@proxy` originate command with channel variables for customer_id, product_type, traffic_grade. The `X-Carrier` SIP header is hardcoded to `primary` (Dallas); `traffic_grade` is only passed as a channel var, it does NOT select the carrier. STIR/SHAKEN (Task 2.2): accepts `stir_attest="A"` (calls.py passes it only after the from_did ownership gate) and adds `stir_attest`/`sip_h_X-Attestation`/`stir_attest_intent`/`stir_inbound_signed` to the originate vars — the direct originate leg IS the carrier-bound INVITE, and Kamailio consumes + strips X-Attestation unconditionally.
 - `get_call_status()` -- `uuid_dump` to get live call state
 - `hangup_call()` -- `uuid_kill` with hangup cause
 - `transfer_call()` -- `uuid_transfer`
@@ -191,7 +215,7 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/customers` | List customers (filterable by status, account_type) |
-| `POST` | `/v1/customers` | Create customer |
+| `POST` | `/v1/customers` | Create customer (`account_type` `api` → 422 while API Calling is retired) |
 | `GET` | `/v1/customers/{id}` | Get customer by ID |
 | `PUT` | `/v1/customers/{id}` | Update customer |
 | `DELETE` | `/v1/customers/{id}` | Delete customer (cascading, transactional) |
@@ -208,7 +232,7 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | `PATCH` | `/v1/rcf/{identifier}` | User (tenant-scoped; max_channels admin-only) | Partial update (alias for PUT) |
 | `DELETE` | `/v1/rcf/{identifier}` | Admin | Delete RCF number (by ID or DID); customer number release is request-based via `/v1/numbers/{did}/request-release` (admin approves with `/v1/numbers/{did}/unassign`) |
 
-### Calls (API Calling)
+### Calls (API Calling) — RETIRED, mounted only when `API_CALLING_ENABLED=true`
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/v1/calls` | Originate outbound call via ESL (CPS-limited) |
@@ -258,7 +282,7 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | `POST` | `/v1/numbers/reconcile` | Admin | Reconcile did_inventory against product tables (rcf/api/trunk) without hitting Bandwidth (never clobbers `source`/`carrier_trunk_id`) |
 | `POST` | `/v1/numbers/add` | Admin | Manual DID intake: batch of 1-500 DIDs owned by `carrier` (REQUIRED, lowercased — must have ≥1 ENABLED carrier_trunks row, else 404 "unknown carrier"); `carrier_trunk_id` OPTIONAL (must belong to that carrier + be enabled, else 422) → status `available`, `source='manual'`, `carrier` set, trunk nullable. Envelope: `{added, skipped_existing, invalid, count}` (TED UI contract) |
 | `PUT` | `/v1/numbers/{did}/carrier-trunk` | Admin | Re-associate a DID with a carrier trunk (`carrier_trunk_id: int\|null`). Setting a trunk also syncs `d.carrier` to that trunk's carrier; null clears only the trunk (`d.carrier` left as-is); returns the updated inventory item |
-| `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record) |
+| `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record; `product_type` `api` → 422 while API Calling is retired) |
 | `POST` | `/v1/numbers/{did}/unassign` | Admin | Unassign DID (removes product record) |
 | `GET` | `/v1/numbers/available` | User | Browse available DIDs with filters |
 | `GET` | `/v1/numbers/my` | User | Customer's assigned numbers (includes `status`, e.g. `release_requested`) |
@@ -307,7 +331,7 @@ CPS tier management — backed by `cps_tiers`.
 |---|---|---|
 | `GET` | `/v1/tiers` | List all tiers |
 | `GET` | `/v1/tiers/trunk` | List trunk-type tiers |
-| `GET` | `/v1/tiers/api` | List api-type tiers |
+| `GET` | `/v1/tiers/api` | List api-type tiers (404 while API Calling is retired) |
 | `GET` | `/v1/tiers/{tier_id}` | Get tier |
 | `POST` | `/v1/tiers` | Create tier |
 | `PATCH` | `/v1/tiers/{tier_id}` | Update tier |
@@ -344,7 +368,7 @@ New-customer intake pipeline (`pending → completed`, or `→ rejected` — sta
 
 **FCC KYC capture (FCC 26-27 FNPRM, adopted 2026-04-30):** the public POST requires a nested `kyc` object, validated server-side and persisted to `onboarding_requests.kyc` JSONB (migration `35_onboarding_kyc.sql`) as `{standard, high_volume|null, declared_peak_cps, declared_max_concurrent_calls, submitted_at, form_version: 'fcc-26-27-fnprm-v2'}`. `standard` (all customers): legal business name, structured physical address + registered-agent/virtual-office self-disclosure (FNPRM red flag), government ID (`ein` — strict NN-NNNNNNN — / `state_registration` — requires `state_of_registration` — / `duns` / `other`), alternate phone (E.164-normalized, must differ from the main phone), optional website. **Capacity declarations (v2, REQUIRED, KycPayload top level):** `declared_peak_cps` (1-1000) + `declared_max_concurrent_calls` (1-100000). **Granite's high-volume threshold (provider-defined per FCC 26-27; REPLACES the legacy 50,000+ calls/month rule):** more than 1 CPS **or** more than 1,000 concurrent call paths — crossing EITHER forces `is_high_volume=true` + the `high_volume` block (422 otherwise, error message contains "high-volume threshold" for the frontend's fuzzy 422 mapping); exactly at threshold (1 CPS / 1000 paths) is NOT high-volume; voluntary opt-in below the thresholds stays allowed. Note: a trunk applicant needing >1000 call paths declares it here — `TrunkIntake.concurrent_call_paths` stays capped at 1000. `high_volume` (required iff `is_high_volume=true`): intended use (Literal enum; `other` requires a description), 1-20 originating IPs (IPv4/IPv6/CIDR ≤ /24 v4, ≤ /64 v6 — syntactic validation only), optional expected daily calls. Pre-KYC rows have `kyc IS NULL` and remain fully operable through the admin endpoints. **Retention: 4 years per FCC 26-27 — operational policy (no automated purge here); do not delete onboarding rows (even rejected) younger than 4 years.** Admin review of the KYC data (gov-ID/formation-record verification) happens before `complete` — the endpoint itself has no KYC-specific logic.
 
-**Product-aware intake (products-v1):** the public POST also requires a `products` object — applicants select one or more products and supply exactly the setup information each selected product needs to provision. Shape: `{selected: ['rcf'|'trunk'|'api'|'voicemail', ...] (min 1, no duplicates), rcf?, trunk?, api?, voicemail?}` — each product block must be **present iff selected** (validated both directions). Per-product required info: **rcf** = did_count / porting / forwarding_setup (exact form option strings; `current_carrier` required when porting Yes/Both); **trunk** = 1-10 `signaling_ips` (IP/CIDR, same validator as KYC originating IPs — the platform is **IP-peering only, no REGISTER auth**, so the PBX/SBC public signaling IPs are mandatory to provision a trunk) + `concurrent_call_paths` 1-1000 + optional pbx_vendor/dids_needed; **api** = use_case + needs_numbers + optional expected_cps (1-1000) / webhook_url (http(s), ≤255); **voicemail** = mailbox_count 1-10000 + attach_to (`existing_numbers`/`new_numbers`/`unsure`). Persisted to nullable `onboarding_requests.products` JSONB (migration `36_onboarding_products.sql`) as the validated payload + `form_version: 'products-v1'`. The legacy top-level RCF fields (did_count/porting/current_carrier/forwarding_setup) are now optional on the POST and nullable in the DB; when 'rcf' is selected they are backfilled from `products.rcf` so pre-products admin queries stay meaningful (non-RCF submissions store NULLs). Pre-products rows have `products IS NULL` and remain fully operable through the admin endpoints.
+**Product-aware intake (products-v1):** the public POST also requires a `products` object — applicants select one or more products and supply exactly the setup information each selected product needs to provision. Shape: `{selected: ['rcf'|'trunk'|'api'|'voicemail', ...] (min 1, no duplicates), rcf?, trunk?, api?, voicemail?}` — each product block must be **present iff selected** (validated both directions). Per-product required info: **rcf** = did_count / porting / forwarding_setup (exact form option strings; `current_carrier` required when porting Yes/Both); **trunk** = 1-10 `signaling_ips` (IP/CIDR, same validator as KYC originating IPs — the platform is **IP-peering only, no REGISTER auth**, so the PBX/SBC public signaling IPs are mandatory to provision a trunk) + `concurrent_call_paths` 1-1000 + optional pbx_vendor/dids_needed; **api** = use_case + needs_numbers + optional expected_cps (1-1000) / webhook_url (http(s), ≤255) — **retired: selecting `api` (or sending a `products.api` block) is a 422 unless `API_CALLING_ENABLED=true`**; **voicemail** = mailbox_count 1-10000 + attach_to (`existing_numbers`/`new_numbers`/`unsure`). Persisted to nullable `onboarding_requests.products` JSONB (migration `36_onboarding_products.sql`) as the validated payload + `form_version: 'products-v1'`. The legacy top-level RCF fields (did_count/porting/current_carrier/forwarding_setup) are now optional on the POST and nullable in the DB; when 'rcf' is selected they are backfilled from `products.rcf` so pre-products admin queries stay meaningful (non-RCF submissions store NULLs). Pre-products rows have `products IS NULL` and remain fully operable through the admin endpoints.
 
 ### Docs (when ENABLE_DOCS=true)
 | Method | Path | Description |

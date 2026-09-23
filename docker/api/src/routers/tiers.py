@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from auth.dependencies import require_admin
+from config import API_CALLING_RETIRED_MESSAGE, api_calling_enabled
 from db import database as db
 
 router = APIRouter()
@@ -16,6 +17,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
+def _validate_tier_type(v: str) -> str:
+    """Shared tier_type rule. 'api' is refused (422) while API Calling is
+    retired (config.api_calling_enabled); existing api rows are untouched."""
+    v = v.lower()
+    if v not in ("rcf", "api", "trunk", "all"):
+        raise ValueError("tier_type must be rcf, api, trunk, or all")
+    if v == "api" and not api_calling_enabled():
+        raise ValueError(f"{API_CALLING_RETIRED_MESSAGE}: tier_type 'api' is not accepted")
+    return v
+
 
 class TierCreate(BaseModel):
     name: str
@@ -31,10 +43,7 @@ class TierCreate(BaseModel):
     @field_validator("tier_type")
     @classmethod
     def validate_tier_type(cls, v: str) -> str:
-        v = v.lower()
-        if v not in ("rcf", "api", "trunk", "all"):
-            raise ValueError("tier_type must be rcf, api, trunk, or all")
-        return v
+        return _validate_tier_type(v)
 
     @field_validator("cps_limit")
     @classmethod
@@ -66,11 +75,7 @@ class TierUpdate(BaseModel):
     @field_validator("tier_type")
     @classmethod
     def validate_tier_type(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            v = v.lower()
-            if v not in ("rcf", "api", "trunk", "all"):
-                raise ValueError("tier_type must be rcf, api, trunk, or all")
-        return v
+        return _validate_tier_type(v) if v is not None else v
 
     @field_validator("cps_limit")
     @classmethod
@@ -122,7 +127,14 @@ async def list_trunk_tiers(admin: dict = Depends(require_admin)):
 
 @router.get("/api")
 async def list_api_tiers(admin: dict = Depends(require_admin)):
-    """List API-type CPS tiers."""
+    """List API-type CPS tiers.
+
+    Hidden (404, same body as an unknown route) while API Calling is retired.
+    The route itself stays registered so ``/api`` never falls through to
+    ``/{tier_id}`` (which would 422 on the int parse instead of 404).
+    """
+    if not api_calling_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
     rows = await db.fetch_all(
         """
         SELECT id, name, tier_type, cps_limit, call_paths, monthly_fee, per_call_fee,

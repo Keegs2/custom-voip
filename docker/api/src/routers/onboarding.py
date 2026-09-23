@@ -44,6 +44,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
+from config import API_CALLING_RETIRED_MESSAGE, api_calling_enabled
 from db import database as db
 from auth.dependencies import require_admin
 from utils.phone import normalize_e164
@@ -357,6 +358,17 @@ class ProductsPayload(BaseModel):
 
     @model_validator(mode="after")
     def validate_blocks_match_selection(self) -> "ProductsPayload":
+        # API Calling is RETIRED (config.api_calling_enabled): a NEW intake that
+        # selects it (alone or alongside other products) is a 422 — never
+        # silently dropped, so the applicant knows to deselect it. Stored
+        # pre-retirement rows that carry 'api' are untouched (admin reads
+        # never re-validate through this model).
+        if not api_calling_enabled() and ("api" in self.selected or self.api is not None):
+            raise ValueError(
+                f"{API_CALLING_RETIRED_MESSAGE}: the 'api' product can no longer "
+                "be requested — deselect it (RCF, SIP Trunking and Voicemail "
+                "remain available)"
+            )
         for key in ("rcf", "trunk", "api", "voicemail"):
             block = getattr(self, key)
             if key in self.selected and block is None:

@@ -1,3 +1,5 @@
+import { API_CALLING_ENABLED } from '../config/features';
+
 export type OnboardingStatus = 'pending' | 'completed' | 'rejected';
 
 /* ─────────────────────────────────────────────────────────────
@@ -74,13 +76,13 @@ export interface KycHighVolume {
 
 export type ProductKey = 'rcf' | 'trunk' | 'api' | 'voicemail';
 
-/** Stable render/order for product blocks everywhere. */
-export const PRODUCT_ORDER: readonly ProductKey[] = [
-  'rcf',
-  'trunk',
-  'api',
-  'voicemail',
-];
+/** Stable render/order for product blocks everywhere — also the set the
+ *  onboarding picker offers. `api` (API Calling) is RETIRED: the key, labels
+ *  and ApiIntake stay (the backend payload shape is unchanged), but it is only
+ *  offered while API_CALLING_ENABLED is on. */
+export const PRODUCT_ORDER: readonly ProductKey[] = (
+  ['rcf', 'trunk', 'api', 'voicemail'] as const
+).filter((p) => API_CALLING_ENABLED || p !== 'api');
 
 /** Full display names — picker cards, admin block titles. */
 export const PRODUCT_LABELS: Record<ProductKey, string> = {

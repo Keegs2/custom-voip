@@ -47,7 +47,7 @@ production; the `Full-System`/`unified` branches hold the UCaaS stack, which is
 |---------|--------|-------|
 | **RCF** (Remote Call Forwarding) | **LIVE — primary product** | DID → forward_to mapping. No end-customer UI access. On-net short-circuit routing for platform-owned destinations. |
 | **SIP Trunking** | LIVE | IP-peering only (REGISTER declined). Multi-zone redundant inbound; FS-aware `/healthz` + `trunk.granitevoip.com` DNS failover. |
-| **API Calling** | LIVE | Programmable voice. Outbound `/v1/calls` is **East-only single-region** (accepted limitation — ESL pinned to East FS-1). |
+| API Calling | **RETIRED / disabled 2026-09** | Switched off; code kept behind `API_CALLING_ENABLED` (API + FreeSWITCH env, and `docker/ui/app/src/config/features.ts` in the UI) — flip all to restore. When it was live, outbound `/v1/calls` was East-only single-region (ESL pinned to East FS-1). Hybrid now means RCF + SIP Trunking. |
 | UCaaS (WebRTC/voicemail/conferencing/chat) | NOT on this branch | `Full-System`/`unified` only. RCF customers never see UCaaS features. |
 
 ### 1.2 Current-state summary (2026-09-04)
@@ -636,7 +636,7 @@ Config: `docker/freeswitch/conf/` (sofia profiles, modules) +
 | Per-call identity | `;fsn=1/2` marker stamped at selection time so in-dialog requests reach the FS that owns the call even across an SBC flip |
 | Health | Kamailio OPTIONS probes both; `/healthz` is **any-FS** (zone healthy if either FS up) |
 | Drilled | All 3 zones 2026-08-31 (`docs/FS_MEDIA_HA_RUNBOOK.md` — deploy, drills, caveats) |
-| Known gap | **ESL/API originates still pin to FS-1** (`FREESWITCH_ESL_HOST` = fs-media-v2): East FS-1 down ⇒ `POST /v1/calls` fails while inbound RCF rides FS-2. Open item (§12). |
+| Known gap | **ESL originates still pin to FS-1** (`FREESWITCH_ESL_HOST` = fs-media-v2): East FS-1 down ⇒ ESL tools (and `POST /v1/calls`, if API Calling is ever re-enabled) fail while inbound RCF rides FS-2. Open item (§12). |
 | Watchdog | `revup-fs-watchdog.timer` on every media VM pages (via `revup-alert` syslog → GCM) on container death / FS unresponsiveness |
 
 ### 5.2 Sofia profiles
@@ -654,7 +654,8 @@ Never use `-nonat`; never remove `local-network-acl=loopback.auto` (root
 
 1. Anti-fraud early rejects (empty/injected/non-digit/>20-digit destinations).
 2. Special numbers (9195–9198 echo/tone/milliwatt).
-3. Branch: API outbound (`api_outbound.lua`, tier-aware CPS) / trunk outbound
+3. Branch: API outbound (`api_outbound.lua`, tier-aware CPS — API Calling retired
+   2026-09, gated off by `API_CALLING_ENABLED`) / trunk outbound
    (`trunk_outbound.lua`) / inbound DID.
 4. DID lookup on the **zone-local** PG replica via PgBouncer (`db_client.lua`).
    Redis is intentionally **removed** from the RCF path (mod_lua threading vs
@@ -896,7 +897,7 @@ Init scripts run only on first initdb; on prod they're applied on the primary
 |---|------|---------|
 | 01 | 01_extensions.sql | timescaledb, pgcrypto, inet |
 | 02 | 02_schema_core.sql | customers, users, DB roles |
-| 03 | 03_schema_api.sql | API Calling tables (api_dids, credentials) |
+| 03 | 03_schema_api.sql | API Calling tables (api_dids, credentials) — product retired 2026-09, tables kept |
 | 04 | 04_schema_fraud.sql | fraud prefixes, velocity |
 | 05 | 05_schema_cdr.sql | CDR hypertable (retention, RTP quality) |
 | 06 | 06_seed_data.sql | rate tables baseline |
@@ -926,8 +927,8 @@ Init scripts run only on first initdb; on prod they're applied on the primary
 | 34 | 34_release_requested_status.sql | DID release workflow |
 | 35 | 35_onboarding_kyc.sql | FCC KYC capture |
 | 36 | 36_onboarding_products.sql | per-product onboarding intake |
-| 37 | 37_payments_ledger.sql | payments demo ledger (dormant) |
-| 38 | 38_payments_demo.sql | payments demo config (dormant) |
+| 37 | 37_payments_ledger.sql | payments demo ledger (payments demo removed 2026-09; tables inert) |
+| 38 | 38_payments_demo.sql | payments demo config (payments demo removed 2026-09; tables inert) |
 | 39 | 39_users_support_role.sql | support role separation |
 | 40 | 40_carrier_trunks.sql | **multi-carrier trunk registry** (trust + egress contract) |
 | 41 | 41_did_carrier_source.sql | DID→carrier attribution |
@@ -1073,7 +1074,8 @@ load-bearing layout, not `md:*` utilities. Design system: Daylight (white
 console on dark collapsible sidebar, `dl-*`/`rcf-*` shared classes).
 
 Sidebar visibility is `account_type`-scoped (rcf sees RCF only; trunk sees SIP
-Trunks; api sees API DIDs; hybrid gets both; admin sections admin-only) —
+Trunks; hybrid gets RCF + SIP Trunks; the retired `api` product's items are
+gated off by `API_CALLING_ENABLED`; admin sections admin-only) —
 RCF customers never see UCaaS features.
 
 #### API surface (`docker/api/src/routers/`, FastAPI behind `/api/`)
@@ -1084,7 +1086,7 @@ RCF customers never see UCaaS features.
 | health.py | /health | Liveness (DB + Redis checks) — uptime-check target |
 | customers.py | /v1/customers | Customer CRUD + credit |
 | rcf.py | /v1/rcf | RCF number provisioning (tenant-scoped read; admin write) |
-| calls.py | /v1/calls | API-product call origination (tier CPS, ESL → East FS-1) |
+| calls.py | /v1/calls | API-product call origination (tier CPS, ESL → East FS-1) — disabled while `API_CALLING_ENABLED` is off (product retired 2026-09) |
 | trunks.py | /v1/trunks | SIP trunk CRUD + IPs + DIDs + stats |
 | cdrs.py | /v1/cdrs | **Ingest webhook (always-200, auth-exempt)** + query/summary |
 | search.py | /v1/search | Admin DID/user/call search (UNION rcf/api/trunk) |
@@ -1096,7 +1098,6 @@ RCF customers never see UCaaS features.
 | homer.py | /v1/homer | SIP trace search (qryn/ClickHouse) + IP aliases |
 | onboarding.py | /v1/onboarding | Intake (public POST) + admin review; FCC KYC |
 | billing.py | /v1/billing | Read-only estimated billing (§8.4) |
-| payments.py | /v1/payments | Machine-payments demo (dormant unless `PAYMENTS_DEMO_MODE`) |
 | sipp.py | /v1/sipp | Load-test presets/runner |
 | freeswitch.py | /freeswitch | mod_xml_curl gateway + json_cdr ingest (auth-exempt) |
 
@@ -1191,7 +1192,7 @@ Honest list — verified 2026-09-04. Remove entries here as they close.
 |---|------|--------|
 | 1 | `central-db` external IP | Reserved `136.112.210.141` detached during 2026-09-01 stop/start; VM on ephemeral `34.69.170.41`. Re-attach the reservation. |
 | 2 | `sandbox_replica` | Slot absent from the primary; sandbox replica (legacy fs-media 10.142.0.102) status unknown — confirm or decommission. |
-| 3 | ESL pinned to FS-1 | API originates (`POST /v1/calls`, ESL tools) fail when East FS-1 is down even though inbound rides FS-2. Fix option: healthz-aware ESL client fallback (`esl_client.py`). |
+| 3 | ESL pinned to FS-1 | ESL tools (and `POST /v1/calls` if API Calling is re-enabled) fail when East FS-1 is down even though inbound rides FS-2. Fix option: healthz-aware ESL client fallback (`esl_client.py`). |
 | 4 | PDD is a proxy metric | `progress_timeout`-based PDD bounds are indirect; no true per-carrier PDD histogram yet. |
 | 5 | STIR verify canary | Own-crypto inbound verify deployed DARK; §6 canary (per implementation plan) pending before `STIR_SHAKEN_VERIFY=on`. |
 | 6 | `CLAUDE.md` machine-type drift | Root CLAUDE.md still lists `services` as e2-standard-4; actual is e2-highmem-4/32GB since 2026-09-02. |

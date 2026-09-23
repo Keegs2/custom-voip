@@ -1,7 +1,9 @@
 """Live per-call price quoting off the REAL rate deck (shared helper).
 
-Used by the x402 pay-per-call gate on ``POST /v1/calls`` (routers/calls.py) and
-by the admin rate lookup (routers/rates.py). Both resolve rates the SAME way the
+Used by the admin rate lookup (routers/rates.py: ``get_default_rate_table_id`` /
+``lookup_rate``). ``quote_call_price`` was the x402 pay-per-call quote for the
+payments demo on ``POST /v1/calls``; that caller was removed with the demo and
+the helper is kept unused (pure read, no side effects) pending a decision. Both resolve rates the SAME way the
 SQL rating engine does — the ``get_rate()`` longest-prefix function from
 ``docker/postgres/init/05_schema_cdr.sql`` — so a quoted price always matches
 what ``rate_cdr()`` would charge for the first minute.

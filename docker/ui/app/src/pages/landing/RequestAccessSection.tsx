@@ -45,7 +45,8 @@ import {
    picker + per-product setup blocks, then Capacity & timeline, then
    the input-driven High-volume declaration) — stacking identity-first
    below ~1000px. The products group (products-v1) is a multi-select
-   card picker (RCF / Trunking / API / Voicemail); each selection
+   card picker (RCF / Trunking / Voicemail — API Calling is retired and
+   only offered while API_CALLING_ENABLED is on); each selection
    reveals a compact titled sub-block of setup fields. ONE unified
    IP-chip field (visible when trunking is selected OR high-volume is
    on; label/helper adapt) feeds BOTH payload slots on submit:

@@ -19,7 +19,8 @@
 
 - **RCF** — DID → forward_to routing (the core product). Provisioning API + admin UI.
 - **SIP Trunks** — IP-authenticated trunks, call-path packages, CPS tiers.
-- **API Calling** — programmable outbound origination via ESL (backend; UI is admin-side).
+- **API Calling** — **retired 2026-09** (switched off, code kept behind `API_CALLING_ENABLED`
+  in the API/FreeSWITCH env and `docker/ui/app/src/config/features.ts`; flip both to restore).
 - **Admin suite** — customers, trunks, CDRs, rates, tiers, carriers, SIPp, DID inventory,
   user lookup, call-quality analytics.
 - **SIP troubleshooting** — Homer SIP capture (HEP). The per-VM production deploy uses the
@@ -57,7 +58,8 @@ host) for development/testing — not the production layout.
 | Type | Sees in UI |
 |---|---|
 | `rcf` | RCF only (DID → forward_to). No UCaaS, ever. |
-| `trunk` / `api` / `hybrid` | Trunk / API-calling features (admin-managed) |
+| `trunk` / `hybrid` | SIP Trunking / RCF + SIP Trunking (admin-managed) |
+| `api` | API Calling — **retired 2026-09** (disabled, code kept behind `API_CALLING_ENABLED`) |
 
 **RCF customers never see UCaaS features.** That isolation is the core product rule.
 
