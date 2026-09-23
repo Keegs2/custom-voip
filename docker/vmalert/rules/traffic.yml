@@ -1,4 +1,5 @@
 # vmalert recording rules — NOC wall traffic roll-ups (CPS / ingress / concurrency).
+# Two groups: noc_traffic (30s) and noc_concurrency (15s, peak/HWM series).
 # ---------------------------------------------------------------------------
 # Loaded by the vmalert service (docker-compose.services.yml) via
 #   -rule=/etc/vmalert/rules/*.yml
@@ -16,10 +17,10 @@
 # are the RECONCILED platform names (kamailio_ prefix, counters WITHOUT a
 # _total suffix — hard-won gotcha; freeswitch_sessions_total DOES carry it).
 #
-# Interval 30s (not the 15s scrape): matches the 30s wall auto-refresh, halves
-# remote-write volume, and every window here is >= 1m so a 30s step loses no
-# resolution. Worst-case added staleness vs raw = one eval (30s) — invisible on
-# a 30s wall.
+# noc_traffic interval 30s (not the 15s scrape): matches the 30s wall
+# auto-refresh, halves remote-write volume, and every window here is >= 1m so a
+# 30s step loses no resolution. Worst-case added staleness vs raw = one eval
+# (30s) — invisible on a 30s wall. (noc_concurrency is 15s — see that group.)
 #
 # This file supersedes trunk_rollup.yml (2026-07-29 design). The legacy series
 # voip:cps:by_direction:rate1m / voip:calls_active:by_node had no dashboard or
@@ -60,3 +61,72 @@ groups:
       # as the bounded aggregate for future alerting.
       - record: node:freeswitch_calls_active:sum
         expr: sum by (freeswitch_node, zone) (freeswitch_calls_active)
+
+  # -------------------------------------------------------------------------
+  # Concurrency high-water marks (NOC "Concurrent HWM" tiles).
+  #
+  # Source: the ESL exporter's burst-safe peak gauges (ops_metrics.py,
+  # carrier-monitor sidecar :9103) — freeswitch_calls_active_peak /
+  # freeswitch_channels_peak = per-node MAX over a trailing 30s window, sampled
+  # every 2s. They exist because max_over_time() over the raw 10s-polled /
+  # 15s-scraped gauge undercounts short bursts. Until a node's exporter is
+  # redeployed the peak series are ABSENT for that node, so every rule falls
+  # back PER NODE to the raw gauge via `or` (a node with a peak series uses it,
+  # a node without one uses its raw gauge — never double-counted). Both sides
+  # are reduced to (freeswitch_node, zone) BEFORE the `or`, so the fallback
+  # matches on exactly those labels no matter what extra labels either series
+  # carries (today both come from the same freeswitch_esl job/target with the
+  # same labelset, but the peak exporter is being added in parallel — this
+  # keeps the match robust to it).
+  #
+  # Interval 15s, NOT the 30s of noc_traffic: each peak sample covers the
+  # trailing 30s, so the recorded series must sample at <= that window or an
+  # instant can fall between two evaluations and the burst is skipped. A 30s
+  # eval against a 15s scrape aliases (evals and scrapes drift in and out of
+  # phase and a whole window can be missed); 15s = one scrape guarantees every
+  # 30s window is observed at least once. The raw-gauge fallback is still only
+  # as good as its 10s poll (documented limitation until the exporter ships).
+  #
+  # Rules read RAW series directly — nothing here chains off another rule in
+  # the same group (same-group chaining evaluates against the previous cycle's
+  # result and adds a 15s lag). zone/fleet sums are sums of per-node 30s
+  # maxima: an upper bound on true simultaneous concurrency (nodes can peak at
+  # different instants inside the window) — the conservative side for capacity.
+  #
+  # Recorded series only exist from the rule deploy onward: HWM windows
+  # (24h / 7d / 30d) fill in from rollout, they do not backfill.
+  - name: noc_concurrency
+    interval: 15s
+    rules:
+      # Per-FS-node connected-call peak (30s window), raw-gauge fallback.
+      # Consumers: none on a panel directly (per-zone / fleet below are the
+      # panel inputs); the bounded per-node aggregate for alerting + ad-hoc.
+      - record: node:freeswitch_calls_active_peak:max
+        expr: max by (freeswitch_node, zone) (freeswitch_calls_active_peak) or max by (freeswitch_node, zone) (freeswitch_calls_active)
+
+      # Per-zone connected-call peak (zones are independent capacity domains —
+      # ~5,000-call ceiling per FS = max-sessions 10000 channels ÷ 2 legs;
+      # panel 107 colors at 70% / 90% of it).
+      # Consumer: traffic-status id=107 (per-zone HWM 24h, max_over_time).
+      - record: zone:freeswitch_calls_active_peak:sum
+        expr: sum by (zone) (max by (freeswitch_node, zone) (freeswitch_calls_active_peak) or max by (freeswitch_node, zone) (freeswitch_calls_active))
+
+      # Fleet connected-call peak.
+      # Consumers: noc-home id=21 (HWM 24h), traffic-status ids 103-106
+      # (HWM ladder 1h/24h/7d/30d, max_over_time) + id=45 (peak line).
+      - record: fleet:freeswitch_calls_active_peak:sum
+        expr: sum(max by (freeswitch_node, zone) (freeswitch_calls_active_peak) or max by (freeswitch_node, zone) (freeswitch_calls_active))
+
+      # Per-FS-node channel (leg) peak, raw fallback freeswitch_channels_total.
+      # Channels are what FS max-sessions=10000 (switch.conf.xml) caps.
+      # Consumer: traffic-status id=108 (channels HWM 24h vs max-sessions).
+      - record: node:freeswitch_channels_peak:max
+        expr: max by (freeswitch_node, zone) (freeswitch_channels_peak) or max by (freeswitch_node, zone) (freeswitch_channels_total)
+
+      # Per-zone channel peak. Consumer: none yet (alerting / ad-hoc).
+      - record: zone:freeswitch_channels_peak:sum
+        expr: sum by (zone) (max by (freeswitch_node, zone) (freeswitch_channels_peak) or max by (freeswitch_node, zone) (freeswitch_channels_total))
+
+      # Fleet channel peak. Consumer: none yet (alerting / ad-hoc).
+      - record: fleet:freeswitch_channels_peak:sum
+        expr: sum(max by (freeswitch_node, zone) (freeswitch_channels_peak) or max by (freeswitch_node, zone) (freeswitch_channels_total))

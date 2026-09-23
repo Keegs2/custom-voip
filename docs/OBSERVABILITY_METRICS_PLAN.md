@@ -70,10 +70,11 @@ VictoriaMetrics carries the aggregate + carrier trunks + `topk` roll-ups (bounde
 | Metric | Type | Labels | Source | Feeds panel |
 |---|---|---|---|---|
 | `freeswitch_sessions_total` | counter | *(vmagent adds `freeswitch_node`,`zone`)* | mod_prometheus `:9102` | CPS per FS |
-| `freeswitch_calls_active` | gauge | *(+`freeswitch_node`,`zone`)* | mod_prometheus `:9102` | Total connected calls |
+| `freeswitch_calls_active` | gauge | *(+`freeswitch_node`,`zone`)* | ESL exporter `:9103` (moved from mod_prometheus `:9102`, which was dropped) | Concurrent calls — live (traffic-status 3, noc-home 20, call-quality 41) + raw fallback of the `noc_concurrency` peak rules |
 | `freeswitch_sessions_active`, `freeswitch_sessions_per_second`, `freeswitch_sessions_peak*` | gauge | *(aggregate)* | mod_prometheus `:9102` | supporting |
 | `freeswitch_channels_active` | gauge | `freeswitch_node`,`direction`,`on_net` | ESL exporter `:9103` | on-net share, live splits |
 | `freeswitch_calls_bridged`, `freeswitch_channels_total`, `freeswitch_esl_scrape_ok` | gauge | `freeswitch_node` | ESL exporter `:9103` | health / cross-check |
+| `freeswitch_calls_active_peak`, `freeswitch_channels_peak` | gauge | `freeswitch_node` | ESL exporter `:9103` — max of `show calls count` / `show channels count` readings over a trailing window (`OPS_METRICS_PEAK_WINDOW`, default 30s), sampled every `OPS_METRICS_PEAK_INTERVAL` (default 2s) by a separate thread and computed at scrape time; floored at the current `freeswitch_calls_active` / `freeswitch_channels_total`. Per-node exact to the peak interval; a fleet `sum()` of per-node peaks can overstate by the non-coincident portion within one window | concurrent-call high-water mark (use instead of `max_over_time(freeswitch_calls_active)`, which aliases bursts between 10s polls / 15s scrapes) — consumed via the `noc_concurrency` recording rules (`*:freeswitch_calls_active_peak:*`, `*:freeswitch_channels_peak:*`), never directly by a panel |
 | `kamailio_trunk_cps` | counter | `trunk`(carrier),`direction` | Kamailio custom `:8080` | **Total CPS** (`rate()`) |
 | `kamailio_trunk_active_calls` | gauge | `trunk`(carrier),`direction` | Kamailio dialog profile `:8080` | **Calls per trunk in/out** |
 | `kamailio_*` (dialog active, tm reply codes, shmem, dispatcher, htable, sl) | mixed | module-intrinsic | xhttp_prom `:8080` (`xhttp_prom_stats="all"`) | SBC health |
@@ -256,7 +257,7 @@ Five live panels → PromQL on `voip-metrics-vm`; the seven analytics panels sta
 |---|---|---|---|
 | 1 | Total CPS — now (1m) | `voip-metrics-vm` | `sum(rate(kamailio_trunk_cps[1m]))` |
 | 2 | CPS per FreeSWITCH | `voip-metrics-vm` | `sum by (freeswitch_node)(rate(freeswitch_sessions_total[1m]))` |
-| 3 | Total connected calls — now | `voip-metrics-vm` | `sum(freeswitch_calls_active)` *(true live gauge — upgrade from the CDR overlap proxy; update the panel description)* |
+| 3 | Total connected calls — now *(retitled "Concurrent calls — live" 2026-09-22)* | `voip-metrics-vm` | `sum(freeswitch_calls_active)` *(true live gauge — upgrade from the CDR overlap proxy; update the panel description)* |
 | 4 | Calls per trunk — inbound | `voip-metrics-vm` | `sum by (trunk)(kamailio_trunk_active_calls{direction="inbound"})` |
 | 5 | Calls per trunk — outbound | `voip-metrics-vm` | `sum by (trunk)(kamailio_trunk_active_calls{direction="outbound"})` |
 | 10,11,20,21,22,30,31 | volume / per-zone / carrier split / ASR-ACD / on-net / SIP class / hangup | `voip-cdr-pg` | **unchanged** |
@@ -317,7 +318,7 @@ Live across all three zones; everything below lands in the East VictoriaMetrics 
 | VM role | Exporters (port) | Source of truth |
 |---|---|---|
 | SBC ×6 (2/zone) | Kamailio `xhttp_prom` (`:8080`) · `node_exporter` (`:9100`) | `kamailio_trunk_cps`, `kamailio_trunk_active_calls{trunk,direction}`, `kamailio_dialog_*`, `kamailio_shmem_*`, node |
-| FreeSWITCH ×3 (1/zone) | ESL exporter in the carrier‑monitor sidecar (`:9103`) · `node_exporter` (`:9100`) | `freeswitch_sessions_total`, `freeswitch_calls_active`, `freeswitch_channels_active{direction,on_net}`, node — **mod_prometheus was dropped; the ESL exporter carries its aggregates** |
+| FreeSWITCH ×3 (1/zone) | ESL exporter in the carrier‑monitor sidecar (`:9103`) · `node_exporter` (`:9100`) | `freeswitch_sessions_total`, `freeswitch_calls_active`, `freeswitch_calls_active_peak`, `freeswitch_channels_peak`, `freeswitch_channels_active{direction,on_net}`, node — **mod_prometheus was dropped; the ESL exporter carries its aggregates** |
 | services (East) | VictoriaMetrics (`:8428`) · vmalert (`:8880`) · `node_exporter` (`:9100`) · `postgres_exporter` (`:9187`) · `pgbouncer_exporter` (`:9127`) | central store + primary DB (2657 `pg_*`, incl. per‑replica `pg_stat_replication` lag) + PgBouncer pool (76 `pgbouncer_*`) |
 | DB replicas (`west-db`,`central-db`) | — (deferred, see below) | replication lag is read centrally from the **primary's** exporter |
 
@@ -360,6 +361,8 @@ vmalert (`voip-vmalert`, East services VM) evaluates `docker/vmalert/rules/*.yml
 
 **Interval: 30s** (not the 15s scrape). Rationale: matches the 30s wall auto-refresh, halves remote-write volume, and every rule window is ≥ 1m so a 30s step loses no resolution; worst-case added staleness vs a raw query is one eval (30s) — invisible on a 30s wall.
 
+**Exception — `noc_concurrency` is 15s.** Its inputs (`freeswitch_calls_active_peak` / `freeswitch_channels_peak`) are each a max over a trailing **30s** window; the recorded series must sample at ≤ that window or an instant falls between two evaluations and its burst is skipped. A 30s eval against a 15s scrape drifts in and out of phase and aliases; 15s (= one scrape) observes every 30s window at least once. Each rule reduces both sides to `max by (freeswitch_node, zone)` BEFORE a per-node `or` fallback to the raw gauge (`freeswitch_calls_active` / `freeswitch_channels_total`), so a node whose exporter does not yet emit the peak still contributes — and a node is never double-counted. Zone/fleet sums of per-node 30s maxima are an upper bound on truly simultaneous calls (non-coincident peaks) — the conservative side for capacity. HWM windows fill in from rule deploy; they do not backfill.
+
 **Naming:** Prometheus `level:metric:operations` convention. Source names are the reconciled platform names — `kamailio_*` counters have **NO `_total` suffix** (hard-won gotcha); `freeswitch_sessions_total` does.
 
 **Cardinality contract:** recorded labels are only `zone`, `direction`, `trunk` (carrier), `reporting_instance` (SBC), `freeswitch_node`, `attestation`, `verstat`, `source`, `class`. Never customer identifiers.
@@ -373,6 +376,12 @@ vmalert (`voip-vmalert`, East services VM) evaluates `docker/vmalert/rules/*.yml
 | | `trunk:kamailio_trunk_cps:increase5m` | `sum by (trunk,direction,zone)(increase(kamailio_trunk_cps[5m]))` | call-quality id 74 (inbound) |
 | | `node:freeswitch_sessions:rate1m` | `sum by (freeswitch_node,zone)(rate(freeswitch_sessions_total[1m]))` | traffic-status id 2 |
 | | `node:freeswitch_calls_active:sum` | `sum by (freeswitch_node,zone)(freeswitch_calls_active)` | none (legacy `voip:calls_active:by_node` continuity + future alerting) |
+| `traffic.yml` / `noc_concurrency` (15s) | `node:freeswitch_calls_active_peak:max` | `max by (freeswitch_node,zone)(freeswitch_calls_active_peak) or max by (freeswitch_node,zone)(freeswitch_calls_active)` | none directly (per-node alerting / ad-hoc) |
+| | `zone:freeswitch_calls_active_peak:sum` | `sum by (zone)(<per-node expr above>)` | traffic-status id 107 (`max_over_time(...[24h])` per zone) |
+| | `fleet:freeswitch_calls_active_peak:sum` | `sum(<per-node expr above>)` | noc-home id 21 (`max_over_time(...[24h])`), traffic-status ids 103–106 (HWM 1h/24h/7d/30d), id 45 (peak line) |
+| | `node:freeswitch_channels_peak:max` | `max by (freeswitch_node,zone)(freeswitch_channels_peak) or max by (freeswitch_node,zone)(freeswitch_channels_total)` | traffic-status id 108 (channels HWM 24h vs max-sessions 10000) |
+| | `zone:freeswitch_channels_peak:sum` | `sum by (zone)(<per-node channels expr>)` | none yet (alerting / ad-hoc) |
+| | `fleet:freeswitch_channels_peak:sum` | `sum(<per-node channels expr>)` | none yet (alerting / ad-hoc) |
 | `sip_health.yml` / `noc_sip_health` | `zone:kamailio_invite_replies:rate5m` ×5 (static label `class`=2xx/3xx/4xx/5xx/6xx) | `sum by (zone)(rate(kamailio_core_rcv_replies_Nxx_invite[5m]))` | traffic-status ids 40, 41, 46 (A–E), 47 |
 | `stir.yml` / `noc_stir` | `zone:kamailio_stir_attest_signed:increase5m` | `sum by (zone,attestation)(increase(...[5m]))` | none yet (alerting / future fixed-window panels) |
 | | `zone:kamailio_stir_inbound_verstat:increase5m` | `sum by (zone,verstat,source)(increase(...[5m]))` | none yet (same) |
@@ -381,11 +390,13 @@ Ratios (ASR / failure %) are deliberately NOT recorded: panels filter `zone=~"$z
 
 ## Panels swapped vs deliberately left raw
 
-**Swapped** (recorded series is semantically equivalent; each panel description names the rule + raw fallback query): traffic-status 1, 2, 40, 41, 44, 46, 47, 58 · call-quality 74. Recorded series only exist from deploy time — on the now-6h default walls any pre-deploy gap ages out within 6h.
+**Swapped** (recorded series is semantically equivalent; each panel description names the rule + raw fallback query): traffic-status 1, 2, 40, 41, 44, 46, 47, 58 · call-quality 74.
+
+**Built on recorded series from the start** (2026-09-22 concurrency pass — no raw equivalent exists, since `max_over_time` of the raw gauge undercounts bursts): noc-home 21 "Traffic · Concurrent HWM — 24h" (replaced "Traffic · CPS — now (1m)"; CPS stays on Traffic Status id 1) · traffic-status 103–106 "Concurrent HWM — last 1h/24h/7d/30d", 107 "Concurrent HWM per zone — 24h" (orange ≥ 3,500 / red ≥ 4,500 — 70%/90% of the ~5,000-call ceiling that max-sessions=10000 channels ÷ 2 legs implies), 108 "Channels HWM per FS node — 24h vs max-sessions 10,000" (orange ≥ 7,000 / red ≥ 9,000), and the 30s-peak line added to 45. All HWM stats are INSTANT `max_over_time(<rule>[window])`. Recorded series only exist from deploy time — on the now-6h default walls any pre-deploy gap ages out within 6h.
 
 **Left raw — with reasons:**
 - **Election rows (traffic-status 55/56/57 Active SBC, 59/60/61 Active FS):** their `present_over_time`/`last_over_time` + `or vector(0)` queries are value-aware freshness probes — a recorded series keeps existing after the source goes stale and would DESTROY the staleness signal that rolls the election. Never route these through recording rules.
-- **Instant gauge sums** (traffic-status 3, 4, 5, 42, 43, 45, 49, 50, 51, 52, 53 · noc-home 2 `probe_success`): point lookups over a handful of bounded series — already cheap, recording adds lag for zero win.
+- **Instant gauge sums** (traffic-status 3, 4, 5, 42, 43, 45 (raw lines; its peak line is recorded), 49, 50, 51, 52, 53, 102 · noc-home 2 `probe_success`, 20 · call-quality 41 — the live concurrent-calls gauge, which replaced the CDR-overlap proxy that structurally read ~0 because CDRs are written at hangup): point lookups over a handful of bounded series — already cheap, recording adds lag for zero win.
 - **stir-shaken voip-metrics-vm panels (1–13):** all are INSTANT `increase(...[$__range])` — the operator's range pick (1h/24h/7d) drives the count. A fixed-window recorded series cannot serve an arbitrary `$__range` without changing semantics (`sum_over_time` over a 30s-recorded `increase5m` multi-counts events + inherits edge effects). Stays raw; the `stir.yml` 5m roll-ups exist for alerting and any future fixed-window panel.
 - **stir-shaken trust-bundle stats (201–208):** instant single-gauge arithmetic (`time() - ts`) — cheap by construction.
 - **db-replication / infra-overview:** no `voip-metrics-vm` queries (Postgres/other datasources).
@@ -398,4 +409,4 @@ cd /opt/revup && sudo git pull
 [ "$(hostname)" = "services" ] && sudo docker compose -f /opt/revup/docker-compose.services.yml up -d --force-recreate --no-deps grafana
 ```
 
-Verify: `curl -s http://127.0.0.1:8880/api/v1/rules | grep -c record` (expect 12 rules across 3 groups) and, after ~1 min, `curl -s 'http://127.0.0.1:8428/api/v1/query?query=zone:kamailio_trunk_cps:rate1m'` returns series. The legacy `voip:*` series simply stop updating (12-month retention keeps their history queryable).
+Verify: `curl -s http://127.0.0.1:8880/api/v1/rules | grep -c record` (as of 2026-09-22: 22 recording rules + 3 alerts across 5 groups — noc_traffic 5, noc_concurrency 6, noc_sip_health 5, noc_stir 2, noc_teardown 4) and `curl -s 'http://127.0.0.1:8428/api/v1/query?query=fleet:freeswitch_calls_active_peak:sum'` returns one series and, after ~1 min, `curl -s 'http://127.0.0.1:8428/api/v1/query?query=zone:kamailio_trunk_cps:rate1m'` returns series. The legacy `voip:*` series simply stop updating (12-month retention keeps their history queryable).

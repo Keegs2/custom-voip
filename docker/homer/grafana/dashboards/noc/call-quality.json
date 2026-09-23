@@ -108,8 +108,8 @@
     {
       "id": 41,
       "type": "stat",
-      "title": "Concurrent calls (CDR-derived)",
-      "description": "Calls currently in progress right now, derived from CDR time-overlap: rows where answer_time <= now() < end_time (a call is up between answer and hangup). This is the RELIABLE concurrency source. active_calls is NOT used — it is only populated by the programmable-voice API path, not the RCF path that carries production traffic.",
+      "title": "Concurrent calls — live",
+      "description": "Connected (bridged) calls up right now on the selected zone: sum(freeswitch_calls_active{zone=~\"$zonere\"}) — the live ESL-exporter gauge (:9103, ~10s poll), same source as Traffic Status 'Concurrent calls — live'. Replaces the old CDR-overlap proxy (answer_time <= now() < end_time), which could only see calls whose CDR had already been written — CDRs land at hangup, so it structurally missed in-progress calls. $zonere is derived from the Zone picker (All = every zone). Informational blue; per-zone capacity colouring + the high-water marks are on Traffic Status.",
       "gridPos": {
         "h": 4,
         "w": 5,
@@ -117,20 +117,20 @@
         "y": 0
       },
       "datasource": {
-        "type": "postgres",
-        "uid": "voip-cdr-pg"
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
       },
       "targets": [
         {
           "refId": "A",
           "datasource": {
-            "type": "postgres",
-            "uid": "voip-cdr-pg"
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
           },
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT count(*) AS concurrent FROM cdrs WHERE answer_time IS NOT NULL AND answer_time <= now() AND end_time > now() AND start_time > now() - interval '6 hours' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
+          "expr": "sum(freeswitch_calls_active{zone=~\"$zonere\"})",
+          "legendFormat": "connected",
+          "instant": true,
+          "range": false
         }
       ],
       "options": {
@@ -150,21 +150,19 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
           "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "blue",
                 "value": null
-              },
-              {
-                "color": "orange",
-                "value": 3000
-              },
-              {
-                "color": "red",
-                "value": 6000
               }
             ]
           }
@@ -2753,7 +2751,7 @@
       {
         "name": "zone",
         "label": "Zone",
-        "description": "Filter raw-cdrs panels by zone, derived from freeswitch_node (one FS per zone). 'All' = SQL LIKE '%'. Note: the hourly-aggregate panels (ACD, and the per-zone ASR panel) and the live Kamailio ingress panel (PromQL) span all zones regardless of this filter.",
+        "description": "Filter raw-cdrs panels by zone, derived from freeswitch_node (one FS per zone). 'All' = SQL LIKE '%'. Note: the hourly-aggregate panels (ACD, and the per-zone ASR panel) and the live Kamailio ingress panel (PromQL) span all zones regardless of this filter. The live 'Concurrent calls' stat (PromQL) DOES follow it, via the derived hidden $zonere.",
         "type": "custom",
         "hide": 0,
         "multi": false,
@@ -2786,6 +2784,30 @@
             "value": "central"
           }
         ]
+      },
+      {
+        "name": "zonere",
+        "label": "Zone (regex)",
+        "description": "Hidden regex twin of $zone for the PromQL (VictoriaMetrics) panels (used as zone=~\"$zonere\"). DERIVED from $zone by a trivial Postgres query (All '%' -> '.*', else the zone name), so it follows the Zone picker automatically — unlike a static custom twin, which a hidden variable cannot be switched by hand. This board is CDR/Postgres-driven already, so the query adds no new dependency.",
+        "type": "query",
+        "hide": 2,
+        "datasource": {
+          "type": "postgres",
+          "uid": "voip-cdr-pg"
+        },
+        "definition": "SELECT CASE WHEN '$zone' = '%' THEN '.*' ELSE '$zone' END AS zonere",
+        "query": "SELECT CASE WHEN '$zone' = '%' THEN '.*' ELSE '$zone' END AS zonere",
+        "refresh": 1,
+        "regex": "",
+        "sort": 0,
+        "multi": false,
+        "includeAll": false,
+        "current": {
+          "selected": true,
+          "text": ".*",
+          "value": ".*"
+        },
+        "options": []
       }
     ]
   },
@@ -2797,7 +2819,7 @@
   "timezone": "browser",
   "title": "Call Quality",
   "uid": "noc-call-quality",
-  "version": 1,
+  "version": 2,
   "weekStart": "",
   "description": "Call Quality wall board — the full voice picture from the CDR hypertable (voip-cdr-pg). Top strip: last-15m live snapshot (ASR / Concurrent / CPS / Avg MOS / On-net %) on the selected zone. Priority band (two rows of three): MOS trend, packet loss, per-zone volume, total volume, SIP response classes, and THE carrier split — inbound by carrier / PoP (Bandwidth vs Sinch), attribution from cdrs.inbound_carrier / inbound_carrier_pop stamped spoof-proof by Kamailio at carrier ingress. Below, themed rows: quality detail (jitter / MOS distribution / R-factor / quality %), delivery (answered-vs-failed, ASR trends, ACD, PDD), carrier detail (egress share from carrier_used, per-carrier ASR, plus a live Kamailio ingress counter that shows a call at INVITE time — before its CDR exists), and diagnostics (hangup causes, rated-call snapshot). Long trends use the cheap continuous aggregate cdr_hourly_stats (customer-scoped, no zone/carrier dimension — those trends span all zones); recent/quality panels read raw cdrs and honour the Zone filter. RTP metrics are NULL on unanswered & unrated calls and are filtered out. PDD is approximated as answer_time - start_time (time-to-answer) — true PDD to the first 18x needs Homer/SIP timing, not the CDR. Infrastructure health (VMs / VIPs / media nodes) lives on the Infrastructure / Home / Fleet dashboards."
 }
