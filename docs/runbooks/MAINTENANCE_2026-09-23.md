@@ -20,8 +20,9 @@ Hostnames: services `services` · East FS `fs-media-v2` (FS-1), `east-fs-2` · W
 
 1. Merge the PR into `RCF-V1` and confirm: `git fetch origin && git log --oneline -3 origin/RCF-V1`
 2. **STIR stack pre-flight (hard gate).** This PR sits on top of the STIR stack (#120/#121/#123). This PR changes nothing on the SBCs, but if the SBCs are not yet RUNNING the STIR Kamailio config, tonight's media `git pull` would ship the STIR FreeSWITCH changes ahead of them (the SBC-before-media X-From-Name constraint). On each SBC: `cd /opt/revup && git merge-base --is-ancestor 5a471e5 HEAD && echo PULLED; sudo docker inspect -f '{{.Created}}' voip-kamailio; git log -1 --format=%cI 5a471e5` — the checkout must contain `5a471e5` (last kamailio.cfg change, PR #123) AND the container must have been created after that. If not, run `docs/runbooks/STIR_STACK_DEPLOY_RUNBOOK.md` §2 (SBCs) FIRST.
-3. On `services`, confirm nothing has been rated (else see the plan §6 corrective re-export): `hostname | grep -q '^services$' && sudo -u postgres psql -d voip -c "SELECT count(*) AS rated FROM cdrs WHERE rated_at IS NOT NULL;"` → `0`.
-4. Test phone ready. Test DID `+16174544217` → `+17744045256`.
+3. **Migration inventory (hard gate).** Every migration after first initdb is applied by hand; confirm nothing earlier was missed: `hostname | grep -q '^services$' && cd /opt/revup && sudo git pull && sudo -u postgres psql -d voip -f /opt/revup/scripts/db/check_migrations.sql` — every row except 48/49 must read `applied`. Any other `*** MISSING ***`: apply ONLY the missing ones, in number order, in §2 BEFORE 48 (inserts are `ON CONFLICT`-guarded, creates are `IF NOT EXISTS`). View trap: 40, 44 and 45 each `CREATE OR REPLACE VIEW carrier_trunk_health` — if you (re)apply 40 or 44, re-apply 45 right after, or the view regresses/errors. **except 43** (one-shot jitter backfill — read its header; it needs `-v cutoff=<first new-API deploy time>`; never re-run it). 47 is expected MISSING only if the STIR stack's services step (#121) was never done.
+4. On `services`, confirm nothing has been rated (else see the plan §6 corrective re-export): `hostname | grep -q '^services$' && sudo -u postgres psql -d voip -c "SELECT count(*) AS rated FROM cdrs WHERE rated_at IS NOT NULL;"` → `0`.
+5. Test phone ready. Test DID `+16174544217` → `+17744045256`.
 
 ---
 
