@@ -10,9 +10,14 @@ insanely easy, ELI5 view of a customer's own calls — built from the platform's
    billable seconds, 6-second increments, or exact durations. Every duration a
    customer sees is **whole minutes** computed server-side with
    `services/tenant_redaction.py` (`duration_minutes`, `aggregate_minutes`,
-   `average_minutes`, `TENANT_CALL_MINUTES_SQL`). Totals are rounded ONCE at the
+   `average_minutes`, `call_minutes_sql`/`TALK_MS_SQL`). Totals are rounded ONCE at the
    aggregate (never a sum of per-call ceilings). No answer/end timestamps in any
    report response (start time only), so length can't be re-derived.
+   **Minutes are TALK time** (2026-09-23, `docs/CDR_LEG_SPLIT_CONTRACT.md`
+   "Customer minutes"): `end_time - answer_time`, 0 if unanswered — never
+   `duration_ms` (start→end, includes ring) and never `billable_ms`
+   (`rate_cdr()` may overwrite it with billing increments). Rounding rules are
+   unchanged (per call ≥1 if answered; totals rounded once).
 2. **Tenant scoping** exactly like `/v1/cdrs`: `get_support_read_filter`. Tenants
    are forced to their own `customer_id`; staff (admin/support) must pass
    `customer_id` (422 if missing — a report is always about one customer).
@@ -22,6 +27,9 @@ insanely easy, ELI5 view of a customer's own calls — built from the platform's
    `cdrs` via the `(customer_id, start_time DESC)` index, bounded date ranges
    (max 366 days), no Timescale-only functions (portable `date_trunc(... AT TIME
    ZONE tz)`), LIMITs everywhere.
+5. **One row per call.** Every report scan carries `leg IS DISTINCT FROM 'B'`:
+   carrier B-leg rows (the CDR A/B leg split) are never counted, summed or
+   listed, and there is no `leg` parameter on any report endpoint.
 
 ## Common query params (all endpoints)
 
@@ -126,8 +134,8 @@ These pin down behaviour the contract above left implicit; the shapes are unchan
   than the previous period's `start` (a partially-covered comparison would
   mislead).
 - **`avg_minutes`** = mean of the per-call whole minutes of ANSWERED calls,
-  1 decimal. `minutes` (totals, trend points, number rows) = the answered-ms
-  total of that row/bucket rounded ONCE.
+  1 decimal. `minutes` (totals, trend points, number rows) = the answered
+  TALK-ms total (`end_time - answer_time`) of that row/bucket rounded ONCE.
 - **Trend `date`** is the bucket start (week = Monday, month = the 1st), so the
   first week/month bucket can be earlier than `start`; each bucket only counts
   calls inside `[start, end]`.

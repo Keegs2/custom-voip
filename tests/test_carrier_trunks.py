@@ -1208,6 +1208,8 @@ def test_migration47_b_leg_updates_a_row_and_inserts_nothing(trunks_db, client):
                 "uuid": "ct-stir-b-2",
                 "direction": "outbound",
                 "originating_leg_uuid": "ct-stir-a-2",
+                "cdr_carrier_leg": "true",       # answered carrier leg (contract rule 4)
+                "answer_epoch": "1700000005",
                 "sip_rh_X-Stir-Outcome": "eff=C;mode=gateway-C;identities=1;base=1;div=0;stripped=0",
             },
             "callflow": [{"caller_profile": {
@@ -1240,6 +1242,7 @@ def test_migration47_b_leg_for_unknown_a_leg_is_a_noop(trunks_db, client):
         r = await client.post("/v1/cdrs/ingest", json={
             "variables": {"uuid": "ct-stir-b-orphan", "direction": "outbound",
                           "originating_leg_uuid": "ct-stir-a-does-not-exist",
+                          "cdr_carrier_leg": "true", "answer_epoch": "1700000005",
                           "stir_outcome": "eff=A;mode=reorig"},
         })
         assert r.status_code == 200, r.text

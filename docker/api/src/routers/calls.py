@@ -295,6 +295,7 @@ async def get_call(
                answer_time, end_time, duration_ms, hangup_cause
         FROM cdrs
         WHERE uuid = $1::varchar AND ($2::int IS NULL OR customer_id = $2::int)
+          AND leg IS DISTINCT FROM 'B'
         ORDER BY start_time DESC LIMIT 1
         """,
         call_id, customer_filter
@@ -309,8 +310,10 @@ async def get_call(
             "to": cdr["destination"],
             "start_time": str(cdr["start_time"]),
             "end_time": str(tr.floor_to_minute(cdr["end_time"])),
+            # TALK time (end - answer), contract "Customer minutes".
             "duration_minutes": tr.duration_minutes(
-                cdr["duration_ms"], cdr["answer_time"] is not None),
+                tr.talk_ms(cdr["answer_time"], cdr["end_time"]),
+                cdr["answer_time"] is not None),
             "hangup_cause": cdr["hangup_cause"]
         }
 

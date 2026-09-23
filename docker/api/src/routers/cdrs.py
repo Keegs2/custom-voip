@@ -4,6 +4,7 @@ from typing import Literal, Optional
 from datetime import datetime, timedelta, timezone
 from db import database as db
 from auth.dependencies import get_support_read_filter, require_admin
+import config
 from services import stir_outcome as stir_oc
 from services import tenant_redaction as tr
 import asyncpg
@@ -630,23 +631,35 @@ async def _store_call_attestation(call_uuid: str, customer_id: int, variables: d
 #
 # The cdrs table uses a composite PK (id, start_time) for TimescaleDB
 # hypertable partitioning, so ON CONFLICT on uuid is not available; the
-# `WHERE NOT EXISTS` sub-select is the duplicate guard. Every parameter gets an
+# `WHERE NOT EXISTS` sub-select is the duplicate guard (A-legs AND B-legs: a
+# B row is its own channel, with its own uuid). Every parameter gets an
 # explicit ::type cast so asyncpg never needs to infer PostgreSQL types
 # (AmbiguousParameterError when values are None; PgBouncer transaction mode).
 #
-# DEPLOY-ORDER RESILIENCE (migration 47): `stir_outcome` / `stir_eff_actual`
-# are the LAST entries of BOTH the column list and the value list ($56/$57),
-# so the pre-47 statement is the identical text with those two tails omitted —
-# nothing is renumbered, $1..$55 bind exactly as before. If the API build
-# reaches production before 47 is applied, the full INSERT raises
-# UndefinedColumnError; `_execute_cdr_insert` then retries with the pre-47
-# statement so the billable row still lands (the two STIR columns are the
-# only thing lost) and logs the condition at ERROR, rate-limited. The startup
-# guard (db/schema_check.py) and GET /health/detailed name the remedy.
+# DEPLOY-ORDER RESILIENCE — THREE TIERS, each a STRICT TAIL TRUNCATION of the
+# one before (nothing is ever renumbered; $1..$55 bind exactly as they always
+# have):
+#   full    (60 params) ... stir_outcome, stir_eff_actual ($56/$57, migration
+#                           47), leg, call_id, leg_attempt ($58/$59/$60,
+#                           migration 48)
+#   pre-48  (57 params) — the 48 tail omitted
+#   pre-47  (55 params) — the 47 tail omitted too
+# If the API build reaches production before a migration is applied, the
+# full INSERT raises UndefinedColumnError; `_execute_cdr_insert` then retries
+# with the matching shorter statement so the A-leg (billable) row still lands
+# (only the missing columns are lost) and logs at ERROR, rate-limited. The
+# startup guard (db/schema_check.py) and GET /health/detailed name the
+# remedy. B-leg rows NEVER fall back: a B row without `leg` would be
+# indistinguishable from a call row and double-count — it is dropped instead.
 # ---------------------------------------------------------------------------
-def _cdr_insert_sql(with_stir_outcome: bool) -> str:
+def _cdr_insert_sql(with_stir_outcome: bool, with_call_legs: bool = False) -> str:
+    if with_call_legs and not with_stir_outcome:
+        raise ValueError("tiers are strict tail truncations: 48 requires 47")
     stir_cols = ",\n                stir_outcome, stir_eff_actual" if with_stir_outcome else ""
     stir_vals = ",\n                $56::text,    $57::text" if with_stir_outcome else ""
+    leg_cols = ",\n                leg, call_id, leg_attempt" if with_call_legs else ""
+    leg_vals = (",\n                $58::varchar, $59::varchar, $60::smallint"
+                if with_call_legs else "")
     return f"""
             INSERT INTO cdrs (
                 uuid, customer_id, product_type, trunk_id, direction,
@@ -670,7 +683,7 @@ def _cdr_insert_sql(with_stir_outcome: bool) -> str:
                 sip_user_agent, network_addr, bridge_uuid,
                 sbc_id,
                 origin_customer_id, terminating_customer_id, on_net, on_net_hops,
-                inbound_carrier, inbound_carrier_pop{stir_cols}
+                inbound_carrier, inbound_carrier_pop{stir_cols}{leg_cols}
             )
             SELECT
                 $1::varchar,  $2::int,       $3::varchar,  $4::int,       $5::varchar,
@@ -694,24 +707,30 @@ def _cdr_insert_sql(with_stir_outcome: bool) -> str:
                 $46::varchar, $47::varchar, $48::varchar,
                 $49::varchar,
                 $50::int,     $51::int,      $52::bool,     $53::smallint,
-                $54::varchar, $55::varchar{stir_vals}
+                $54::varchar, $55::varchar{stir_vals}{leg_vals}
             WHERE NOT EXISTS (
                 SELECT 1 FROM cdrs WHERE uuid = $1::varchar
             )
             """
 
 
-_CDR_INSERT_SQL = _cdr_insert_sql(with_stir_outcome=True)          # binds $1..$57
-_CDR_INSERT_SQL_PRE47 = _cdr_insert_sql(with_stir_outcome=False)   # binds $1..$55
+_CDR_INSERT_SQL = _cdr_insert_sql(with_stir_outcome=True, with_call_legs=True)  # $1..$60
+_CDR_INSERT_SQL_PRE48 = _cdr_insert_sql(with_stir_outcome=True)                 # $1..$57
+_CDR_INSERT_SQL_PRE47 = _cdr_insert_sql(with_stir_outcome=False)                # $1..$55
+_CDR_INSERT_PARAM_COUNT = 60
+_CDR_INSERT_PRE48_PARAM_COUNT = 57
 _CDR_INSERT_PRE47_PARAM_COUNT = 55
 _STIR_OUTCOME_COLUMNS = ("stir_outcome", "stir_eff_actual")
+_CALL_LEG_COLUMNS = ("leg", "call_id", "leg_attempt")
 
-# Rate limit for the fallback log line: one ERROR per interval per worker,
-# the rest at DEBUG — a busy zone in the deploy window must not flood logs
-# with one stack per call, but the condition must stay visible.
+# Rate limit for the fallback log lines: one ERROR per interval per worker per
+# tier, the rest at DEBUG — a busy zone in the deploy window must not flood
+# logs with one stack per call, but the condition must stay visible.
 _PRE47_LOG_INTERVAL_SEC = 300.0
 _pre47_last_logged_mono = 0.0
 _pre47_fallback_count = 0
+_pre48_last_logged_mono = 0.0
+_pre48_fallback_count = 0
 
 
 def _is_missing_stir_outcome_column(exc: BaseException) -> bool:
@@ -719,6 +738,14 @@ def _is_missing_stir_outcome_column(exc: BaseException) -> bool:
     columns ('column "stir_outcome" of relation "cdrs" does not exist')."""
     msg = str(exc)
     return any(col in msg for col in _STIR_OUTCOME_COLUMNS)
+
+
+def _is_missing_call_leg_column(exc: BaseException) -> bool:
+    """True iff the UndefinedColumnError names a migration-48 column. Matched
+    in its QUOTED form (`"leg"`) — a bare substring `leg` would also match
+    `leg_attempt` and any future column that merely contains the letters."""
+    msg = str(exc)
+    return any(f'"{col}"' in msg for col in _CALL_LEG_COLUMNS)
 
 
 def _note_pre47_fallback(call_uuid: str, exc: BaseException) -> None:
@@ -729,7 +756,8 @@ def _note_pre47_fallback(call_uuid: str, exc: BaseException) -> None:
         _pre47_last_logged_mono = now
         logger.error(
             "CDR ingest: cdrs is missing the migration-47 columns (%s) — inserting "
-            "uuid=%s WITHOUT stir_outcome/stir_eff_actual (%d fallback(s) so far in "
+            "uuid=%s WITHOUT stir_outcome/stir_eff_actual (and without the "
+            "migration-48 leg/call_id/leg_attempt tail) (%d fallback(s) so far in "
             "this worker). The API build is ahead of the database; apply on the East "
             "primary: sudo -u postgres psql -d voip -f "
             "/opt/revup/docker/postgres/init/47_cdr_stir_outcome.sql "
@@ -741,20 +769,173 @@ def _note_pre47_fallback(call_uuid: str, exc: BaseException) -> None:
                      call_uuid, _pre47_fallback_count)
 
 
-async def _execute_cdr_insert(call_uuid: str, params: tuple) -> str:
-    """Run the CDR INSERT; on a missing migration-47 column retry without it.
+def _note_pre48_fallback(call_uuid: str, exc: BaseException) -> None:
+    global _pre48_last_logged_mono, _pre48_fallback_count
+    _pre48_fallback_count += 1
+    now = time.monotonic()
+    if now - _pre48_last_logged_mono >= _PRE47_LOG_INTERVAL_SEC:
+        _pre48_last_logged_mono = now
+        logger.error(
+            "CDR ingest: cdrs is missing the migration-48 columns (%s) — inserting "
+            "A-leg uuid=%s WITHOUT leg/call_id/leg_attempt (%d fallback(s) so far in "
+            "this worker; carrier B-leg rows are DROPPED until 48 lands). The API "
+            "build is ahead of the database; apply on the East primary: "
+            "sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f "
+            "/opt/revup/docker/postgres/init/48_cdr_call_legs.sql "
+            "(next reminder in %ds)",
+            exc, call_uuid, _pre48_fallback_count, int(_PRE47_LOG_INTERVAL_SEC),
+        )
+    else:
+        logger.debug("CDR ingest: pre-48 fallback INSERT for uuid=%s (%d so far)",
+                     call_uuid, _pre48_fallback_count)
 
-    Any OTHER UndefinedColumnError (or any other error) propagates unchanged
-    to _process_cdr_body's catch-all, exactly as before.
+
+async def _execute_cdr_insert(call_uuid: str, params: tuple, *,
+                              allow_fallback: bool = True) -> str:
+    """Run the 60-param CDR INSERT, falling back tier by tier on a missing
+    migration-48 / migration-47 column (see the block comment above).
+
+    `allow_fallback=False` (B-leg rows) re-raises instead: a B row that lost
+    its `leg` tail would masquerade as a call row. Any OTHER
+    UndefinedColumnError (or any other error) propagates unchanged to
+    _process_cdr_body's catch-all, exactly as before.
     """
     try:
         return await db.execute(_CDR_INSERT_SQL, *params)
+    except asyncpg.exceptions.UndefinedColumnError as exc:
+        if not allow_fallback:
+            raise
+        if _is_missing_stir_outcome_column(exc):
+            # 47 absent -> the 48 tail cannot be kept either (strict tails).
+            _note_pre47_fallback(call_uuid, exc)
+            return await db.execute(_CDR_INSERT_SQL_PRE47,
+                                    *params[:_CDR_INSERT_PRE47_PARAM_COUNT])
+        if not _is_missing_call_leg_column(exc):
+            raise
+        _note_pre48_fallback(call_uuid, exc)
+    try:
+        return await db.execute(_CDR_INSERT_SQL_PRE48,
+                                *params[:_CDR_INSERT_PRE48_PARAM_COUNT])
     except asyncpg.exceptions.UndefinedColumnError as exc:
         if not _is_missing_stir_outcome_column(exc):
             raise
         _note_pre47_fallback(call_uuid, exc)
         return await db.execute(_CDR_INSERT_SQL_PRE47,
                                 *params[:_CDR_INSERT_PRE47_PARAM_COUNT])
+
+
+# ---------------------------------------------------------------------------
+# Leg-split helpers (docs/CDR_LEG_SPLIT_CONTRACT.md)
+# ---------------------------------------------------------------------------
+
+def _var_str(variables: dict, key: str) -> Optional[str]:
+    """Trimmed string channel var, or None when absent/empty."""
+    v = variables.get(key)
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s or None
+
+
+def _var_bool(value) -> bool:
+    return value is not None and str(value).strip().lower() in ("true", "1", "t", "yes")
+
+
+def _leg_timestamp(variables: dict, stem: str) -> Optional[datetime]:
+    """`<stem>_uepoch` (microseconds — exact) else `<stem>_epoch` (seconds).
+
+    FreeSWITCH emits both; the uepoch form keeps the timestamps consistent
+    with the millisecond billmsec/mduration durations (so the export's
+    ring_ms and the customer talk time computed from timestamps are not
+    second-floored). "0"/absent/garbage uepoch falls back to the epoch form,
+    which keeps its own "0 = not answered" semantics.
+    """
+    u = _safe_int(variables.get(f"{stem}_uepoch"))
+    if u is not None and u > 0:
+        try:
+            return (datetime.fromtimestamp(u // 1_000_000, tz=timezone.utc)
+                    + timedelta(microseconds=u % 1_000_000))
+        except (OverflowError, OSError, ValueError):
+            pass
+    return _epoch_to_timestamp(variables.get(f"{stem}_epoch"))
+
+
+def _ms_duration(variables: dict, ms_key: str, sec_key: str) -> int:
+    """Millisecond duration from `ms_key` (billmsec / mduration); falls back
+    to whole seconds x 1000 from `sec_key` when the ms var is absent or
+    unparseable. Clamped to the INT column range."""
+    ms = _safe_int(variables.get(ms_key))
+    if ms is None:
+        ms = _safe_int(variables.get(sec_key), default=0) * 1000
+    return min(max(int(ms), 0), _INT32_MAX)
+
+
+def _b_leg_row_context(variables: dict, own_uuid: str,
+                       topo_a_uuid: str) -> tuple[Optional[dict], Optional[str]]:
+    """Attribution for a carrier B-leg ROW, taken ONLY from the `cdr_*`
+    dial-string vars (contract "FreeSWITCH -> ingest"). Never from the A-leg
+    ingest defaults (`direction='inbound'`, `product_type='trunk'`,
+    `customer_id=0`) — that is exactly the double-billing failure mode.
+
+    Returns (ctx, None) or (None, reason-to-drop).
+    """
+    call_id = _var_str(variables, "cdr_call_id")
+    customer_id = _safe_int(_var_str(variables, "cdr_customer_id"))
+    product_type = _var_str(variables, "cdr_product_type")
+    missing = [name for name, val in (("cdr_call_id", call_id),
+                                      ("cdr_customer_id", customer_id),
+                                      ("cdr_product_type", product_type))
+               if val is None]
+    if missing:
+        return None, "missing " + ",".join(missing)
+    if call_id == str(own_uuid):
+        return None, "cdr_call_id equals the B-leg's own uuid"
+    if topo_a_uuid and topo_a_uuid != call_id:
+        logger.warning(
+            "CDR ingest: B-leg uuid=%s cdr_call_id=%s disagrees with its "
+            "originator uuid=%s — using cdr_call_id (contract)",
+            own_uuid, call_id, topo_a_uuid)
+    direction = _var_str(variables, "cdr_direction")
+    if direction is not None and direction != "outbound":
+        logger.warning("CDR ingest: B-leg uuid=%s cdr_direction=%r — a carrier "
+                       "B-leg is always stored as 'outbound'", own_uuid, direction)
+    attempt = _safe_int(_var_str(variables, "cdr_leg_attempt"))
+    if attempt is not None and not (1 <= attempt <= 32767):
+        attempt = None
+    on_net_raw = _var_str(variables, "cdr_on_net")
+    inbound_carrier = _var_str(variables, "cdr_inbound_carrier")
+    inbound_carrier_pop = _var_str(variables, "cdr_inbound_carrier_pop")
+    sbc_id = _var_str(variables, "cdr_sbc_id")
+    return {
+        "call_id": call_id[:64],
+        "leg_attempt": attempt,
+        "direction": "outbound",
+        "customer_id": customer_id,
+        "product_type": product_type[:10],
+        "trunk_id": _safe_int(_var_str(variables, "cdr_trunk_id")),
+        "origin_customer_id": _safe_int(_var_str(variables, "cdr_origin_customer_id")),
+        "terminating_customer_id": _safe_int(
+            _var_str(variables, "cdr_terminating_customer_id")),
+        "on_net": None if on_net_raw is None else _var_bool(on_net_raw),
+        "on_net_hops": _safe_int(_var_str(variables, "cdr_on_net_hops")),
+        "inbound_carrier": inbound_carrier[:20] if inbound_carrier else None,
+        "inbound_carrier_pop": inbound_carrier_pop[:50] if inbound_carrier_pop else None,
+        "sbc_id": sbc_id[:30] if sbc_id else None,
+    }, None
+
+
+async def _b_leg_stir_update(a_uuid: str, b_uuid: str, variables: dict,
+                             carrier_leg: bool, answered: bool) -> dict:
+    """STIR outcome UPDATE onto the A-leg — ONLY from an ANSWERED CARRIER
+    B-leg (contract rule 4). A failed failover attempt must never overwrite
+    the winner's outcome (last-POST-wins regression, plan §4.7 trap 1)."""
+    if not carrier_leg:
+        return {"status": "b_leg", "detail": "not a carrier leg; no row",
+                "uuid": b_uuid, "a_leg_uuid": a_uuid or None}
+    if not answered:
+        return {"status": "b_leg", "detail": "unanswered carrier leg; no stir update",
+                "uuid": b_uuid, "a_leg_uuid": a_uuid or None}
+    return await _apply_b_leg_stir_outcome(a_uuid, b_uuid, variables)
 
 
 async def _process_cdr_body(body: dict) -> dict:
@@ -798,8 +979,42 @@ async def _process_cdr_body(body: dict) -> dict:
         # `call_uuid` is passed so a self-referential classification falls back
         # to the INSERT path rather than dropping the row.
         a_leg_uuid = stir_oc.b_leg_a_uuid(body, own_uuid=str(call_uuid))
+
+        # ---- A/B leg split (docs/CDR_LEG_SPLIT_CONTRACT.md) ----------------
+        # The split trigger is the EXPLICIT `cdr_leg=B` + `cdr_carrier_leg=true`
+        # pair that FreeSWITCH sets per-leg on carrier dial strings only —
+        # never inferred from leg topology. A B row additionally requires the
+        # topology to agree (an originator profile / originating_leg_uuid):
+        # a body FreeSWITCH itself calls an A-leg but that carries cdr_leg=B
+        # (an `export` without `nolocal:` leaking the var onto the A-leg) is
+        # kept as the A-leg call row — the failure direction is always "keep
+        # the billable call row".
+        cdr_leg = (_var_str(variables, "cdr_leg") or "").upper()
+        carrier_leg = _var_bool(variables.get("cdr_carrier_leg"))
+        b_ctx = None
         if a_leg_uuid is not None:
-            return await _apply_b_leg_stir_outcome(a_leg_uuid, str(call_uuid), variables)
+            b_answered = _leg_timestamp(variables, "answer") is not None
+            if not (cdr_leg == "B" and carrier_leg and config.cdr_b_leg_rows_enabled()):
+                # Contract rule 3: no row (non-carrier / flag off / pre-split FS).
+                return await _b_leg_stir_update(a_leg_uuid, str(call_uuid), variables,
+                                                carrier_leg, b_answered)
+            b_ctx, drop_reason = _b_leg_row_context(variables, str(call_uuid), a_leg_uuid)
+            if b_ctx is None:
+                logger.error(
+                    "CDR ingest: carrier B-leg uuid=%s (A-leg %s) DROPPED — %s. "
+                    "A B row is never built from ingest defaults; fix the FS "
+                    "cdr_* dial-string vars", call_uuid, a_leg_uuid or "?", drop_reason)
+                stir = await _b_leg_stir_update(a_leg_uuid, str(call_uuid), variables,
+                                                carrier_leg, b_answered)
+                return {"status": "b_leg", "detail": f"dropped: {drop_reason}",
+                        "uuid": str(call_uuid), "a_leg_uuid": a_leg_uuid or None,
+                        "stir": stir.get("detail")}
+        elif cdr_leg == "B":
+            logger.error(
+                "CDR ingest: uuid=%s carries cdr_leg=B but FreeSWITCH reports it as "
+                "an A-leg (no originator) — treating it as the A-leg call row. The "
+                "cdr_* vars are leaking onto the A-leg (export without nolocal:?)",
+                call_uuid)
 
         direction = str(variables.get("direction", "inbound"))
         product_type = str(variables.get("product_type", "trunk"))
@@ -833,8 +1048,8 @@ async def _process_cdr_body(body: dict) -> dict:
             logger.warning("CDR ingest: missing destination_number for uuid=%s", call_uuid)
             return {"status": "error", "detail": "missing destination"}
 
-        start_time = _epoch_to_timestamp(variables.get("start_epoch"))
-        end_time = _epoch_to_timestamp(variables.get("end_epoch"))
+        start_time = _leg_timestamp(variables, "start")
+        end_time = _leg_timestamp(variables, "end")
         if not start_time or not end_time:
             logger.warning(
                 "CDR ingest: invalid start/end epoch for uuid=%s "
@@ -882,13 +1097,14 @@ async def _process_cdr_body(body: dict) -> dict:
                 )
         caller_id = _clean_caller_id_number(caller_id)
 
-        answer_time = _epoch_to_timestamp(variables.get("answer_epoch"))
+        answer_time = _leg_timestamp(variables, "answer")
 
-        duration_sec = _safe_int(variables.get("duration"), default=0)
-        duration_ms = int(duration_sec * 1000)
-
-        billsec = _safe_int(variables.get("billsec"), default=0)
-        billable_ms = int(billsec * 1000)
+        # Millisecond precision (plan §1.2): FreeSWITCH posts `mduration` /
+        # `billmsec` alongside the second-floored `duration` / `billsec`.
+        # Sending true ms means exactly ONE rounding, done by the rate plan
+        # owner. Falls back to seconds x 1000 when the ms vars are absent.
+        duration_ms = _ms_duration(variables, "mduration", "duration")
+        billable_ms = _ms_duration(variables, "billmsec", "billsec")
 
         hangup_cause = variables.get("hangup_cause")
         if hangup_cause is not None:
@@ -1022,6 +1238,28 @@ async def _process_cdr_body(body: dict) -> dict:
         # badge prefers this when present. See services/stir_outcome.py.
         stir_outcome_raw, stir_eff_actual = stir_oc.extract_outcome(variables)
 
+        # ---- Leg columns (migration 48) ------------------------------------
+        # A-leg: leg='A', call_id = own uuid, leg_attempt NULL.
+        # Carrier B-leg: every call-level/attribution value comes from the
+        # cdr_* vars (b_ctx) — the B channel's own direction/customer_id/...
+        # (or their ingest defaults) are never used. Timing, durations,
+        # destination, caller id, hangup/SIP code, quality, codecs and the
+        # STIR outcome stay the B channel's OWN (they describe this leg).
+        leg, call_id, leg_attempt = "A", str(call_uuid)[:64], None
+        if b_ctx is not None:
+            leg, call_id, leg_attempt = "B", b_ctx["call_id"], b_ctx["leg_attempt"]
+            direction = b_ctx["direction"]
+            product_type = b_ctx["product_type"]
+            customer_id = b_ctx["customer_id"]
+            trunk_id = b_ctx["trunk_id"]
+            origin_customer_id = b_ctx["origin_customer_id"]
+            terminating_customer_id = b_ctx["terminating_customer_id"]
+            on_net = b_ctx["on_net"]
+            on_net_hops = b_ctx["on_net_hops"]
+            inbound_carrier = b_ctx["inbound_carrier"]
+            inbound_carrier_pop = b_ctx["inbound_carrier_pop"]
+            sbc_id = b_ctx["sbc_id"]
+
         # ---- Logging: summarize what we extracted -------------------------
         extracted = []
         dropped = []
@@ -1057,6 +1295,7 @@ async def _process_cdr_body(body: dict) -> dict:
             "freeswitch_node": freeswitch_node,
             "stir_outcome": stir_outcome_raw,
             "stir_eff_actual": stir_eff_actual,
+            "leg": leg, "call_id": call_id, "leg_attempt": leg_attempt,
         }
         for fname, fval in field_checks.items():
             if fval is not None:
@@ -1134,14 +1373,24 @@ async def _process_cdr_body(body: dict) -> dict:
             # ---- migration 47 — MUST stay the last two (see _cdr_insert_sql)
             stir_outcome_raw,       # $56 stir_outcome (str | None) — raw X-Stir-Outcome
             stir_eff_actual,        # $57 stir_eff_actual (str | None) — its eff= token
+            # ---- migration 48 — MUST stay the last three (see _cdr_insert_sql)
+            leg,                    # $58 leg ('A' | 'B')
+            call_id,                # $59 call_id (A-leg uuid)
+            leg_attempt,            # $60 leg_attempt (int | None; B-legs only)
         )
+
+        if b_ctx is not None:
+            return await _insert_b_leg_row(str(call_uuid), params, variables,
+                                           carrier_leg, answer_time is not None)
+
         result = await _execute_cdr_insert(str(call_uuid), params)
 
         # ---- STIR/SHAKEN attestation (companion table, failure-isolated) --
-        # Derive + UPSERT the attestation row from the raw stir_* channel vars.
-        # Runs for BOTH new and duplicate CDRs (the UPSERT is idempotent, so a
-        # re-ingest just refreshes it). Never raises, never affects the CDR
-        # result or the ingest 200 contract — errors are logged internally.
+        # A-LEG ONLY (a B row would UPSERT a second attestation per call and
+        # double GET /v1/stir/stats). Derive + UPSERT the attestation row from
+        # the raw stir_* channel vars. Runs for BOTH new and duplicate CDRs
+        # (the UPSERT is idempotent, so a re-ingest just refreshes it). Never
+        # raises, never affects the CDR result or the ingest 200 contract.
         await _store_call_attestation(str(call_uuid), int(customer_id), variables)
 
         if result and "INSERT 0 0" in result:
@@ -1149,9 +1398,9 @@ async def _process_cdr_body(body: dict) -> dict:
             return {"status": "duplicate", "uuid": call_uuid}
 
         logger.info(
-            "CDR ingest: inserted uuid=%s customer=%s dest=%s duration=%ds "
+            "CDR ingest: inserted uuid=%s customer=%s dest=%s duration=%dms "
             "hangup=%s sip_code=%s carrier=%s mos=%s",
-            call_uuid, customer_id, destination, duration_sec,
+            call_uuid, customer_id, destination, duration_ms,
             hangup_cause, sip_code, carrier_used, mos,
         )
         return {"status": "ok", "uuid": call_uuid}
@@ -1159,6 +1408,40 @@ async def _process_cdr_body(body: dict) -> dict:
     except Exception:
         logger.exception("CDR ingest: unexpected error processing CDR")
         return {"status": "error", "detail": "internal processing error"}
+
+
+async def _insert_b_leg_row(b_uuid: str, params: tuple, variables: dict,
+                            carrier_leg: bool, answered: bool) -> dict:
+    """INSERT a carrier B-leg row (leg='B'), then — only if this leg ANSWERED
+    — apply its STIR outcome to the A-leg. No call_attestations write.
+
+    NO tiered fallback: without migration 48 the row could not carry
+    `leg='B'` and would double-count as a call, so it is dropped (logged).
+    Dedup is the same `NOT EXISTS (uuid)` guard as A-legs (the B channel has
+    its own uuid). Status stays `b_leg` so /ingest/bulk tallies it apart.
+    """
+    a_uuid = params[58]
+    try:
+        result = await _execute_cdr_insert(b_uuid, params, allow_fallback=False)
+    except asyncpg.exceptions.UndefinedColumnError as exc:
+        logger.error(
+            "CDR ingest: carrier B-leg uuid=%s (A-leg %s) DROPPED — cdrs lacks a "
+            "migration-47/48 column (%s). Apply 48_cdr_call_legs.sql on the East "
+            "primary; a B row is never inserted without its leg column",
+            b_uuid, a_uuid, exc)
+        return {"status": "b_leg", "detail": "dropped: schema behind (migration 48)",
+                "uuid": b_uuid, "a_leg_uuid": a_uuid}
+    stir = await _b_leg_stir_update(a_uuid, b_uuid, variables, carrier_leg, answered)
+    if result and "INSERT 0 0" in result:
+        logger.info("CDR ingest: duplicate B-leg skipped uuid=%s", b_uuid)
+        detail = "duplicate"
+    else:
+        logger.info("CDR ingest: inserted B-leg uuid=%s call_id=%s attempt=%s "
+                    "customer=%s answered=%s", b_uuid, a_uuid, params[59],
+                    params[1], answered)
+        detail = "inserted"
+    return {"status": "b_leg", "detail": detail, "uuid": b_uuid,
+            "a_leg_uuid": a_uuid, "leg": "B", "stir": stir.get("detail")}
 
 
 @router.post("/ingest")
@@ -1319,6 +1602,28 @@ async def ingest_cdr_bulk(request: Request):
 # with a 422 and documents the enum in OpenAPI.
 Zone = Literal["east", "west", "central"]
 
+# Staff-only `leg` view (docs/CDR_LEG_SPLIT_CONTRACT.md "API read-side param"):
+#   calls (default) — one row per call: `leg IS DISTINCT FROM 'B'` (A-legs +
+#                     every legacy NULL row)
+#   all             — A rows and carrier B rows
+#   b               — carrier B rows only
+# Tenants are ALWAYS `calls` (the param is ignored for them).
+LegView = Literal["calls", "all", "b"]
+
+#: The canonical one-row-per-call predicate. Every call-counting surface uses
+#: exactly this text (grep for it).
+ONE_ROW_PER_CALL_SQL = "leg IS DISTINCT FROM 'B'"
+
+_LEG_VIEW_SQL = {
+    "calls": f" AND {ONE_ROW_PER_CALL_SQL}",
+    "all": "",
+    "b": " AND leg = 'B'",
+}
+
+#: Hard cap on rows returned by the staff "all legs of this call" lookup
+#: (`call_id=`): one call has 1 A row + at most a handful of carrier attempts.
+CALL_ID_LOOKUP_LIMIT = 50
+
 # ---------------------------------------------------------------------------
 # STIR badge — ONE serializer for every CDR-shaped response.
 #
@@ -1332,6 +1637,11 @@ Zone = Literal["east", "west", "central"]
 # Scalar sub-select (NOT a join): the CDR filter builder emits unqualified
 # column names (customer_id, ...) that would become ambiguous under a JOIN
 # with call_attestations, which also has customer_id.
+#: Staff-only leg columns (migration 48). `call_id` is the canonical call
+#: identity COALESCE(call_id, uuid) so legacy rows carry their own uuid.
+#: NOT on the tenant allowlist (tenants never see B rows).
+_STAFF_LEG_COLUMNS_SQL = "leg, COALESCE(call_id, uuid) AS call_id, leg_attempt"
+
 _STIR_INTENT_SUBSELECT = (
     "(SELECT ca.signed_attestation FROM call_attestations ca "
     "WHERE ca.call_id = cdrs.uuid) AS stir_attestation"
@@ -1400,6 +1710,8 @@ def _build_cdr_filters(
     sbc_id: Optional[str],
     zone: Optional[str],
     rated_only: bool,
+    leg: str = "calls",
+    call_id: Optional[str] = None,
 ) -> tuple[str, list]:
     """Build the WHERE clause + bind values shared by /v1/cdrs and /summary.
 
@@ -1409,10 +1721,26 @@ def _build_cdr_filters(
 
     Both time bounds are INCLUSIVE on both endpoints:
     `start_time >= start_date AND start_time <= end_date`.
+
+    `call_id` (STAFF ONLY — callers pass None for tenants) REPLACES the time
+    window: every leg of one call is returned regardless of the UI's date
+    range. It is matched as `(call_id = $1 OR uuid = $1)` rather than
+    `COALESCE(call_id, uuid) = $1` so the planner can BitmapOr
+    idx_cdrs_call_id (migration 49) with idx_cdrs_uuid instead of scanning
+    every chunk. Equivalent for every A-leg and legacy row (call_id is NULL
+    or == uuid); for a B-leg uuid it additionally returns that one B row,
+    which is the useful answer. Callers cap the page at CALL_ID_LOOKUP_LIMIT.
+
+    `leg` applies the LegView predicate (default one-row-per-call).
     """
-    sql = "WHERE start_time >= $1 AND start_time <= $2"
-    values: list = [start_date, end_date]
-    idx = 3
+    if call_id:
+        sql = "WHERE (call_id = $1::varchar OR uuid = $1::varchar)"
+        values: list = [call_id]
+        idx = 2
+    else:
+        sql = "WHERE start_time >= $1 AND start_time <= $2"
+        values = [start_date, end_date]
+        idx = 3
 
     # `is not None`, NOT truthiness: customer_id=0 is the ingest default for
     # unmatched calls. The old `if customer_id:` silently DROPPED the filter
@@ -1463,6 +1791,10 @@ def _build_cdr_filters(
     if rated_only:
         sql += " AND rated_at IS NOT NULL"
 
+    # Fixed fragment chosen from a closed map (Literal-validated upstream);
+    # an unknown value falls back to the safe one-row-per-call view.
+    sql += _LEG_VIEW_SQL.get(leg, _LEG_VIEW_SQL["calls"])
+
     return sql, values
 
 
@@ -1478,6 +1810,8 @@ async def query_cdrs(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     rated_only: bool = False,
+    leg: LegView = "calls",
+    call_id: Optional[str] = Query(default=None, min_length=1, max_length=64),
     limit: int = Query(default=100, ge=0, le=1000),
     offset: int = Query(default=0, ge=0),
     customer_filter: int | None = Depends(get_support_read_filter),
@@ -1513,6 +1847,9 @@ async def query_cdrs(
     if is_tenant:
         customer_id = customer_filter
         rated_only, sbc_id, zone = False, None, None
+        leg, call_id = "calls", None       # tenants: always one row per call
+    if call_id:
+        limit = min(limit, CALL_ID_LOOKUP_LIMIT)
 
     # Pin naive datetimes to UTC, then default to the last 24 hours when no
     # explicit range is given (the UI always sends one; this is a safety net).
@@ -1534,6 +1871,8 @@ async def query_cdrs(
         sbc_id=sbc_id,
         zone=zone,
         rated_only=rated_only,
+        leg=leg,
+        call_id=call_id,
     )
 
     # Real-pagination total: COUNT(*) over the EXACT same where clause and
@@ -1581,6 +1920,7 @@ async def query_cdrs(
                inbound_carrier, inbound_carrier_pop, on_net,
                freeswitch_node,
                stir_outcome, stir_eff_actual,
+               {_STAFF_LEG_COLUMNS_SQL},
                {_STIR_INTENT_SUBSELECT}
         FROM cdrs
         {where_sql}
@@ -1612,6 +1952,8 @@ async def cdr_summary(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     rated_only: bool = False,
+    leg: LegView = "calls",
+    call_id: Optional[str] = Query(default=None, min_length=1, max_length=64),
     group_by: Literal["day", "hour", "destination"] = "day",
     customer_filter: int | None = Depends(get_support_read_filter),
 ):
@@ -1643,6 +1985,7 @@ async def cdr_summary(
     if is_tenant:
         customer_id = customer_filter
         rated_only, sbc_id, zone = False, None, None
+        leg, call_id = "calls", None       # tenants: always one row per call
 
     # Pin naive datetimes to UTC, then apply the SAME 24h default window as
     # GET /v1/cdrs (see CHANGED note in the docstring).
@@ -1664,6 +2007,8 @@ async def cdr_summary(
         sbc_id=sbc_id,
         zone=zone,
         rated_only=rated_only,
+        leg=leg,
+        call_id=call_id,
     )
 
     if is_tenant:
@@ -1719,10 +2064,9 @@ async def cdr_summary(
 
 # Answered-call talk-time total (ms) — the ONLY duration input a tenant
 # summary reads; converted to whole minutes in tr.redact_summary_row().
-_TENANT_ANSWERED_MS_SQL = (
-    "COALESCE(SUM(duration_ms) FILTER (WHERE answer_time IS NOT NULL "
-    "AND duration_ms > 0), 0)::bigint AS answered_duration_ms"
-)
+# TALK time (end_time - answer_time, contract "Customer minutes") — never
+# duration_ms (includes ring) nor billable_ms (rate_cdr() may overwrite it).
+_TENANT_ANSWERED_MS_SQL = f"{tr.TENANT_ANSWERED_TALK_MS_SQL} AS answered_duration_ms"
 
 
 async def _tenant_summary(where_sql: str, values: list, group_by: str) -> dict:
@@ -1800,6 +2144,7 @@ async def get_cdr(
             SELECT {tr.tenant_cdr_select_sql()},
                    {_STIR_INTENT_SUBSELECT}
             FROM cdrs WHERE uuid = $1 AND customer_id = $2
+              AND {ONE_ROW_PER_CALL_SQL}
             """,
             cdr_uuid, customer_filter,
         )
@@ -1830,6 +2175,7 @@ async def get_cdr(
                network_addr, bridge_uuid, sbc_id,
                inbound_carrier, inbound_carrier_pop, on_net,
                stir_outcome, stir_eff_actual,
+               {_STAFF_LEG_COLUMNS_SQL},
                {_STIR_INTENT_SUBSELECT}
         FROM cdrs WHERE uuid = $1
     """

@@ -7,6 +7,22 @@ export type CallDirection = 'inbound' | 'outbound';
 export type CdrZone = 'east' | 'west' | 'central';
 
 /**
+ * CDR leg (migration 48 — docs/CDR_LEG_SPLIT_CONTRACT.md). 'A' = the call
+ * row (one per call, unchanged set); 'B' = one row per CARRIER bridge
+ * attempt. Pre-migration rows carry NULL.
+ */
+export type CdrLeg = 'A' | 'B';
+
+/**
+ * Staff-only `leg` read param on GET /cdrs + /cdrs/summary:
+ *  - 'calls' (server default) — one row per call (`leg IS DISTINCT FROM 'B'`)
+ *  - 'all'   — A-leg + every carrier B-leg row
+ *  - 'b'     — carrier B-leg rows only
+ * Tenants: the API always applies 'calls' (param ignored).
+ */
+export type CdrRowsMode = 'calls' | 'all' | 'b';
+
+/**
  * CDR row. Extends the shared STIR badge payload (`stir_attestation`,
  * `stir_eff_actual`, `stir_outcome`, `stir_badge`, `stir_badge_source`) —
  * present on GET /cdrs and GET /cdrs/{uuid} since migration 47.
@@ -104,6 +120,14 @@ export interface Cdr extends StirBadgeFields {
   sip_to_user?: string | null;
   sip_user_agent?: string | null;
   network_addr?: string | null;
+
+  // A/B leg split (migration 48). Staff rows only — absent on tenant rows.
+  /** 'A' call row, 'B' carrier bridge attempt, NULL = pre-split legacy row. */
+  leg?: CdrLeg | null;
+  /** Call identity: the A-leg uuid (== own uuid on A rows; NULL on legacy). */
+  call_id?: string | null;
+  /** 1-based carrier bridge attempt number (B rows only; NULL otherwise). */
+  leg_attempt?: number | null;
 }
 
 /**
@@ -112,8 +136,8 @@ export interface Cdr extends StirBadgeFields {
  *
  * PINNED 1:1 to the router's declared params (routers/cdrs.py query_cdrs):
  * customer_id, trunk_id, product_type, direction, destination (prefix),
- * sbc_id, zone, start_date, end_date, rated_only, limit, offset — and
- * NOTHING else. FastAPI silently drops undeclared query params (the old
+ * sbc_id, zone, start_date, end_date, rated_only, leg + call_id (staff),
+ * limit, offset — and NOTHING else. FastAPI silently drops undeclared query params (the old
  * `start_from`/`start_to` and `caller_id`/`sort_by`/`sort_dir` were exactly
  * such dead filters), so any param added here MUST exist on the router.
  */
@@ -134,6 +158,11 @@ export interface CdrSearchParams {
   sbc_id?: string;
   /** Only CDRs that have been rated (rated_at IS NOT NULL). */
   rated_only?: boolean;
+  /** Staff-only row model (see CdrRowsMode). Omit = server default 'calls'. */
+  leg?: CdrRowsMode;
+  /** Staff-only: every row of ONE call — the A-leg uuid plus its carrier
+      B rows (pair with leg='all'). Omit = no call filter. */
+  call_id?: string;
   limit?: number;
   offset?: number;
 }

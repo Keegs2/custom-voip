@@ -4,10 +4,14 @@ Contract: docs/CUSTOMER_REPORTING_DESIGN.md (implemented exactly). An ELI5
 view of ONE customer's own calls, built from `cdrs`.
 
 Hard rules (see the design doc + services/tenant_redaction.py):
-  * Minutes only. Per-call length = TENANT_CALL_MINUTES_SQL; totals round the
-    answered-ms total ONCE (`aggregate_minutes`); averages are the mean of
-    per-call whole minutes (`average_minutes`). No seconds, no costs, no
-    answer/end timestamps anywhere in a response (start time only).
+  * Minutes only, from TALK time (`end_time - answer_time`, contract
+    "Customer minutes" — never duration_ms, which includes ring, nor
+    billable_ms). Per-call length = tr.call_minutes_sql('talk_ms'); totals
+    round the answered talk-ms total ONCE (`aggregate_minutes`); averages are
+    the mean of per-call whole minutes (`average_minutes`). No seconds, no
+    costs, no answer/end timestamps anywhere in a response (start time only).
+  * One row per call: every scan carries `leg IS DISTINCT FROM 'B'` (carrier
+    B-leg rows never reach a report; there is no leg param).
   * Scoping: `get_support_read_filter`. Tenants are forced to their own
     customer_id (any `customer_id` param ignored); staff (admin/support) must
     pass `customer_id` (422 otherwise).
@@ -127,12 +131,14 @@ sel AS (
 _BASE_CTE = f"""
 base AS (
     SELECT c.id, c.uuid, c.start_time, c.answer_time, c.direction,
-           c.caller_id, c.destination, c.hangup_cause, c.mos, c.duration_ms,
+           c.caller_id, c.destination, c.hangup_cause, c.mos,
+           {tr.TALK_MS_SQL} AS talk_ms,
            {_NUMBER_SQL} AS number
       FROM cdrs c
      WHERE c.customer_id = $1::int
        AND c.start_time >= {_LO_SQL}
        AND c.start_time <  {_HI_SQL}
+       AND c.leg IS DISTINCT FROM 'B'
 ),
 f AS (
     SELECT * FROM base
@@ -142,8 +148,8 @@ f AS (
 _WITH = f"WITH {_OWNED_CTES},{_SEL_CTE},{_BASE_CTE}"
 
 _ANSWERED = "answer_time IS NOT NULL"
-_ANSWERED_MS = f"duration_ms > 0 AND {_ANSWERED}"
-_MINUTES = tr.TENANT_CALL_MINUTES_SQL
+_ANSWERED_MS = f"talk_ms > 0 AND {_ANSWERED}"
+_MINUTES = tr.call_minutes_sql("talk_ms")
 
 
 # ---------------------------------------------------------------------------
@@ -230,16 +236,17 @@ SELECT
     count(*) FILTER (WHERE cur)                                      AS calls,
     count(*) FILTER (WHERE cur AND direction = 'outbound')           AS outbound,
     count(*) FILTER (WHERE cur AND {_ANSWERED})                      AS answered,
-    COALESCE(sum(duration_ms) FILTER (WHERE cur AND {_ANSWERED_MS}), 0)::bigint AS answered_ms,
+    COALESCE(sum(talk_ms) FILTER (WHERE cur AND {_ANSWERED_MS}), 0)::bigint AS answered_ms,
     avg({_MINUTES}) FILTER (WHERE cur AND {_ANSWERED})               AS avg_call_minutes,
     count(*) FILTER (WHERE cur AND mos IS NOT NULL)                  AS rated,
     avg(mos) FILTER (WHERE cur AND mos IS NOT NULL)                  AS avg_mos,
     count(*) FILTER (WHERE cur AND mos >= 3.6)                       AS good_or_better,
     count(*) FILTER (WHERE NOT cur)                                  AS prev_calls,
     count(*) FILTER (WHERE NOT cur AND {_ANSWERED})                  AS prev_answered,
-    COALESCE(sum(duration_ms) FILTER (WHERE NOT cur AND {_ANSWERED_MS}), 0)::bigint AS prev_answered_ms,
+    COALESCE(sum(talk_ms) FILTER (WHERE NOT cur AND {_ANSWERED_MS}), 0)::bigint AS prev_answered_ms,
     (SELECT (min(c2.start_time) AT TIME ZONE $4::text)::date
        FROM cdrs c2 WHERE c2.customer_id = $1::int
+        AND c2.leg IS DISTINCT FROM 'B'
         -- Bounded so Timescale prunes chunks instead of scanning every
         -- (compressed) chunk; 400d covers the planned 13-month retention.
         AND c2.start_time >= now() - interval '400 days')            AS data_from
@@ -342,7 +349,7 @@ b AS (
     SELECT date_trunc($6::text, start_time AT TIME ZONE $4::text)::date AS d,
            count(*) AS calls,
            count(*) FILTER (WHERE {_ANSWERED}) AS answered,
-           COALESCE(sum(duration_ms) FILTER (WHERE {_ANSWERED_MS}), 0)::bigint AS answered_ms
+           COALESCE(sum(talk_ms) FILTER (WHERE {_ANSWERED_MS}), 0)::bigint AS answered_ms
       FROM f
      GROUP BY 1
 )
@@ -385,7 +392,7 @@ st AS (
     SELECT number,
            count(*) AS calls,
            count(*) FILTER (WHERE {_ANSWERED}) AS answered,
-           COALESCE(sum(duration_ms) FILTER (WHERE {_ANSWERED_MS}), 0)::bigint AS answered_ms,
+           COALESCE(sum(talk_ms) FILTER (WHERE {_ANSWERED_MS}), 0)::bigint AS answered_ms,
            avg(mos) FILTER (WHERE mos IS NOT NULL) AS avg_mos,
            count(*) FILTER (WHERE mos IS NOT NULL) AS rated
       FROM base
@@ -446,8 +453,8 @@ _DIRECTION_SQL = {"all": "", "inbound": " AND direction IS DISTINCT FROM 'outbou
                   "outbound": " AND direction = 'outbound'"}
 
 #: Per-call projection. `hangup_cause` is read ONLY to choose the plain-English
-#: missed reason and is dropped by _shape_call(); duration_ms never leaves SQL
-#: (length is the whole-minute TENANT_CALL_MINUTES_SQL).
+#: missed reason and is dropped by _shape_call(); talk_ms never leaves SQL
+#: (length is the whole-minute call_minutes_sql('talk_ms')).
 _CALL_COLS = f"""
     id, uuid, direction, caller_id, destination, number, hangup_cause, mos,
     ({_ANSWERED}) AS answered,

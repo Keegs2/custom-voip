@@ -15,6 +15,16 @@ API_CALLING_ENABLED
     Mirrors the FreeSWITCH env var of the same name and the UI constant
     ``docker/ui/app/src/config/features.ts::API_CALLING_ENABLED`` — to restore
     the product, flip all three.
+
+CDR_B_LEG_ROWS
+    CDR A/B leg split (docs/CDR_LEG_SPLIT_CONTRACT.md). When ON, a carrier
+    B-leg CDR (``cdr_leg=B`` + ``cdr_carrier_leg=true``) posted by
+    mod_json_cdr (``log-b-leg=true``, the per-zone FS cutover switch) is
+    INSERTed as its own ``leg='B'`` row. ON unless the env var is exactly
+    ``false`` (case-insensitive, surrounding whitespace ignored) — owner
+    decision 2026-09-23: the split ships ON. OFF = B-legs never insert (they
+    only feed the answered-carrier-leg STIR outcome UPDATE), i.e. the
+    pre-split behavior.
 """
 import os
 
@@ -39,3 +49,8 @@ def require_api_calling_enabled() -> None:
     """
     if not api_calling_enabled():
         raise HTTPException(status_code=404, detail="Not Found")
+
+
+def cdr_b_leg_rows_enabled() -> bool:
+    """True unless ``CDR_B_LEG_ROWS`` is exactly "false" (trimmed, any case)."""
+    return os.getenv("CDR_B_LEG_ROWS", "").strip().lower() != "false"

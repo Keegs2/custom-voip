@@ -1002,6 +1002,101 @@ local function normalize_dest(row)
 end
 
 -- ================================================================
+-- CDR A/B leg split: per-leg B-channel CDR variables
+-- ================================================================
+-- Contract: docs/CDR_LEG_SPLIT_CONTRACT.md. With mod_json_cdr log-b-leg=true
+-- every originated B channel POSTs its own CDR. The ingest writes a B row
+-- ONLY when the B channel carries cdr_leg=B AND cdr_carrier_leg=true, and
+-- builds that row from these cdr_* vars (never from its A-leg defaults —
+-- direction='inbound'/customer_id=0 would double-bill). So this fragment is
+-- appended ONLY to CARRIER dial strings (the RCF off-net failover loops
+-- below); on-net terminals (terminate_trunk PBX delivery, terminate_api,
+-- local extension) and hard rejects never get it -> no B row.
+--
+-- Scoping: returned as a "[...]" PER-LEG block placed immediately before
+-- the endpoint ("{globals}[cdr_*]sofia/external/..."). switch_ivr_originate
+-- parses "[...]" into a local_var_event applied ONLY to that one new peer
+-- channel; nothing is ever written back to the caller channel, so the A-leg
+-- CDR is unchanged (no `export`, no `set` — export would ALSO set the var
+-- on the A-leg and flip every A row to direction=outbound).
+--
+-- Values are the A-leg's FINAL values read back off the A channel at bridge
+-- time (after on-net chain resolution / dispatch_terminal), so the B row's
+-- call-level facts are verbatim copies of the A row's. Every value is
+-- validated against a dial-string-safe charset (no , [ ] { } $ ' " or
+-- whitespace) — an unsafe or absent value is OMITTED (the ingest then logs
+-- + drops a B-leg missing cdr_customer_id/cdr_call_id; it never mis-inserts)
+-- so attribution can fail closed but the CALL can never fail from this.
+local CDR_B_LEG_VARS = {
+    -- { B-leg var,                  A-leg source var,          validator }
+    { "cdr_customer_id",             "customer_id",             "int"   },
+    { "cdr_product_type",            "product_type",            "word"  },
+    { "cdr_trunk_id",                "trunk_id",                "int"   },
+    { "cdr_on_net",                  "on_net",                  "bool"  },
+    { "cdr_on_net_hops",             "on_net_hops",             "int"   },
+    { "cdr_origin_customer_id",      "origin_customer_id",      "int"   },
+    { "cdr_terminating_customer_id", "terminating_customer_id", "int"   },
+    { "cdr_inbound_carrier",         "inbound_carrier",         "token" },
+    { "cdr_inbound_carrier_pop",     "inbound_carrier_pop",     "token" },
+    { "cdr_sbc_id",                  "sip_h_X-SBC-ID",          "token" },
+}
+
+local function cdr_safe_value(v, kind)
+    if v == nil then return nil end
+    v = tostring(v)
+    if v == "" then return nil end
+    if kind == "int" then
+        return v:match("^%d+$")
+    elseif kind == "bool" then
+        if v == "true" or v == "false" then return v end
+        return nil
+    elseif kind == "word" then
+        return v:match("^[%a_]+$")
+    elseif kind == "token" then
+        return v:match("^[%w%._%-]+$")
+    elseif kind == "callid" then
+        -- A-leg uuid == inbound SIP Call-ID (internal profile
+        -- inbound-use-callid-as-uuid=true), e.g. 218382592_122992403@67.231.13.185.
+        -- The same value already rides every carrier dial string as X-CID.
+        return v:match("^[%w%._%-@:+~!%%*/]+$")
+    end
+    return nil
+end
+
+-- attempt_no: 1-based count of bridges actually LAUNCHED for this call
+-- (TCP-pre-check-skipped attempts create no B channel and are not counted,
+-- so B rows are numbered 1..N without gaps).
+local function cdr_b_leg_block(attempt_no)
+    local parts = {
+        "cdr_leg=B",
+        "cdr_carrier_leg=true",
+        "cdr_leg_attempt=" .. string.format("%d", attempt_no),
+        "cdr_direction=outbound",
+    }
+    local a_uuid = get_var("uuid", nil)
+    local call_id = cdr_safe_value(a_uuid, "callid")
+    if call_id then
+        parts[#parts + 1] = "cdr_call_id=" .. call_id
+    else
+        freeswitch.consoleLog("WARNING", string.format(
+            "[inbound_router] cdr_call_id omitted (uuid %q not dial-string safe) — B-leg CDR will be dropped by ingest\n",
+            tostring(a_uuid)))
+    end
+    for _, spec in ipairs(CDR_B_LEG_VARS) do
+        local raw = get_var(spec[2], nil)
+        local val = cdr_safe_value(raw, spec[3])
+        if val then
+            parts[#parts + 1] = spec[1] .. "=" .. val
+        elseif raw ~= nil then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[inbound_router] %s omitted from B-leg (A-leg %s=%q not dial-string safe)\n",
+                spec[1], spec[2], tostring(raw)))
+        end
+    end
+    return "[" .. table.concat(parts, ",") .. "]"
+end
+
+-- ================================================================
 -- Terminator: RCF  (dest = terminal RCF routing row, ctx = cross-hop state)
 -- ================================================================
 -- BEHAVIOR-PRESERVING extraction of the original `product_type == "rcf"` body.
@@ -1495,8 +1590,14 @@ local function terminate_rcf(dest, ctx)
     -- change per attempt.
     -- ================================================================
 
+    -- CDR leg split: 1-based count of CARRIER bridges actually launched for
+    -- this call (shared by whichever PSTN loop runs below; skipped attempts
+    -- are not counted). Feeds cdr_leg_attempt via cdr_b_leg_block().
+    local carrier_legs_launched = 0
+
     if is_local_forward then
-        -- Local extension: single bridge attempt (no SBC/carrier failover)
+        -- Local extension: single bridge attempt (no SBC/carrier failover).
+        -- ON-NET terminal: deliberately NO cdr_b_leg_block() -> no B row.
         stir_outcome_reset()
         pcall(function()
             session:execute("bridge", dial_string)
@@ -1569,17 +1670,21 @@ local function terminate_rcf(dest, ctx)
                 -- selector: X-Carrier-IP/X-Carrier-Label replace the
                 -- X-Carrier enum. progress_timeout still bounds carrier PDD
                 -- per attempt; call_timeout / session-timer trio / X-CID
-                -- are unchanged.
+                -- are unchanged. The per-leg "[cdr_*]" block (CDR leg split,
+                -- cdr_b_leg_block above) scopes the B-row vars to THIS B
+                -- channel only.
+                carrier_legs_launched = carrier_legs_launched + 1
                 local attempt_dial = string.format(
                     "{ignore_early_media=false,progress_timeout=%d,call_timeout=%d,sip_h_X-Carrier-IP=%s,sip_h_X-Carrier-Label=%s" ..
                     ",sip_h_X-CID=%s" ..
                     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-                    "}sofia/external/%s@%s:5060",
+                    "}%ssofia/external/%s@%s:5060",
                     bridge_progress_timeout,
                     ring_timeout,
                     attempt.ip,
                     attempt.carrier_label,
                     sip_call_id,
+                    cdr_b_leg_block(carrier_legs_launched),
                     forward_to,
                     attempt.sbc
                 )
@@ -1631,7 +1736,9 @@ local function terminate_rcf(dest, ctx)
         -- LEGACY FALLBACK — byte-identical to the pre-table loop below this
         -- comment (indentation preserved on purpose). Do NOT restructure:
         -- the fail-open contract is that a DB blip reproduces today's exact
-        -- attempts (env primary/secondary + X-Carrier enum).
+        -- attempts (env primary/secondary + X-Carrier enum). The only
+        -- addition is the per-leg "[cdr_*]" CDR-split block (B channel only;
+        -- no SIP header, no A-leg var).
         set_var("term_trunks_source", "fallback")
         -- PSTN: 4-attempt SBC + carrier failover loop
         local bridge_attempts = {
@@ -1658,15 +1765,19 @@ local function terminate_rcf(dest, ctx)
                 -- response (180/183) arrives within N seconds. Once ringing
                 -- starts, the call may ring up to call_timeout (the ring time
                 -- allowed for this attempt). Env-tunable per CLAUDE.md.
+                -- CDR leg split: the per-leg "[cdr_*]" block is the ONLY
+                -- addition to the pre-table dial string (B channel only).
+                carrier_legs_launched = carrier_legs_launched + 1
                 local attempt_dial = string.format(
                     "{ignore_early_media=false,progress_timeout=%d,call_timeout=%d,sip_h_X-Carrier=%s" ..
                     ",sip_h_X-CID=%s" ..
                     ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-                    "}sofia/external/%s@%s:5060",
+                    "}%ssofia/external/%s@%s:5060",
                     bridge_progress_timeout,
                     ring_timeout,
                     attempt.carrier,
                     sip_call_id,
+                    cdr_b_leg_block(carrier_legs_launched),
                     forward_to,
                     attempt.sbc
                 )
@@ -1936,6 +2047,9 @@ local function terminate_trunk(dest, ctx)
 
         -- Build dial string to customer PBX through Kamailio SBC
         -- Same pattern as RCF: FS -> Kamailio (sbc_proxy_ip:5060) -> PBX
+        -- CDR leg split: this is an ON-NET / PBX delivery, NOT a carrier leg —
+        -- deliberately NO cdr_b_leg_block() (contract: no B row; the B-leg
+        -- POST carries no cdr_carrier_leg=true so the ingest writes nothing).
         -- X-PBX-Dest header tells Kamailio where to relay the call
         local bridge_did = normalized_did:gsub("^%+", "")
         local pbx_ip = endpoint_ips[1]

@@ -6,7 +6,7 @@
     "home"
   ],
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "timezone": "browser",
   "editable": true,
   "graphTooltip": 0,
@@ -1009,7 +1009,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'bandwidth' AND inbound_carrier_pop = 'dallas';"
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'bandwidth' AND inbound_carrier_pop = 'dallas';"
         }
       ],
       "options": {
@@ -1195,7 +1195,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'bandwidth' AND inbound_carrier_pop = 'la';"
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'bandwidth' AND inbound_carrier_pop = 'la';"
         }
       ],
       "options": {
@@ -1381,7 +1381,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'sinch' AND inbound_carrier_pop = 'denver';"
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'sinch' AND inbound_carrier_pop = 'denver';"
         }
       ],
       "options": {
@@ -1576,7 +1576,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'sinch' AND inbound_carrier_pop = 'chicago';"
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'sinch' AND inbound_carrier_pop = 'chicago';"
         }
       ],
       "options": {
@@ -1760,7 +1760,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT z.name, z.lat, z.lon, COALESCE(c.calls,0) AS calls_1h FROM (VALUES ('East',33.13::float8,-80.01::float8,'east'),('West',45.60::float8,-121.18::float8,'west'),('Central',41.26::float8,-95.86::float8,'central')) AS z(name,lat,lon,zk) LEFT JOIN (SELECT split_part(coalesce(sbc_id,''),'-',1) AS zone, count(*) AS calls FROM cdrs WHERE start_time > now() - interval '1 hour' GROUP BY 1) c ON c.zone=z.zk;"
+          "rawSql": "SELECT z.name, z.lat, z.lon, COALESCE(c.calls,0) AS calls_1h FROM (VALUES ('East',33.13::float8,-80.01::float8,'east'),('West',45.60::float8,-121.18::float8,'west'),('Central',41.26::float8,-95.86::float8,'central')) AS z(name,lat,lon,zk) LEFT JOIN (SELECT split_part(coalesce(sbc_id,''),'-',1) AS zone, count(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' GROUP BY 1) c ON c.zone=z.zk;"
         },
         {
           "refId": "B",
@@ -2410,7 +2410,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour';",
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour';",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2475,7 +2475,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_today FROM cdrs WHERE start_time >= date_trunc('day', now());",
+          "rawSql": "SELECT count(*) AS calls_today FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time >= date_trunc('day', now());",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2540,7 +2540,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE start_time > now() - interval '15 minutes';",
+          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes';",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2614,7 +2614,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float / NULLIF(count(*), 0) AS on_net_pct FROM cdrs WHERE start_time > now() - interval '15 minutes';",
+          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float / NULLIF(count(*), 0) AS on_net_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes';",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2681,7 +2681,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(mos) AS avg_mos FROM cdrs WHERE start_time > now() - interval '15 minutes' AND mos IS NOT NULL;",
+          "rawSql": "SELECT avg(mos) AS avg_mos FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND mos IS NOT NULL;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2755,7 +2755,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(packet_loss_pct) AS avg_loss_pct FROM cdrs WHERE start_time > now() - interval '15 minutes' AND packet_loss_pct IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
+          "rawSql": "SELECT avg(packet_loss_pct) AS avg_loss_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND packet_loss_pct IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2827,7 +2827,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(jitter_max_ms) AS avg_peak_jitter_ms FROM cdrs WHERE start_time > now() - interval '15 minutes' AND jitter_max_ms IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
+          "rawSql": "SELECT avg(jitter_max_ms) AS avg_peak_jitter_ms FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND jitter_max_ms IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2899,7 +2899,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(r_factor) AS avg_r_factor FROM cdrs WHERE start_time > now() - interval '15 minutes' AND r_factor IS NOT NULL;",
+          "rawSql": "SELECT avg(r_factor) AS avg_r_factor FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND r_factor IS NOT NULL;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2973,7 +2973,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(EXTRACT(EPOCH FROM (end_time - answer_time))) AS acd_sec FROM cdrs WHERE start_time > now() - interval '1 hour' AND answer_time IS NOT NULL AND end_time IS NOT NULL;",
+          "rawSql": "SELECT avg(EXTRACT(EPOCH FROM (end_time - answer_time))) AS acd_sec FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND answer_time IS NOT NULL AND end_time IS NOT NULL;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -3038,7 +3038,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p95_answer_s FROM cdrs WHERE start_time > now() - interval '1 hour' AND answer_time IS NOT NULL;",
+          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p95_answer_s FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND answer_time IS NOT NULL;",
           "refId": "A",
           "datasource": {
             "type": "postgres",

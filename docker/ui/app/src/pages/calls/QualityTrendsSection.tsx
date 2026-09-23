@@ -9,6 +9,10 @@
  * query only runs while the section is expanded (react-query `enabled`), so
  * a collapsed section costs nothing. Collapse state persists in
  * localStorage; default expanded.
+ *
+ * Row model: quality is a ONE-ROW-PER-CALL surface (CDR leg-split contract),
+ * so the staff "Rows" choice (`leg`) is stripped here — the charts always
+ * sample call rows, never carrier B-legs, whatever the table shows.
  */
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -126,9 +130,16 @@ export function QualityTrendsSection({ params, nonce }: QualityTrendsSectionProp
   // ALL hooks unconditionally at the top — React #310 prevention.
   const [open, setOpen] = useState<boolean>(loadOpen);
 
+  // Same committed filter set minus the row model (see header).
+  const callParams = useMemo<CdrSearchParams>(() => {
+    const p: CdrSearchParams = { ...params };
+    delete p.leg;
+    return p;
+  }, [params]);
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['calls-trends', params, nonce],
-    queryFn: () => searchCdrs({ ...params, limit: TREND_SAMPLE_LIMIT, offset: 0 }),
+    queryKey: ['calls-trends', callParams, nonce],
+    queryFn: () => searchCdrs({ ...callParams, limit: TREND_SAMPLE_LIMIT, offset: 0 }),
     // Collapsed section = no fetch. Expanding triggers it (and react-query
     // caches per committed search, so re-collapsing/expanding is free).
     enabled: open,

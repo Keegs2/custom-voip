@@ -7,7 +7,7 @@ This directory contains the FastAPI application source. The container copies `sr
 ```
 src/
   main.py                    # App factory, lifespan, middleware, router mounts
-  config.py                  # Feature flags read LIVE from env — API_CALLING_ENABLED (api_calling_enabled / require_api_calling_enabled)
+  config.py                  # Feature flags read LIVE from env — API_CALLING_ENABLED (api_calling_enabled / require_api_calling_enabled), CDR_B_LEG_ROWS (cdr_b_leg_rows_enabled; ON unless exactly `false`)
   auth/
     __init__.py
     security.py              # JWT creation/validation, bcrypt password hashing
@@ -18,7 +18,7 @@ src/
   db/
     __init__.py
     database.py              # asyncpg connection pool, query helpers
-    schema_check.py          # Deploy-order guard: are the migration-47 cdrs columns present? (startup CRITICAL + /health/detailed)
+    schema_check.py          # Deploy-order guard: are the migration-47 + 48 cdrs columns present? (startup CRITICAL + /health/detailed)
     redis_client.py          # Async Redis client, caching, CPS rate limiting
   models/
     __init__.py              # Empty -- Pydantic models are defined inline in routers
@@ -76,14 +76,21 @@ Staff shapes are unchanged. Everything lives in `services/tenant_redaction.py`:
   counters — duration proxies, `fraud_*`, `traffic_grade`, `carrier_used`,
   `inbound_carrier*`, `on_net*`, `sbc_id`, `freeswitch_node`, `network_addr`,
   `sip_user_agent`, `bridge_uuid`).
-- **Duration.** Per call `duration_minutes` = whole minutes, half-up, from
-  `duration_ms`; unanswered → 0; any answered call with >0 ms → at least 1.
+- **Duration = TALK time.** Per call `duration_minutes` = whole minutes, half-up,
+  from `end_time - answer_time` (`tr.TALK_MS_SQL`, selected as `talk_ms`; Python
+  twin `tr.talk_ms()`) — never `duration_ms` (includes ring) nor `billable_ms`
+  (contract "Customer minutes"); unanswered → 0; any answered call with >0 ms → at least 1.
   Totals (`total_minutes`) round the answered-call ms total ONCE (never a sum
   of per-call minimums — that would mimic billing increments). Averages
   (`avg_duration_minutes`) are the mean of per-call whole minutes, 1 decimal
   ("2.3 min") — so a one-call window cannot leak sub-minute precision.
   `answer_time`/`end_time` are floored to the minute for tenants (otherwise
   `end - answer` re-derives the exact duration); `start_time` stays exact.
+- **One row per call.** Every tenant CDR query carries `leg IS DISTINCT FROM 'B'`
+  (list/total/summary via the shared builder, `GET /v1/cdrs/{uuid}` → a B uuid
+  is a 404, trunk stats, `/v1/calls/{id}`, every report). The staff `leg` /
+  `call_id` params are ignored for tenants; `leg`/`leg_attempt` are on the
+  forbidden list and never on the allowlist.
 - **Filters.** `rated_only`, `sbc_id`, `zone` are ignored for tenants on
   `/v1/cdrs` + `/summary` (no inference oracle for rating state / withheld
   routing columns). No cost/duration sort or filter params exist.
@@ -119,8 +126,11 @@ Tests: `tests/test_reports.py` (ephemeral PG 16).
   (the `customer_id` param is ignored); staff (admin/support) MUST pass
   `customer_id` (422). Staff and tenants get the SAME redacted shape — there is
   no staff-only variant of a report.
-- **Redaction:** minutes only via `tenant_redaction` (`TENANT_CALL_MINUTES_SQL`
-  per call, `aggregate_minutes` on each row/bucket/total ms sum — rounded once,
+- **One row per call:** the `base` CTE (and the `data_from` probe) carry
+  `c.leg IS DISTINCT FROM 'B'`; no report has a `leg` param.
+- **Redaction:** minutes only via `tenant_redaction` — TALK time: `base` selects
+  `tr.TALK_MS_SQL AS talk_ms`, per call `tr.call_minutes_sql('talk_ms')`,
+  `aggregate_minutes` on each row/bucket/total talk-ms sum — rounded once,
   `average_minutes` for avg). Never selected/returned: costs, rates, billable,
   answer/end times, carrier/SBC/FS/network columns. `hangup_cause` is read only
   to map to a plain-English missed reason (`services/reporting.MISSED_REASONS`)
@@ -166,7 +176,7 @@ Tests: `tests/test_reports.py` (ephemeral PG 16).
 
 ### Startup (lifespan context manager)
 1. `init_db()` -- creates asyncpg connection pool (parses `DATABASE_URL` with regex)
-2. `schema_check.run_startup_check()` -- probes `information_schema.columns` for `cdrs.stir_outcome` / `cdrs.stir_eff_actual` (migration 47, bound by the ingest INSERT). Missing → logs **CRITICAL** with the exact `sudo -u postgres psql -d voip -f /opt/revup/docker/postgres/init/47_cdr_stir_outcome.sql` remedy; DB unreachable → WARNING. Never raises — the API keeps serving.
+2. `schema_check.run_startup_check()` -- probes `information_schema.columns` for `cdrs.stir_outcome` / `stir_eff_actual` (47) and `leg` / `call_id` / `leg_attempt` (48), all bound by the ingest INSERT. Missing → logs **CRITICAL** with the exact remedy per migration file (`sudo -u postgres psql -d voip -f …/47_cdr_stir_outcome.sql`, `sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f …/48_cdr_call_legs.sql`); DB unreachable → WARNING. Never raises — the API keeps serving.
 3. `init_redis()` -- creates redis-py async client with retry logic (5 attempts, 2s backoff)
 
 ### Shutdown
@@ -245,12 +255,15 @@ CDR ingestion and querying. The largest router file.
   - Cleans caller_id_number (handles SIP `"Display" <+1234>` format)
   - Computes R-factor from MOS using piecewise linear approximation
   - Extracts ~55 columns including full RTP quality metrics (jitter, packet loss, MOS, codec info), the on-net set `origin_customer_id`/`terminating_customer_id`/`on_net`/`on_net_hops` (records both parties of an internal call; `customer_id` stays the terminal so `rate_cdr()` is unchanged; off-net → `origin==customer`, `on_net=false`), and the inbound-carrier attribution pair `inbound_carrier`/`inbound_carrier_pop` (FS channel vars, migration 40; absent/empty → NULL)
-  - Explicit `::type` casts on all INSERT parameters for asyncpg/PgBouncer compatibility (the INSERT binds 55 positional params, `$1`–`$55`; on-net columns are `$50::int`/`$51::int`/`$52::bool`/`$53::smallint`, inbound-carrier columns `$54::varchar`/`$55::varchar`)
+  - Explicit `::type` casts on all INSERT parameters for asyncpg/PgBouncer compatibility (the INSERT binds 60 positional params, `$1`–`$60`; on-net columns are `$50::int`/`$51::int`/`$52::bool`/`$53::smallint`, inbound-carrier `$54::varchar`/`$55::varchar`, STIR outcome `$56::text`/`$57::text`, leg split `$58::varchar` leg / `$59::varchar` call_id / `$60::smallint` leg_attempt)
+  - Millisecond durations (`billmsec`/`mduration`, seconds×1000 fallback) and µs timestamps (`*_uepoch`, `*_epoch` fallback) — `_ms_duration` / `_leg_timestamp`
   - Duplicate detection via `WHERE NOT EXISTS` (the cdrs table uses a composite PK for TimescaleDB)
-  - **Pre-47 fallback** (`_cdr_insert_sql` / `_execute_cdr_insert`): `stir_outcome`/`stir_eff_actual` are the LAST two entries of the column and value lists, so on `asyncpg.UndefinedColumnError` for either the INSERT is retried without them (`params[:55]`) and the condition logged at ERROR once per 300s — the billable row lands even if the API build is ahead of migration 47. Other missing columns are NOT swallowed.
+  - **Three-tier fallback** (`_cdr_insert_sql(with_stir_outcome, with_call_legs)` / `_execute_cdr_insert`): full 60 → pre-48 57 → pre-47 55, strict tail truncations, on `asyncpg.UndefinedColumnError` naming a 48 / 47 column; ERROR once per 300s per tier. Other missing columns are NOT swallowed. `allow_fallback=False` for B rows (dropped instead — a B row without `leg` would count as a call).
+  - **A/B leg split** (contract `docs/CDR_LEG_SPLIT_CONTRACT.md`): A-legs write `leg='A'`, `call_id=uuid`. Topology B-leg (`stir_outcome.b_leg_a_uuid`) + `cdr_leg=B` + `cdr_carrier_leg=true` + `CDR_B_LEG_ROWS` on → `_b_leg_row_context` (attribution ONLY from `cdr_*` vars; `cdr_customer_id`/`cdr_call_id`/`cdr_product_type` required else dropped; direction forced `outbound`) → `_insert_b_leg_row`. Otherwise no row. `_b_leg_stir_update`: STIR UPDATE onto the A-leg only from an ANSWERED carrier leg. `_store_call_attestation`: A-leg only. `cdr_leg=B` on a topology A-leg → kept as the A row (ERROR). Result status for every B-leg body is `b_leg`.
   - Always returns 200 to prevent FreeSWITCH retry storms
-- **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours. Tenant callers get the redacted allowlist shape (see the Tenant redaction section).
-- **Summary**: `GET /v1/cdrs/summary` grouped by day, hour, or destination prefix.
+- **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours. Tenant callers get the redacted allowlist shape (see the Tenant redaction section). **One row per call by default** (`ONE_ROW_PER_CALL_SQL` = `leg IS DISTINCT FROM 'B'`, applied in `_build_cdr_filters`, so list + total + all summary groupings agree). Staff-only `leg=calls|all|b` (`LegView`) and `call_id=` (all legs of one call: `(call_id = $1 OR uuid = $1)` — chosen over `COALESCE(call_id, uuid) = $1` so idx_cdrs_call_id + idx_cdrs_uuid BitmapOr; REPLACES the date window; page capped at `CALL_ID_LOOKUP_LIMIT`=50). Staff rows add `leg`, `call_id` (`COALESCE(call_id, uuid)`), `leg_attempt` (`_STAFF_LEG_COLUMNS_SQL`).
+- **Summary**: `GET /v1/cdrs/summary` grouped by day, hour, or destination prefix — same builder, same `leg`/`call_id` semantics.
+- **Other one-row-per-call surfaces** (`leg IS DISTINCT FROM 'B'`): `trunks.py` last-hour stats (tenant + staff), `sbc.py` `/stats`, `search.py` DID call history, `calls.py` completed-call lookup, `reports.py` (all), `scripts/backup/asr_guard.sh` (no longer depends on `direction`). The `call_attestations` → `cdrs` LATERAL joins match by `uuid` = the A-leg uuid, so they never hit a B row.
 - **Rating**: `POST /v1/cdrs/{uuid}/rate` calls a PostgreSQL function `rate_cdr()`.
 
 ### search.py

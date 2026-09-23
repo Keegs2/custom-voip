@@ -240,7 +240,8 @@ async def did_call_history(
         carrier_used,
         total_cost
     FROM cdrs
-    WHERE caller_id = $1 OR destination = $1
+    WHERE (caller_id = $1 OR destination = $1)
+      AND leg IS DISTINCT FROM 'B'   -- one row per call (leg split)
     ORDER BY start_time DESC
     LIMIT $2
     """

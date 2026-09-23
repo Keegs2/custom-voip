@@ -8,8 +8,20 @@ DELIVERY SEMANTICS — AT LEAST ONCE:
     no DB transaction is held open across the upload. If the process crashes
     after a successful upload but before marking the rows exported, the same
     rows are selected again on the next run and re-sent. Downstream MUST dedup
-    on the CDR ``uuid`` (call_id) — it is globally unique. We prefer a possible
-    duplicate file over a silently-dropped CDR (this is billing data).
+    on the ROW ``uuid`` — it is the FreeSWITCH CHANNEL uuid and globally unique
+    per row (an A-leg and each of its carrier B-legs are different channels).
+    The call-level correlation key is ``call_id`` (== uuid on an A-leg, the
+    A-leg's uuid on a B-leg). We prefer a possible duplicate file over a
+    silently-dropped CDR (this is billing data).
+
+RATING CONTRACT (docs/CDR_LEG_SPLIT_CONTRACT.md — shipped in every file via
+the self-describing header; see formatter.py for the field-by-field contract):
+    * count CALLS as ``leg='A'`` rows (legacy files: every row is an A-leg);
+    * rate EVERY row on its own ``billed_seconds``;
+    * never rate a leg by reference to its partner;
+    * ``answered=false`` rows have ``billed_seconds=0`` and must never be
+      rated (they are exported on purpose: completeness is reconcilable via
+      cdr_export_log.row_count, omission is not).
 
 SINGLE-INSTANCE GUARD:
     send_batch() takes a TTL-based lease row in ``cdr_export_lock`` (claim and
@@ -56,8 +68,16 @@ LINE_TERMINATOR = "\r\n"
 #
 # Order = base-table declaration order (05_schema_cdr.sql) followed by the
 # ADD COLUMN migrations in file-number order: 18 (sbc_id), 23 (on-net columns),
-# 40 (inbound-carrier attribution).
+# 40 (inbound-carrier attribution), 47 (STIR outcome), 48 (leg split).
 # `id` and `start_time` are also required by the watermark/meta (BatchMeta).
+# The FILE column order is the formatter's (billing block first), not this.
+#
+# PURE column names only (the drift guard parses the migrations and compares
+# sets). `leg` and `call_id` (48) are deliberately NOT here: they are SHADOWED
+# by derived fields of the same name in SELECT_DERIVED
+# (`COALESCE(leg, 'A')`, `COALESCE(call_id, uuid)`), so every exported row —
+# including the pre-48 backlog still waiting to ship — satisfies the rating
+# rule literally ("count calls = leg='A' rows"; group legs on call_id).
 SELECT_COLUMNS: tuple[str, ...] = (
     # --- base table (05_schema_cdr.sql), in declaration order ---
     "id",
@@ -126,7 +146,47 @@ SELECT_COLUMNS: tuple[str, ...] = (
     # --- 40_carrier_trunks.sql (inbound-carrier attribution) ---
     "inbound_carrier",
     "inbound_carrier_pop",
+    # --- 47_cdr_stir_outcome.sql (STIR egress outcome — ACTUAL wire result) ---
+    "stir_outcome",
+    "stir_eff_actual",
+    # --- 48_cdr_call_legs.sql (leg split; leg + call_id are derived, see above) ---
+    "leg_attempt",
 )
+
+# The billing contract: fields DERIVED in the SELECT, never stored, so every
+# historical row gets the correct value with zero backfill. (alias, sql).
+#   answered        — the call/leg was answered
+#   billed_ms       — THE billable quantity, ms. Structurally 0 when
+#                     unanswered: the CASE also guards against a future
+#                     rate_cdr() run (it overwrites billable_ms from the
+#                     ring-inclusive duration_ms) injecting ring time.
+#   billed_seconds  — ceil(billed_ms / 1000); the one field to rate on.
+#   ring_ms         — start -> answer (or -> end when unanswered). Never billable.
+#   call_id         — COALESCE(call_id, uuid): call identity on every row.
+#   leg             — COALESCE(leg, 'A'): a legacy (pre-48) row IS an A-leg.
+_BILLED_MS_SQL = ("(CASE WHEN answer_time IS NULL THEN 0 "
+                  "ELSE GREATEST(COALESCE(billable_ms, 0), 0) END)")
+SELECT_DERIVED: tuple[tuple[str, str], ...] = (
+    ("answered", "(answer_time IS NOT NULL)"),
+    ("billed_ms", f"{_BILLED_MS_SQL}::bigint"),
+    ("billed_seconds", f"CEIL({_BILLED_MS_SQL} / 1000.0)::bigint"),
+    ("ring_ms", "GREATEST(round(EXTRACT(EPOCH FROM (COALESCE(answer_time, end_time)"
+                " - start_time)) * 1000), 0)::bigint"),
+    ("call_id", "COALESCE(call_id, uuid)"),
+    ("leg", "COALESCE(leg, 'A')"),
+)
+
+#: Stored columns whose export value is the same-named derived field instead.
+SHADOWED_COLUMNS: frozenset[str] = frozenset({"call_id", "leg"})
+
+#: Aliases of SELECT_DERIVED (the formatter's derived source keys).
+DERIVED_ALIASES: tuple[str, ...] = tuple(a for a, _ in SELECT_DERIVED)
+
+
+def select_list_sql() -> str:
+    """The export projection: pure columns + derived billing fields."""
+    return ", ".join(list(SELECT_COLUMNS)
+                     + [f"{expr} AS {alias}" for alias, expr in SELECT_DERIVED])
 
 
 @dataclass
@@ -162,7 +222,7 @@ async def select_batch(pool: asyncpg.Pool, cfg: ExportConfig) -> list[asyncpg.Re
     landed. ORDER BY (start_time, id) matches idx_cdrs_unexported for a cheap
     scan. Every parameter carries an explicit ::type cast for asyncpg/PgBouncer.
     """
-    cols = ", ".join(SELECT_COLUMNS)
+    cols = select_list_sql()
     query = f"""
         SELECT {cols}
         FROM cdrs

@@ -28,21 +28,18 @@ their `cdrs` columns must apply them explicitly (test_carrier_trunks.py does):
     `cdrs.inbound_carrier_pop`, but also creates the `carrier_trunks` table,
     its seeds and the `carrier_trunk_health` view.
 
-KNOWN DEBT (pre-existing, NOT addressed here). `tests/test_cdr_search_filters.py`
-and the CDR-list/detail tests in `tests/test_support_role_authz.py` already fail
-on `origin/RCF-V1` — verified root cause: their inline `cdrs` predates
-migration 23's on-net columns AND migration 40's `inbound_carrier` /
-`inbound_carrier_pop`, every one of which `GET /v1/cdrs` selects, so the query
-raises UndefinedColumnError and the endpoint 500s. (Adding those six columns to
-test_cdr_search_filters.py's inline DDL turns its 17 failures into 22 passes.)
-Fixing them is deliberately OUT OF SCOPE here so this branch's test baseline
-stays directly comparable to base. The complete follow-up fix is:
+KNOWN DEBT — FIXED (2026-09-23, leg-split release). `tests/test_cdr_search_filters.py`
+and the CDR-list/detail tests in `tests/test_support_role_authz.py` used to
+fail because their inline `cdrs` predated migration 23's on-net columns and
+migration 40's `inbound_carrier` / `inbound_carrier_pop`, and had no
+`call_attestations` table for the STIR intent sub-select. Both fixtures now
+declare the migration-40 pair + `call_attestations` inline and replay this
+helper's migrations.
 
-  1. apply this helper's migrations in both fixtures, AND
-  2. add migration 40's `cdrs.inbound_carrier` / `inbound_carrier_pop`, AND
-  3. give `test_cdr_search_filters.py` a `call_attestations` table — it has
-     none, and `GET /v1/cdrs` now carries a scalar sub-select against it for
-     the STIR intent badge.
+Deliberately NOT listed either:
+  * `49_cdr_call_legs_index_cagg.sql` — a psql SCRIPT (\\gset / \\if meta-
+    commands, TimescaleDB-only statements); asyncpg cannot execute it.
+    `tests/test_cdr_leg_split.py` runs it through the real `psql` binary.
 """
 from pathlib import Path
 
@@ -52,6 +49,7 @@ INIT_DIR = Path(__file__).resolve().parents[1] / "docker" / "postgres" / "init"
 CDR_COLUMN_MIGRATIONS = (
     "23_onnet_cdr_columns.sql",   # origin/terminating customer, on_net, on_net_hops
     "47_cdr_stir_outcome.sql",    # stir_outcome, stir_eff_actual
+    "48_cdr_call_legs.sql",       # leg, call_id, leg_attempt (A/B leg split)
 )
 
 

@@ -426,7 +426,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(ca.created_at, '1h'), COALESCE(oc.stir_eff_actual, CASE WHEN ca.signed_attestation = 'div' THEN COALESCE(ca.inbound_attest, 'div') ELSE ca.signed_attestation END, 'unknown') AS metric, COUNT(*) AS value FROM call_attestations ca LEFT JOIN LATERAL (SELECT c.stir_eff_actual FROM cdrs c WHERE c.uuid = ca.call_id AND c.start_time >= $__timeFrom()::timestamptz - interval '2 days' AND c.start_time <= $__timeTo()::timestamptz + interval '1 hour' ORDER BY c.start_time DESC LIMIT 1) oc ON true WHERE $__timeFilter(ca.created_at) GROUP BY 1, 2 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(ca.created_at, '1h'), COALESCE(oc.stir_eff_actual, CASE WHEN ca.signed_attestation = 'div' THEN COALESCE(ca.inbound_attest, 'div') ELSE ca.signed_attestation END, 'unknown') AS metric, COUNT(*) AS value FROM call_attestations ca LEFT JOIN LATERAL (SELECT c.stir_eff_actual FROM cdrs c WHERE c.leg IS DISTINCT FROM 'B' AND c.uuid = ca.call_id AND c.start_time >= $__timeFrom()::timestamptz - interval '2 days' AND c.start_time <= $__timeTo()::timestamptz + interval '1 hour' ORDER BY c.start_time DESC LIMIT 1) oc ON true WHERE $__timeFilter(ca.created_at) GROUP BY 1, 2 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -1021,7 +1021,7 @@
   "timezone": "browser",
   "title": "STIR/SHAKEN",
   "uid": "noc-stir-shaken",
-  "version": 1,
+  "version": 2,
   "weekStart": "",
   "description": "STIR/SHAKEN NOC board: outbound signed-attestation mix (A/B/C/div/unsigned) + signing rate, %div/%C/%unsigned compliance stats, inbound verstat mix (Passed/Failed/No-TN) and its self-vs-carrier source, plus a per-zone (SBC) attestation table. Live from VictoriaMetrics (voip-metrics-vm) Kamailio xhttp_prom counters. Zone dropdown focuses East / West / Central or All. Bottom row: Trust & Certificates — STI-PA trust-bundle health (age/CA count/sticaList exp/CRL), our SHAKEN-8052 leaf expiry, and x5u publish reachability from the services-VM textfile metrics + blackbox probes (the pre-canary checklist for enabling own-crypto inbound verify)."
 }

@@ -148,7 +148,9 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 8. **Session timer export**: Channel variables must be `export`ed (not just `set`) to propagate to the B-leg. Without this, Bandwidth tears down calls after Session-Expires (30s) because FreeSWITCH doesn't send refresh re-INVITEs.
 
-9. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
+9. **CDR A/B leg split (2026-09-23)**: `json_cdr.conf.xml` `log-b-leg=true` — every originated B-leg posts its own CDR. Only CARRIER dial strings (RCF off-net failover loops, trunk_outbound) carry the per-leg `[cdr_leg=B,cdr_carrier_leg=true,cdr_leg_attempt=N,…]` block that makes the ingest write a B row; on-net deliveries never do. Vars are per-leg `[]` dial-string vars — never `export`/`set` them on the A-leg. Activation after `git pull` = `reloadxml` + `reload mod_json_cdr` (no restart). Details: `scripts/CLAUDE.md` "CDR A/B leg split", `conf/CLAUDE.md` "json_cdr.conf.xml", `docs/CDR_LEG_SPLIT_CONTRACT.md`.
+
+10. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
 
 ## Volumes (docker-compose.media.yml)
 

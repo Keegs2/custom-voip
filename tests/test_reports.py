@@ -204,6 +204,11 @@ CDRS = [
 ]
 
 
+#: A calls that also carry carrier B-leg rows (every report must still count
+#: each of these ONCE — `leg IS DISTINCT FROM 'B'`).
+_B_LEG_TAGS = {"a01", "a03", "a04", "a05", "a06", "a07", "a14"}
+
+
 def _uuid(tag):
     return f"{tag}000000-0000-0000-0000-000000000000"
 
@@ -262,9 +267,39 @@ def reports_db():
                       'standard', 7, 'east-fs', $14, 'east-sbc-1', 'bandwidth',
                       '203.0.113.9')
                     """,
+                    # duration_ms = RING (7 s) + talk: customer minutes must
+                    # come from talk time (end - answer), never duration_ms
+                    # (contract "Customer minutes") — every minute assertion
+                    # below would shift if a report read duration_ms.
                     _uuid(tag), cid, "trunk" if trunk else "rcf", trunk, direction,
-                    caller, dest, start, answer, end, ms, (ms // 6000) * 6000,
+                    caller, dest, start, answer, end, ms + 7_000, (ms // 6000) * 6000,
                     cause, mos)
+                await conn.execute(
+                    "UPDATE cdrs SET leg = 'A', call_id = uuid WHERE uuid = $1",
+                    _uuid(tag))
+                if cid == CID_A and tag in _B_LEG_TAGS:
+                    # Carrier B-legs of the same call (contract row model):
+                    # same customer, direction 'outbound', caller = the
+                    # customer's own number (masking) so the B row WOULD land
+                    # in /numbers + counts if a report forgot the leg filter.
+                    # One failed attempt (unanswered) + the answered leg.
+                    for attempt, b_answered in ((1, False), (2, answered)):
+                        b_start = start + timedelta(seconds=attempt)
+                        b_answer = b_start + timedelta(seconds=6) if b_answered else None
+                        b_end = end if b_answered else b_start + timedelta(seconds=2)
+                        await conn.execute(
+                            """
+                            INSERT INTO cdrs (uuid, customer_id, product_type, trunk_id,
+                              direction, caller_id, destination, start_time, answer_time,
+                              end_time, duration_ms, billable_ms, hangup_cause, mos,
+                              leg, call_id, leg_attempt)
+                            VALUES ($1, $2, 'rcf', $3, 'outbound', $4, '+17745550000',
+                              $5, $6, $7, 99999, 99999, $8, 1.0, 'B', $9, $10)
+                            """,
+                            f"{tag}b{attempt}00000-0000-0000-0000-000000000000"[:36],
+                            cid, trunk, A_MAIN, b_start, b_answer, b_end,
+                            "NORMAL_CLEARING" if b_answered else "USER_BUSY",
+                            _uuid(tag), attempt)
         await owner.close()
         db.pool = await asyncpg.create_pool(
             host=pg.sock, port=pg.port, user="api", password="api_secret",

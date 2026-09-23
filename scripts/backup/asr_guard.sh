@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Call-quality watchdog — pages when inbound ASR collapses (calls silently fail)
+# Call-quality watchdog — pages when call ASR collapses (calls silently fail)
 # =============================================================================
 # THE GAP (audit finding): the monitoring module (infra/monitoring) pages on
 # *reachability* — VIP/VM/disk/mem/CPU. Nothing pages when the front door is up
@@ -10,54 +10,71 @@
 # every uptime check still green.
 #
 # This watchdog (every ~10 min via systemd timer): computes the trailing-15-min
-# INBOUND ASR from the cdrs hypertable. When there is enough volume to trust the
+# per-CALL ASR from the cdrs hypertable. When there is enough volume to trust the
 # number ($ASR_GUARD_MIN_VOLUME) AND ASR is below the floor ($ASR_GUARD_ASR_FLOOR),
 # it emits a "revup-alert" syslog line — Cloud Monitoring's log-match policy
 # (infra/monitoring) pages on that tag. No traffic (or too little to be
 # meaningful) exits quietly: a quiet night is not an outage.
 #
 # ASR = answered / total, where answered = answer_time IS NOT NULL. Both figures
-# come from a single trailing-window scan of cdrs (direction='inbound').
+# come from a single trailing-window scan of cdrs, ONE ROW PER CALL:
+# `leg IS DISTINCT FROM 'B'` (docs/CDR_LEG_SPLIT_CONTRACT.md). Since the A/B leg
+# split, every failed carrier failover attempt is its own `leg='B'` row; counting
+# those would crater ASR and page on a healthy platform. The guard deliberately
+# does NOT depend on `direction` (was `direction='inbound'`): direction is a
+# channel var set in Lua (plan §3 "paging path — do not let it depend on
+# direction"), so the paging signal is now every A-leg call (RCF inbound + trunk
+# outbound), filtered only by the explicit leg column.
+# Deploy-order safe: until migration 48 adds `cdrs.leg` the predicate is
+# omitted (pre-48 there are no B rows), so a `git pull` that lands before the
+# migration can never turn the guard into a failing unit that pages.
 #
 # Manual run (single line):  sudo /opt/revup/scripts/backup/asr_guard.sh
 # =============================================================================
 set -euo pipefail
 
 [ -f /etc/revup/backup.env ] && . /etc/revup/backup.env
-ASR_GUARD_MIN_VOLUME="${ASR_GUARD_MIN_VOLUME:-20}" # min inbound calls in 15m to page
+ASR_GUARD_MIN_VOLUME="${ASR_GUARD_MIN_VOLUME:-20}" # min calls (A-legs) in 15m to page
 ASR_GUARD_ASR_FLOOR="${ASR_GUARD_ASR_FLOOR:-50}"   # page below this ASR percent
 
 if [ "$(id -un)" != "postgres" ]; then
     exec sudo -u postgres -- "$0" "$@"
 fi
 
-# asr_percent|volume  over the trailing 15 minutes of inbound calls.
+# asr_percent|volume  over the trailing 15 minutes of calls (one row per call).
 # asr is NULL when volume is 0 (NULLIF guards the divide) — treated as no-traffic.
 # -d voip is REQUIRED: `cdrs` lives in the voip DB. Without it, the postgres user
 # connects to its default `postgres` DB, the query errors ("relation cdrs does not
 # exist"), set -e exits non-zero, and the systemd unit's OnFailure pages every run.
+HAS_LEG="$(psql -d "${BACKUP_DB:-voip}" -X -tA -c \
+    "SELECT count(*) FROM information_schema.columns
+     WHERE table_name = 'cdrs' AND column_name = 'leg'")"
+LEG_SQL=""
+if [ "${HAS_LEG:-0}" != "0" ]; then
+    LEG_SQL="AND leg IS DISTINCT FROM 'B'"
+fi
 ROW="$(psql -d "${BACKUP_DB:-voip}" -X -tA -F'|' -c \
     "SELECT round(100.0 * count(*) FILTER (WHERE answer_time IS NOT NULL)
                   / NULLIF(count(*), 0)),
             count(*)
      FROM cdrs
-     WHERE direction = 'inbound'
-       AND start_time > now() - interval '15 minutes'")"
+     WHERE start_time > now() - interval '15 minutes'
+       ${LEG_SQL}")"
 
 ASR="${ROW%%|*}"
 VOL="${ROW##*|}"
 
 # No traffic (empty/NULL ASR) → nothing to judge. Quiet exit, no page.
 if [ -z "$ASR" ]; then
-    logger -t revup-backup -- "asr-guard: no inbound traffic in the last 15m — nothing to check"
+    logger -t revup-backup -- "asr-guard: no call traffic in the last 15m — nothing to check"
     exit 0
 fi
 
 # Always log an info line — Cloud Logging keeps the ASR trend.
-logger -t revup-backup -- "asr-guard: inbound asr=${ASR}% volume=${VOL} window=15m"
+logger -t revup-backup -- "asr-guard: call asr=${ASR}% volume=${VOL} window=15m"
 
 if [ "$VOL" -ge "$ASR_GUARD_MIN_VOLUME" ] && [ "$ASR" -lt "$ASR_GUARD_ASR_FLOOR" ]; then
-    logger -p user.err -t revup-alert -- "ASR ${ASR}% over 15m (vol=${VOL}) — inbound calls failing, check carrier/route/Homer"
+    logger -p user.err -t revup-alert -- "ASR ${ASR}% over 15m (vol=${VOL}) — calls failing, check carrier/route/Homer"
     # exit 0, NOT 1: the guard did its job (it paged its own specific line above).
     # Exiting non-zero would trip the unit's OnFailure and page a SECOND, generic
     # "unit-failed" line. Reserve non-zero exits for actual script errors.

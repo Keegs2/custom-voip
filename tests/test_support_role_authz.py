@@ -218,6 +218,8 @@ CREATE TABLE cdrs (
   network_addr VARCHAR(45),
   bridge_uuid VARCHAR(64),
   sbc_id VARCHAR(30),
+  inbound_carrier VARCHAR(20),       -- migration 40 (inline: 40 also builds carrier_trunks)
+  inbound_carrier_pop VARCHAR(50),
   PRIMARY KEY (id, start_time));
 
 CREATE TABLE call_attestations (

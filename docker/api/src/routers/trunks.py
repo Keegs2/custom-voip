@@ -577,6 +577,7 @@ async def get_trunk_stats(
                     FILTER (WHERE answer_time IS NOT NULL) as avg_call_minutes
             FROM cdrs
             WHERE trunk_id = $1 AND start_time > NOW() - INTERVAL '1 hour'
+              AND leg IS DISTINCT FROM 'B'
             """,
             trunk_id
         )
@@ -611,6 +612,7 @@ async def _staff_last_hour_stats(trunk_id: int) -> dict:
             SUM(total_cost) as total_cost
         FROM cdrs
         WHERE trunk_id = $1 AND start_time > NOW() - INTERVAL '1 hour'
+          AND leg IS DISTINCT FROM 'B'
         """,
         trunk_id
     )

@@ -18,6 +18,11 @@
  * (services/tenant_redaction.py), so the Carrier column is staff-only and
  * Duration renders whole minutes via utils/callDuration.ts.
  *
+ * Leg column (staff, only when the Rows filter is All legs / Carrier legs):
+ * a small badge — "A" for the call row, "B #n" for carrier bridge attempt n,
+ * em dash for pre-split legacy rows. Hidden in the default Calls mode, so the
+ * default staff table and every tenant table render exactly as before.
+ *
  * Cost is labeled "Cost Est." — RCF-V1 billing is estimates-only by design;
  * the billing of record is Equinox (title attr says so).
  *
@@ -35,7 +40,7 @@ import { fmt, fmtMoneySmart } from '../../utils/format';
 import { mosTone, packetLossColor, INK_FAINT } from './quality';
 import { carrierLabel, isOnNetCall, trunkLabel, EMPTY } from './callsFormat';
 import { fmtCallDuration } from '../../utils/callDuration';
-import type { Cdr, ProductType, CallDirection } from '../../types/cdr';
+import type { Cdr, CdrRowsMode, ProductType, CallDirection } from '../../types/cdr';
 
 /** Table timestamps render in the operator's LOCAL timezone (matches the
     local-time filter pickers, so what you search is what you read). */
@@ -86,6 +91,25 @@ function MosPill({ mos }: { mos: number | null | undefined }) {
   );
 }
 
+/** "A" / "B #attempt" leg badge; em dash on legacy (pre-split) rows. */
+function LegBadge({ cdr }: { cdr: Cdr }) {
+  if (cdr.leg === 'A') {
+    return <span className="dl-tag" title="Call row (A-leg)">A</span>;
+  }
+  if (cdr.leg === 'B') {
+    return (
+      <span
+        className="dl-tag dl-tag-slate"
+        title={cdr.leg_attempt != null ? `Carrier bridge attempt ${cdr.leg_attempt}` : 'Carrier bridge attempt'}
+        style={{ whiteSpace: 'nowrap' }}
+      >
+        B{cdr.leg_attempt != null ? ` #${cdr.leg_attempt}` : ''}
+      </span>
+    );
+  }
+  return <span style={{ color: INK_FAINT }} title="Legacy row (pre leg split)">—</span>;
+}
+
 function SearchIcon() {
   return (
     <svg
@@ -128,6 +152,8 @@ interface CallsTableProps {
   selectedUuid: string | null;
   /** Admin or support — Customer + Cost columns render only for staff. */
   isStaff: boolean;
+  /** Committed row model — the Leg column shows for staff when not 'calls'. */
+  rowsMode?: CdrRowsMode;
 }
 
 export function CallsTable({
@@ -140,7 +166,12 @@ export function CallsTable({
   onSelect,
   selectedUuid,
   isStaff,
+  rowsMode = 'calls',
 }: CallsTableProps) {
+  const showLeg = isStaff && rowsMode !== 'calls';
+  const colCount = (isStaff ? 13 : 10) + (showLeg ? 1 : 0);
+  const minWidth = (isStaff ? 1240 : 940) + (showLeg ? 70 : 0);
+
   return (
     <section className="dl-panel">
       {/* Quick-filter toolbar — client-side, current page only */}
@@ -174,10 +205,11 @@ export function CallsTable({
       </div>
 
       <div className="dlx4-tablewrap">
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: isStaff ? 1240 : 940 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth }}>
           <thead>
             <tr>
               <th className="dl-th">Time</th>
+              {showLeg && <th className="dl-th">Leg</th>}
               {isStaff && <th className="dl-th">Customer</th>}
               <th className="dl-th">Product</th>
               <th className="dl-th">Dir</th>
@@ -199,7 +231,7 @@ export function CallsTable({
           <tbody>
             {cdrs.length === 0 && (
               <tr>
-                <td colSpan={isStaff ? 13 : 10}style={{ padding: 20 }}>
+                <td colSpan={colCount} style={{ padding: 20 }}>
                   <div className="dl-empty">
                     {pageRowCount === 0 ? (
                       <>
@@ -240,6 +272,9 @@ export function CallsTable({
                       {fmtTime(cdr.start_time)}
                     </span>
                   </td>
+                  {showLeg && (
+                    <td className="dlx-td"><LegBadge cdr={cdr} /></td>
+                  )}
                   {isStaff && (
                     <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {customerNames?.[cdr.customer_id] ?? `#${cdr.customer_id}`}

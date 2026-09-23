@@ -51,6 +51,9 @@ asyncpg = pytest.importorskip("asyncpg")
 
 REMEDY_47 = ("sudo -u postgres psql -d voip -f "
              "/opt/revup/docker/postgres/init/47_cdr_stir_outcome.sql")
+REMEDY_48 = ("sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f "
+             "/opt/revup/docker/postgres/init/48_cdr_call_legs.sql")
+ALL_COLS = ["stir_outcome", "stir_eff_actual", "leg", "call_id", "leg_attempt"]
 
 
 def _a_leg_vars(uuid, **overrides):
@@ -76,6 +79,8 @@ def _a_leg_vars(uuid, **overrides):
 def _reset_fallback_rate_limit():
     cdrs._pre47_last_logged_mono = 0.0
     cdrs._pre47_fallback_count = 0
+    cdrs._pre48_last_logged_mono = 0.0
+    cdrs._pre48_fallback_count = 0
 
 
 # ===========================================================================
@@ -87,13 +92,15 @@ def test_remedy_command_is_exact():
     # one command per migration file, not per column
     assert schema_check.remedies_for(["stir_eff_actual"]) == [REMEDY_47]
     assert schema_check.remedies_for([]) == []
+    assert schema_check.remedies_for(["leg", "call_id"]) == [REMEDY_48]
+    assert schema_check.remedies_for(ALL_COLS) == [REMEDY_47, REMEDY_48]
 
 
 def test_check_reports_missing_columns_with_fake_pool(monkeypatch):
     async def fake_fetch_all(sql, *args):
         assert "information_schema.columns" in sql
-        assert args == (["stir_outcome", "stir_eff_actual"],)
-        return [{"column_name": "stir_outcome"}]      # eff_actual missing
+        assert args == (ALL_COLS,)
+        return [{"column_name": c} for c in ALL_COLS if c != "stir_eff_actual"]
 
     monkeypatch.setattr(db, "fetch_all", fake_fetch_all)
     r = asyncio.run(schema_check.check_cdr_schema())
@@ -105,7 +112,7 @@ def test_check_reports_missing_columns_with_fake_pool(monkeypatch):
 
 def test_check_ok_with_fake_pool(monkeypatch):
     async def fake_fetch_all(sql, *args):
-        return [{"column_name": "stir_outcome"}, {"column_name": "stir_eff_actual"}]
+        return [{"column_name": c} for c in ALL_COLS]
 
     monkeypatch.setattr(db, "fetch_all", fake_fetch_all)
     r = asyncio.run(schema_check.check_cdr_schema())
@@ -140,7 +147,7 @@ def test_startup_check_logs_critical_with_remedy_and_does_not_raise(monkeypatch,
 
 def test_startup_check_is_quiet_when_ok(monkeypatch, caplog):
     async def fake_fetch_all(sql, *args):
-        return [{"column_name": "stir_outcome"}, {"column_name": "stir_eff_actual"}]
+        return [{"column_name": c} for c in ALL_COLS]
 
     monkeypatch.setattr(db, "fetch_all", fake_fetch_all)
     with caplog.at_level(logging.INFO, logger="db.schema_check"):
@@ -179,7 +186,7 @@ def test_ingest_falls_back_to_pre47_insert_with_fake_db(monkeypatch, caplog):
     assert len(fake.cdr_inserts) == 2
     full_sql, full_p = fake.cdr_inserts[0]
     pre_sql, pre_p = fake.cdr_inserts[1]
-    assert len(full_p) == 57 and "stir_outcome" in full_sql
+    assert len(full_p) == 60 and "stir_outcome" in full_sql
     assert len(pre_p) == 55 and "stir_outcome" not in pre_sql and "stir_eff_actual" not in pre_sql
     assert max(int(x) for x in re.findall(r"\$(\d+)", pre_sql)) == 55
     assert pre_p == full_p[:55]                         # nothing renumbered
@@ -404,8 +411,8 @@ def test_pg_schema_check_reports_both_columns_missing(guard_db, caplog):
     with caplog.at_level(logging.INFO, logger="db.schema_check"):
         r = _run(schema_check.run_startup_check())
     assert r["status"] == "missing"
-    assert r["missing"] == ["stir_outcome", "stir_eff_actual"]
-    assert r["remedy"] == [REMEDY_47]
+    assert r["missing"] == ALL_COLS
+    assert r["remedy"] == [REMEDY_47, REMEDY_48]
     crit = [rec for rec in caplog.records if rec.levelno == logging.CRITICAL]
     assert len(crit) == 1 and REMEDY_47 in crit[0].getMessage()
 
@@ -465,15 +472,17 @@ def test_pg_ingest_lands_billable_row_without_47_and_logs_once(guard_db, client,
 
 
 def test_pg_after_applying_47_full_insert_resumes(guard_db, client):
-    """Apply the REAL migration (twice — idempotent) on the live scratch DB:
-    no restart, the next ingest binds $56/$57 and the columns fill."""
+    """Apply the REAL migration 47 (twice — idempotent) on the live scratch
+    DB: no restart, the next ingest binds $56/$57 via the PRE-48 tier (48 is
+    still missing) and the columns fill."""
     async def go():
         async with guard_db["owner"].acquire() as conn:
             await apply_cdr_column_migrations(conn, names=("47_cdr_stir_outcome.sql",))
 
         r = await client.get("/health/detailed")
-        assert r.json()["components"]["schema"] == "healthy"
-        assert (await schema_check.check_cdr_schema())["status"] == "ok"
+        assert r.json()["components"]["schema"].startswith(
+            "degraded: cdrs is missing column(s) leg, call_id, leg_attempt")
+        assert REMEDY_48 in r.json()["components"]["schema"]
 
         r = await client.post("/v1/cdrs/ingest", json={
             "variables": _a_leg_vars("guard-a-3", stir_outcome="eff=A;mode=reorig")})
@@ -487,3 +496,132 @@ def test_pg_after_applying_47_full_insert_resumes(guard_db, client):
         assert row is not None and row["stir_outcome"] is None
 
     _run(go())
+
+
+def test_pg_pre48_tier_lands_a_leg_and_drops_b_row(guard_db, client, caplog):
+    """47 applied, 48 NOT: the A-leg lands through the 57-param tier (ERROR
+    names migration 48) and a carrier B-leg row is DROPPED — never inserted
+    without its `leg` column, where it would double-count as a call."""
+    _reset_fallback_rate_limit()
+
+    async def go():
+        with caplog.at_level(logging.DEBUG, logger="routers.cdrs"):
+            r = await client.post("/v1/cdrs/ingest", json={
+                "variables": _a_leg_vars("guard-a-48")})
+        assert r.json()["status"] == "ok", r.text
+        assert await db.fetch_one("SELECT 1 FROM cdrs WHERE uuid = $1", "guard-a-48")
+
+        before = (await db.fetch_one("SELECT COUNT(*) AS n FROM cdrs"))["n"]
+        b = {"variables": _a_leg_vars(
+                "guard-b-48", originating_leg_uuid="guard-a-48", direction="outbound",
+                cdr_leg="B", cdr_carrier_leg="true", cdr_call_id="guard-a-48",
+                cdr_leg_attempt="1", cdr_customer_id="20", cdr_product_type="rcf"),
+             "callflow": [{"caller_profile": {
+                 "uuid": "guard-b-48", "destination_number": "+17744045256",
+                 "originator": {"originator_caller_profiles": [{"uuid": "guard-a-48"}]}}}]}
+        r = await client.post("/v1/cdrs/ingest", json=b)
+        assert r.status_code == 200
+        assert r.json()["status"] == "b_leg"
+        assert r.json()["detail"].startswith("dropped: schema behind")
+        after = (await db.fetch_one("SELECT COUNT(*) AS n FROM cdrs"))["n"]
+        assert after == before
+
+    _run(go())
+    errs = [rec for rec in caplog.records if rec.levelno == logging.ERROR
+            and "migration-48" in rec.getMessage()]
+    assert len(errs) == 1 and "48_cdr_call_legs.sql" in errs[0].getMessage()
+
+
+def test_pg_after_applying_48_full_60_param_insert(guard_db, client):
+    async def go():
+        async with guard_db["owner"].acquire() as conn:
+            await apply_cdr_column_migrations(conn, names=("48_cdr_call_legs.sql",))
+        r = await client.get("/health/detailed")
+        assert r.json()["components"]["schema"] == "healthy"
+        assert (await schema_check.check_cdr_schema())["status"] == "ok"
+        r = await client.post("/v1/cdrs/ingest", json={
+            "variables": _a_leg_vars("guard-a-60")})
+        assert r.json()["status"] == "ok", r.text
+        row = await db.fetch_one(
+            "SELECT leg, call_id, leg_attempt FROM cdrs WHERE uuid = $1", "guard-a-60")
+        assert (row["leg"], row["call_id"], row["leg_attempt"]) == ("A", "guard-a-60", None)
+        # rows written by the earlier tiers stay legacy-shaped (leg NULL)
+        row = await db.fetch_one("SELECT leg FROM cdrs WHERE uuid = $1", "guard-a-48")
+        assert row["leg"] is None
+
+    _run(go())
+
+
+def test_fake_db_pre48_tier_is_strict_tail_truncation(monkeypatch, caplog):
+    """Missing 48 only: full(60) -> pre-48(57); the 57 params are exactly the
+    first 57 of the full tuple and the SQL tops out at $57."""
+    calls = []
+
+    async def fake(sql, *params):
+        calls.append((sql, params))
+        if "INSERT INTO cdrs" in sql and "leg_attempt" in sql:
+            raise asyncpg.exceptions.UndefinedColumnError(
+                'column "leg" of relation "cdrs" does not exist')
+        return "INSERT 0 1"
+
+    monkeypatch.setattr(db, "execute", fake)
+    _reset_fallback_rate_limit()
+    r = asyncio.run(cdrs._process_cdr_body({"variables": _a_leg_vars("fake-48")}))
+    assert r["status"] == "ok"
+    ins = [(s, p) for s, p in calls if "INSERT INTO cdrs" in s]
+    assert len(ins) == 2
+    (full_sql, full_p), (pre_sql, pre_p) = ins
+    assert len(full_p) == 60 and len(pre_p) == 57 and pre_p == full_p[:57]
+    assert "stir_outcome" in pre_sql and "leg_attempt" not in pre_sql
+    assert max(int(x) for x in re.findall(r"\$(\d+)", pre_sql)) == 57
+
+
+def test_fake_db_neither_47_nor_48_falls_to_55(monkeypatch):
+    """Missing 47 AND 48: PostgreSQL names the FIRST missing column
+    (stir_outcome) -> straight to the 55-param tier."""
+    calls = []
+
+    async def fake(sql, *params):
+        calls.append((sql, params))
+        if "INSERT INTO cdrs" in sql and "stir_outcome" in sql:
+            raise asyncpg.exceptions.UndefinedColumnError(
+                'column "stir_outcome" of relation "cdrs" does not exist')
+        return "INSERT 0 1"
+
+    monkeypatch.setattr(db, "execute", fake)
+    _reset_fallback_rate_limit()
+    r = asyncio.run(cdrs._process_cdr_body({"variables": _a_leg_vars("fake-55")}))
+    assert r["status"] == "ok"
+    ins = [p for s, p in calls if "INSERT INTO cdrs" in s]
+    assert [len(p) for p in ins] == [60, 55]
+
+
+def test_fake_db_pre48_then_pre47(monkeypatch):
+    """48 reported first (e.g. 47 dropped by hand after 48?) — the pre-48
+    retry then names a 47 column and the 55 tier lands the row."""
+    calls = []
+
+    async def fake(sql, *params):
+        calls.append((sql, params))
+        if "INSERT INTO cdrs" in sql and "leg_attempt" in sql:
+            raise asyncpg.exceptions.UndefinedColumnError(
+                'column "call_id" of relation "cdrs" does not exist')
+        if "INSERT INTO cdrs" in sql and "stir_outcome" in sql:
+            raise asyncpg.exceptions.UndefinedColumnError(
+                'column "stir_eff_actual" of relation "cdrs" does not exist')
+        return "INSERT 0 1"
+
+    monkeypatch.setattr(db, "execute", fake)
+    _reset_fallback_rate_limit()
+    r = asyncio.run(cdrs._process_cdr_body({"variables": _a_leg_vars("fake-3t")}))
+    assert r["status"] == "ok"
+    assert [len(p) for s, p in calls if "INSERT INTO cdrs" in s] == [60, 57, 55]
+
+
+def test_insert_tiers_are_strict_tail_truncations():
+    full, pre48, pre47 = cdrs._CDR_INSERT_SQL, cdrs._CDR_INSERT_SQL_PRE48, cdrs._CDR_INSERT_SQL_PRE47
+    top = lambda q: max(int(x) for x in re.findall(r"\$(\d+)", q))  # noqa: E731
+    assert (top(full), top(pre48), top(pre47)) == (60, 57, 55)
+    assert "$58::varchar, $59::varchar, $60::smallint" in full
+    with pytest.raises(ValueError):
+        cdrs._cdr_insert_sql(with_stir_outcome=False, with_call_legs=True)

@@ -9,9 +9,13 @@ columns).
 
 ========================= FULL COLUMN EXPORT =========================
 This emits a COMPLETE dump of every data column on the ``cdrs`` table (every
-column except the ``exported_at`` watermark). The header row is AUTHORITATIVE:
-each field's label is its raw DB column name (snake_case), so the file is
-self-describing and downstream consumers pick the columns they need.
+column except the ``exported_at`` watermark) PLUS the derived billing fields
+(answered, billed_ms, billed_seconds, ring_ms, and call_id as
+COALESCE(call_id, uuid)) — BILLING BLOCK FIRST. The header row is
+AUTHORITATIVE: each label is the raw DB column name or the derived alias
+(snake_case), so the file is self-describing. See the FIELD CONTRACT comment
+above _FIELD_DEFS for what to rate on (billed_seconds) and how to count
+calls (leg='A').
 
 When the ``cdrs`` schema grows (a new ADD COLUMN migration), add the column
 here (and to exporter.SELECT_COLUMNS) — the drift-guard test in
@@ -107,7 +111,7 @@ def _fmt_json(value: Any) -> str:
 
 
 def _fmt_bool(value: Any) -> str:
-    """Render a BOOLEAN (on_net) as 'true'/'false'. None -> ''."""
+    """Render a BOOLEAN (on_net, answered) as 'true'/'false'. None -> ''."""
     if value is None:
         return ""
     return "true" if value else "false"
@@ -128,38 +132,76 @@ def _fmt_plain(value: Any) -> str:
 # Field definitions
 # ---------------------------------------------------------------------------
 # Each entry: (output_column_name, source_row_key, value_formatter).
-# The output_column_name is the raw DB column name and doubles as the CSV
-# header (self-describing file). source_row_key must be a column present in the
-# exporter's SELECT (see exporter.SELECT_COLUMNS) — kept identical to the header
-# so the drift-guard test can equate the two sets.
+# The output_column_name doubles as the CSV header (self-describing file) and
+# is identical to the source key: a raw DB column name for stored columns
+# (exporter.SELECT_COLUMNS) or the alias of a DERIVED billing field
+# (exporter.SELECT_DERIVED). The drift guard asserts
+# set(FIELDS) == SELECT_COLUMNS ∪ derived aliases.
 #
-# ORDER HERE IS AUTHORITATIVE for the exported file layout and mirrors
-# exporter.SELECT_COLUMNS (base-table order, then migrations in number order).
-# To add a new cdrs column to the export, append it here AND to SELECT_COLUMNS.
-_FIELD_DEFS: list[tuple[str, str, Callable[[Any], str]]] = [
-    # --- base table (05_schema_cdr.sql), in declaration order ---
-    ("id",                             "id",                             _fmt_plain),
+# ORDER HERE IS AUTHORITATIVE for the exported file layout:
+#   1. the BILLING BLOCK first (plan §2 step 4, fixed before Equinox pins a
+#      mapping): call_id, leg, uuid, customer_id, product_type, direction,
+#      answered, billed_seconds, billed_ms, ring_ms, duration_ms, billable_ms,
+#      start_time, answer_time, end_time, caller_id, destination,
+#      carrier_used, on_net, origin_customer_id, terminating_customer_id,
+#      hangup_cause, sip_code;
+#   2. every remaining stored column in schema order (05, 16, 18, 23, 40);
+#   3. the newest migrations' columns (47 stir_outcome/stir_eff_actual,
+#      48 leg_attempt), appended so existing positions never move again.
+#
+# FIELD CONTRACT (for the rater):
+#   call_id         call identity; group legs of one call on it
+#   leg             'A' = the call (count calls on these) | 'B' = one carrier
+#                   bridge attempt of that call (legacy pre-split rows are
+#                   exported as 'A' — they are A-legs)
+#   uuid            unique per ROW (FreeSWITCH channel uuid) — dedup key
+#   answered        'true'/'false'
+#   billed_seconds  THE rateable quantity (ceil of billed_ms); 0 when
+#                   answered=false. Rate every row on its own value; never by
+#                   reference to its partner leg.
+#   billed_ms       exact billable ms (answer -> hangup); 0 when unanswered
+#   ring_ms         NOT billable: start -> answer (or -> end if unanswered)
+#   duration_ms     NOT billable: whole channel life incl. ring (fidelity)
+#   billable_ms     raw stored value — fidelity only; rate billed_seconds
+#   leg_attempt     1..N carrier attempt number on B rows; '' on A rows
+# To add a new cdrs column to the export, append it at the END here AND to
+# SELECT_COLUMNS.
+_BILLING_BLOCK: list[tuple[str, str, Callable[[Any], str]]] = [
+    ("call_id",                        "call_id",                        _fmt_plain),
+    ("leg",                            "leg",                            _fmt_plain),
     ("uuid",                           "uuid",                           _fmt_plain),
     ("customer_id",                    "customer_id",                    _fmt_plain),
     ("product_type",                   "product_type",                   _fmt_plain),
-    ("trunk_id",                       "trunk_id",                       _fmt_plain),
     ("direction",                      "direction",                      _fmt_plain),
-    ("caller_id",                      "caller_id",                      _fmt_plain),
-    ("destination",                    "destination",                    _fmt_plain),
-    ("destination_prefix",             "destination_prefix",             _fmt_plain),
+    ("answered",                       "answered",                       _fmt_bool),
+    ("billed_seconds",                 "billed_seconds",                 _fmt_plain),
+    ("billed_ms",                      "billed_ms",                      _fmt_plain),
+    ("ring_ms",                        "ring_ms",                        _fmt_plain),
+    ("duration_ms",                    "duration_ms",                    _fmt_plain),
+    ("billable_ms",                    "billable_ms",                    _fmt_plain),
     ("start_time",                     "start_time",                     _fmt_ts),
     ("answer_time",                    "answer_time",                    _fmt_ts),
     ("end_time",                       "end_time",                       _fmt_ts),
-    ("duration_ms",                    "duration_ms",                    _fmt_plain),
-    ("billable_ms",                    "billable_ms",                    _fmt_plain),
+    ("caller_id",                      "caller_id",                      _fmt_plain),
+    ("destination",                    "destination",                    _fmt_plain),
+    ("carrier_used",                   "carrier_used",                   _fmt_plain),
+    ("on_net",                         "on_net",                         _fmt_bool),
+    ("origin_customer_id",             "origin_customer_id",             _fmt_plain),
+    ("terminating_customer_id",        "terminating_customer_id",        _fmt_plain),
+    ("hangup_cause",                   "hangup_cause",                   _fmt_plain),
+    ("sip_code",                       "sip_code",                       _fmt_plain),
+]
+
+_FIDELITY_BLOCK: list[tuple[str, str, Callable[[Any], str]]] = [
+    # --- base table (05_schema_cdr.sql), declaration order, minus the above ---
+    ("id",                             "id",                             _fmt_plain),
+    ("trunk_id",                       "trunk_id",                       _fmt_plain),
+    ("destination_prefix",             "destination_prefix",             _fmt_plain),
     ("rate_per_min",                   "rate_per_min",                   _fmt_money),
     ("total_cost",                     "total_cost",                     _fmt_money),
     ("carrier_cost",                   "carrier_cost",                   _fmt_money),
     ("margin",                         "margin",                         _fmt_money),
     ("rated_at",                       "rated_at",                       _fmt_ts),
-    ("hangup_cause",                   "hangup_cause",                   _fmt_plain),
-    ("sip_code",                       "sip_code",                       _fmt_plain),
-    ("carrier_used",                   "carrier_used",                   _fmt_plain),
     ("traffic_grade",                  "traffic_grade",                  _fmt_plain),
     ("fraud_score",                    "fraud_score",                    _fmt_plain),
     ("fraud_flags",                    "fraud_flags",                    _fmt_json),
@@ -169,7 +211,7 @@ _FIELD_DEFS: list[tuple[str, str, Callable[[Any], str]]] = [
     ("jitter_min_ms",                  "jitter_min_ms",                  _fmt_num),
     ("jitter_max_ms",                  "jitter_max_ms",                  _fmt_num),
     ("jitter_avg_ms",                  "jitter_avg_ms",                  _fmt_num),
-    ("packet_loss_count",             "packet_loss_count",              _fmt_plain),
+    ("packet_loss_count",              "packet_loss_count",              _fmt_plain),
     ("packet_total_count",             "packet_total_count",             _fmt_plain),
     ("packet_loss_pct",                "packet_loss_pct",                _fmt_num),
     ("flaw_total",                     "flaw_total",                     _fmt_plain),
@@ -196,15 +238,19 @@ _FIELD_DEFS: list[tuple[str, str, Callable[[Any], str]]] = [
     ("bridge_uuid",                    "bridge_uuid",                    _fmt_plain),
     # --- 18_sbc_id_column.sql ---
     ("sbc_id",                         "sbc_id",                         _fmt_plain),
-    # --- 23_onnet_cdr_columns.sql ---
-    ("origin_customer_id",             "origin_customer_id",             _fmt_plain),
-    ("terminating_customer_id",        "terminating_customer_id",        _fmt_plain),
-    ("on_net",                         "on_net",                         _fmt_bool),
+    # --- 23_onnet_cdr_columns.sql (the rest of the set is in the billing block) ---
     ("on_net_hops",                    "on_net_hops",                    _fmt_plain),
     # --- 40_carrier_trunks.sql (inbound-carrier attribution) ---
     ("inbound_carrier",                "inbound_carrier",                _fmt_plain),
     ("inbound_carrier_pop",            "inbound_carrier_pop",            _fmt_plain),
+    # --- 47_cdr_stir_outcome.sql ---
+    ("stir_outcome",                   "stir_outcome",                   _fmt_plain),
+    ("stir_eff_actual",                "stir_eff_actual",                _fmt_plain),
+    # --- 48_cdr_call_legs.sql (leg + call_id are in the billing block) ---
+    ("leg_attempt",                    "leg_attempt",                    _fmt_plain),
 ]
+
+_FIELD_DEFS: list[tuple[str, str, Callable[[Any], str]]] = _BILLING_BLOCK + _FIDELITY_BLOCK
 
 # Module-level documentation of column order (output labels). Public API.
 FIELDS: list[str] = [name for (name, _src, _fmt) in _FIELD_DEFS]

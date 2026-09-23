@@ -15,6 +15,16 @@
 --       flag parsing ("true" case-insensitive/trimmed only); and RCF/trunk
 --       scenarios produce IDENTICAL captured state with the flag off vs on.
 --
+--   (5) CDR A/B leg split (docs/CDR_LEG_SPLIT_CONTRACT.md): every CARRIER
+--       bridge attempt (table-driven + legacy failover loops) carries a
+--       per-leg "[cdr_*]" block with the A-leg's final values and a 1-based
+--       contiguous cdr_leg_attempt; NO cdr_* var is ever set on the A-leg;
+--       on-net trunk delivery / local extension / API reject / hard rejects
+--       carry NO cdr_* at all; unsafe values are omitted, never injected.
+--       Optional regression mode: BASELINE_ROUTER=<pre-change inbound_router.lua>
+--       re-runs every scenario on the baseline and asserts the captured A-leg
+--       state + dial strings (with the [cdr_*] block stripped) are IDENTICAL.
+--
 -- Also runs the RCF->trunk case with a fully-transparent chain to prove the
 -- direct-trunk output is reproduced when every hop passes CID.
 --
@@ -153,6 +163,177 @@ scenarios.direct_api = {
     trunk_endpoints = {},
 }
 
+-- ------------------------------------------------------------------
+-- CDR leg-split scenarios (carrier egress). Common inbound attribution:
+-- Kamailio-stamped X-SBC-ID / X-Inbound-Carrier / X-Inbound-PoP on the A-leg.
+-- ------------------------------------------------------------------
+local SPLIT_HDRS = {
+    ["sip_h_X-SBC-ID"]            = "east-sbc-1",
+    ["sip_h_X-Inbound-Carrier"]   = "sinch",
+    ["sip_h_X-Inbound-PoP"]       = "denver",
+}
+
+-- (6) OFF-NET single-hop RCF, carrier_trunks unavailable -> LEGACY 4-attempt
+--     loop; every attempt fails -> 4 carrier B-legs, then 503.
+scenarios.rcf_offnet_legacy_allfail = {
+    inbound_did   = "+16170000020",
+    sip_from_user = "+15085550101",
+    caller_id     = "+15085550101",
+    extra_vars    = SPLIT_HDRS,
+    step1 = {
+        product_type = "rcf",
+        customer_id = 10, forward_to = "+17745550100",
+        pass_caller_id = true, ring_timeout = 30, max_channels = 0,
+        rcf_name = "Main Office",
+    },
+    oracle = {},
+    trunk_endpoints = {},
+    bridge_results = { "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE",
+                       "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE" },
+}
+
+-- (7) OFF-NET RCF, table-driven (carrier_trunks) 2 trunks x 2 SBCs = 4
+--     attempts, SBC-2 (10.0.0.2) cached DOWN -> 2 launched; first fails,
+--     second answers. Expect cdr_leg_attempt 1,2 (contiguous, skips uncounted).
+scenarios.rcf_offnet_table_skip = {
+    inbound_did   = "+16170000021",
+    sip_from_user = "+15085550102",
+    caller_id     = "+15085550102",
+    extra_vars    = SPLIT_HDRS,
+    step1 = {
+        product_type = "rcf",
+        customer_id = 10, forward_to = "+17745550101",
+        pass_caller_id = false, ring_timeout = 25, max_channels = 0,
+        rcf_name = "Masked Line",
+    },
+    oracle = {},
+    trunk_endpoints = {},
+    term_trunks = {
+        { carrier = "bandwidth", pop = "dallas", term_ip = "67.231.2.12",    traffic_class = "any" },
+        { carrier = "bandwidth", pop = "la",     term_ip = "216.82.238.134", traffic_class = "any" },
+    },
+    sbc_down = { ["10.0.0.2"] = true },
+    bridge_results = { "NO_ANSWER", "SUCCESS" },
+}
+
+-- (8) ON-NET chain -> OFF-NET terminal: +16170000030 (RCF cust 10, pass=true)
+--     -> +16170000031 (RCF cust 11, pass=FALSE, masks) -> +17745550102 (PSTN).
+--     One carrier B-leg; call-level facts on_net=true, hops=1, origin=10,
+--     terminal=11. First attempt answers.
+scenarios.rcf_chain_offnet = {
+    inbound_did   = "+16170000030",
+    sip_from_user = "+15085550103",
+    caller_id     = "+15085550103",
+    extra_vars    = SPLIT_HDRS,
+    step1 = {
+        product_type = "rcf",
+        customer_id = 10, forward_to = "+16170000031",
+        pass_caller_id = true, ring_timeout = 30, max_channels = 0,
+        rcf_name = "Origin",
+    },
+    oracle = {
+        ["+16170000031"] = {
+            did="+16170000031", product_type="rcf", customer_id=11,
+            product_ref_id=4, product_enabled="t", customer_status="active",
+            forward_to="+17745550102", pass_caller_id="f",
+            ring_timeout="20", max_channels="0", product_name="Terminal RCF",
+            voice_url=nil, fallback_url=nil, trunk_id=nil,
+        },
+    },
+    trunk_endpoints = {},
+    bridge_results = { "SUCCESS" },
+}
+
+-- (9) Local extension terminal (on-net): RCF -> 1001. No carrier leg.
+scenarios.rcf_local_ext = {
+    inbound_did   = "+16170000040",
+    sip_from_user = "+15085550104",
+    caller_id     = "+15085550104",
+    extra_vars    = SPLIT_HDRS,
+    step1 = {
+        product_type = "rcf",
+        customer_id = 10, forward_to = "1001",
+        pass_caller_id = true, ring_timeout = 30, max_channels = 0,
+        rcf_name = "Origin",
+    },
+    oracle = {},
+    trunk_endpoints = {},
+    bridge_results = { "SUCCESS" },
+}
+
+-- (10) Hard rejects: disabled on-net terminal (603) and a loop (483).
+scenarios.rcf_disabled_terminal = {
+    inbound_did   = "+16170000050",
+    sip_from_user = "+15085550105",
+    caller_id     = "+15085550105",
+    extra_vars    = SPLIT_HDRS,
+    step1 = {
+        product_type = "rcf",
+        customer_id = 10, forward_to = "+16170000051",
+        pass_caller_id = true, ring_timeout = 30, max_channels = 0,
+        rcf_name = "Origin",
+    },
+    oracle = {
+        ["+16170000051"] = {
+            did="+16170000051", product_type="rcf", customer_id=12,
+            product_ref_id=5, product_enabled="f", customer_status="active",
+            forward_to="+17745550103", pass_caller_id="t",
+            ring_timeout="30", max_channels="0", product_name="Off",
+        },
+    },
+    trunk_endpoints = {},
+}
+scenarios.rcf_loop = {
+    inbound_did   = "+16170000060",
+    sip_from_user = "+15085550106",
+    caller_id     = "+15085550106",
+    extra_vars    = SPLIT_HDRS,
+    step1 = {
+        product_type = "rcf",
+        customer_id = 10, forward_to = "+16170000061",
+        pass_caller_id = true, ring_timeout = 30, max_channels = 0,
+        rcf_name = "Origin",
+    },
+    oracle = {
+        ["+16170000061"] = {
+            did="+16170000061", product_type="rcf", customer_id=10,
+            product_ref_id=6, product_enabled="t", customer_status="active",
+            forward_to="+16170000060", pass_caller_id="t",
+            ring_timeout="30", max_channels="0", product_name="Back",
+        },
+        ["+16170000060"] = {
+            did="+16170000060", product_type="rcf", customer_id=10,
+            product_ref_id=7, product_enabled="t", customer_status="active",
+            forward_to="+16170000061", pass_caller_id="t",
+            ring_timeout="30", max_channels="0", product_name="Origin",
+        },
+    },
+    trunk_endpoints = {},
+}
+
+-- (11) Unsafe values never reach the dial string: a PoP with a comma and a
+--      uuid with a comma/bracket are OMITTED; the rest of the block is intact.
+scenarios.rcf_offnet_unsafe = {
+    inbound_did   = "+16170000070",
+    sip_from_user = "+15085550107",
+    caller_id     = "+15085550107",
+    uuid          = "bad,uuid]x",
+    extra_vars    = {
+        ["sip_h_X-SBC-ID"]          = "east-sbc-2",
+        ["sip_h_X-Inbound-Carrier"] = "bandwidth",
+        ["sip_h_X-Inbound-PoP"]     = "den,ver",
+    },
+    step1 = {
+        product_type = "rcf",
+        customer_id = 10, forward_to = "+17745550104",
+        pass_caller_id = true, ring_timeout = 30, max_channels = 0,
+        rcf_name = "Origin",
+    },
+    oracle = {},
+    trunk_endpoints = {},
+    bridge_results = { "SUCCESS" },
+}
+
 -- Shallow-copy a scenario with a per-run env override table (os.getenv stub).
 local function with_env(sc, envtab)
     local c = {}
@@ -164,7 +345,7 @@ end
 -- ------------------------------------------------------------------
 -- Run one scenario in an isolated environment and return captured state.
 -- ------------------------------------------------------------------
-local function run_scenario(sc)
+local function run_scenario(sc, script_path)
     local captured = {
         setvars   = {},   -- session:setVariable + set_var (last write wins)
         bridges   = {},   -- dial strings passed to session:execute("bridge", ...)
@@ -177,7 +358,7 @@ local function run_scenario(sc)
     -- ---- session stub ----
     local session = {}
     local session_vars = {
-        uuid                = "u-"..tostring(sc.inbound_did),
+        uuid                = sc.uuid or ("u-"..tostring(sc.inbound_did)),
         destination_number  = sc.inbound_did,
         caller_id_number    = sc.caller_id,
         caller_id_name      = "",
@@ -187,6 +368,9 @@ local function run_scenario(sc)
         sip_received_ip     = "67.231.2.12",
         network_addr        = "67.231.2.12",
     }
+    for k, v in pairs(sc.extra_vars or {}) do session_vars[k] = v end
+    local bridge_results = sc.bridge_results
+    local bridge_idx = 0
     function session:getVariable(k) return session_vars[k] end
     function session:setVariable(k, v) session_vars[k] = v; captured.setvars[k] = v end
     function session:ready() return true end
@@ -196,6 +380,13 @@ local function run_scenario(sc)
     function session:execute(app, data)
         if app == "bridge" then
             captured.bridges[#captured.bridges+1] = data
+            -- Scripted bridge outcome (originate_disposition) per attempt,
+            -- only for scenarios that define one (older scenarios unchanged).
+            if bridge_results then
+                bridge_idx = bridge_idx + 1
+                session_vars.originate_disposition =
+                    bridge_results[bridge_idx] or "NORMAL_TEMPORARY_FAILURE"
+            end
         elseif app == "lua" and data == "voice_webhook.lua" then
             captured.webhook = true
         else
@@ -204,7 +395,14 @@ local function run_scenario(sc)
     end
 
     -- ---- freeswitch stub ----
+    -- Pre-seed the process-wide SBC health cache so no real TCP probe runs
+    -- (luasocket may exist on the dev box): both harness SBCs "up" unless the
+    -- scenario marks one down.
     local globals = {}
+    for _, ip in ipairs({ "10.0.0.1", "10.0.0.2" }) do
+        globals["sbc_health_" .. ip] = string.format("%s:%d",
+            (sc.sbc_down and sc.sbc_down[ip]) and "down" or "up", os.time())
+    end
     local freeswitch = {
         consoleLog = function(_, _) end,
         getGlobalVariable = function(k) return globals[k] end,
@@ -253,15 +451,31 @@ local function run_scenario(sc)
             return sc.trunk_endpoints[tostring(trunk_id)]
         end,
     }
+    -- carrier_trunks (table-driven termination) only when the scenario
+    -- supplies rows; otherwise db.get_termination_trunks is absent and the
+    -- router takes the LEGACY fallback loop (fail-open path).
+    if sc.term_trunks then
+        fake_db.get_termination_trunks = function(_) return sc.term_trunks end
+    end
 
     -- ---- os stub: per-scenario env overrides (os.getenv) ----
     -- API_CALLING_ENABLED is pinned to the scenario's value (nil = unset)
     -- so the caller's shell env can never leak into the result.
     local sc_env = sc.env or {}
+    -- Pinned harness env: deterministic SBC IPs for the failover loop and
+    -- no leak of the caller's shell (TEST_MODE, pass-through flags, zone).
+    local PINNED = {
+        SBC_PROXY_IP = "10.0.0.1", SBC_PROXY_IP_FAILOVER = "10.0.0.2",
+        EXTERNAL_SIP_IP = "203.0.113.50", FS_ZONE = "east",
+    }
+    local UNSET = { API_CALLING_ENABLED = true, TEST_MODE = true,
+        RCF_FROM_PASSTHROUGH = true, BRIDGE_PROGRESS_TIMEOUT = true,
+        FS_NODE_ID = true }
     local sandbox_os = setmetatable({
         getenv = function(k)
             if sc_env[k] ~= nil then return sc_env[k] end
-            if k == "API_CALLING_ENABLED" then return nil end
+            if PINNED[k] ~= nil then return PINNED[k] end
+            if UNSET[k] then return nil end
             return os.getenv(k)
         end,
     }, { __index = os })
@@ -296,8 +510,9 @@ local function run_scenario(sc)
     -- Ensure the RCF path does not take the TEST_MODE tone branch.
     local saved_test_mode = os.getenv("TEST_MODE")
 
-    local chunk, err = loadfile(SCRIPT, "t", env)
-    if not chunk then error("loadfile "..SCRIPT.." failed: "..tostring(err)) end
+    local path = script_path or SCRIPT
+    local chunk, err = loadfile(path, "t", env)
+    if not chunk then error("loadfile "..path.." failed: "..tostring(err)) end
     local ok, run_err = pcall(chunk)
     if not ok then error("script raised: "..tostring(run_err)) end
 
@@ -462,6 +677,232 @@ do
         local on  = dump(run_scenario(with_env(scenarios[name], { API_CALLING_ENABLED = "true" })))
         check(name .. ": captured state identical with flag off vs on", off == on,
               "\n--- off ---\n" .. off .. "\n--- on ---\n" .. on)
+    end
+end
+
+-- ------------------------------------------------------------------
+-- CDR A/B leg split assertions
+-- ------------------------------------------------------------------
+-- Extract the per-leg "[...]" block that must sit IMMEDIATELY before the
+-- endpoint ("}[cdr_...]sofia/external/"). Returns (vars table | nil, the
+-- dial string with the block removed, raw block text).
+local function cdr_block(dial)
+    local pre, block, post = dial:match("^(.-})%[([^%]]*)%](sofia/.*)$")
+    if not block then return nil, dial, nil end
+    local t = {}
+    for kv in block:gmatch("[^,]+") do
+        local k, v = kv:match("^([%w_]+)=(.*)$")
+        if k then t[k] = v else t["__bad__"] = kv end
+    end
+    return t, pre .. post, block
+end
+
+local function no_cdr_on_a_leg(c, label)
+    local leaked = {}
+    for k in pairs(c.setvars) do
+        if tostring(k):match("^cdr_") then leaked[#leaked+1] = k end
+    end
+    for _, e in ipairs(c.executes) do
+        if tostring(e.data):match("cdr_") then leaked[#leaked+1] = e.app .. ":" .. e.data end
+    end
+    check(label .. ": NO cdr_* var set/exported on the A-leg", #leaked == 0,
+          table.concat(leaked, ","))
+end
+
+local function no_cdr_in_bridges(c, label)
+    local bad = {}
+    for _, b in ipairs(c.bridges) do
+        if b:match("cdr_") then bad[#bad+1] = b end
+    end
+    check(label .. ": NO cdr_* in any dial string (no B row)", #bad == 0,
+          table.concat(bad, " | "))
+end
+
+-- Assert the full contract set on one carrier dial string.
+local function check_b_block(dial, want, label)
+    local t, stripped = cdr_block(dial)
+    check(label .. ": [cdr_*] per-leg block present right before sofia/",
+          t ~= nil, dial)
+    if not t then return end
+    check(label .. ": block parses cleanly (no stray fields)", t["__bad__"] == nil,
+          tostring(t["__bad__"]))
+    for k, v in pairs(want) do
+        if v == false then
+            check(label .. ": " .. k .. " omitted", t[k] == nil, tostring(t[k]))
+        else
+            check(label .. ": " .. k .. "=" .. v, t[k] == v, tostring(t[k]))
+        end
+    end
+    check(label .. ": only one [ ] block / endpoint untouched",
+          not stripped:find("%[") and stripped:find("}sofia/external/") ~= nil, stripped)
+end
+
+local function base_want(sc, attempt, extra)
+    local w = {
+        cdr_leg = "B", cdr_carrier_leg = "true",
+        cdr_leg_attempt = tostring(attempt), cdr_direction = "outbound",
+        cdr_call_id = "u-" .. sc.inbound_did,
+        cdr_product_type = "rcf",
+        cdr_trunk_id = false,
+        cdr_inbound_carrier = "sinch", cdr_inbound_carrier_pop = "denver",
+        cdr_sbc_id = "east-sbc-1",
+    }
+    for k, v in pairs(extra or {}) do w[k] = v end
+    return w
+end
+
+do
+    print("[6] OFF-NET RCF, legacy fallback loop, all 4 attempts fail")
+    local sc = scenarios.rcf_offnet_legacy_allfail
+    local c = run_scenario(sc)
+    check("4 carrier bridge attempts", #c.bridges == 4, #c.bridges)
+    local sbcs = { "10.0.0.1", "10.0.0.2", "10.0.0.1", "10.0.0.2" }
+    local carriers = { "primary", "primary", "secondary", "secondary" }
+    for i, b in ipairs(c.bridges) do
+        check_b_block(b, base_want(sc, i, {
+            cdr_customer_id = "10", cdr_on_net = "false", cdr_on_net_hops = "0",
+            cdr_origin_customer_id = "10", cdr_terminating_customer_id = "10",
+        }), "legacy attempt " .. i)
+        local _, stripped = cdr_block(b)
+        local want_dial = string.format(
+            "{ignore_early_media=false,progress_timeout=10,call_timeout=30,sip_h_X-Carrier=%s" ..
+            ",sip_h_X-CID=callid-%s" ..
+            ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
+            "}sofia/external/+17745550100@%s:5060", carriers[i], sc.inbound_did, sbcs[i])
+        check("legacy attempt " .. i .. ": dial string minus block == pre-split string",
+              stripped == want_dial, "\n got " .. stripped .. "\nwant " .. want_dial)
+    end
+    no_cdr_on_a_leg(c, "legacy allfail")
+    check("503 after all attempts", c.hangups[1] == "NORMAL_TEMPORARY_FAILURE",
+          table.concat(c.hangups, ","))
+    check("term_trunks_source=fallback", c.setvars["term_trunks_source"] == "fallback",
+          c.setvars["term_trunks_source"])
+    check("A-leg product/customer unchanged (rcf / 10)",
+          c.setvars["product_type"] == "rcf" and c.setvars["customer_id"] == "10",
+          tostring(c.setvars["product_type"]) .. "/" .. tostring(c.setvars["customer_id"]))
+    check("A-leg direction NOT set to outbound", c.setvars["direction"] ~= "outbound",
+          c.setvars["direction"])
+end
+
+do
+    print("[7] OFF-NET RCF, table-driven loop, SBC-2 down, 2nd launched attempt answers")
+    local sc = scenarios.rcf_offnet_table_skip
+    local c = run_scenario(sc)
+    check("2 launched bridges (2 skipped by TCP pre-check)", #c.bridges == 2, #c.bridges)
+    local ips = { "67.231.2.12", "216.82.238.134" }
+    for i, b in ipairs(c.bridges) do
+        check_b_block(b, base_want(sc, i, {
+            cdr_customer_id = "10", cdr_on_net = "false", cdr_on_net_hops = "0",
+            cdr_origin_customer_id = "10", cdr_terminating_customer_id = "10",
+        }), "table attempt " .. i)
+        check("table attempt " .. i .. ": carrier IP " .. ips[i] .. " via SBC-1",
+              b:find("sip_h_X-Carrier-IP=" .. ips[i], 1, true) ~= nil
+              and b:find("@10.0.0.1:5060", 1, true) ~= nil, b)
+    end
+    no_cdr_on_a_leg(c, "table skip")
+    check("no router hangup (answered)", #c.hangups == 0, table.concat(c.hangups, ","))
+    check("carrier_used = winning trunk", c.setvars["carrier_used"] == "bandwidth-la",
+          c.setvars["carrier_used"])
+    -- pass_caller_id=false single hop: masking DID presented (CID composition).
+    check("CID: effective_caller_id_number = masking DID (10-digit)",
+          c.setvars["effective_caller_id_number"] == "6170000021",
+          c.setvars["effective_caller_id_number"])
+end
+
+do
+    print("[8] ON-NET chain -> OFF-NET terminal (one carrier B-leg, call-level facts)")
+    local sc = scenarios.rcf_chain_offnet
+    local c = run_scenario(sc)
+    check("exactly 1 carrier bridge", #c.bridges == 1, #c.bridges)
+    if c.bridges[1] then
+        check_b_block(c.bridges[1], base_want(sc, 1, {
+            cdr_customer_id = "11", cdr_on_net = "true", cdr_on_net_hops = "1",
+            cdr_origin_customer_id = "10", cdr_terminating_customer_id = "11",
+        }), "chain attempt 1")
+    end
+    no_cdr_on_a_leg(c, "chain offnet")
+    check("A-leg customer_id = terminal (11)", c.setvars["customer_id"] == "11",
+          c.setvars["customer_id"])
+    check("A-leg on_net=true hops=1",
+          c.setvars["on_net"] == "true" and c.setvars["on_net_hops"] == "1",
+          tostring(c.setvars["on_net"]) .. "/" .. tostring(c.setvars["on_net_hops"]))
+    check("CID: masking hop +16170000031 presented (last false hop wins)",
+          c.setvars["effective_caller_id_number"] == "6170000031",
+          c.setvars["effective_caller_id_number"])
+    check("CID: X-Original-CID = masking E.164",
+          c.setvars["sip_h_X-Original-CID"] == "+16170000031",
+          c.setvars["sip_h_X-Original-CID"])
+end
+
+do
+    print("[9] ON-NET terminals / rejects carry NO cdr_* (no B row)")
+    for _, name in ipairs({ "rcf_mask_to_trunk", "rcf_transparent_to_trunk",
+                            "direct_trunk", "rcf_local_ext" }) do
+        local c = run_scenario(scenarios[name])
+        check(name .. ": a bridge was emitted", #c.bridges >= 1, #c.bridges)
+        no_cdr_in_bridges(c, name)
+        no_cdr_on_a_leg(c, name)
+    end
+    for _, spec in ipairs({
+        { "rcf_to_api", "CALL_REJECTED" }, { "direct_api", "CALL_REJECTED" },
+        { "rcf_disabled_terminal", "CALL_REJECTED" },
+        { "rcf_loop", "EXCHANGE_ROUTING_ERROR" },
+    }) do
+        local c = run_scenario(scenarios[spec[1]])
+        check(spec[1] .. ": hard reject " .. spec[2],
+              c.hangups[1] == spec[2] and #c.bridges == 0,
+              table.concat(c.hangups, ",") .. " bridges=" .. #c.bridges)
+        no_cdr_on_a_leg(c, spec[1])
+    end
+    -- API Calling ON: the webhook engine answers; still no carrier dial here.
+    local c = run_scenario(with_env(scenarios.rcf_to_api, { API_CALLING_ENABLED = "true" }))
+    no_cdr_in_bridges(c, "rcf_to_api (flag on)")
+    no_cdr_on_a_leg(c, "rcf_to_api (flag on)")
+end
+
+do
+    print("[10] Unsafe values are omitted, never injected into the dial string")
+    local sc = scenarios.rcf_offnet_unsafe
+    local c = run_scenario(sc)
+    check("1 bridge", #c.bridges == 1, #c.bridges)
+    if c.bridges[1] then
+        check_b_block(c.bridges[1], {
+            cdr_leg = "B", cdr_carrier_leg = "true", cdr_leg_attempt = "1",
+            cdr_direction = "outbound", cdr_customer_id = "10",
+            cdr_call_id = false,             -- uuid had ',' and ']'
+            cdr_inbound_carrier = "bandwidth",
+            cdr_inbound_carrier_pop = false, -- had ','
+            cdr_sbc_id = "east-sbc-2",
+        }, "unsafe")
+    end
+    no_cdr_on_a_leg(c, "unsafe")
+end
+
+-- Optional regression mode against the pre-split router.
+local BASELINE = os.getenv("BASELINE_ROUTER")
+if BASELINE and BASELINE ~= "" then
+    print("[11] BASELINE regression: A-leg state + dial strings (minus [cdr_*]) identical to " .. BASELINE)
+    local function dump_stripped(c)
+        local copy = { setvars = c.setvars, hangups = c.hangups, executes = c.executes,
+                       answered = c.answered, webhook = c.webhook, bridges = {} }
+        for i, b in ipairs(c.bridges) do
+            local _, stripped = cdr_block(b)
+            copy.bridges[i] = stripped
+        end
+        return dump(copy)
+    end
+    local names = {}
+    for name in pairs(scenarios) do names[#names+1] = name end
+    table.sort(names)
+    for _, name in ipairs(names) do
+        for _, flag in ipairs({ false, true }) do
+            local sc = flag and with_env(scenarios[name], { API_CALLING_ENABLED = "true" })
+                or scenarios[name]
+            local new = dump_stripped(run_scenario(sc))
+            local old = dump(run_scenario(sc, BASELINE))
+            check(string.format("%s (api flag %s): identical to baseline", name, tostring(flag)),
+                  new == old, "\n--- baseline ---\n" .. old .. "\n--- new ---\n" .. new)
+        end
     end
 end
 

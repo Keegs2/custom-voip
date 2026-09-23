@@ -11,6 +11,12 @@
  * over the same committed filter set); the trend charts aggregate their own
  * up-to-1000-row fetch.
  *
+ * ROW-MODEL HONESTY (staff only — CDR A/B leg split): staff get a one-line
+ * note under the strip saying what a "row" is. Rows=Calls → figures are per
+ * call; Rows=All legs / Carrier legs → every carrier bridge attempt is its
+ * own row, so counts / ASR / averages are NOT call counts. Tenants are always
+ * one row per call (API-enforced) and see no note — their strip is unchanged.
+ *
  * Money cells (Total Cost / Avg Cost per call) render for STAFF only —
  * tenants never see cost anywhere. Em dash when nothing in the set is rated
  * (no fake "$0.0000"); color only on meaningful nonzero values.
@@ -22,7 +28,15 @@ import {
   mosColor, packetLossColor, jitterColor, rFactorColor, fmtDurationShort,
 } from './quality';
 import { fmtAvgCallDuration } from '../../utils/callDuration';
-import type { Cdr } from '../../types/cdr';
+import { ROWS_MODE_NOTE } from './callsFilters';
+import type { Cdr, CdrRowsMode } from '../../types/cdr';
+
+/** Unit for the "of N matching …" hint (staff only). */
+const ROWS_UNIT: Record<CdrRowsMode, string> = {
+  calls: 'calls',
+  all: 'rows',
+  b: 'legs',
+};
 
 interface StatCellProps {
   label: string;
@@ -52,9 +66,11 @@ interface CallsKpiStripProps {
   total?: number;
   /** Admin or support — money KPIs render only for staff. */
   isStaff: boolean;
+  /** Committed row model (staff) — drives the per-call vs per-leg note. */
+  rowsMode?: CdrRowsMode;
 }
 
-export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
+export function CallsKpiStrip({ cdrs, total, isStaff, rowsMode = 'calls' }: CallsKpiStripProps) {
   const stats = useMemo(() => {
     const loaded = cdrs.length;
     let answered = 0;
@@ -102,12 +118,19 @@ export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
   const hasRated = stats.ratedCount > 0;
   const asrTone = stats.asr > 50 ? GOOD : stats.asr >= 30 ? WARN : BAD;
 
-  return (
+  const matchingHint =
+    total == null
+      ? undefined
+      : isStaff
+        ? `of ${total.toLocaleString()} matching ${ROWS_UNIT[rowsMode]}`
+        : `of ${total.toLocaleString()} matching`;
+
+  const strip = (
     <section className="dlx4-statgrid" aria-label="Call aggregates for the current page">
       <StatCell
         label="This Page"
         value={stats.loaded.toLocaleString()}
-        hint={total != null ? `of ${total.toLocaleString()} matching` : undefined}
+        hint={matchingHint}
       />
       <StatCell label="Answered" value={stats.answered.toLocaleString()} />
       <StatCell label="ASR" value={`${stats.asr.toFixed(1)}%`} tone={asrTone} />
@@ -147,11 +170,31 @@ export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
       )}
       {isStaff && (
         <StatCell
-          label="Avg Cost / Call"
+          label={rowsMode === 'calls' ? 'Avg Cost / Call' : 'Avg Cost / Row'}
           value={stats.avgCost != null ? fmtMoneySmart(stats.avgCost) : '—'}
           hint={hasRated ? `${stats.ratedCount.toLocaleString()} rated` : undefined}
         />
       )}
     </section>
+  );
+
+  // Tenants: the strip alone, exactly as before.
+  if (!isStaff) return strip;
+
+  return (
+    <>
+      {strip}
+      <p
+        className="dlx4-statcell-hint"
+        role="note"
+        style={{
+          margin: '-4px 2px 0',
+          whiteSpace: 'normal',
+          color: rowsMode === 'calls' ? undefined : 'var(--rcf-ink-soft)',
+        }}
+      >
+        {ROWS_MODE_NOTE[rowsMode]}
+      </p>
+    </>
   );
 }

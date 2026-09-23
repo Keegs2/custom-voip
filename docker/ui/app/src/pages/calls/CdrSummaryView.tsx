@@ -6,6 +6,12 @@
  * grouping dimension — so switching tabs never changes what "the current
  * search" means.
  *
+ * Row model (staff "Rows" filter — CDR A/B leg split): the committed `leg`
+ * passes straight through to /cdrs/summary, so with Rows=All legs / Carrier
+ * legs every carrier bridge attempt is counted. The count column is then
+ * labeled "Total Rows" and a note says the totals are not call counts; in
+ * the default Calls mode a note says the figures are per call.
+ *
  * Styling: the shared DAYLIGHT CONSOLE system — `dlx-seg` group-by control
  * (dl-admin.css) and a white `dl-panel` table. ASR thresholds keep their
  * green/amber/red semantics in light-tuned tones.
@@ -15,6 +21,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getCdrSummary } from '../../api/cdrs';
 import { Spinner } from '../../components/ui/Spinner';
 import { fmtMoneySmart } from '../../utils/format';
+import { ROWS_MODE_NOTE, rowsModeOf } from './callsFilters';
 import type { CdrSearchParams, CdrSummaryRow } from '../../types/cdr';
 
 type GroupBy = 'day' | 'hour' | 'destination';
@@ -54,6 +61,8 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
     queryFn: () => getCdrSummary({ ...params, group_by: groupBy }),
   });
 
+  const rowsMode = rowsModeOf(params);
+
   const dateColLabel =
     groupBy === 'hour' ? 'Hour' : groupBy === 'destination' ? 'Destination' : 'Date';
 
@@ -76,6 +85,16 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
             </button>
           ))}
         </div>
+        <span
+          role="note"
+          style={{
+            fontSize: '0.7rem',
+            color: rowsMode === 'calls' ? 'var(--rcf-ink-dim)' : 'var(--rcf-ink-soft)',
+          }}
+        >
+          {ROWS_MODE_NOTE[rowsMode]}
+          {params.call_id ? ' The call filter applies to Records only.' : ''}
+        </span>
       </div>
 
       {isLoading && (
@@ -115,7 +134,7 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
                   <th className="dl-th">{dateColLabel}</th>
                   <th className="dl-th">Product</th>
                   <th className="dl-th">Direction</th>
-                  <th className="dl-th">Total Calls</th>
+                  <th className="dl-th">{rowsMode === 'calls' ? 'Total Calls' : 'Total Rows'}</th>
                   <th className="dl-th">Answered</th>
                   <th className="dl-th">ASR</th>
                   <th className="dl-th">Duration</th>

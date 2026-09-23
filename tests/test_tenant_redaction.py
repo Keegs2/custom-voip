@@ -95,11 +95,14 @@ def test_average_minutes_one_decimal_half_up():
 
 def test_allowlist_and_denylist_are_disjoint_and_sane():
     assert not (tr.TENANT_CDR_FIELDS & tr.FORBIDDEN_TENANT_CDR_KEYS)
-    assert "duration_ms" in tr.TENANT_CDR_SELECT_COLUMNS          # read...
-    assert "duration_ms" not in tr.TENANT_CDR_FIELDS              # ...never returned
+    # minutes come from TALK time (end - answer): duration_ms (ring-inclusive)
+    # is never even selected for a tenant; talk_ms is read, never returned.
+    assert "duration_ms" not in tr.TENANT_CDR_SELECT_COLUMNS
+    assert tr.tenant_cdr_select_sql().endswith("AS talk_ms")
+    assert "talk_ms" not in tr.TENANT_CDR_FIELDS
     assert "duration_minutes" in tr.TENANT_CDR_FIELDS
     for col in tr.TENANT_CDR_SELECT_COLUMNS:
-        assert col not in tr.FORBIDDEN_TENANT_CDR_KEYS or col == "duration_ms", col
+        assert col not in tr.FORBIDDEN_TENANT_CDR_KEYS, col
 
 
 def test_redact_cdr_row_drops_unknown_and_sensitive_keys():
@@ -331,6 +334,7 @@ CDR_NOANS = "a0000000-0000-0000-0000-000000000000"    # no,  30_000 ring -> 0 mi
 CDR_B = "b0000000-0000-0000-0000-000000000001"        # tenant B, answered 60_000
 ACTIVE_A = "c0000000-0000-0000-0000-00000000000a"     # live call, tenant A
 RCF_DID_A = "+16175550101"                            # tenant A RCF DID
+CDR_B_LEG_PREFIX = "d0000000-0000-0000-0000-00000000000"  # + attempt: B legs of CDR_ANS_95
 
 
 @pytest.fixture(scope="module")
@@ -403,6 +407,28 @@ def redact_db():
             await seed(CDR_ANS_20, CID_A, now - timedelta(hours=2), 20_000, True)
             await seed(CDR_NOANS, CID_A, now - timedelta(hours=3), 30_000, False)
             await seed(CDR_B, CID_B, now - timedelta(hours=1), 60_000, True)
+            # Leg split: stamp the A rows, then give CDR_ANS_95 two carrier
+            # B-leg rows (failed attempt 1 + answered attempt 2) on the same
+            # trunk/customer. Every tenant surface below must still count
+            # ONE call (leg IS DISTINCT FROM 'B'); the B uuids never surface.
+            await conn.execute("UPDATE cdrs SET leg = 'A', call_id = uuid")
+            s95 = now - timedelta(minutes=10)
+            for attempt, answered_b in ((1, False), (2, True)):
+                b_start = s95 + timedelta(seconds=attempt)
+                await conn.execute(
+                    """
+                    INSERT INTO cdrs (uuid, customer_id, product_type, trunk_id,
+                      direction, caller_id, destination, start_time, answer_time,
+                      end_time, duration_ms, billable_ms, hangup_cause,
+                      leg, call_id, leg_attempt)
+                    VALUES ($1, $2, 'trunk', $3, 'outbound', '+16175551000',
+                      '+12125551111', $4, $5, $6, 999000, 999000, 'NORMAL_CLEARING',
+                      'B', $7, $8)
+                    """,
+                    f"{CDR_B_LEG_PREFIX}{attempt}", CID_A, TRUNK_A, b_start,
+                    (b_start + timedelta(seconds=5)) if answered_b else None,
+                    b_start + timedelta(seconds=(100 if answered_b else 3)),
+                    CDR_ANS_95, attempt)
             await conn.execute(
                 "INSERT INTO call_attestations (call_id, customer_id, signed_attestation) "
                 "VALUES ($1, $2, 'A')", CDR_ANS_95, CID_A)
@@ -532,6 +558,9 @@ def test_tenant_cdr_detail_has_no_forbidden_keys(client, tokens):
         assert body["duration_minutes"] == 2
         # cross-tenant stays a no-leak 404
         r = await client.get(f"/v1/cdrs/{CDR_B}", headers=_h(tokens, "user_a"))
+        assert r.status_code == 404
+        # a carrier B-leg row is never a tenant-visible call (same 404)
+        r = await client.get(f"/v1/cdrs/{CDR_B_LEG_PREFIX}2", headers=_h(tokens, "user_a"))
         assert r.status_code == 404
 
     _run(go())

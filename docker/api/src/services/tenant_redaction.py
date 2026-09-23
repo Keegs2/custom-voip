@@ -10,22 +10,25 @@ keep the full historical shapes.
 
 Design (defense in depth, two layers):
 
-  1. SQL — tenant queries select ONLY `TENANT_CDR_SELECT_COLUMNS` (plus
-     `duration_ms`, consumed here and never returned). Sensitive columns are
-     not even read for a tenant request.
+  1. SQL — tenant queries select ONLY `TENANT_CDR_SELECT_COLUMNS` (plus the
+     derived `talk_ms`, consumed here and never returned). Sensitive columns
+     are not even read for a tenant request. Tenant queries are always
+     one-row-per-call (`leg IS DISTINCT FROM 'B'`) — a carrier B-leg row is
+     never shown to, or counted for, a customer.
   2. Response — every tenant CDR row passes through `redact_cdr_row()`, which
      builds the output from the ALLOWLIST `TENANT_CDR_FIELDS`. A column added
      to the SELECT later (or a `SELECT *` regression) cannot leak by default:
      anything not on the allowlist is dropped.
 
-Duration for tenants (`duration_minutes`, whole minutes):
+Duration for tenants (`duration_minutes`, whole minutes) = TALK TIME:
   * unanswered call               -> 0
-  * answered, duration_ms <= 0    -> 0
-  * answered, duration_ms  > 0    -> max(1, round_half_up(ms / 60000))
+  * answered, talk_ms <= 0        -> 0
+  * answered, talk_ms  > 0        -> max(1, round_half_up(ms / 60000))
     (1s..89s -> 1, 90s -> 2, 3600s -> 60). "Never 0 for an answered call."
-  Source is `duration_ms` — the same field staff see as `duration_seconds`
-  (FreeSWITCH `duration`, start->end) — so a staff and tenant view of one call
-  agree to the minute.
+  Source (contract "Customer minutes", docs/CDR_LEG_SPLIT_CONTRACT.md) is the
+  talk time computed from the timestamps, `end_time - answer_time`
+  (`TALK_MS_SQL`) — NEVER `duration_ms` (start->end, includes ring time) and
+  NEVER `billable_ms` (rate_cdr() can overwrite it with billing increments).
 
 Aggregates:
   * totals   -> `total_minutes`: the ANSWERED-call ms total, rounded half-up
@@ -59,12 +62,22 @@ _HALF_MIN_MS = 30_000
 # CDR rows
 # ---------------------------------------------------------------------------
 
-#: cdrs columns a tenant query may SELECT (SQL layer). `duration_ms` is read
-#: only to derive `duration_minutes` and is removed before the response.
+#: Talk time in ms from the timestamps (0 when unanswered / non-positive).
+#: Unqualified column names: valid wherever `cdrs` is the only relation (or
+#: the unaliased one) in scope. EXTRACT(EPOCH FROM interval) is exact to the
+#: microsecond; rounded to whole ms.
+TALK_MS_SQL = (
+    "(CASE WHEN answer_time IS NOT NULL AND end_time > answer_time "
+    "THEN round(EXTRACT(EPOCH FROM (end_time - answer_time)) * 1000)::bigint "
+    "ELSE 0 END)"
+)
+
+#: cdrs columns a tenant query may SELECT (SQL layer). `talk_ms` (derived,
+#: TALK_MS_SQL) is read only to compute `duration_minutes` and is removed
+#: before the response.
 TENANT_CDR_SELECT_COLUMNS: tuple[str, ...] = (
     "uuid", "customer_id", "product_type", "trunk_id", "direction",
     "caller_id", "destination", "start_time", "answer_time", "end_time",
-    "duration_ms",
     "hangup_cause", "sip_code", "hangup_cause_q850", "sip_hangup_disposition",
     "sip_from_user", "sip_to_user",
     # Voice quality (customer-meaningful; no duration proxy)
@@ -80,7 +93,7 @@ TENANT_CDR_SELECT_COLUMNS: tuple[str, ...] = (
 
 #: The ONLY keys a tenant CDR row may carry in a response (allowlist).
 TENANT_CDR_FIELDS: frozenset[str] = frozenset(
-    (set(TENANT_CDR_SELECT_COLUMNS) - {"duration_ms"})
+    set(TENANT_CDR_SELECT_COLUMNS)
     | {
         "duration_minutes",
         # stir_oc.badge_fields() output
@@ -98,6 +111,7 @@ FORBIDDEN_TENANT_CDR_KEYS: frozenset[str] = frozenset({
     "destination_prefix",
     # exact duration / billing increments
     "duration_ms", "billable_ms", "duration_seconds", "billable_seconds",
+    "talk_ms",
     "total_duration_sec", "avg_duration_sec", "avg_duration_ms",
     # duration proxies (RTP volume counters scale 1:1 with talk time)
     "rtp_audio_in_raw_bytes", "rtp_audio_in_media_bytes",
@@ -111,6 +125,10 @@ FORBIDDEN_TENANT_CDR_KEYS: frozenset[str] = frozenset({
     "on_net_hops", "origin_customer_id", "terminating_customer_id",
     "network_addr", "sip_user_agent", "freeswitch_node", "sbc_id",
     "bridge_uuid",
+    # leg-split internals (migration 48) — staff only. (`call_id` is NOT
+    # listed: the retired /v1/calls/{id} shape legitimately echoes the
+    # caller's own `call_id`; the CDR allowlist excludes the column anyway.)
+    "leg", "leg_attempt",
 })
 
 assert not (TENANT_CDR_FIELDS & FORBIDDEN_TENANT_CDR_KEYS), (
@@ -125,9 +143,10 @@ _FLOAT_KEYS = (
 
 
 def tenant_cdr_select_sql() -> str:
-    """Comma-joined tenant SELECT list (column names are module constants —
-    never user input — so interpolating them into SQL is safe)."""
-    return ", ".join(TENANT_CDR_SELECT_COLUMNS)
+    """Comma-joined tenant SELECT list + the derived `talk_ms` (column names
+    and the expression are module constants — never user input — so
+    interpolating them into SQL is safe)."""
+    return ", ".join(TENANT_CDR_SELECT_COLUMNS) + f", {TALK_MS_SQL} AS talk_ms"
 
 
 def _round_half_up_minutes(ms: int) -> int:
@@ -135,11 +154,21 @@ def _round_half_up_minutes(ms: int) -> int:
     return (int(ms) + _HALF_MIN_MS) // _MS_PER_MIN
 
 
-def duration_minutes(duration_ms: Optional[int], answered: bool) -> int:
-    """Per-call tenant duration in whole minutes (see module docstring)."""
-    if not answered or duration_ms is None or duration_ms <= 0:
+def duration_minutes(talk_ms: Optional[int], answered: bool) -> int:
+    """Per-call tenant duration in whole minutes from TALK time ms (see
+    module docstring)."""
+    if not answered or talk_ms is None or talk_ms <= 0:
         return 0
-    return max(1, _round_half_up_minutes(duration_ms))
+    return max(1, _round_half_up_minutes(talk_ms))
+
+
+def talk_ms(answer_time: Any, end_time: Any) -> int:
+    """Python twin of TALK_MS_SQL (end - answer, ms; 0 if unanswered)."""
+    if not isinstance(answer_time, datetime) or not isinstance(end_time, datetime):
+        return 0
+    delta = end_time - answer_time
+    ms = delta.days * 86_400_000 + delta.seconds * 1000 + round(delta.microseconds / 1000)
+    return ms if ms > 0 else 0
 
 
 def aggregate_minutes(total_answered_ms: Optional[int]) -> int:
@@ -164,12 +193,21 @@ def floor_to_minute(value: Any) -> Any:
     return value
 
 
-#: SQL mirror of `duration_minutes()` for server-side averages. Integer
-#: division on positive ints == floor, so this is exactly
-#: max(1, (ms + 30000) // 60000) for answered calls with ms > 0, else 0.
-TENANT_CALL_MINUTES_SQL = (
-    "(CASE WHEN answer_time IS NOT NULL AND duration_ms > 0 "
-    "THEN GREATEST(1, (duration_ms + 30000) / 60000) ELSE 0 END)"
+def call_minutes_sql(talk_ms_expr: str = TALK_MS_SQL) -> str:
+    """SQL mirror of `duration_minutes()` over a talk-ms expression (a column
+    alias such as `talk_ms`, or TALK_MS_SQL itself). Integer division on
+    positive bigints == floor, so this is exactly max(1, (ms + 30000) // 60000)
+    for answered calls with ms > 0, else 0."""
+    return (f"(CASE WHEN answer_time IS NOT NULL AND {talk_ms_expr} > 0 "
+            f"THEN GREATEST(1, ({talk_ms_expr} + 30000) / 60000) ELSE 0 END)")
+
+
+#: Per-call whole minutes straight off `cdrs` columns (server-side averages).
+TENANT_CALL_MINUTES_SQL = call_minutes_sql()
+
+#: Answered-call talk-time total (ms) aggregate over `cdrs` columns.
+TENANT_ANSWERED_TALK_MS_SQL = (
+    f"COALESCE(SUM({TALK_MS_SQL}) FILTER (WHERE answer_time IS NOT NULL), 0)::bigint"
 )
 
 
@@ -186,7 +224,10 @@ def redact_cdr_row(row: Mapping[str, Any]) -> dict[str, Any]:
         k: v for k, v in src.items()
         if k in TENANT_CDR_FIELDS
     }
-    out["duration_minutes"] = duration_minutes(src.get("duration_ms"), answered)
+    talk = src.get("talk_ms")
+    if talk is None:
+        talk = talk_ms(src.get("answer_time"), src.get("end_time"))
+    out["duration_minutes"] = duration_minutes(talk, answered)
     out.update(stir_oc.badge_fields(
         src.get("stir_attestation"),
         src.get("stir_eff_actual"),

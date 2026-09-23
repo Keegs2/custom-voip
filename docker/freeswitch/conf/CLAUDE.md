@@ -218,7 +218,9 @@ timeout: 3 seconds
 
 ## json_cdr.conf.xml
 
-Posts JSON CDR data to FastAPI after every completed call.
+Posts JSON CDR data to FastAPI after every completed call — and, since the
+CDR A/B leg split (2026-09-23, `docs/CDR_LEG_SPLIT_CONTRACT.md`), after every
+originated B-leg too.
 
 ```
 URL: http://$${api_host}:$${api_port}/v1/cdrs/ingest
@@ -226,14 +228,54 @@ Timeout: 5 seconds
 Retries: 2 (with 2s delay)
 ```
 
-**Key settings:**
-- `cdr-leg=a` -- Only A-leg CDRs (B-leg is redundant for billing)
-- `log-http-and-disk=true` -- Fallback to disk when HTTP POST fails
-- `log-dir=/var/log/freeswitch/json_cdr` -- Disk fallback path
-- All channel variables included (no filtering) -- API picks what it needs
-- `encode-values=false` -- Plain JSON, no URL encoding
+**Key settings (read the param, not the neighbouring comment — the old
+comments were attributed to the wrong params):**
+- `log-b-leg=true` -- **the split is ON.** The ONLY live leg filter; `false` =
+  A-leg only. The per-zone cutover switch. The old `cdr-leg=a` line was NOT a
+  real mod_json_cdr param (inert) and has been removed.
+- A B-leg POST becomes a B row ONLY if it carries `cdr_leg=B` +
+  `cdr_carrier_leg=true` — set per-leg on carrier dial strings by
+  `inbound_router.lua` / `trunk_outbound.lua` (see `scripts/CLAUDE.md` "CDR A/B
+  leg split"). On-net B-legs (PBX delivery, local ext) post but write nothing.
+- `prefix-a-leg=true` -- on-disk file naming only (A-leg files `a_`-prefixed).
+- `encode=true` -- body is `application/x-www-form-urlencoded` `cdr=<url-encoded
+  JSON>` (ingest handles it); not base64, not a Content-Type knob.
+- `log-http-and-disk=true` -- EVERY CDR is also written to `log-dir`
+  (`/var/log/freeswitch/json_cdr`, not only on failure); with B-legs on, one
+  file per bridge attempt — watch volume growth. Failed-after-retries POSTs go to
+  `err-log-dir`.
+- All channel variables included (`channel-vars` whitelist stays COMMENTED —
+  the stale list has none of the `cdr_*` vars; enabling it drops every B row).
+- `encode-values=false` -- values not URL-encoded inside the JSON.
+- **Synchronous-post exposure:** a slow/dead API holds each finished session up
+  to `timeout×(1+retries)+delay×retries` = 19 s (thread + memory; RTP already
+  released). B-legs report on their own session threads (never delay the A-leg's
+  next failover attempt), but the split multiplies posting sessions (≤9 per RCF
+  call in a full failover storm) → sustained API outage at high CPS pushes the
+  session count toward `switch.conf` `max-sessions=10000`.
 
----
+**Activation / revert on a running media VM (no container restart).** The conf
+dir is bind-mounted (`docker-compose.media.yml` `./docker/freeswitch/conf:/usr/local/freeswitch/conf`),
+so `git pull` changes the file on disk, but mod_json_cdr reads it ONLY at module
+load and FS serves config from the in-memory XML registry — so BOTH steps are
+needed: `reloadxml` (re-parse; safe for live calls) then `reload mod_json_cdr`
+(unload+load). `xml_curl` binds only `directory`, so the local file is
+authoritative. Scripts (Lua) are also bind-mounted and take effect on the NEXT
+call right after `git pull` — the `[cdr_*]` B-leg vars are inert until
+`log-b-leg=true` is loaded. Deploy the API ingest gate FIRST (else B-leg POSTs
+hit the legacy STIR-outcome path — plan §4.7 trap 1).
+- Activate: `sudo docker exec voip-freeswitch sh -c '/usr/local/freeswitch/bin/fs_cli -p "$ESL_PASSWORD" -x "reloadxml" && /usr/local/freeswitch/bin/fs_cli -p "$ESL_PASSWORD" -x "reload mod_json_cdr"'`
+- Verify loaded: `sudo docker exec voip-freeswitch sh -c '/usr/local/freeswitch/bin/fs_cli -p "$ESL_PASSWORD" -x "module_exists mod_json_cdr"'` → `true` (if `false`, run the same with `-x "load mod_json_cdr"` — while unloaded NO CDRs are written at all).
+- Revert (split off): `cd /opt/revup && sudo sed -i 's|<param name="log-b-leg" value="true"/>|<param name="log-b-leg" value="false"/>|' docker/freeswitch/conf/autoload_configs/json_cdr.conf.xml && sudo docker exec voip-freeswitch sh -c '/usr/local/freeswitch/bin/fs_cli -p "$ESL_PASSWORD" -x "reloadxml" && /usr/local/freeswitch/bin/fs_cli -p "$ESL_PASSWORD" -x "reload mod_json_cdr"'` — leaves the file dirty in git; restore with `sudo git checkout -- docker/freeswitch/conf/autoload_configs/json_cdr.conf.xml` (+ the activate line) to re-enable.
+- **In-flight impact of the reload:** live calls' media/signaling are untouched;
+  their CDRs are posted at their own hangup by the reloaded module (so B-legs
+  bridged before the reload ALSO post — without `cdr_*` if bridged before the
+  `git pull` → ingest writes no row). A session that reaches its reporting
+  state inside the unload→load gap (milliseconds) is neither posted nor written
+  to disk — a lost CDR. Unloading while a session thread is mid-POST inside the
+  module is a use-after-unload hazard FS does not guard against; run it at low
+  traffic with a healthy API (`show calls count` first). A container restart
+  instead drops EVERY live call — never use it for this.
 
 ## Dialplan Structure (`conf/dialplan/public.xml`)
 

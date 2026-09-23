@@ -60,7 +60,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE start_time > now() - interval '15 minutes' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
+          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
         }
       ],
       "options": {
@@ -195,7 +195,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*)::float / 60.0 AS cps FROM cdrs WHERE start_time > now() - interval '1 minute' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
+          "rawSql": "SELECT count(*)::float / 60.0 AS cps FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 minute' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
         }
       ],
       "options": {
@@ -263,7 +263,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(mos) AS avg_mos FROM cdrs WHERE start_time > now() - interval '15 minutes' AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
+          "rawSql": "SELECT avg(mos) AS avg_mos FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
         }
       ],
       "options": {
@@ -333,7 +333,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float / NULLIF(count(*), 0) AS on_net_pct FROM cdrs WHERE start_time > now() - interval '15 minutes' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
+          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float / NULLIF(count(*), 0) AS on_net_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
         }
       ],
       "options": {
@@ -395,7 +395,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(mos) AS avg_mos, percentile_cont(0.1) WITHIN GROUP (ORDER BY mos) AS p10_mos FROM cdrs WHERE $__timeFilter(start_time) AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(mos) AS avg_mos, percentile_cont(0.1) WITHIN GROUP (ORDER BY mos) AS p10_mos FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -507,7 +507,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(packet_loss_pct) AS avg_loss_pct, percentile_cont(0.95) WITHIN GROUP (ORDER BY packet_loss_pct) AS p95_loss_pct FROM cdrs WHERE $__timeFilter(start_time) AND packet_loss_pct IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500 AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(packet_loss_pct) AS avg_loss_pct, percentile_cont(0.95) WITHIN GROUP (ORDER BY packet_loss_pct) AS p95_loss_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND packet_loss_pct IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500 AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -618,7 +618,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END AS zone, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) GROUP BY 1, 2 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END AS zone, count(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) GROUP BY 1, 2 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -691,7 +691,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, count(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -765,7 +765,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, CASE WHEN sip_code IS NULL THEN 'none' WHEN sip_code BETWEEN 200 AND 299 THEN '2xx' WHEN sip_code BETWEEN 300 AND 399 THEN '3xx' WHEN sip_code BETWEEN 400 AND 499 THEN '4xx' WHEN sip_code BETWEEN 500 AND 599 THEN '5xx' WHEN sip_code BETWEEN 600 AND 699 THEN '6xx' ELSE 'other' END AS class, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, CASE WHEN sip_code IS NULL THEN 'none' WHEN sip_code BETWEEN 200 AND 299 THEN '2xx' WHEN sip_code BETWEEN 300 AND 399 THEN '3xx' WHEN sip_code BETWEEN 400 AND 499 THEN '4xx' WHEN sip_code BETWEEN 500 AND 599 THEN '5xx' WHEN sip_code BETWEEN 600 AND 699 THEN '6xx' ELSE 'other' END AS class, count(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -929,7 +929,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, COALESCE(inbound_carrier, 'bandwidth') || COALESCE('-' || NULLIF(inbound_carrier_pop, ''), '') AS carrier_pop, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND direction = 'inbound' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, COALESCE(inbound_carrier, 'bandwidth') || COALESCE('-' || NULLIF(inbound_carrier_pop, ''), '') AS carrier_pop, count(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND direction = 'inbound' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -1015,7 +1015,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(jitter_max_ms) AS avg_peak_jitter_ms, percentile_cont(0.95) WITHIN GROUP (ORDER BY jitter_max_ms) AS p95_peak_jitter_ms FROM cdrs WHERE $__timeFilter(start_time) AND jitter_max_ms IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500 AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(jitter_max_ms) AS avg_peak_jitter_ms, percentile_cont(0.95) WITHIN GROUP (ORDER BY jitter_max_ms) AS p95_peak_jitter_ms FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND jitter_max_ms IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500 AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -1126,7 +1126,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT b.band AS band, COALESCE(a.calls, 0) AS calls FROM (VALUES (1, 'Poor'), (2, 'Fair'), (3, 'Good'), (4, 'Excellent')) AS b(ord, band) LEFT JOIN (SELECT CASE WHEN mos < 3.6 THEN 'Poor' WHEN mos < 4.0 THEN 'Fair' WHEN mos < 4.3 THEN 'Good' ELSE 'Excellent' END AS band, COUNT(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1) a ON a.band = b.band ORDER BY b.ord;"
+          "rawSql": "SELECT b.band AS band, COALESCE(a.calls, 0) AS calls FROM (VALUES (1, 'Poor'), (2, 'Fair'), (3, 'Good'), (4, 'Excellent')) AS b(ord, band) LEFT JOIN (SELECT CASE WHEN mos < 3.6 THEN 'Poor' WHEN mos < 4.0 THEN 'Fair' WHEN mos < 4.3 THEN 'Good' ELSE 'Excellent' END AS band, COUNT(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1) a ON a.band = b.band ORDER BY b.ord;"
         }
       ],
       "options": {
@@ -1240,7 +1240,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(r_factor) AS avg_r_factor FROM cdrs WHERE $__timeFilter(start_time) AND r_factor IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(r_factor) AS avg_r_factor FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND r_factor IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -1321,7 +1321,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(quality_pct) AS avg_quality_pct FROM cdrs WHERE $__timeFilter(start_time) AND quality_pct IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(quality_pct) AS avg_quality_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND quality_pct IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -1415,7 +1415,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '5m') AS time, count(*) FILTER (WHERE answer_time IS NOT NULL) AS answered, count(*) FILTER (WHERE answer_time IS NULL) AS failed FROM cdrs WHERE $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '5m') AS time, count(*) FILTER (WHERE answer_time IS NOT NULL) AS answered, count(*) FILTER (WHERE answer_time IS NULL) AS failed FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -1519,7 +1519,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END AS zone, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE $__timeFilter(start_time) GROUP BY 1, 2 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END AS zone, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) GROUP BY 1, 2 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -1599,7 +1599,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE carrier_used WHEN 'carrier_primary' THEN 'bandwidth-dallas' WHEN 'carrier_secondary' THEN 'bandwidth-la' ELSE carrier_used END AS carrier, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE $__timeFilter(start_time) AND carrier_used IS NOT NULL AND carrier_used NOT IN ('local','default','') AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE carrier_used WHEN 'carrier_primary' THEN 'bandwidth-dallas' WHEN 'carrier_secondary' THEN 'bandwidth-la' ELSE carrier_used END AS carrier, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND carrier_used IS NOT NULL AND carrier_used NOT IN ('local','default','') AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -1658,7 +1658,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "ACD — avg call duration (hourly)",
-      "description": "Average answered-call duration in seconds, from cdr_hourly_stats.avg_duration_sec (already answered-only, cheap continuous aggregate). Customer-scoped aggregate has no zone dimension, so this is all-zones. A sudden ACD collapse often means calls answering then failing fast (dead air / media).",
+      "description": "Average answered-call duration in seconds, from cdr_hourly_stats.avg_duration_sec (already answered-only, cheap continuous aggregate). Customer-scoped aggregate has no zone dimension, so this is all-zones. Restricted to direction='inbound' (2026-09-23 A/B leg split): carrier B-leg rows (leg='B', direction='outbound') land in this aggregate too, and the CAGG has no leg dimension, so the direction key is what keeps this one-row-per-call; outbound-originated calls (API/trunk outbound A-legs) are excluded as a side effect. A sudden ACD collapse often means calls answering then failing fast (dead air / media).",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -1679,7 +1679,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(hour, '1h') AS time, sum(total_duration_sec)::float / NULLIF(sum(answered_calls), 0) AS acd_sec FROM cdr_hourly_stats WHERE $__timeFilter(hour) GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(hour, '1h') AS time, sum(total_duration_sec)::float / NULLIF(sum(answered_calls), 0) AS acd_sec FROM cdr_hourly_stats WHERE $__timeFilter(hour) AND direction = 'inbound' GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -1749,7 +1749,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p50_s, percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p95_s FROM cdrs WHERE $__timeFilter(start_time) AND answer_time IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p50_s, percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p95_s FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND answer_time IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -1873,7 +1873,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT CASE carrier_used WHEN 'carrier_primary' THEN 'Dallas (primary)' WHEN 'carrier_secondary' THEN 'LA (secondary)' WHEN 'local' THEN 'On-net (local)' WHEN 'default' THEN 'Unset (default)' ELSE COALESCE(carrier_used, 'null') END AS carrier, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 2 DESC;"
+          "rawSql": "SELECT CASE carrier_used WHEN 'carrier_primary' THEN 'Dallas (primary)' WHEN 'carrier_secondary' THEN 'LA (secondary)' WHEN 'local' THEN 'On-net (local)' WHEN 'default' THEN 'Unset (default)' ELSE COALESCE(carrier_used, 'null') END AS carrier, count(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 2 DESC;"
         }
       ],
       "options": {
@@ -1942,7 +1942,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, COALESCE(inbound_carrier, 'bandwidth') AS inbound_carrier, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE $__timeFilter(start_time) AND direction = 'inbound' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, COALESCE(inbound_carrier, 'bandwidth') AS inbound_carrier, (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND direction = 'inbound' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -2022,7 +2022,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE carrier_used WHEN 'carrier_primary' THEN 'bandwidth-dallas' WHEN 'carrier_secondary' THEN 'bandwidth-la' ELSE carrier_used END AS carrier, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND carrier_used IS NOT NULL AND carrier_used NOT IN ('local','default','') AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, CASE carrier_used WHEN 'carrier_primary' THEN 'bandwidth-dallas' WHEN 'carrier_secondary' THEN 'bandwidth-la' ELSE carrier_used END AS carrier, count(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND carrier_used IS NOT NULL AND carrier_used NOT IN ('local','default','') AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -2186,7 +2186,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(inbound_carrier, 'bandwidth') AS carrier, COALESCE(NULLIF(inbound_carrier_pop, ''), '—') AS pop, count(*) AS calls, count(*) FILTER (WHERE answer_time IS NOT NULL) AS answered, count(*) FILTER (WHERE answer_time IS NULL) AS failed, round(100.0 * (count(*) FILTER (WHERE answer_time IS NOT NULL)) / NULLIF(count(*), 0), 1) AS asr_pct FROM cdrs WHERE $__timeFilter(start_time) AND direction = 'inbound' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY calls DESC;"
+          "rawSql": "SELECT COALESCE(inbound_carrier, 'bandwidth') AS carrier, COALESCE(NULLIF(inbound_carrier_pop, ''), '—') AS pop, count(*) AS calls, count(*) FILTER (WHERE answer_time IS NOT NULL) AS answered, count(*) FILTER (WHERE answer_time IS NULL) AS failed, round(100.0 * (count(*) FILTER (WHERE answer_time IS NOT NULL)) / NULLIF(count(*), 0), 1) AS asr_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND direction = 'inbound' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY calls DESC;"
         }
       ],
       "transformations": [
@@ -2348,7 +2348,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(hangup_cause, 'UNKNOWN') AS hangup_cause, count(*) AS calls, round(100.0 * count(*) / NULLIF(sum(count(*)) OVER (), 0), 2) AS pct FROM cdrs WHERE $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY calls DESC LIMIT 15;"
+          "rawSql": "SELECT COALESCE(hangup_cause, 'UNKNOWN') AS hangup_cause, count(*) AS calls, round(100.0 * count(*) / NULLIF(sum(count(*)) OVER (), 0), 2) AS pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY calls DESC LIMIT 15;"
         }
       ],
       "transformations": [
@@ -2450,7 +2450,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, hangup_cause AS metric, count(*) AS calls FROM cdrs WHERE $__timeFilter(start_time) AND hangup_cause IN ('MEDIA_TIMEOUT','RECOVERY_ON_TIMER_EXPIRE','ALLOTTED_TIMEOUT') AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, hangup_cause AS metric, count(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND hangup_cause IN ('MEDIA_TIMEOUT','RECOVERY_ON_TIMER_EXPIRE','ALLOTTED_TIMEOUT') AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1, 2 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
@@ -2523,7 +2523,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) FILTER (WHERE mos IS NOT NULL) AS \"Rated calls\", avg(mos) AS \"Avg MOS\", avg(r_factor) AS \"Avg R-factor\", avg(jitter_max_ms) AS \"Avg peak jitter (ms)\", avg(packet_loss_pct) AS \"Avg loss %\", avg(quality_pct) AS \"Avg quality %\" FROM cdrs WHERE $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
+          "rawSql": "SELECT count(*) FILTER (WHERE mos IS NOT NULL) AS \"Rated calls\", avg(mos) AS \"Avg MOS\", avg(r_factor) AS \"Avg R-factor\", avg(jitter_max_ms) AS \"Avg peak jitter (ms)\", avg(packet_loss_pct) AS \"Avg loss %\", avg(quality_pct) AS \"Avg quality %\" FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
         }
       ],
       "options": {
@@ -2737,6 +2737,117 @@
           }
         ]
       }
+    },
+    {
+      "id": 76,
+      "type": "stat",
+      "title": "Carrier legs per call — last 24h (orphan-leg check)",
+      "description": "STAFF / cutover check for the CDR A/B leg split (docs/CDR_LEG_SPLIT_CONTRACT.md). Fixed 24h window (ignores the time picker), follows the Zone filter. Every other cdrs panel on this board counts ONE row per call (leg IS DISTINCT FROM 'B'); this panel is the only one that reads B rows (leg='B', one per carrier bridge attempt, direction='outbound'). B rows = carrier-attempt rows; Calls (A) with >=1 B = distinct calls whose A row exists and has at least one B row; Max / Avg leg_attempt = highest attempt number per call (failover depth; 1 = first attempt answered or failed with no retry, up to 4 = 2 SBC x 2 carrier loop). Orphan B rows = B rows whose call_id has NO A row (a.uuid = b.call_id) and whose call's first attempt started >3h ago — MUST be 0; >0 means the ingest dropped/misattributed an A-leg or wrote a B row with a bad cdr_call_id (red). B awaiting A (<3h) = same test for younger calls: an A-leg CDR is only posted at call hangup, so a call still in progress legitimately has B rows (failed attempts) and no A row yet — informational only. All zero before log-b-leg is enabled on a zone's FreeSWITCH.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 72
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "voip-cdr-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "WITH b AS (SELECT call_id, leg_attempt, start_time FROM cdrs WHERE leg = 'B' AND start_time > now() - interval '24 hours' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone'), per_call AS (SELECT call_id, count(*) AS b_rows, max(leg_attempt) AS max_attempt, min(start_time) AS first_b, EXISTS (SELECT 1 FROM cdrs a WHERE a.uuid = b.call_id AND a.leg IS DISTINCT FROM 'B' AND a.start_time > now() - interval '25 hours') AS has_a FROM b GROUP BY call_id) SELECT COALESCE(sum(b_rows), 0) AS \"B rows\", count(*) FILTER (WHERE has_a) AS \"Calls (A) with >=1 B\", max(max_attempt) AS \"Max leg_attempt\", avg(max_attempt) AS \"Avg leg_attempt / call\", COALESCE(sum(b_rows) FILTER (WHERE NOT has_a AND first_b < now() - interval '3 hours'), 0) AS \"Orphan B rows\", COALESCE(sum(b_rows) FILTER (WHERE NOT has_a AND first_b >= now() - interval '3 hours'), 0) AS \"B awaiting A (<3h)\" FROM per_call;"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg leg_attempt / call"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Orphan B rows"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "refresh": "1m",
@@ -2819,7 +2930,7 @@
   "timezone": "browser",
   "title": "Call Quality",
   "uid": "noc-call-quality",
-  "version": 2,
+  "version": 3,
   "weekStart": "",
-  "description": "Call Quality wall board — the full voice picture from the CDR hypertable (voip-cdr-pg). Top strip: last-15m live snapshot (ASR / Concurrent / CPS / Avg MOS / On-net %) on the selected zone. Priority band (two rows of three): MOS trend, packet loss, per-zone volume, total volume, SIP response classes, and THE carrier split — inbound by carrier / PoP (Bandwidth vs Sinch), attribution from cdrs.inbound_carrier / inbound_carrier_pop stamped spoof-proof by Kamailio at carrier ingress. Below, themed rows: quality detail (jitter / MOS distribution / R-factor / quality %), delivery (answered-vs-failed, ASR trends, ACD, PDD), carrier detail (egress share from carrier_used, per-carrier ASR, plus a live Kamailio ingress counter that shows a call at INVITE time — before its CDR exists), and diagnostics (hangup causes, rated-call snapshot). Long trends use the cheap continuous aggregate cdr_hourly_stats (customer-scoped, no zone/carrier dimension — those trends span all zones); recent/quality panels read raw cdrs and honour the Zone filter. RTP metrics are NULL on unanswered & unrated calls and are filtered out. PDD is approximated as answer_time - start_time (time-to-answer) — true PDD to the first 18x needs Homer/SIP timing, not the CDR. Infrastructure health (VMs / VIPs / media nodes) lives on the Infrastructure / Home / Fleet dashboards."
+  "description": "Call Quality wall board — the full voice picture from the CDR hypertable (voip-cdr-pg). Top strip: last-15m live snapshot (ASR / Concurrent / CPS / Avg MOS / On-net %) on the selected zone. Priority band (two rows of three): MOS trend, packet loss, per-zone volume, total volume, SIP response classes, and THE carrier split — inbound by carrier / PoP (Bandwidth vs Sinch), attribution from cdrs.inbound_carrier / inbound_carrier_pop stamped spoof-proof by Kamailio at carrier ingress. Below, themed rows: quality detail (jitter / MOS distribution / R-factor / quality %), delivery (answered-vs-failed, ASR trends, ACD, PDD), carrier detail (egress share from carrier_used, per-carrier ASR, plus a live Kamailio ingress counter that shows a call at INVITE time — before its CDR exists), and diagnostics (hangup causes, rated-call snapshot). Long trends use the cheap continuous aggregate cdr_hourly_stats (customer-scoped, no zone/carrier dimension — those trends span all zones); recent/quality panels read raw cdrs and honour the Zone filter. RTP metrics are NULL on unanswered & unrated calls and are filtered out. PDD is approximated as answer_time - start_time (time-to-answer) — true PDD to the first 18x needs Homer/SIP timing, not the CDR. Infrastructure health (VMs / VIPs / media nodes) lives on the Infrastructure / Home / Fleet dashboards. CDR A/B leg split (2026-09-23): cdrs holds one A row per call plus one B row per carrier bridge attempt (leg='B'); every raw-cdrs panel here filters leg IS DISTINCT FROM 'B' so it counts / rates quality on ONE row per call (A-leg stats). The only leg-aware panel is 'Carrier legs per call' in Diagnostics. ACD (cdr_hourly_stats) is restricted to direction='inbound' so outbound B rows in the aggregate are excluded."
 }

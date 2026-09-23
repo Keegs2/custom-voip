@@ -52,6 +52,8 @@ REPO = Path(__file__).resolve().parents[1]
 API_SRC = REPO / "docker" / "api" / "src"
 
 sys.path.insert(0, str(API_SRC))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cdr_schema import apply_cdr_column_migrations  # noqa: E402
 
 
 def _find_pg_bin():
@@ -140,9 +142,17 @@ CREATE TABLE cdrs (
   network_addr VARCHAR(45),
   bridge_uuid VARCHAR(64),
   sbc_id VARCHAR(30),
+  inbound_carrier VARCHAR(20),       -- migration 40 (inline: 40 also builds carrier_trunks)
+  inbound_carrier_pop VARCHAR(50),
   PRIMARY KEY (id, start_time));
 
-GRANT ALL ON cdrs TO api;
+CREATE TABLE call_attestations (
+  call_id            TEXT PRIMARY KEY,
+  customer_id        INT NOT NULL,
+  signed_attestation TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now());
+
+GRANT ALL ON cdrs, call_attestations TO api;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO api;
 """
 
@@ -217,6 +227,8 @@ def search_db():
             min_size=1, max_size=2, statement_cache_size=0)
         async with owner.acquire() as conn:
             await conn.execute(_BASE_SCHEMA)
+            # 23 / 47 / 48 from the REAL migration files (tests/cdr_schema.py).
+            await apply_cdr_column_migrations(conn)
 
             async def seed(uuid, cid, sbc, direction, product, dest, start,
                            trunk=None, rated=False):

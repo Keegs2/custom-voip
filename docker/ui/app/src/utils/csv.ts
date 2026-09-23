@@ -55,6 +55,10 @@ const CDR_HEADERS = [
   'Trunk',
   'SIP Code',
   'Rated',
+  // CDR A/B leg split (migration 48). Blank on legacy (pre-split) rows.
+  'Leg',
+  'Call ID',
+  'Attempt',
 ];
 
 /** callsFormat's em-dash placeholder reads as blank in a spreadsheet. */
@@ -66,6 +70,8 @@ function blankIfEmpty(label: string): string {
  * Exports an array of CDR records to a CSV file and triggers a browser
  * download. Carrier/Trunk render via the shared callsFormat mapping — the
  * same labels as the on-screen table, so the export never drifts from the UI.
+ * Staff only. Leg / Call ID / Attempt identify the row within the A/B leg
+ * split — group by Call ID to fold carrier attempts back into their call.
  */
 export function exportCdrsCsv(cdrs: Cdr[], trunkNames?: Record<string, string>): void {
   const rows = cdrs.map((c) => [
@@ -86,6 +92,9 @@ export function exportCdrsCsv(cdrs: Cdr[], trunkNames?: Record<string, string>):
     blankIfEmpty(trunkLabel(c.trunk_id, trunkNames)),
     c.sip_code ?? '',
     c.rated_at ? 'Yes' : 'No',
+    c.leg ?? '',
+    c.call_id ?? '',
+    c.leg_attempt ?? '',
   ]);
 
   const csv = buildCsv(CDR_HEADERS, rows);

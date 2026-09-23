@@ -9,7 +9,11 @@
  *   2. Hero quality tiles — MOS / R-Factor / Quality % / Loss % / Jitter,
  *      status-colored.
  *   3. Call Info — times, duration vs billable, zone/SBC, carrier, codecs,
- *      hangup cause + SIP code, SIP identities.
+ *      hangup cause + SIP code, SIP identities. STAFF also get the CDR A/B
+ *      leg-split identity: Leg (A / B / legacy), Call ID (copyable) and, on
+ *      carrier B rows, the bridge Attempt number, plus a "Show all legs of
+ *      this call" action (staff only — the parent passes `onShowAllLegs`)
+ *      that sets the list to Rows=All legs + call_id=<call_id ?? uuid>.
  *   4. STIR / SHAKEN — the shared <AttestationChain/> (handles its own
  *      404-for-old-rows case).
  *   5. RTP Detail — collapsible (default closed): packet/byte counters both
@@ -130,9 +134,12 @@ interface CdrDetailModalProps {
   isStaff: boolean;
   /** True admin — the Rate CDR write is admin-only (support gets 403). */
   isAdmin: boolean;
+  /** Staff only: drill the list down to every row of this call. Omitted for
+      tenants, which hides the action entirely. */
+  onShowAllLegs?: (callId: string) => void;
 }
 
-export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModalProps) {
+export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }: CdrDetailModalProps) {
   // ALL hooks unconditionally at the top — React #310 prevention.
   const { toastOk, toastErr } = useToast();
   const queryClient = useQueryClient();
@@ -190,14 +197,19 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
     d.rtp_audio_in_packet_count != null || d.rtp_audio_out_packet_count != null ||
     d.jitter_avg_ms != null || d.flaw_total != null;
 
-  async function copyUuid() {
+  async function copyText(value: string, what: string) {
     try {
-      await navigator.clipboard.writeText(d.uuid);
-      toastOk('UUID copied');
+      await navigator.clipboard.writeText(value);
+      toastOk(`${what} copied`);
     } catch {
       toastErr('Copy failed');
     }
   }
+
+  const legLabel =
+    d.leg === 'A' ? 'A — call row'
+      : d.leg === 'B' ? 'B — carrier attempt'
+        : 'Legacy (pre-split)';
 
   return (
     <div
@@ -247,7 +259,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
               </span>
               <button
                 type="button"
-                onClick={() => void copyUuid()}
+                onClick={() => void copyText(d.uuid, 'UUID')}
                 title="Copy UUID"
                 aria-label="Copy call UUID"
                 className="dlx4-pgbtn"
@@ -351,12 +363,63 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
               />
             )}
             {isStaff && d.sip_user_agent && <InfoItem label="User Agent" value={d.sip_user_agent} mono wide />}
+            {/* CDR A/B leg split — staff only (tenant rows carry no leg fields). */}
+            {isStaff && <InfoItem label="Leg" value={legLabel} />}
+            {isStaff && d.leg === 'B' && (
+              <InfoItem label="Attempt" value={d.leg_attempt != null ? `#${d.leg_attempt}` : null} mono />
+            )}
+            {isStaff && (
+              <InfoItem
+                label="Call ID"
+                wide
+                value={
+                  d.call_id ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%', minWidth: 0 }}>
+                      <span
+                        className="dlx4-mono"
+                        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={d.call_id}
+                      >
+                        {d.call_id}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void copyText(d.call_id ?? '', 'Call ID')}
+                        title="Copy Call ID"
+                        aria-label="Copy call ID"
+                        className="dlx4-pgbtn"
+                        style={{ height: 22, minWidth: 0, padding: '0 8px', fontSize: '0.64rem', flex: 'none' }}
+                      >
+                        Copy
+                      </button>
+                    </span>
+                  ) : null
+                }
+              />
+            )}
           </div>
+
+          {/* Staff drill-down: every row of this call (A + carrier B-legs). */}
+          {isStaff && onShowAllLegs && (
+            <div style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="dl-btn dl-btn-ghost"
+                onClick={() => onShowAllLegs(d.call_id ?? d.uuid)}
+                title="Filter the list to this call's A-leg and every carrier attempt"
+              >
+                Show all legs of this call
+              </button>
+            </div>
+          )}
 
           {/* STIR / SHAKEN */}
           <div className="dlx4-xsection">
             <SectionTitle>STIR / SHAKEN</SectionTitle>
-            <AttestationChain callId={d.uuid} />
+            {/* Attestation is keyed by the CALL (A-leg uuid): a carrier B row
+                resolves through its call_id; A / legacy / tenant rows fall
+                back to their own uuid (== call_id on A rows). */}
+            <AttestationChain callId={d.call_id ?? d.uuid} />
           </div>
 
           {/* RTP Detail — collapsible */}

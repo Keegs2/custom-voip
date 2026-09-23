@@ -74,18 +74,22 @@ def _base_variables(**overrides):
 
 # Column order in the INSERT (must match cdrs.py). The tail is: the four
 # on-net columns ($50..$53), the two inbound-carrier columns ($54..$55), then
-# the two STIR-outcome columns ($56..$57, migration 47), so negative indices
-# from the end are -8..-1.
-IDX_ORIGIN = -8
-IDX_TERMINATING = -7
-IDX_ON_NET = -6
-IDX_ON_NET_HOPS = -5
-IDX_INBOUND_CARRIER = -4
-IDX_INBOUND_CARRIER_POP = -3
-IDX_STIR_OUTCOME = -2
-IDX_STIR_EFF_ACTUAL = -1
+# the two STIR-outcome columns ($56..$57, migration 47), then the three
+# leg-split columns ($58..$60, migration 48), so negative indices from the end
+# are -11..-1.
+IDX_ORIGIN = -11
+IDX_TERMINATING = -10
+IDX_ON_NET = -9
+IDX_ON_NET_HOPS = -8
+IDX_INBOUND_CARRIER = -7
+IDX_INBOUND_CARRIER_POP = -6
+IDX_STIR_OUTCOME = -5
+IDX_STIR_EFF_ACTUAL = -4
+IDX_LEG = -3
+IDX_CALL_ID = -2
+IDX_LEG_ATTEMPT = -1
 
-PARAM_COUNT = 57
+PARAM_COUNT = 60
 
 
 def _run(body):
@@ -167,7 +171,7 @@ def test_insert_param_count_matches_placeholders(cap):
     )}
     _run(body)
     placeholders = set(re.findall(r"\$(\d+)", cap.sql))
-    # highest placeholder index must equal the param count (57)
+    # highest placeholder index must equal the param count (60)
     assert max(int(x) for x in placeholders) == len(cap.params) == PARAM_COUNT
 
 
