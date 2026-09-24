@@ -1,0 +1,9 @@
+[Unit]
+Description=revup one-way audio (no inbound RTP) watchdog (every 10 min)
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target

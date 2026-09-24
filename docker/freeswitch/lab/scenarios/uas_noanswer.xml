@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Call-quality lab check #9 (callee side): ring, never answer. When FS relays
+  the caller's CANCEL, answer it 200 and the INVITE 487, then absorb the ACK.
+-->
+<scenario name="RCF quality lab UAS (ring, never answer)">
+
+  <recv request="INVITE" crlf="true">
+    <action>
+      <ereg regexp=".*" search_in="hdr" header="Via:" check_it="true" assign_to="inv_via"/>
+      <ereg regexp=".*" search_in="hdr" header="CSeq:" check_it="true" assign_to="inv_cseq"/>
+    </action>
+  </recv>
+
+  <send>
+    <![CDATA[
+      SIP/2.0 180 Ringing
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]LabUas[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:lab@[local_ip]:[local_port];transport=[transport]>
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv request="CANCEL"/>
+
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]LabUas[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <send>
+    <![CDATA[
+      SIP/2.0 487 Request Terminated
+      Via:[$inv_via]
+      [last_From:]
+      [last_To:];tag=[pid]LabUas[call_number]
+      [last_Call-ID:]
+      CSeq:[$inv_cseq]
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv request="ACK" crlf="true"/>
+</scenario>

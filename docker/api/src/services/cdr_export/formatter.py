@@ -248,6 +248,24 @@ _FIDELITY_BLOCK: list[tuple[str, str, Callable[[Any], str]]] = [
     ("stir_eff_actual",                "stir_eff_actual",                _fmt_plain),
     # --- 48_cdr_call_legs.sql (leg + call_id are in the billing block) ---
     ("leg_attempt",                    "leg_attempt",                    _fmt_plain),
+    # --- 50_cdr_quality_accuracy.sql ---
+    ("quality_status",                 "quality_status",                 _fmt_plain),
+    ("quality_grade",                  "quality_grade",                  _fmt_plain),
+    ("quality_source",                 "quality_source",                 _fmt_plain),
+    ("fs_mos",                         "fs_mos",                         _fmt_num),
+    ("fs_quality_pct",                 "fs_quality_pct",                 _fmt_num),
+    ("fs_jitter_max_std_ms",           "fs_jitter_max_std_ms",           _fmt_num),
+    ("rtp_audio_in_skip_packet_count", "rtp_audio_in_skip_packet_count", _fmt_plain),
+    ("packets_expected",               "packets_expected",               _fmt_plain),
+    ("loss_bursts",                    "loss_bursts",                    _fmt_plain),
+    ("packets_reordered",              "packets_reordered",              _fmt_plain),
+    ("ssrc_changes",                   "ssrc_changes",                   _fmt_plain),
+    ("burst_ratio",                    "burst_ratio",                    _fmt_num),
+    ("inbound_media_ratio",            "inbound_media_ratio",            _fmt_num),
+    ("call_quality_status",            "call_quality_status",            _fmt_plain),
+    ("call_quality_grade",             "call_quality_grade",             _fmt_plain),
+    ("call_mos",                       "call_mos",                       _fmt_num),
+    ("call_quality_leg",               "call_quality_leg",               _fmt_plain),
 ]
 
 _FIELD_DEFS: list[tuple[str, str, Callable[[Any], str]]] = _BILLING_BLOCK + _FIDELITY_BLOCK

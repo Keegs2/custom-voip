@@ -1,0 +1,6 @@
+# staged by run_matrix.sh from the repo copies (docker/freeswitch/conf/autoload_configs)
+conf/autoload_configs/switch.conf.xml
+conf/autoload_configs/json_cdr.conf.xml
+# run output (CDRs, sender manifests, SIPp traces, reports)
+out/
+__pycache__/

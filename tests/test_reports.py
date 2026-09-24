@@ -101,11 +101,19 @@ def test_missed_reasons_list_sorted_and_labelled():
 
 
 @pytest.mark.parametrize("mos,grade", [
-    (None, "none"), (4.5, "great"), (4.0, "great"), (3.99, "good"), (3.6, "good"),
-    (3.59, "fair"), (3.1, "fair"), (3.09, "poor"), (1.0, "poor"),
+    # docs/CALL_QUALITY_ACCURACY_PLAN.md §D — G.107/G.109 R bands 90/80/70
+    (None, "none"), (4.5, "great"), (4.41, "great"), (4.34, "great"), (4.33, "good"),
+    (4.02, "good"), (4.01, "fair"), (3.6, "fair"), (3.59, "poor"), (1.0, "poor"),
 ])
 def test_grade_thresholds(mos, grade):
     assert rp.grade_for_mos(mos) == grade
+
+
+def test_grade_delegates_to_call_quality():
+    from services import call_quality as cq
+    for i in range(100, 451):
+        m = i / 100
+        assert rp.grade_for_mos(m) == (cq.grade_for_mos(m) or "none")
 
 
 def test_numbers_filter_canonicalizes_and_drops_junk():
@@ -277,6 +285,15 @@ def reports_db():
                 await conn.execute(
                     "UPDATE cdrs SET leg = 'A', call_id = uuid WHERE uuid = $1",
                     _uuid(tag))
+                # Migration 50: reports read the CALL-level columns
+                # (worse direction). The seed's mos becomes call_mos/grade;
+                # the per-leg mos is then poisoned to 1.0 to prove reports
+                # never read it.
+                await conn.execute(
+                    "UPDATE cdrs SET call_mos = mos, "
+                    "call_quality_grade = cq_grade(mos), "
+                    "call_quality_status = CASE WHEN mos IS NULL THEN 'unanswered' "
+                    "ELSE 'rated' END, mos = 1.0 WHERE uuid = $1", _uuid(tag))
                 if cid == CID_A and tag in _B_LEG_TAGS:
                     # Carrier B-legs of the same call (contract row model):
                     # same customer, direction 'outbound', caller = the
@@ -300,6 +317,11 @@ def reports_db():
                             cid, trunk, A_MAIN, b_start, b_answer, b_end,
                             "NORMAL_CLEARING" if b_answered else "USER_BUSY",
                             _uuid(tag), attempt)
+            # a15: answered, one-way audio -> graded POOR with no MOS
+            await conn.execute(
+                "UPDATE cdrs SET call_quality_status = 'no_rtp', "
+                "call_quality_grade = 'poor', call_mos = NULL WHERE uuid = $1",
+                _uuid("a15"))
         await owner.close()
         db.pool = await asyncpg.create_pool(
             host=pg.sock, port=pg.port, user="api", password="api_secret",
@@ -428,8 +450,11 @@ def test_overview_shape_and_values(client, tokens):
     assert body["previous_period"] == {"start": "2026-07-01", "end": "2026-07-31",
                                        "calls": None, "answered": None,
                                        "minutes": None, "answer_rate_pct": None}
-    assert body["quality"] == {"rated_calls": 4, "avg_mos": 3.78, "grade": "good",
-                               "pct_good_or_better": 75.0}
+    # graded = a03 4.1 good, a04 3.7 fair, a06 4.3 good, a07 3.0 poor, a15
+    # one-way (poor, no MOS): avg over graded calls WITH a MOS = 3.775 -> 3.78
+    # (fair); good-or-better = 2 of 5.
+    assert body["quality"] == {"rated_calls": 5, "avg_mos": 3.78, "grade": "fair",
+                               "pct_good_or_better": 40.0}
     assert body["busiest_day"] == {"date": "2026-08-14", "calls": 3}   # tie -> earliest
     assert body["busiest_hour"] == {"hour": 10, "calls": 4}
     assert body["missed_reasons"] == [
@@ -538,7 +563,7 @@ def test_numbers_per_number(client, tokens):
     assert body == {"numbers": [
         {"number": A_MAIN, "name": "Main line", "product": "rcf",
          "forwards_to": "+17745550000", "calls": 10, "answered": 6, "missed": 4,
-         "answer_rate_pct": 60.0, "minutes": 3, "avg_mos": 4.03, "grade": "great"},
+         "answer_rate_pct": 60.0, "minutes": 3, "avg_mos": 4.03, "grade": "good"},
         # a07 outbound caller_id '6175550202' is canonicalized onto the DID
         {"number": A_TRUNK, "name": "alpha", "product": "trunk",
          "forwards_to": None, "calls": 4, "answered": 1, "missed": 3,
@@ -595,7 +620,7 @@ def test_calls_shape_order_and_values(client, tokens):
         "id": _uuid("a04"), "started_at": "2026-08-14T10:02:31-06:00",
         "direction": "inbound", "from": "+12085550100", "to": A_MAIN, "number": A_MAIN,
         "outcome": "answered", "outcome_label": "Answered", "missed_reason": None,
-        "length_minutes": 1, "quality": "good"}
+        "length_minutes": 1, "quality": "fair"}
     assert by[_uuid("a06")]["length_minutes"] == 2         # 95 s -> 2
     assert by[_uuid("a07")]["number"] == A_TRUNK
     assert by[_uuid("a07")]["from"] == "6175550202"
@@ -643,7 +668,13 @@ def test_calls_csv_header_rows_escaping(client, tokens):
     assert len(data) == 14
     assert data[0][:2] == ["2026-08-31", "23:59"]
     assert ["2026-08-14", "10:02", "Inbound", "+12085550100", A_MAIN, A_MAIN,
-            "Answered", "1", "Good"] in data
+            "Answered", "1", "Fair"] in data
+    # one-way audio (no_rtp): graded Poor with no MOS — never "Not rated"
+    assert ["2026-08-25", "11:00", "Inbound", "+12085550015", A_MAIN, A_MAIN,
+            "Answered", "1", "Poor"] in data
+    # an answered call that was never graded stays "Not rated"
+    assert ["2026-08-25", "11:05", "Inbound", "+12085550016", A_MAIN, A_MAIN,
+            "Answered", "1", "Not rated"] in data
     assert ["2026-08-21", "08:00", "Inbound", "+12085550008", A_TRUNK, A_TRUNK,
             "The caller hung up before it was answered", "0", "Not rated"] in data
     # formula injection neutralized, embedded quotes/commas round-trip
@@ -788,3 +819,14 @@ def test_report_scan_uses_customer_time_index(reports_db):
     text = _run(plan())
     assert "idx_cdrs_customer_time" in text, text
     assert "start_time >=" in text and "start_time <" in text, text
+
+
+def test_summary_grade_one_way_only_is_poor_not_unrated():
+    """Graded calls that are ALL one-way audio (grade poor, MOS NULL) make the
+    aggregate poor; nothing graded stays "none"."""
+    from routers import reports
+    assert reports._summary_grade(3, None) == "poor"
+    assert reports._summary_grade(0, None) == "none"
+    assert reports._summary_grade(2, 4.35) == "great"
+    assert reports._quality(2, None, 0) == {"rated_calls": 2, "avg_mos": None,
+                                            "grade": "poor", "pct_good_or_better": 0.0}

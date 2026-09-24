@@ -766,10 +766,13 @@ function TelemetryReference() {
       "duration_minutes": 4,
       "hangup_cause": "NORMAL_CLEARING",
       "sip_code": 200,
-      "mos": 4.38,
-      "r_factor": 88.6,
-      "jitter_avg_ms": 3.2,
-      "packet_loss_pct": 0.04,
+      "mos": 4.41,
+      "r_factor": 93.2,
+      "jitter_avg_ms": 1.9,
+      "packet_loss_pct": 0.0,
+      "quality_status": "rated",
+      "quality_grade": "great",
+      "call_quality_grade": "great",
       "read_codec": "PCMU",
       "write_codec": "PCMU"
     }
@@ -780,12 +783,20 @@ function TelemetryReference() {
 }`}
       />
       <Callout accent={BLUE}>
-        <strong style={{ color: C.text }}>Quality fields:</strong> each record
-        carries <IC>mos</IC> (1–5 voice-quality score; 4.0+ is excellent), <IC>r_factor</IC>{' '}
-        (0–93 transmission rating), running jitter in ms (<IC>jitter_min_ms</IC> floor /{' '}
-        <IC>jitter_max_ms</IC> peak / <IC>jitter_avg_ms</IC> mid-band estimate),
-        and network packet loss (<IC>packet_loss_pct</IC>, sequence-gap based), plus codec
-        details — the response above is trimmed for brevity.{' '}
+        <strong style={{ color: C.text }}>Quality fields:</strong> <IC>mos</IC> is an ITU-T G.107
+        E-model score (1–5) computed from true RTP sequence loss — a clean G.711 call scores 4.41, the
+        maximum — and <IC>r_factor</IC> is the G.107 transmission rating (0–100) behind it. Both are{' '}
+        <IC>null</IC> unless the call was graded: <IC>quality_status</IC> is <IC>rated</IC> for graded
+        calls, or explains why not (<IC>unanswered</IC>, <IC>short</IC> = under 5 s,{' '}
+        <IC>low_sample</IC>, <IC>no_data</IC>, or <IC>no_rtp</IC> = one-way audio, graded poor).{' '}
+        <IC>quality_grade</IC> is <IC>great</IC> (MOS ≥ 4.34) / <IC>good</IC> (≥ 4.02) /{' '}
+        <IC>fair</IC> (≥ 3.60) / <IC>poor</IC>. <IC>packet_loss_pct</IC> / <IC>packet_loss_count</IC>{' '}
+        are true network loss; <IC>jitter_avg_ms</IC> / <IC>jitter_max_ms</IC> are RFC 3550 interarrival
+        jitter. <IC>call_quality_grade</IC> / <IC>call_quality_status</IC> / <IC>call_mos</IC> grade the
+        whole call by its worse audio direction, and <IC>GET /v1/cdrs/{'{uuid}'}</IC> adds{' '}
+        <IC>quality_by_direction</IC> with a <IC>caller_audio</IC> and a <IC>callee_audio</IC> block.{' '}
+        <IC>quality_pct</IC> and <IC>jitter_min_ms</IC> are deprecated and always <IC>null</IC>. The
+        response above is trimmed for brevity.{' '}
         <strong style={{ color: C.text }}>Duration:</strong> <IC>duration_minutes</IC> is whole
         minutes (any answered call reads at least 1; unanswered calls read 0), and{' '}
         <IC>answer_time</IC> / <IC>end_time</IC> are reported to the minute.
@@ -820,7 +831,7 @@ function TelemetryReference() {
       />
 
       <H3>Single call detail</H3>
-      <Endpoint method="GET" path="/v1/cdrs/{uuid}" description="One CDR with the complete RTP metric set — every jitter, loss, and byte counter captured for the call." />
+      <Endpoint method="GET" path="/v1/cdrs/{uuid}" description="One CDR with its full quality metric set, plus quality_by_direction — a caller_audio block (what the callee heard) and a callee_audio block (what the caller heard; null when there is no carrier leg)." />
       <CodeBlock
         label="request"
         code={`curl "https://your-portal-url/api/v1/cdrs/9c1e7a3d-..." \\

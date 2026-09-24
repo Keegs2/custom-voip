@@ -37,6 +37,10 @@ Lua libraries installed via luarocks:
 - `redis-lua` -- Pure Lua Redis client (NOT lua-hiredis; hiredis has Lua 5.1/5.3 API incompatibility)
 - `luasql-postgres` -- PostgreSQL driver for DID lookups
 
+**RCF quality patch v1** is applied to the pinned FreeSWITCH checkout right after the
+library builds (`COPY patches/` + `git apply --check && git apply` loop, `|| exit 1`), before
+module selection/bootstrap. See "Quality patch v1" below.
+
 Module selection in `build/modules.conf.in` via sed substitutions:
 - **Enabled**: mod_lua, mod_sofia, mod_xml_curl, mod_json_cdr, mod_event_socket, mod_opus, mod_g729, mod_amr, mod_spandsp, mod_dptools, mod_commands, mod_dialplan_xml, mod_curl, mod_shout, mod_sndfile, mod_tone_stream, mod_say_en, mod_db, mod_hash, mod_loopback, mod_cdr_csv, mod_console, mod_logfile, mod_native_file
 - **Explicitly disabled** (commented out from defaults): mod_conference, mod_av, mod_png, mod_verto, mod_rtc, mod_voicemail, mod_callcenter, mod_valet_parking, mod_spy
@@ -65,12 +69,12 @@ This solves the GCE hairpin NAT problem: when FreeSWITCH sends packets to its ow
 **Requires `NET_ADMIN` capability** in docker-compose.
 
 **IMPORTANT — entrypoint wiring**: The Dockerfile `ENTRYPOINT` is
-`/usr/local/freeswitch/bin/freeswitch` directly (line 342) — it does NOT invoke
-`entrypoint.sh`. The script is `COPY`'d into the image (line 333) but is never the
+`/usr/local/freeswitch/bin/freeswitch` directly (the `ENTRYPOINT` line near the end) — it does NOT invoke
+`entrypoint.sh`. The script is `COPY`'d into the image (`COPY entrypoint.sh`) but is never the
 image default. Therefore the loopback-IP hairpin fix in `entrypoint.sh` is wired
 via a **compose-level entrypoint override** (`docker-compose.media.yml`), not the
 image default. (The "Start FreeSWITCH via entrypoint" comment in the Dockerfile
-above line 342 is misleading — the actual ENTRYPOINT bypasses it.)
+above the `ENTRYPOINT` line is misleading — the actual ENTRYPOINT bypasses it.)
 
 ### CMD flags
 
@@ -136,7 +140,7 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 2. **mod_local_stream disabled**: It requires `local_stream.conf.xml` which doesn't exist. When xml_curl can't reach the API during startup, the missing config causes a CRIT abort. RCF uses `silence_stream://-1` for hold music instead.
 
-3. **mod_httapi and mod_http_cache: built-but-not-loaded**: The Dockerfile ENABLES them at build time (`sed` uncomments them in `build/modules.conf.in`, lines 129/131), so the modules exist in the image. But `modules.conf.xml` leaves their `<load>` lines commented (lines 83/92), so they are NOT loaded at runtime. They are not loaded because their configs would need to be served by xml_curl, which is unreachable during module load on the media VM. To enable, uncomment in `modules.conf.xml` AND provide reachable config.
+3. **mod_httapi and mod_http_cache: built-but-not-loaded**: The Dockerfile ENABLES them at build time (`sed` uncomments them in `build/modules.conf.in`, in the "Enable required modules" `RUN`), so the modules exist in the image. But `modules.conf.xml` leaves their `<load>` lines commented (lines 83/92), so they are NOT loaded at runtime. They are not loaded because their configs would need to be served by xml_curl, which is unreachable during module load on the media VM. To enable, uncomment in `modules.conf.xml` AND provide reachable config.
 
 4. **NAT handling is critical**: Both internal and external profiles set `local-network-acl=loopback.auto` and `apply-nat-acl=rfc1918.auto`. This forces ext-sip-ip/ext-rtp-ip into SDP and SIP headers for ALL traffic except loopback. Without this, Docker 172.28.x.x IPs leak into SDP causing one-way audio.
 
@@ -169,12 +173,85 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 | 8021 | TCP | Event Socket (ESL) |
 | 16384-49151 | UDP | RTP media (32K ports for ~10K concurrent B2BUA calls) |
 
+## Quality patch v1 (RTP loss/jitter measurement) — `patches/0001-rcf-rtp-quality-v1.patch`
+
+Contract: `docs/CALL_QUALITY_ACCURACY_PLAN.md` section A (variables), B (how the API scores
+them), G.3 (lab). FreeSWITCH's own `rtp_audio_in_mos` / `_quality_percentage` / `_flaw_total`
+are NOT a usable loss or quality measure (`do_mos()` scores zero inbound RTP as 4.50, resets
+`flaws`, counts CNG/autoflush/DTMF as flaws). The patch adds a correct measurement NEXT TO them.
+
+**What it is.** A source patch (3 files, 178 added lines, zero removed) applied in the builder
+stage to the pinned `FREESWITCH_REF` 0a54a48:
+- `src/include/switch_types.h`: 10 fields appended to `switch_rtp_numbers_t`
+  (`seq_expected/_received/_lost/_loss_events/_reordered/_epochs`, `rfc3550_jitter_sum_ms/_n/_max_ms`,
+  `rfc3550_kernel_clock`). Layout change is safe: every module is compiled from the same tree in
+  this Dockerfile; no prebuilt binary modules are loaded (only mod_commands + the unbuilt
+  mod_managed SWIG wrapper reference the struct, by field name).
+- `src/switch_rtp.c`: private `qt_*` tracker state in `struct switch_rtp` (pool memory is
+  zero-filled by `switch_core_alloc`, no init code), and `qt_track()` = RFC 3550 A.1 sequence
+  accounting (extended highest seq, cycles, never reset; SSRC change or jump >= 3000 = new
+  epoch, not loss; <= 99 behind = late/reordered; duplicate of highest = reordered, not
+  received) + RFC 3550 6.4.1 interarrival jitter (8 kHz RTP clock only, RFC 2833 excluded,
+  first 50 samples of each epoch = warm-up). Called at exactly two points, both after the
+  existing `stats.inbound.packet_count++`: the normal read path (after SRTP unprotect, outside
+  the `PROXY_MEDIA` guard, so trunk calls are measured) and the autoflush loop (flushed packets
+  DID arrive; muxed RTCP excluded). Arrival time = kernel receive timestamp (`ioctl(SIOCGSTAMP)`
+  on `sock_input`, Linux) with `switch_micro_time_now()` fallback; a clock change between two
+  packets resets the jitter reference instead of differencing two clocks.
+- `src/switch_core_media.c` `set_stats()`: AUDIO-only export of the new variables.
+- Touches NONE of `flaws`, `R`, `mos`, `recved`, `loss[]`, `lossrate`, `burstrate`, the
+  variances, flags, the packet, or any existing channel variable.
+
+**Channel variables added (strings, at hangup, AUDIO media handle only):**
+
+| Variable | Type / unit | Present when |
+|---|---|---|
+| `rtp_audio_in_qpatch` | `"1"` | patched image + audio media handle |
+| `rtp_audio_in_seq_expected` | uint, packets | patched |
+| `rtp_audio_in_seq_received` | uint, packets | patched |
+| `rtp_audio_in_seq_lost` | uint, packets (never reset) | patched |
+| `rtp_audio_in_seq_loss_events` | uint, forward gaps (loss bursts) | patched |
+| `rtp_audio_in_seq_reordered` | uint, late + duplicate-of-highest packets | patched |
+| `rtp_audio_in_seq_epochs` | uint (0 = no RTP ever; 1 + SSRC changes/restarts) | patched |
+| `rtp_audio_in_rfc3550_jitter_avg_ms` | `%0.2f` ms, mean J over post-warm-up samples | patched AND >= 51 in-order samples at 8 kHz |
+| `rtp_audio_in_rfc3550_jitter_max_ms` | `%0.2f` ms, peak J | same |
+| `rtp_audio_in_rfc3550_clock` | `kernel` / `read` | patched |
+
+Absent `rtp_audio_in_qpatch` = unpatched ("legacy") image; the API falls back to
+`rtp_audio_in_jitter_loss_rate` and writes jitter NULL. Every pre-existing `rtp_audio_*`
+variable keeps its exact name, format and value. `seq_lost` = packets that never reached FS's
+socket-read stage (network loss + the pre-count "already sent this frame" drop); autoflush
+discards count as received (they stay visible in `in_flush_packet_count`/`in_skip_packet_count`).
+
+**Rebuild rule.** The patch is valid ONLY for `FREESWITCH_REF` 0a54a48. `git apply --check` fails
+the image build loudly if the ref moves. On any ref bump: regenerate the patch against the new
+commit (full clone, re-apply the same hunks, `git diff > patches/0001-...`), re-run the unit test
+and the full lab below on west-loadtest, and only then roll (standby FS first). Never "fix" a
+failing apply by deleting the patch step: the API would silently fall back to legacy numbers.
+
+**Tests.**
+- Unit (any machine, compiles the tracker straight out of the patch file, both the SIOCGSTAMP
+  path with a mocked ioctl and the read-time fallback): `sh docker/freeswitch/lab/unit/run_unit.sh`
+- Lab evaluator self-test (synthetic CDRs): `python3 docker/freeswitch/lab/unit/eval_selftest.py`
+- Acceptance lab (SIPp + netem, west-loadtest ONLY, ~1 h + 2 image builds):
+  `cd /opt/revup/docker/freeswitch/lab && sudo ./run_matrix.sh all` then
+  `sudo ./run_matrix.sh compare` and `sudo ./run_matrix.sh warncheck`. The 13 checks and pass
+  criteria are in `lab/README.md`. All must pass before any production FS rebuild.
+
+**Verify a rebuilt node** (plan H step 7): build log shows
+`applied /usr/src/fs-patches/0001-rcf-rtp-quality-v1.patch`;
+`sudo docker exec voip-freeswitch sh -c 'grep -ac in_seq_expected /usr/local/freeswitch/lib/libfreeswitch.so*'` >= 1;
+a test call's on-disk CDR carries `rtp_audio_in_qpatch":"1"`. Rollback = re-tag the
+`revup-fs:pre-qpatch` image (plan H "Rollback").
+
 ## File Layout
 
 ```
 docker/freeswitch/
-  Dockerfile              # Multi-stage build
+  Dockerfile              # Multi-stage build (applies patches/ to the pinned FS checkout)
   entrypoint.sh           # Loopback IP hack for GCE hairpin NAT
+  patches/                # FS source patches, pinned to FREESWITCH_REF (quality patch v1)
+  lab/                    # Call-quality acceptance lab: SIPp + netem + evaluator (lab/README.md)
   conf/                   # FreeSWITCH configuration (see conf/CLAUDE.md)
   scripts/                # Lua routing scripts (see scripts/CLAUDE.md)
 ```

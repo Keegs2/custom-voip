@@ -41,7 +41,7 @@ OUTCOME = "eff=div;mode=relay;identities=1;base=1;div=1;stripped=0"
 # Bind positions of the two new INSERT columns (see cdrs.py $56/$57).
 IDX_STIR_OUTCOME = 55
 IDX_STIR_EFF_ACTUAL = 56
-PARAM_COUNT = 60
+PARAM_COUNT = 73   # 60 + the migration-50 quality tail ($61..$73)
 
 
 class _Capture:
@@ -334,7 +334,7 @@ def test_a_leg_with_stir_outcome_binds_raw_and_eff(cap):
     assert "stir_outcome, stir_eff_actual" in sql
     assert "$56::text" in sql and "$57::text" in sql
     assert "leg, call_id, leg_attempt" in sql       # migration 48 tail
-    assert p[57:] == ("A", "a-leg-uuid-1", None)
+    assert p[57:60] == ("A", "a-leg-uuid-1", None)
     assert max(int(x) for x in re.findall(r"\$(\d+)", sql)) == PARAM_COUNT
 
 

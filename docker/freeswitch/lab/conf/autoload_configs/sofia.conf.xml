@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lab sofia profiles. The RTP/media params are copied from the production
+  profiles so the RTP read path behaves as in production:
+    lab-int (5080)  <- conf/sofia/internal.xml  (A-leg: caller -> platform)
+    lab-ext (5090)  <- conf/sofia/external.xml  (B-leg: callee -> platform)
+  Copied verbatim: codec prefs/negotiation, dtmf (rfc2833 101, liberal,
+  pass-rfc2833), rtp-autofix-timing, rtp-keepalive-sec, rtp-timeout-sec,
+  rtp-hold-timeout-sec, rtcp-audio-interval-msec=5000, suppress-cng=false,
+  local-network-acl=loopback.auto, inbound-use-callid-as-uuid.
+  The core RTP settings (rtp-autoflush-during-bridge=true, port range,
+  monotonic timing, timer) come from the REPO switch.conf.xml staged by
+  run_matrix.sh. The default soft timer is used, as in production.
+  Deliberately NOT copied (signalling-only, would need Kamailio/NAT):
+  ACLs, NAT detection, session timers (disabled so the SIPp scenarios stay
+  simple), sip-capture/HEP, gateways, TLS.
+-->
+<configuration name="sofia.conf" description="sofia Endpoint">
+  <global_settings>
+    <param name="log-level" value="0"/>
+    <param name="debug-presence" value="0"/>
+  </global_settings>
+  <profiles>
+    <profile name="lab-int">
+      <settings>
+        <param name="sip-ip" value="$${local_ip_v4}"/>
+        <param name="sip-port" value="5080"/>
+        <param name="rtp-ip" value="$${local_ip_v4}"/>
+        <param name="ext-rtp-ip" value="$${local_ip_v4}"/>
+        <param name="ext-sip-ip" value="$${local_ip_v4}"/>
+        <param name="context" value="public"/>
+        <param name="dialplan" value="XML"/>
+        <param name="inbound-codec-prefs" value="PCMU,PCMA,G722,opus"/>
+        <param name="outbound-codec-prefs" value="PCMU,PCMA,G722,opus"/>
+        <param name="inbound-codec-negotiation" value="greedy"/>
+        <param name="inbound-late-negotiation" value="false"/>
+        <param name="dtmf-type" value="rfc2833"/>
+        <param name="dtmf-duration" value="2000"/>
+        <param name="rfc2833-pt" value="101"/>
+        <param name="liberal-dtmf" value="true"/>
+        <param name="pass-rfc2833" value="true"/>
+        <param name="rfc2833-send-payload" value="101"/>
+        <param name="enable-timer" value="false"/>
+        <param name="inbound-use-callid-as-uuid" value="true"/>
+        <param name="track-calls" value="false"/>
+        <param name="local-network-acl" value="loopback.auto"/>
+        <param name="rtp-autofix-timing" value="true"/>
+        <param name="rtp-keepalive-sec" value="15"/>
+        <param name="rtp-timeout-sec" value="60"/>
+        <param name="rtp-hold-timeout-sec" value="1800"/>
+        <param name="rtcp-audio-interval-msec" value="5000"/>
+        <param name="rtp-secure-media" value="false"/>
+        <param name="suppress-cng" value="false"/>
+        <param name="hold-music" value="silence_stream://-1"/>
+        <param name="user-agent-string" value="RcfQualityLab/1.0"/>
+        <param name="auth-calls" value="false"/>
+        <param name="accept-blind-auth" value="true"/>
+      </settings>
+    </profile>
+    <profile name="lab-ext">
+      <settings>
+        <param name="sip-ip" value="$${local_ip_v4}"/>
+        <param name="sip-port" value="5090"/>
+        <param name="rtp-ip" value="$${local_ip_v4}"/>
+        <param name="ext-rtp-ip" value="$${local_ip_v4}"/>
+        <param name="ext-sip-ip" value="$${local_ip_v4}"/>
+        <param name="context" value="public"/>
+        <param name="dialplan" value="XML"/>
+        <param name="inbound-codec-prefs" value="PCMU,PCMA"/>
+        <param name="outbound-codec-prefs" value="PCMU,PCMA"/>
+        <param name="inbound-codec-negotiation" value="greedy"/>
+        <param name="dtmf-type" value="rfc2833"/>
+        <param name="rfc2833-pt" value="101"/>
+        <param name="enable-timer" value="false"/>
+        <param name="outbound-use-uuid-as-callid" value="true"/>
+        <param name="local-network-acl" value="loopback.auto"/>
+        <param name="rtp-keepalive-sec" value="15"/>
+        <param name="suppress-cng" value="false"/>
+        <param name="rtp-timeout-sec" value="60"/>
+        <param name="rtp-hold-timeout-sec" value="1800"/>
+        <param name="rtcp-audio-interval-msec" value="5000"/>
+        <param name="rtp-secure-media" value="false"/>
+        <param name="user-agent-string" value="RcfQualityLab/1.0"/>
+        <param name="auth-calls" value="false"/>
+      </settings>
+    </profile>
+  </profiles>
+</configuration>

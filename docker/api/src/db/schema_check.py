@@ -1,4 +1,4 @@
-"""Deploy-order guard for the CDR ingest schema (migrations 47 + 48).
+"""Deploy-order guard for the CDR ingest schema (migrations 47 + 48 + 50).
 
 WHY THIS EXISTS
 ---------------
@@ -22,7 +22,7 @@ must keep serving, and the ingest contract is untouched):
 
 routers/cdrs.py additionally makes the ingest itself survive the window: on
 UndefinedColumnError for one of these columns it retries the INSERT with the
-next tail-truncated tier (full 60 -> pre-48 57 -> pre-47 55; see
+next tail-truncated tier (full 73 -> pre-50 60 -> pre-48 57 -> pre-47 55; see
 `_execute_cdr_insert`) so every A-leg call row lands. Carrier B-leg rows are
 NOT inserted without migration 48 (they would masquerade as calls), and the
 CDR read endpoints filter on `leg`, so they fail until 48 is applied. This
@@ -45,6 +45,16 @@ REQUIRED_CDR_COLUMNS: tuple[tuple[str, str], ...] = (
     ("leg", "48_cdr_call_legs.sql"),
     ("call_id", "48_cdr_call_legs.sql"),
     ("leg_attempt", "48_cdr_call_legs.sql"),
+    # migration 50 — the 13 INSERT columns ($61..$73) + the 4 call-level
+    # columns cdr_refresh_call_quality() writes and the read endpoints SELECT
+    *((c, "50_cdr_quality_accuracy.sql") for c in (
+        "quality_status", "quality_grade", "quality_source",
+        "fs_mos", "fs_quality_pct", "fs_jitter_max_std_ms",
+        "rtp_audio_in_skip_packet_count",
+        "packets_expected", "loss_bursts", "packets_reordered", "ssrc_changes",
+        "burst_ratio", "inbound_media_ratio",
+        "call_quality_status", "call_quality_grade", "call_mos", "call_quality_leg",
+    )),
 )
 
 #: Where the init scripts live on every VM (CLAUDE.md: repo path /opt/revup).

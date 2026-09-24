@@ -131,7 +131,10 @@ sel AS (
 _BASE_CTE = f"""
 base AS (
     SELECT c.id, c.uuid, c.start_time, c.answer_time, c.direction,
-           c.caller_id, c.destination, c.hangup_cause, c.mos,
+           c.caller_id, c.destination, c.hangup_cause,
+           -- call-level quality = the worse direction (migration 50,
+           -- docs/CALL_QUALITY_ACCURACY_PLAN.md §C/§E.2): graded <=> grade set
+           c.call_mos AS mos, c.call_quality_grade AS grade,
            {tr.TALK_MS_SQL} AS talk_ms,
            {_NUMBER_SQL} AS number
       FROM cdrs c
@@ -238,9 +241,9 @@ SELECT
     count(*) FILTER (WHERE cur AND {_ANSWERED})                      AS answered,
     COALESCE(sum(talk_ms) FILTER (WHERE cur AND {_ANSWERED_MS}), 0)::bigint AS answered_ms,
     avg({_MINUTES}) FILTER (WHERE cur AND {_ANSWERED})               AS avg_call_minutes,
-    count(*) FILTER (WHERE cur AND mos IS NOT NULL)                  AS rated,
-    avg(mos) FILTER (WHERE cur AND mos IS NOT NULL)                  AS avg_mos,
-    count(*) FILTER (WHERE cur AND mos >= 3.6)                       AS good_or_better,
+    count(*) FILTER (WHERE cur AND grade IS NOT NULL)                AS rated,
+    avg(mos) FILTER (WHERE cur AND grade IS NOT NULL AND mos IS NOT NULL) AS avg_mos,
+    count(*) FILTER (WHERE cur AND grade IN ('great','good'))        AS good_or_better,
     count(*) FILTER (WHERE NOT cur)                                  AS prev_calls,
     count(*) FILTER (WHERE NOT cur AND {_ANSWERED})                  AS prev_answered,
     COALESCE(sum(talk_ms) FILTER (WHERE NOT cur AND {_ANSWERED_MS}), 0)::bigint AS prev_answered_ms,
@@ -273,12 +276,21 @@ SELECT GROUPING(d, h, hc) AS gset, d, h, hc,
 _GSET_DAY, _GSET_HOUR, _GSET_CAUSE = 3, 5, 6
 
 
+def _summary_grade(rated: int, mos: Optional[float]) -> str:
+    """Grade word for an aggregate: from the average MOS of graded calls; when
+    calls were graded but none carries a MOS (every one was one-way audio,
+    graded poor with MOS NULL) the aggregate is poor, never "Not rated"."""
+    if rated and mos is None:
+        return "poor"
+    return rp.grade_for_mos(mos)
+
+
 def _quality(rated: int, avg_mos: Any, good: int) -> dict:
-    mos = rp.round_mos(avg_mos) if rated else None
+    mos = rp.round_mos(avg_mos) if rated and avg_mos is not None else None
     return {
         "rated_calls": int(rated),
         "avg_mos": mos,
-        "grade": rp.grade_for_mos(mos),
+        "grade": _summary_grade(rated, mos),
         "pct_good_or_better": rp.pct(good, rated),
     }
 
@@ -393,8 +405,8 @@ st AS (
            count(*) AS calls,
            count(*) FILTER (WHERE {_ANSWERED}) AS answered,
            COALESCE(sum(talk_ms) FILTER (WHERE {_ANSWERED_MS}), 0)::bigint AS answered_ms,
-           avg(mos) FILTER (WHERE mos IS NOT NULL) AS avg_mos,
-           count(*) FILTER (WHERE mos IS NOT NULL) AS rated
+           avg(mos) FILTER (WHERE grade IS NOT NULL AND mos IS NOT NULL) AS avg_mos,
+           count(*) FILTER (WHERE grade IS NOT NULL) AS rated
       FROM base
      WHERE number IN (SELECT number FROM sel)
      GROUP BY number
@@ -414,7 +426,7 @@ async def build_numbers(s: ReportScope) -> dict:
     out = []
     for r in rows:
         calls, answered = int(r["calls"]), int(r["answered"])
-        mos = rp.round_mos(r["avg_mos"]) if r["rated"] else None
+        mos = rp.round_mos(r["avg_mos"]) if r["rated"] and r["avg_mos"] is not None else None
         out.append({
             "number": r["number"],
             "name": r["name"],
@@ -426,7 +438,7 @@ async def build_numbers(s: ReportScope) -> dict:
             "answer_rate_pct": rp.pct(answered, calls),
             "minutes": tr.aggregate_minutes(r["answered_ms"]),
             "avg_mos": mos,
-            "grade": rp.grade_for_mos(mos),
+            "grade": _summary_grade(int(r["rated"]), mos),
         })
     return {"numbers": out}
 
@@ -456,7 +468,7 @@ _DIRECTION_SQL = {"all": "", "inbound": " AND direction IS DISTINCT FROM 'outbou
 #: missed reason and is dropped by _shape_call(); talk_ms never leaves SQL
 #: (length is the whole-minute call_minutes_sql('talk_ms')).
 _CALL_COLS = f"""
-    id, uuid, direction, caller_id, destination, number, hangup_cause, mos,
+    id, uuid, direction, caller_id, destination, number, hangup_cause, mos, grade,
     ({_ANSWERED}) AS answered,
     {_MINUTES} AS length_minutes,
     (start_time AT TIME ZONE $4::text) AS local_ts,
@@ -480,7 +492,9 @@ def _shape_call(r: asyncpg.Record) -> dict:
         "number": r["number"],
         **rp.outcome_fields(answered, r["hangup_cause"]),
         "length_minutes": int(r["length_minutes"]),
-        "quality": rp.grade_for_mos(r["mos"]),
+        # the STORED call grade (worse direction); one-way audio (no_rtp)
+        # is 'poor' with no MOS -> "Poor" in the CSV, never "Not rated"
+        "quality": r["grade"] or "none",
     }
     return out
 

@@ -56,8 +56,20 @@ Missed-call reasons (plain English; `hangup_cause` → key):
 | `declined` | The call was declined or blocked | CALL_REJECTED |
 | `network` | A network problem stopped the call | everything else |
 
-Quality grade from MOS: `great` ≥ 4.0 · `good` ≥ 3.6 · `fair` ≥ 3.1 · `poor` < 3.1 ·
-`none` (no rated calls). Only calls with `mos IS NOT NULL` count as rated.
+Quality grade (the ONE definition, `docs/CALL_QUALITY_ACCURACY_PLAN.md` §D — ITU-T
+G.107 E-model MOS from true RTP sequence loss, G.109 R bands 90/80/70, applied to the
+stored 2-dp MOS): `great` ≥ 4.34 · `good` ≥ 4.02 · `fair` ≥ 3.60 · `poor` < 3.60, or
+one-way audio · `none` (not graded). A clean G.711 call is 4.41 (the model ceiling).
+
+Reports read the CALL-level columns (`cdrs.call_quality_grade` / `call_mos` = the
+worse of the caller→platform and callee→platform directions, migration 50). A call is
+**rated (graded) ⇔ `call_quality_grade IS NOT NULL`** — per plan §B.2 only an answered
+call of ≥ 5 s with ≥ 250 inbound packets is graded; an answered ≥ 5 s call with < 10 %
+of the expected inbound packets is one-way audio (`no_rtp`) and is graded **poor with
+no MOS** (CSV "Poor"). Unanswered, short, low-sample and no-data calls are not graded
+("Not rated"). `avg_mos` = mean `call_mos` over graded calls that have one;
+`pct_good_or_better` = share of graded calls with grade great/good. An aggregate whose
+graded calls were all one-way audio is `poor` (never `none`).
 
 ## Endpoints (router `routers/reports.py`, mounted at `/v1/reports` and `/reports`)
 

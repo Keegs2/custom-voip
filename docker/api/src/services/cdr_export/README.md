@@ -192,6 +192,34 @@ retention policy** (`05_schema_cdr.sql`). Implications:
 
 ---
 
+## 2026-09 semantics change — call quality (migration 50)
+
+Deployed with `docs/CALL_QUALITY_ACCURACY_PLAN.md`. For Equinox:
+
+- **Changed meaning at deploy time** (same column names, honest values):
+  `mos` / `r_factor` = ITU-T G.107 E-model MOS / R (clean G.711 = 4.41; empty unless
+  the leg was graded), `packet_loss_pct` / `packet_loss_count` = TRUE inbound loss
+  (sequence-based on patched FreeSWITCH, from FS `loss_rate` otherwise),
+  `jitter_avg_ms` / `jitter_max_ms` = RFC 3550 interarrival jitter (empty on
+  unpatched FreeSWITCH — never estimated).
+- **Now always empty:** `quality_pct`, `jitter_min_ms` (deprecated). The raw
+  FreeSWITCH values moved to `fs_mos`, `fs_quality_pct`, `fs_jitter_max_std_ms`; the
+  old `packet_loss_count` meaning (autoflush/CNG skip counter) is
+  `rtp_audio_in_skip_packet_count`.
+- **17 new trailing columns** (after `leg_attempt`, in this order): `quality_status`,
+  `quality_grade`, `quality_source`, `fs_mos`, `fs_quality_pct`,
+  `fs_jitter_max_std_ms`, `rtp_audio_in_skip_packet_count`, `packets_expected`,
+  `loss_bursts`, `packets_reordered`, `ssrc_changes`, `burst_ratio`,
+  `inbound_media_ratio`, `call_quality_status`, `call_quality_grade`, `call_mos`,
+  `call_quality_leg`. The header row names them; existing positions do not move.
+- **`quality_source` tells old from new:** `fs_patch_v1` / `fs_legacy` = written by
+  the new API; `backfill_v1` = history recomputed in place by
+  `docker/postgres/backfill/50_cdr_quality_backfill.psql`; empty = a row exported
+  before the change (old meanings).
+- **Already-exported rows are NOT re-exported.** The backfill never touches the
+  `exported_at` watermark, so files Equinox already has keep the old meanings;
+  rows exported after the deploy carry the new ones.
+
 ## File format
 
 The file is a **complete CSV dump of every `cdrs` data column** — all columns

@@ -295,14 +295,19 @@ export function QualityCard({ overview }: { overview: QueryState<ReportOverview>
       explainer={
         <>
           <p>
-            We listen to how clear each answered call sounded and give it a score from 1 (hard to understand) to 5
-            (crystal clear). The phone industry calls this a <strong>MOS score</strong>.
+            We measure how clear each answered call sounded — in both directions — and give it a score from 1 (hard
+            to understand) to 5 (crystal clear). A perfectly clear phone call scores about 4.4. The phone industry
+            calls this a <strong>MOS score</strong>, and each call is graded by whichever side sounded worse.
           </p>
           <p>
-            <strong>Great</strong> is 4 and up, <strong>Good</strong> is 3.6 and up, <strong>Fair</strong> is 3.1 and
-            up, and anything lower is <strong>Poor</strong>. Most calls land in Great.
+            <strong>Great</strong> is 4.34 and up, <strong>Good</strong> 4.02 and up, <strong>Fair</strong> 3.60 and
+            up; <strong>Poor</strong> below that, or when one side had no audio. Only answered calls of 5 seconds or
+            more with measurable audio are graded.
           </p>
-          <p>Some calls can’t be measured (for example very short ones), so they’re left out.</p>
+          <p>
+            Calls that weren’t answered, lasted under 5 seconds, or carried too little sound to measure get no grade,
+            so they’re left out of these figures rather than counted as perfect.
+          </p>
         </>
       }
     >
@@ -316,6 +321,11 @@ export function QualityCard({ overview }: { overview: QueryState<ReportOverview>
               {GRADE_WORD[q.grade]}
             </div>
             <p className="rpt-caption">{GRADE_BLURB[q.grade]}</p>
+            {q.grade === 'none' && (
+              <p className="rpt-caption">
+                Calls are graded only when they were answered, lasted 5 seconds or more, and carried measurable sound.
+              </p>
+            )}
           </div>
           {q.grade !== 'none' && (
             <div className="dl-kvbox">
@@ -373,7 +383,10 @@ export function Glossary() {
           </div>
           <div>
             <dt>Call quality</dt>
-            <dd>How clear the call sounded, graded Great, Good, Fair or Poor from a 1-to-5 sound score.</dd>
+            <dd>
+              How clear the call sounded, graded Great, Good, Fair or Poor from a 1-to-5 sound score. A call where no
+              sound came through from one side counts as Poor. Unanswered calls and calls under 5 seconds aren’t graded.
+            </dd>
           </div>
           <div>
             <dt>Incoming / outgoing</dt>

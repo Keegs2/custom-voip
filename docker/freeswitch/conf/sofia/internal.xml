@@ -269,38 +269,39 @@
     <!-- RTP QUALITY / RTCP TRACKING (CDR MOS/loss)  -->
     <!-- ============================================ -->
     <!--
-      Enables FreeSWITCH's per-call RTP quality estimator on THIS (A-leg)
-      profile so mod_json_cdr emits MOS, quality %, R-factor inputs, jitter
-      variance, packet loss, and flaw totals into the CDR. Without an RTCP
-      interval, mod_sofia never sets SWITCH_RTP_FLAG_ENABLE_RTCP on the RTP
-      session, so switch_rtp.c's check_jitter()/estimate_mos() never runs and
-      these channel variables stay unset (NULL in the CDR):
-          rtp_audio_in_mos, rtp_audio_in_quality_percentage,
-          rtp_audio_in_flaw_total, rtp_audio_in_jitter_min_variance,
-          rtp_audio_in_jitter_max_variance, rtp_audio_in_mean_interval
-      (The raw arrival counters — rtp_audio_in_media_packet_count,
-      rtp_audio_in_skip_packet_count, rtp_audio_in_raw_bytes,
-      rtp_audio_in_media_bytes — are tracked whenever FS handles media and
-      are populated even without this, but they are NULL today because RCF
-      was never in a media-stat-emitting state on a completed A-leg. This
-      flips the whole set on.)
+      What this param does (and does NOT do), verified against the pinned
+      FreeSWITCH source (0a54a48):
+        - rtcp-audio-interval-msec sets SWITCH_RTP_FLAG_ENABLE_RTCP, which
+          ONLY drives rtcp_stats() and the RTCP Sender/Receiver Reports FS
+          sends. It is NOT what makes FS measure inbound quality.
+        - The inbound estimator (check_jitter() and do_mos(), switch_rtp.c)
+          runs on the RTP read path REGARDLESS of RTCP. So the legacy
+          rtp_audio_in_* stats (rtp_audio_in_mos, _quality_percentage,
+          _flaw_total, _jitter_min/max_variance, _mean_interval,
+          _jitter_loss_rate, the packet/byte counters) are exported at hangup
+          whenever FS anchors the media, with or without this param.
+        - Those legacy FS numbers are NOT used for grading any more: the
+          platform grades from the RCF quality patch v1 variables
+          (rtp_audio_in_qpatch, rtp_audio_in_seq_expected/_received/_lost/
+          _loss_events/_reordered/_epochs, rtp_audio_in_rfc3550_jitter_avg_ms/
+          _max_ms, rtp_audio_in_rfc3550_clock), exported by
+          docker/freeswitch/patches/0001-rcf-rtp-quality-v1.patch and
+          scored by the API (G.107 E-model). Contract:
+          docs/CALL_QUALITY_ACCURACY_PLAN.md (sections A, B, D);
+          variable table in docker/freeswitch/CLAUDE.md "Quality patch v1".
 
-      5000ms (RTCP every 5s):
-        - Purely LOCAL: the estimator is driven by INBOUND RTP arrival
-          timing (jitter/error periods measured on packets we receive from
-          the carrier). MOS/quality/loss are computed even if Bandwidth
-          ignores our RTCP entirely — we do not depend on receiving RTCP
-          Receiver Reports back. So the A-leg CDR stats are valid regardless
-          of carrier RTCP behavior.
+      5000ms (RTCP every 5s) is kept for the RTCP reports themselves:
+        - Purely LOCAL: we do not depend on receiving RTCP Receiver Reports
+          back from the carrier for any CDR stat.
         - RTCP is bound on RTP-port+1 (rtcp-mux is NOT set, and Bandwidth
           does not offer a=rtcp-mux), so RTCP stays inside the configured
-          16384-49151 RTP range and uses the same ext-rtp-ip as RTP — it
+          16384-49151 RTP range and uses the same ext-rtp-ip as RTP; it
           does NOT fight the GCE ext-rtp-ip / hairpin setup or the firewall.
         - 5s (vs the common 1000ms) keeps outbound RTCP volume negligible at
-          10K concurrent calls while still yielding a stable end-of-call MOS.
+          10K concurrent calls.
       Default media mode is unchanged (no proxy_media/bypass on the RCF path);
-      FS is already the RTP anchor for RCF, which is exactly what lets it
-      measure inbound quality.
+      FS is the RTP anchor for RCF, which is exactly what lets it measure
+      inbound quality.
     -->
     <param name="rtcp-audio-interval-msec" value="5000"/>
 

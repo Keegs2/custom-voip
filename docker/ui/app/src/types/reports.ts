@@ -11,7 +11,12 @@
 /** Product a customer number belongs to. */
 export type ReportProduct = 'rcf' | 'trunk' | 'api';
 
-/** Quality grade from MOS: great ≥ 4.0 · good ≥ 3.6 · fair ≥ 3.1 · poor < 3.1 · none = no rated calls. */
+/**
+ * Quality grade (docs/CALL_QUALITY_ACCURACY_PLAN.md §D, applied to the stored
+ * 2-dp E-model MOS): great ≥ 4.34 · good ≥ 4.02 · fair ≥ 3.60 · poor < 3.60 or
+ * one-way audio · none = no graded calls. Only answered calls of 5 s or more
+ * with measurable audio are graded.
+ */
 export type QualityGrade = 'great' | 'good' | 'fair' | 'poor' | 'none';
 
 /** Plain-English missed-call reason keys (hangup cause → key, server-side). */

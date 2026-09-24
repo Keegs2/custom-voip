@@ -151,6 +151,24 @@ SELECT_COLUMNS: tuple[str, ...] = (
     "stir_eff_actual",
     # --- 48_cdr_call_legs.sql (leg split; leg + call_id are derived, see above) ---
     "leg_attempt",
+    # --- 50_cdr_quality_accuracy.sql (call-quality accuracy; semantics note in README) ---
+    "quality_status",
+    "quality_grade",
+    "quality_source",
+    "fs_mos",
+    "fs_quality_pct",
+    "fs_jitter_max_std_ms",
+    "rtp_audio_in_skip_packet_count",
+    "packets_expected",
+    "loss_bursts",
+    "packets_reordered",
+    "ssrc_changes",
+    "burst_ratio",
+    "inbound_media_ratio",
+    "call_quality_status",
+    "call_quality_grade",
+    "call_mos",
+    "call_quality_leg",
 )
 
 # The billing contract: fields DERIVED in the SELECT, never stored, so every

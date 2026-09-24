@@ -781,3 +781,119 @@ def test_staff_customer_endpoints_keep_traffic_grade(client, tokens):
         assert r.json()["traffic_grade"] == "premium"
 
     _run(go())
+
+
+# ---------------------------------------------------------------------------
+# Call-quality accuracy (migration 50, docs/CALL_QUALITY_ACCURACY_PLAN.md §E.3)
+# ---------------------------------------------------------------------------
+_Q50_ALLOWED = {"quality_status", "quality_grade", "call_quality_status",
+                "call_quality_grade", "call_mos", "burst_ratio", "loss_bursts",
+                "inbound_media_ratio"}
+_Q50_FORBIDDEN = {"packets_expected", "rtp_audio_in_skip_packet_count", "packets_reordered",
+                  "ssrc_changes", "fs_mos", "fs_quality_pct", "fs_jitter_max_std_ms",
+                  "quality_source", "call_quality_leg"}
+
+
+def test_quality_allowlist_and_denylist_sets():
+    assert _Q50_ALLOWED <= set(tr.TENANT_CDR_SELECT_COLUMNS)
+    assert _Q50_ALLOWED | {"quality_by_direction"} <= tr.TENANT_CDR_FIELDS
+    assert _Q50_FORBIDDEN <= tr.FORBIDDEN_TENANT_CDR_KEYS
+    assert not (_Q50_FORBIDDEN & tr.TENANT_CDR_FIELDS)
+    # existing customer field names kept (none renamed)
+    for k in ("mos", "r_factor", "packet_loss_pct", "packet_loss_count", "jitter_avg_ms",
+              "jitter_max_ms", "jitter_min_ms", "quality_pct"):
+        assert k in tr.TENANT_CDR_FIELDS
+    # the per-direction block is built from allowlisted columns only
+    assert set(tr.TENANT_QUALITY_DIRECTION_KEYS) <= set(tr.TENANT_CDR_SELECT_COLUMNS)
+    assert set(tr.TENANT_QUALITY_DIRECTION_KEYS) == {
+        "quality_status", "quality_grade", "mos", "r_factor", "packet_loss_pct",
+        "packet_loss_count", "jitter_avg_ms", "jitter_max_ms", "burst_ratio",
+        "inbound_media_ratio"}
+    # the misleading skip counter never rides a "loss" key for tenants
+    assert "rtp_audio_in_skip_packet_count" not in tr.TENANT_CDR_FIELDS
+
+
+def test_neutralize_legacy_quality_pure():
+    legacy = {"quality_legacy_row": True, "packet_loss_count": 900, "packet_loss_pct": 3.0,
+              "mos": 4.5}
+    out = tr.neutralize_legacy_quality(legacy)
+    assert out["packet_loss_count"] is None and out["packet_loss_pct"] is None
+    assert out["mos"] == 4.5 and legacy["packet_loss_count"] == 900   # input untouched
+    new = {"quality_legacy_row": False, "packet_loss_count": 5, "packet_loss_pct": 0.2}
+    assert tr.neutralize_legacy_quality(new) == new
+    red = tr.redact_cdr_row({"uuid": "u", **legacy})
+    assert red["packet_loss_count"] is None and "quality_legacy_row" not in red
+
+
+def test_tenant_detail_quality_by_direction_is_allowlisted(redact_db, client, tokens):
+    db = redact_db["db"]
+
+    async def go():
+        # CDR_ANS_95 rated great (new API); its answered B attempt 2 rated fair.
+        await db.execute(
+            """UPDATE cdrs SET quality_source='fs_patch_v1', quality_status='rated',
+                   quality_grade='great', mos=4.41, r_factor=93.2, packet_loss_pct=0,
+                   packet_loss_count=0, jitter_avg_ms=1.9, jitter_max_ms=4.2,
+                   burst_ratio=1, inbound_media_ratio=1.01, packets_expected=4750,
+                   packets_reordered=3, ssrc_changes=0, fs_mos=4.5,
+                   rtp_audio_in_skip_packet_count=41, call_quality_status='rated',
+                   call_quality_grade='fair', call_mos=3.92, call_quality_leg='B'
+             WHERE uuid = $1""", CDR_ANS_95)
+        await db.execute(
+            """UPDATE cdrs SET quality_source='fs_patch_v1', quality_status='rated',
+                   quality_grade='fair', mos=3.92, r_factor=77.42, packet_loss_pct=5,
+                   packet_loss_count=250, burst_ratio=1, inbound_media_ratio=1,
+                   packets_expected=5000, fs_mos=4.5, rtp_audio_in_skip_packet_count=7
+             WHERE uuid = $1""", f"{CDR_B_LEG_PREFIX}2")
+        r = await client.get(f"/v1/cdrs/{CDR_ANS_95}", headers=_h(tokens, "user_a"))
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert_no_forbidden(body)                           # recursive, incl. nested
+        assert set(body) <= tr.TENANT_CDR_FIELDS
+        assert (body["call_quality_grade"], body["call_mos"]) == ("fair", 3.92)
+        assert body["quality_grade"] == "great" and body["quality_pct"] is None
+        qbd = body["quality_by_direction"]
+        assert set(qbd) == {"caller_audio", "callee_audio"}
+        for block in qbd.values():
+            assert set(block) == set(tr.TENANT_QUALITY_DIRECTION_KEYS)
+        assert qbd["caller_audio"]["mos"] == 4.41
+        assert (qbd["callee_audio"]["quality_grade"], qbd["callee_audio"]["mos"],
+                qbd["callee_audio"]["packet_loss_count"]) == ("fair", 3.92, 250)
+        # the list rows carry the grades but never the staff-only internals
+        r = await client.get("/v1/cdrs", headers=_h(tokens, "user_a"))
+        rows = {c["uuid"]: c for c in r.json()["cdrs"]}
+        assert rows[CDR_ANS_95]["call_quality_grade"] == "fair"
+        assert "quality_by_direction" not in rows[CDR_ANS_95]
+        assert_no_forbidden(r.json())
+
+        # staff: same block + staff extras, and the staff-only columns
+        r = await client.get(f"/v1/cdrs/{CDR_ANS_95}", headers=_h(tokens, "admin"))
+        d = r.json()
+        assert d["call_quality_leg"] == "B" and d["rtp_audio_in_skip_packet_count"] == 41
+        callee = d["quality_by_direction"]["callee_audio"]
+        assert callee["uuid"] == f"{CDR_B_LEG_PREFIX}2" and callee["packets_expected"] == 5000
+        assert callee["fs_mos"] == 4.5 and callee["quality_source"] == "fs_patch_v1"
+
+    _run(go())
+
+
+def test_tenant_never_sees_old_skip_counter_on_unbackfilled_rows(redact_db, client, tokens):
+    """A row the pre-50 API wrote (quality_source NULL) still holds the skip
+    counter in packet_loss_count until the backfill runs: tenants get NULL."""
+    db = redact_db["db"]
+
+    async def go():
+        await db.execute("UPDATE cdrs SET packet_loss_count = 900, packet_loss_pct = 3.1, "
+                         "quality_source = NULL WHERE uuid = $1", CDR_ANS_20)
+        r = await client.get(f"/v1/cdrs/{CDR_ANS_20}", headers=_h(tokens, "user_a"))
+        body = r.json()
+        assert body["packet_loss_count"] is None and body["packet_loss_pct"] is None
+        assert body["quality_by_direction"]["caller_audio"]["packet_loss_count"] is None
+        r = await client.get("/v1/cdrs", headers=_h(tokens, "user_a"))
+        rows = {c["uuid"]: c for c in r.json()["cdrs"]}
+        assert rows[CDR_ANS_20]["packet_loss_count"] is None
+        # staff still see the stored value
+        r = await client.get(f"/v1/cdrs/{CDR_ANS_20}", headers=_h(tokens, "admin"))
+        assert r.json()["packet_loss_count"] == 900
+
+    _run(go())

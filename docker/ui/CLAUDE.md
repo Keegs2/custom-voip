@@ -354,9 +354,12 @@ Static inline documentation pages. No API calls. `/documentation` redirects to
 live in `pages/docs/shared.tsx`. There is no single `DocsPage`.
 
 **`CallQualityPage`** (`/call-quality`)
-Platform-wide SIP quality analysis. Sections: filter bar, stat cards (ASR, MOS,
-packet loss, jitter, R-factor), trend charts, paginated CDR table, slide-out
-call detail panel. APIs: `GET /cdrs`, `GET /customers`, `GET /trunks`.
+Platform-wide SIP quality analysis (the merged Calls & Quality page,
+`pages/calls/`). Sections: filter bar, KPI strip (graded calls, good-or-better
+%, poor, one-way audio, median call MOS — shares/percentiles, never averages),
+trend charts (good+ %, median call MOS, loss p95, jitter p95), paginated CDR
+table, call detail modal (quality per audio direction). APIs: `GET /cdrs`,
+`GET /customers`, `GET /trunks`. Grades: see §16.
 
 **`TroubleshootingPage`** (`/troubleshooting`)
 Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
@@ -833,3 +836,36 @@ Danger red:    #ef4444 / #7f1d1d
 Active nav items use a coloured gradient background with a matching border and
 glow shadow — each product has its own accent colour defined in `Sidebar.tsx`
 (`#4ade80` for RCF, `#fbbf24` for trunks, `#c084fc` for API, `#22d3ee` for IVR).
+
+---
+
+## 16. Voice-Quality Grades — ONE owner (`pages/calls/quality.ts`)
+
+Contract: `docs/CALL_QUALITY_ACCURACY_PLAN.md` (§B.3 column semantics, §C.3
+`quality_by_direction`, §D grade definition). Since migration 50 `mos` /
+`r_factor` are our ITU-T G.107 E-model values from TRUE RTP sequence loss
+(clean G.711 = 4.41, the ceiling) and are non-NULL ONLY when
+`quality_status === 'rated'`; `jitter_*` are RFC 3550; `quality_pct` and
+`jitter_min_ms` are always NULL; FreeSWITCH's own values live in `fs_*`
+(staff only).
+
+- **`quality.ts` is the single UI grade source.** `gradeForMos` (great ≥ 4.34 ·
+  good ≥ 4.02 · fair ≥ 3.60 · poor), `gradeLabel`, `gradeColor` / `gradeTone`,
+  `qualityStatusReason` / `qualityStatusShort` (why a call isn't graded, in
+  customer or staff wording), `summarizeCallQuality`, `percentileCont`, and
+  the colour-only thresholds (R 80/70, loss 4/8 %, jitter 20/50 ms). Never
+  hard-code a MOS/R/loss threshold in a component — Python
+  (`services/call_quality.py`), SQL (`cq_grade`) and Grafana use the same cut
+  points and must agree on every stored row.
+- **`quality.assert.ts`** is the boundary self-test (4.34/4.33, 4.02/4.01,
+  3.60/3.59 — identical to the Python tests). Dev-only dynamic import from
+  `CdrDetailModal.tsx`; run by hand with node type-stripping or esbuild.
+- **Call vs leg.** Call-level surfaces (tables, KPIs, RCF activity) read the
+  CALL grade `call_quality_grade` / `call_quality_status` / `call_mos` — the
+  worse of the two audio directions. Leg-level `quality_status` /
+  `quality_grade` / `mos` describe ONE direction (A row = caller's audio).
+- **Honesty rules.** One-way audio (`no_rtp`) renders as a red "One-way"
+  (graded poor, MOS NULL) — never a score. Ungraded calls render "—" / "Not
+  rated" with the reason. No averages of MOS/loss/jitter anywhere — shares
+  and percentiles only. Tenants keep the existing redaction (no FS raw values,
+  no packet/byte counters, no money).

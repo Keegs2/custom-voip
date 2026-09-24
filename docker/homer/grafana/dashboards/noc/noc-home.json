@@ -6,7 +6,7 @@
     "home"
   ],
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "timezone": "browser",
   "editable": true,
   "graphTooltip": 0,
@@ -52,7 +52,7 @@
       "type": "dashboards"
     }
   ],
-  "description": "NOC home / wall-TV command board — Live System Status. Top row: the US datacenter map, full width. Bottom band (left→right): per-zone SIP VIP reachability + servers up/down (East · West · Central), carrier trunks (Bandwidth Dallas / LA, Sinch Denver / Chicago origination), platform services. 🟢 green = healthy · 🔴 red = attention · 🟠 orange = stale probe. Zone tiles: VIP reachable (uptime pass-fraction ≥ 99.9%) + one UP/DOWN box per server (SBC-1 · SBC-2 · FS-1 · FS-2 · SVCS/DB) pinned to the expected fleet — a server that stops reporting goes RED, it never vanishes. Carrier tiles: UP / DOWN from live Kamailio-dispatcher OPTIONS probes + inbound calls landed in the last hour. Platform services: UP / DOWN from live blackbox probes. Map: 🟢 datacenter (server-rack icon, size = calls / hour) · 📡 carrier trunk (signal-tower icon — Bandwidth 🟢 up · Sinch 🔵 up · 🔴 down) — includes the two Sinch termination trunks (Atlanta LD, Denver TF; the two Denver tower markers are offset — orig west / label above, TF east / label below). Below the band, three full-width KPI rows: Traffic (active calls · CPS · calls 1h/today · ASR · on-net %), Voice (MOS · loss · peak jitter · R-factor · ACD · PDD-proxy p95), and STIR/SHAKEN (signed % · A share · div chains · inbound verified % · trust-bundle age · leaf-cert time left). Hover any tile or map marker for detail. Landing page for the Production NOC.",
+  "description": "NOC home / wall-TV command board — Live System Status. Top row: the US datacenter map, full width. Bottom band (left→right): per-zone SIP VIP reachability + servers up/down (East · West · Central), carrier trunks (Bandwidth Dallas / LA, Sinch Denver / Chicago origination), platform services. 🟢 green = healthy · 🔴 red = attention · 🟠 orange = stale probe. Zone tiles: VIP reachable (uptime pass-fraction ≥ 99.9%) + one UP/DOWN box per server (SBC-1 · SBC-2 · FS-1 · FS-2 · SVCS/DB) pinned to the expected fleet — a server that stops reporting goes RED, it never vanishes. Carrier tiles: UP / DOWN from live Kamailio-dispatcher OPTIONS probes + inbound calls landed in the last hour. Platform services: UP / DOWN from live blackbox probes. Map: 🟢 datacenter (server-rack icon, size = calls / hour) · 📡 carrier trunk (signal-tower icon — Bandwidth 🟢 up · Sinch 🔵 up · 🔴 down) — includes the two Sinch termination trunks (Atlanta LD, Denver TF; the two Denver tower markers are offset — orig west / label above, TF east / label below). Below the band, three full-width KPI rows: Traffic (active calls · CPS · calls 1h/today · ASR · on-net %), Voice (good+ call share · loss p95 · jitter p95 · one-way audio · ACD · PDD-proxy p95), and STIR/SHAKEN (signed % · A share · div chains · inbound verified % · trust-bundle age · leaf-cert time left). Hover any tile or map marker for detail. Landing page for the Production NOC.",
   "panels": [
     {
       "id": 2,
@@ -2664,8 +2664,8 @@
     {
       "id": 30,
       "type": "stat",
-      "title": "Voice · Avg MOS — 15m",
-      "description": "Mean Opinion Score, trailing 15 min, rated calls only (mos IS NOT NULL), all zones — Call Quality id 43's query with the zone filter dropped. Red < 3.5 · orange < 4.0 · green >= 4.0.",
+      "title": "Voice · Good+ calls — 15m",
+      "description": "Share of graded calls, trailing 15 min, all zones, whose CALL grade (worse direction) is great or good — Call Quality id 43's query with the zone filter dropped (noc-home has no zone variable). Graded = answered >= 5 s with measurable audio, or one-way audio (graded poor). Red < 90% · orange < 97% · green >= 97% (SLI 1 target).",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -2678,15 +2678,15 @@
       },
       "targets": [
         {
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT avg(mos) AS avg_mos FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND mos IS NOT NULL;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
             "uid": "voip-cdr-pg"
-          }
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT 100.0 * count(*) FILTER (WHERE call_quality_grade IN ('great','good')) / NULLIF(count(*) FILTER (WHERE call_quality_grade IS NOT NULL), 0) AS good_or_better_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND call_quality_grade IS NOT NULL AND start_time > now() - interval '15 minutes';"
         }
       ],
       "options": {
@@ -2705,10 +2705,10 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "decimals": 2,
-          "min": 1,
-          "max": 5,
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
           "noValue": "—",
           "mappings": [],
           "color": {
@@ -2723,11 +2723,11 @@
               },
               {
                 "color": "orange",
-                "value": 3.5
+                "value": 90
               },
               {
                 "color": "green",
-                "value": 4.0
+                "value": 97
               }
             ]
           }
@@ -2738,8 +2738,8 @@
     {
       "id": 31,
       "type": "stat",
-      "title": "Voice · Packet loss — 15m",
-      "description": "Average RTP packet loss %, trailing 15 min, rated-calls-only semantics per Call Quality conventions (billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500 — short/silent calls produce junk loss numbers). Green < 1% · orange >= 1% · red >= 3%.",
+      "title": "Voice · Loss p95 — 15m",
+      "description": "p95 of TRUE packet loss % (RTP sequence loss, not flaws÷packets), trailing 15 min, all zones, over rated legs of BOTH directions pooled (caller→platform A rows + carrier callee→platform B rows — deliberately leg-aware; the (leg IS DISTINCT FROM 'B' OR leg = 'B') clause states that). Rated = answered >= 5 s, >= 250 inbound packets. Green <= 1% · orange <= 4% · red > 4%. Per-direction split: Call Quality id 21.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -2752,15 +2752,15 @@
       },
       "targets": [
         {
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT avg(packet_loss_pct) AS avg_loss_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND packet_loss_pct IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
             "uid": "voip-cdr-pg"
-          }
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY packet_loss_pct) AS p95_loss_pct FROM cdrs WHERE (leg IS DISTINCT FROM 'B' OR leg = 'B') AND quality_status = 'rated' AND packet_loss_pct IS NOT NULL AND start_time > now() - interval '15 minutes';"
         }
       ],
       "options": {
@@ -2781,6 +2781,7 @@
         "defaults": {
           "unit": "percent",
           "decimals": 2,
+          "min": 0,
           "noValue": "—",
           "mappings": [],
           "color": {
@@ -2795,11 +2796,11 @@
               },
               {
                 "color": "orange",
-                "value": 1
+                "value": 1.0001
               },
               {
                 "color": "red",
-                "value": 3
+                "value": 4.0001
               }
             ]
           }
@@ -2810,8 +2811,8 @@
     {
       "id": 32,
       "type": "stat",
-      "title": "Voice · Peak jitter — 15m",
-      "description": "Average of per-call PEAK jitter (cdrs.jitter_max_ms — real milliseconds since migration 43's variance->ms fix), trailing 15 min, rated calls only (billable_ms >= 10000, rtp_audio_in_packet_count >= 500), matching Call Quality id 20. Peak latches the worst burst of each call, so this reads pessimistic vs mean jitter. Green < 40 ms · orange >= 40 · red >= 80.",
+      "title": "Voice · Jitter p95 — 15m",
+      "description": "p95 of the per-call mean RFC 3550 interarrival jitter (jitter_avg_ms), trailing 15 min, all zones, rated legs of both directions pooled (deliberately leg-aware, as id 31). '—' until the FreeSWITCH images carry quality patch v1 (legacy images store jitter NULL). Green <= 20 ms · orange <= 50 ms · red > 50 ms. Per-direction: Call Quality id 20.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -2824,15 +2825,15 @@
       },
       "targets": [
         {
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT avg(jitter_max_ms) AS avg_peak_jitter_ms FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND jitter_max_ms IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
             "uid": "voip-cdr-pg"
-          }
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY jitter_avg_ms) AS p95_jitter_ms FROM cdrs WHERE (leg IS DISTINCT FROM 'B' OR leg = 'B') AND quality_status = 'rated' AND jitter_avg_ms IS NOT NULL AND start_time > now() - interval '15 minutes';"
         }
       ],
       "options": {
@@ -2853,6 +2854,7 @@
         "defaults": {
           "unit": "ms",
           "decimals": 1,
+          "min": 0,
           "noValue": "—",
           "mappings": [],
           "color": {
@@ -2867,11 +2869,11 @@
               },
               {
                 "color": "orange",
-                "value": 40
+                "value": 20.0001
               },
               {
                 "color": "red",
-                "value": 80
+                "value": 50.0001
               }
             ]
           }
@@ -2882,8 +2884,8 @@
     {
       "id": 33,
       "type": "stat",
-      "title": "Voice · R-factor — 15m",
-      "description": "Average R-factor (ITU-T G.107 E-model, 0-100), trailing 15 min, rated calls only (r_factor IS NOT NULL) — Call Quality id 13's metric as a stat. Red < 70 (users complain) · orange < 80 · green >= 80 (toll quality).",
+      "title": "Voice · One-way audio — 1h",
+      "description": "Calls in the last hour, all zones, whose call quality is one-way audio (call_quality_status='no_rtp': answered >= 5 s but one direction delivered < 10% of the expected RTP packets). Any is red — one a week is normal carrier noise, several per hour means a media-path regression (Cloud NAT / bypass-vpn, SDP c=, RTP source IP); scripts/backup/media_guard.sh pages on it. Detail: Call Quality id 22.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -2896,15 +2898,15 @@
       },
       "targets": [
         {
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT avg(r_factor) AS avg_r_factor FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND r_factor IS NOT NULL;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
             "uid": "voip-cdr-pg"
-          }
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS one_way_calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND call_quality_status = 'no_rtp' AND start_time > now() - interval '1 hour';"
         }
       ],
       "options": {
@@ -2924,10 +2926,9 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "decimals": 1,
+          "decimals": 0,
           "min": 0,
-          "max": 100,
-          "noValue": "—",
+          "noValue": "0",
           "mappings": [],
           "color": {
             "mode": "thresholds"
@@ -2936,16 +2937,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": null
               },
               {
-                "color": "orange",
-                "value": 70
-              },
-              {
-                "color": "green",
-                "value": 80
+                "color": "red",
+                "value": 1
               }
             ]
           }

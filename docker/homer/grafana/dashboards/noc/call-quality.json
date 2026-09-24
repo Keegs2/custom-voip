@@ -241,8 +241,8 @@
     {
       "id": 43,
       "type": "stat",
-      "title": "Avg MOS — last 15m",
-      "description": "Mean Opinion Score averaged over answered, rated calls in the last 15m (mos IS NOT NULL). MOS is NULL on unanswered/unrated calls and those are excluded. Carrier-good >= 4.0, degraded 3.5-4.0, poor < 3.5.",
+      "title": "Good-or-better calls — last 15m",
+      "description": "Share of GRADED calls in the last 15 min (selected zone) whose call grade is great or good: 100 × count(call_quality_grade IN great/good) / count(call_quality_grade IS NOT NULL), A rows only. Call-level = the WORSE direction of caller→platform (A row) and the answered carrier callee→platform (B row), stored on the A row by cdr_refresh_call_quality() (migration 50). Only graded calls count: answered, >= 5 s, and either >= 250 inbound packets (rated) or < 10% of the expected inbound packets (no_rtp = one-way audio, graded poor). Grades (plan D, ONE definition, applied to the stored 2-dp E-model MOS): great >= 4.34 (R>=90) · good >= 4.02 (R>=80) · fair >= 3.60 (R>=70) · poor < 3.60 or one-way audio. MOS is our ITU-T G.107 E-model from true RTP sequence loss (G.711 ceiling 4.41), not FreeSWITCH's estimator. Red < 90% · amber < 97% · green >= 97% (the SLI 1 target, infra/monitoring/SLOS.md). '—' = no graded call in the window.",
       "gridPos": {
         "h": 4,
         "w": 5,
@@ -263,7 +263,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(mos) AS avg_mos FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
+          "rawSql": "SELECT 100.0 * count(*) FILTER (WHERE call_quality_grade IN ('great','good')) / NULLIF(count(*) FILTER (WHERE call_quality_grade IS NOT NULL), 0) AS good_or_better_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND call_quality_grade IS NOT NULL AND start_time > now() - interval '15 minutes' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
         }
       ],
       "options": {
@@ -282,10 +282,11 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "decimals": 2,
-          "min": 1,
-          "max": 5,
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
+          "noValue": "—",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -296,11 +297,11 @@
               },
               {
                 "color": "orange",
-                "value": 3.5
+                "value": 90
               },
               {
                 "color": "green",
-                "value": 4.0
+                "value": 97
               }
             ]
           }
@@ -373,8 +374,8 @@
     {
       "id": 12,
       "type": "timeseries",
-      "title": "MOS trend — avg / p10 (10m)",
-      "description": "Mean MOS and the 10th-percentile (worst-decile) MOS per 10m, selected zone, answered+rated only. avg tells the headline; p10 exposes the worst calls even while the average looks fine.",
+      "title": "Call MOS — p50 / p10 (10m)",
+      "description": "Median and 10th-percentile (worst decile) CALL MOS per 10m, selected zone: percentile_cont over call_mos of A rows with call_quality_status='rated' (one-way-audio calls have no MOS and are on the one-way panel instead). Call-level = the WORSE direction of caller→platform (A row) and the answered carrier callee→platform (B row), stored on the A row by cdr_refresh_call_quality() (migration 50). Only graded calls count: answered, >= 5 s, and either >= 250 inbound packets (rated) or < 10% of the expected inbound packets (no_rtp = one-way audio, graded poor). Dashed lines = the grade cut points 3.60 (fair) / 4.02 (good) / 4.34 (great). No averages — percentiles only. A clean G.711 call is 4.41.",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -395,14 +396,12 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(mos) AS avg_mos, percentile_cont(0.1) WITHIN GROUP (ORDER BY mos) AS p10_mos FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, percentile_cont(0.5) WITHIN GROUP (ORDER BY call_mos) AS \"p50 call MOS\", percentile_cont(0.1) WITHIN GROUP (ORDER BY call_mos) AS \"p10 call MOS\" FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND call_quality_status = 'rated' AND call_mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "min": 1,
-          "max": 5,
           "decimals": 2,
           "color": {
             "mode": "palette-classic"
@@ -413,7 +412,10 @@
             "lineWidth": 2,
             "fillOpacity": 8,
             "showPoints": "never",
-            "spanNulls": true
+            "spanNulls": true,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
           },
           "thresholds": {
             "mode": "absolute",
@@ -424,20 +426,26 @@
               },
               {
                 "color": "orange",
-                "value": 3.5
+                "value": 3.6
               },
               {
                 "color": "green",
-                "value": 4.0
+                "value": 4.02
+              },
+              {
+                "color": "dark-green",
+                "value": 4.34
               }
             ]
-          }
+          },
+          "min": 1,
+          "max": 4.5
         },
         "overrides": [
           {
             "matcher": {
               "id": "byName",
-              "options": "avg_mos"
+              "options": "p50 call MOS"
             },
             "properties": [
               {
@@ -452,7 +460,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "p10_mos"
+              "options": "p10 call MOS"
             },
             "properties": [
               {
@@ -469,8 +477,8 @@
       "options": {
         "legend": {
           "calcs": [
-            "mean",
-            "min"
+            "min",
+            "max"
           ],
           "displayMode": "table",
           "placement": "bottom",
@@ -485,8 +493,8 @@
     {
       "id": 21,
       "type": "timeseries",
-      "title": "Packet loss % — avg / p95 (10m)",
-      "description": "Average and p95 of packet_loss_pct per 10m, selected zone. packet_loss_pct is flaw_total-based (RTP sequence-gap network loss) — the old value counted autoflush discards, fixed at ingest and backfilled by migration 43. Floored to meaningful calls (≥10s billable, ≥500 inbound RTP packets). Anything sustained above ~1% is audible. p95 catches the worst calls. Only calls ≥10s are included (short calls have unstable loss stats).",
+      "title": "True packet loss — p95 by direction (10m)",
+      "description": "p95 of packet_loss_pct per 10m, selected zone, split by direction. packet_loss_pct is TRUE RTP sequence loss (RFC 3550 expected − received, patched FS) or FS's lossrate (legacy images / history), no longer flaws÷packets. Leg-level panel: rows with quality_status='rated' (answered >= 5 s, >= 250 inbound packets, loss input present). caller→platform = the A row (leg IS DISTINCT FROM 'B', what the callee hears); callee→platform = the carrier B rows (leg='B', what the caller hears). Deliberately leg-aware — B rows are directions here, never counted as calls. Loss colours (plan D): <= 4% green · <= 8% amber · > 8% red; ~1% random loss already costs 0.08 MOS on G.711.",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -507,13 +515,12 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(packet_loss_pct) AS avg_loss_pct, percentile_cont(0.95) WITHIN GROUP (ORDER BY packet_loss_pct) AS p95_loss_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND packet_loss_pct IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500 AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, percentile_cont(0.95) WITHIN GROUP (ORDER BY packet_loss_pct) FILTER (WHERE caller_side) AS \"caller→platform p95\", percentile_cont(0.95) WITHIN GROUP (ORDER BY packet_loss_pct) FILTER (WHERE NOT caller_side) AS \"callee→platform p95\" FROM (SELECT start_time, packet_loss_pct, (leg IS DISTINCT FROM 'B') AS caller_side FROM cdrs WHERE $__timeFilter(start_time) AND quality_status = 'rated' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' AND packet_loss_pct IS NOT NULL) s GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
-          "min": 0,
           "decimals": 2,
           "color": {
             "mode": "palette-classic"
@@ -524,7 +531,10 @@
             "lineWidth": 2,
             "fillOpacity": 8,
             "showPoints": "never",
-            "spanNulls": true
+            "spanNulls": true,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "thresholds": {
             "mode": "absolute",
@@ -535,27 +545,28 @@
               },
               {
                 "color": "orange",
-                "value": 1
+                "value": 4.0001
               },
               {
                 "color": "red",
-                "value": 3
+                "value": 8.0001
               }
             ]
-          }
+          },
+          "min": 0
         },
         "overrides": [
           {
             "matcher": {
               "id": "byName",
-              "options": "p95_loss_pct"
+              "options": "caller→platform p95"
             },
             "properties": [
               {
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "red"
+                  "fixedColor": "blue"
                 }
               }
             ]
@@ -563,14 +574,14 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "avg_loss_pct"
+              "options": "callee→platform p95"
             },
             "properties": [
               {
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "orange"
+                  "fixedColor": "purple"
                 }
               }
             ]
@@ -980,7 +991,7 @@
     {
       "id": 10,
       "type": "row",
-      "title": "Quality detail — jitter / MOS distribution / R-factor / quality % (rated calls only)",
+      "title": "Quality detail — grades / loss / jitter / one-way audio (graded legs only)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -993,8 +1004,8 @@
     {
       "id": 20,
       "type": "timeseries",
-      "title": "Peak jitter — avg / p95 (10m)",
-      "description": "Per-call PEAK running jitter: jitter_max_ms = sqrt of FreeSWITCH's max inter-arrival variance — the worst running jitter std-dev of the call, in real ms (migration 43 converted historical rows from raw variance). avg = average of per-call peaks; p95 = p95 of per-call peaks (the worst calls). Floored to meaningful calls (≥10s billable, ≥500 inbound RTP packets) so sub-second calls don't dominate. The portal's jitter_avg_ms (RMS mid-band estimate) trends lower than peak by design. Only calls ≥10s are included (short calls have unstable jitter stats).",
+      "title": "Jitter (RFC 3550) — p50 / p95 by direction (10m)",
+      "description": "p50 and p95 of the per-call MEAN RFC 3550 interarrival jitter (jitter_avg_ms, kernel receive timestamps) per 10m, selected zone, split by direction. Leg-level panel: rows with quality_status='rated' (answered >= 5 s, >= 250 inbound packets, loss input present). caller→platform = the A row (leg IS DISTINCT FROM 'B', what the callee hears); callee→platform = the carrier B rows (leg='B', what the caller hears). Deliberately leg-aware — B rows are directions here, never counted as calls. EMPTY until the FreeSWITCH images carry quality patch v1 — legacy images and history store jitter NULL (the old value was fabricated from FS's running variance and is kept only as fs_jitter_max_std_ms). Diagnostic only: jitter does not enter the MOS. <= 20 ms green · <= 50 amber · > 50 red.",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -1015,13 +1026,12 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(jitter_max_ms) AS avg_peak_jitter_ms, percentile_cont(0.95) WITHIN GROUP (ORDER BY jitter_max_ms) AS p95_peak_jitter_ms FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND jitter_max_ms IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500 AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, percentile_cont(0.5) WITHIN GROUP (ORDER BY jitter_avg_ms) FILTER (WHERE caller_side) AS \"caller→platform p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY jitter_avg_ms) FILTER (WHERE caller_side) AS \"caller→platform p95\", percentile_cont(0.5) WITHIN GROUP (ORDER BY jitter_avg_ms) FILTER (WHERE NOT caller_side) AS \"callee→platform p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY jitter_avg_ms) FILTER (WHERE NOT caller_side) AS \"callee→platform p95\" FROM (SELECT start_time, jitter_avg_ms, (leg IS DISTINCT FROM 'B') AS caller_side FROM cdrs WHERE $__timeFilter(start_time) AND quality_status = 'rated' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' AND jitter_avg_ms IS NOT NULL) s GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
-          "min": 0,
           "decimals": 1,
           "color": {
             "mode": "palette-classic"
@@ -1032,7 +1042,10 @@
             "lineWidth": 2,
             "fillOpacity": 8,
             "showPoints": "never",
-            "spanNulls": true
+            "spanNulls": true,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "thresholds": {
             "mode": "absolute",
@@ -1043,27 +1056,28 @@
               },
               {
                 "color": "orange",
-                "value": 40
+                "value": 20.0001
               },
               {
                 "color": "red",
-                "value": 80
+                "value": 50.0001
               }
             ]
-          }
+          },
+          "min": 0
         },
         "overrides": [
           {
             "matcher": {
               "id": "byName",
-              "options": "p95_peak_jitter_ms"
+              "options": "caller→platform p50"
             },
             "properties": [
               {
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "orange"
+                  "fixedColor": "light-blue"
                 }
               }
             ]
@@ -1071,14 +1085,44 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "avg_peak_jitter_ms"
+              "options": "caller→platform p95"
             },
             "properties": [
               {
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "green"
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "callee→platform p50"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "light-purple"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "callee→platform p95"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
                 }
               }
             ]
@@ -1104,8 +1148,8 @@
     {
       "id": 11,
       "type": "barchart",
-      "title": "MOS distribution",
-      "description": "Per-call MOS bucketed into fixed quality bands (SQL CASE): Poor <3.6 (red), Fair 3.6–4.0 (orange), Good 4.0–4.3 (yellow), Excellent ≥4.3 (green). All four bands always render — empty bands show as zero-height slots, so the axis never collapses. Fixed bands because the FreeSWITCH MOS estimator pins healthy G.711 calls at ~4.5: an auto-bucketed histogram degenerates to a single full-width bar. Healthy = everything stacked in Excellent; any movement into lower bands = audio degradation. Dashboard time range, selected zone, mos IS NOT NULL (unrated/unanswered excluded).",
+      "title": "Call grade distribution",
+      "description": "Graded calls in the dashboard range (selected zone, A rows) by CALL grade — the worse direction. Great >= 4.34 · Good >= 4.02 · Fair >= 3.60 · Poor (audio) = graded poor with media both ways (MOS < 3.60) · One-way / no audio = call_quality_status='no_rtp' (one side sent < 10% of the expected packets; also graded poor). Call-level = the WORSE direction of caller→platform (A row) and the answered carrier callee→platform (B row), stored on the A row by cdr_refresh_call_quality() (migration 50). Only graded calls count: answered, >= 5 s, and either >= 250 inbound packets (rated) or < 10% of the expected inbound packets (no_rtp = one-way audio, graded poor). All five bands always render (fixed VALUES list LEFT JOIN) so the axis never collapses. Ungraded calls (unanswered, < 5 s, too few packets, no media data) are excluded — see the snapshot's 'Not graded'.",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -1126,7 +1170,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT b.band AS band, COALESCE(a.calls, 0) AS calls FROM (VALUES (1, 'Poor'), (2, 'Fair'), (3, 'Good'), (4, 'Excellent')) AS b(ord, band) LEFT JOIN (SELECT CASE WHEN mos < 3.6 THEN 'Poor' WHEN mos < 4.0 THEN 'Fair' WHEN mos < 4.3 THEN 'Good' ELSE 'Excellent' END AS band, COUNT(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND mos IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1) a ON a.band = b.band ORDER BY b.ord;"
+          "rawSql": "SELECT b.band AS band, COALESCE(a.calls, 0) AS calls FROM (VALUES (1, 'Great'), (2, 'Good'), (3, 'Fair'), (4, 'Poor (audio)'), (5, 'One-way / no audio')) AS b(ord, band) LEFT JOIN (SELECT CASE WHEN call_quality_status = 'no_rtp' THEN 'One-way / no audio' WHEN call_quality_grade = 'great' THEN 'Great' WHEN call_quality_grade = 'good' THEN 'Good' WHEN call_quality_grade = 'fair' THEN 'Fair' WHEN call_quality_grade = 'poor' THEN 'Poor (audio)' END AS band, count(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND call_quality_grade IS NOT NULL AND $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1) a ON a.band = b.band ORDER BY b.ord;"
         }
       ],
       "options": {
@@ -1190,21 +1234,25 @@
                   {
                     "type": "value",
                     "options": {
-                      "Poor": {
-                        "color": "red",
+                      "Great": {
+                        "color": "green",
                         "index": 0
+                      },
+                      "Good": {
+                        "color": "semi-dark-green",
+                        "index": 1
                       },
                       "Fair": {
                         "color": "orange",
-                        "index": 1
-                      },
-                      "Good": {
-                        "color": "yellow",
                         "index": 2
                       },
-                      "Excellent": {
-                        "color": "green",
+                      "Poor (audio)": {
+                        "color": "red",
                         "index": 3
+                      },
+                      "One-way / no audio": {
+                        "color": "dark-red",
+                        "index": 4
                       }
                     }
                   }
@@ -1217,9 +1265,9 @@
     },
     {
       "id": 13,
-      "type": "timeseries",
-      "title": "R-factor trend — avg (10m)",
-      "description": "Average ITU R-factor per 10m, selected zone, r_factor IS NOT NULL. Toll-quality >= 80; 70-80 acceptable; < 70 users notice. Complements MOS (same underlying E-model).",
+      "type": "barchart",
+      "title": "Loss distribution — graded legs",
+      "description": "Rated legs in the dashboard range (selected zone) bucketed by true packet_loss_pct, one bar per direction per band: 0 · (0, 0.5) · [0.5, 1) · [1, 2) · [2, 4) · [4, 8) · >= 8 %. At random loss (G.711 + PLC) the grade boundaries fall at ~0.87% (great), ~4.05% (good) and ~8.11% (fair). Leg-level panel: rows with quality_status='rated' (answered >= 5 s, >= 250 inbound packets, loss input present). caller→platform = the A row (leg IS DISTINCT FROM 'B', what the callee hears); callee→platform = the carrier B rows (leg='B', what the caller hears). Deliberately leg-aware — B rows are directions here, never counted as calls. All seven bands always render. Replaces the old R-factor trend (an average of a relabelled MOS).",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -1237,70 +1285,97 @@
             "type": "postgres",
             "uid": "voip-cdr-pg"
           },
-          "format": "time_series",
+          "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(r_factor) AS avg_r_factor FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND r_factor IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT b.band AS band, COALESCE(a.caller, 0) AS \"caller→platform\", COALESCE(a.callee, 0) AS \"callee→platform\" FROM (VALUES (1, '0%'), (2, '0–0.5%'), (3, '0.5–1%'), (4, '1–2%'), (5, '2–4%'), (6, '4–8%'), (7, '≥8%')) AS b(ord, band) LEFT JOIN (SELECT CASE WHEN packet_loss_pct = 0 THEN '0%' WHEN packet_loss_pct < 0.5 THEN '0–0.5%' WHEN packet_loss_pct < 1 THEN '0.5–1%' WHEN packet_loss_pct < 2 THEN '1–2%' WHEN packet_loss_pct < 4 THEN '2–4%' WHEN packet_loss_pct < 8 THEN '4–8%' ELSE '≥8%' END AS band, count(*) FILTER (WHERE caller_side) AS caller, count(*) FILTER (WHERE NOT caller_side) AS callee FROM (SELECT start_time, packet_loss_pct, (leg IS DISTINCT FROM 'B') AS caller_side FROM cdrs WHERE $__timeFilter(start_time) AND quality_status = 'rated' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' AND packet_loss_pct IS NOT NULL) s GROUP BY 1) a ON a.band = b.band ORDER BY b.ord;"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "min": 0,
-          "max": 100,
-          "decimals": 1,
+          "decimals": 0,
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "fillOpacity": 12,
-            "showPoints": "never",
-            "spanNulls": true
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "lineWidth": 1
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 70
-              },
-              {
                 "color": "green",
-                "value": 80
+                "value": null
               }
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "caller→platform"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "callee→platform"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
+        "xField": "band",
+        "orientation": "vertical",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0,
+        "showValue": "auto",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "barRadius": 0,
+        "fullHighlight": false,
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
         "legend": {
-          "calcs": [
-            "mean",
-            "min"
-          ],
+          "showLegend": true,
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "calcs": []
         }
       }
     },
     {
       "id": 22,
       "type": "timeseries",
-      "title": "Quality % trend — avg (10m)",
-      "description": "Average FreeSWITCH rtp_audio_in_quality_percentage per 10m, selected zone, quality_pct IS NOT NULL. This is FS's own composite call-quality score (0-100). Tracks MOS/R-factor but is a single ready-made number.",
+      "title": "One-way / no inbound audio — per hour",
+      "description": "Per hour, selected zone. Silent = legs with quality_status='no_rtp': answered >= 5 s but < 10% of the expected inbound RTP packets (one-way audio — typically a media-path fault: Cloud NAT / bypass-vpn, SDP c=, RTP source IP). caller→platform silent = the A row (the callee heard nothing); callee→platform silent = a carrier B row (the caller heard nothing). Partial inbound media = rated or low_sample legs, either direction, that received < 50% of the packets their talk time implies (inbound_media_ratio < 0.5) — audio that died mid-call, which early media can hide from no_rtp. Leg-level and deliberately leg-aware. The paging half is scripts/backup/media_guard.sh (revup-alert). Replaces the old FS 'Quality %' trend.",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -1321,59 +1396,117 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroup(start_time, '10m') AS time, avg(quality_pct) AS avg_quality_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND quality_pct IS NOT NULL AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, count(*) FILTER (WHERE caller_side) AS \"caller→platform silent\", count(*) FILTER (WHERE NOT caller_side) AS \"callee→platform silent\" FROM (SELECT start_time, (leg IS DISTINCT FROM 'B') AS caller_side FROM cdrs WHERE $__timeFilter(start_time) AND quality_status = 'no_rtp' AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone') s GROUP BY 1 ORDER BY 1;"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(start_time, '1h') AS time, count(*) FILTER (WHERE quality_status IN ('rated','low_sample') AND inbound_media_ratio < 0.5) AS \"partial inbound media\" FROM cdrs WHERE (leg IS DISTINCT FROM 'B' OR leg = 'B') AND $__timeFilter(start_time) AND quality_status IN ('rated','low_sample') AND inbound_media_ratio < 0.5 AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone' GROUP BY 1 ORDER BY 1;"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
+          "unit": "short",
+          "decimals": 0,
           "min": 0,
-          "max": 100,
-          "decimals": 1,
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "fillOpacity": 12,
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
             "showPoints": "never",
-            "spanNulls": true
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": null
               },
               {
-                "color": "orange",
-                "value": 90
-              },
-              {
-                "color": "green",
-                "value": 97
+                "color": "red",
+                "value": 1
               }
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "caller→platform silent"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "callee→platform silent"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "partial inbound media"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
           "calcs": [
-            "mean",
-            "min"
+            "sum",
+            "max"
           ],
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
@@ -2501,8 +2634,8 @@
     {
       "id": 30,
       "type": "stat",
-      "title": "Rated-call quality snapshot",
-      "description": "Headline quality averages over the current range + zone across answered, rated calls. 'Rated calls' = rows with a non-NULL mos (the RTP-metric denominator). If this count is low vs total volume, most calls are unrated and the quality panels above are a small sample. Scoped to the selected range + zone.",
+      "title": "Graded-call quality snapshot",
+      "description": "Call-level quality over the current range + zone, A rows (one per call). Graded calls = count(call_quality_grade). Good+ % = great/good share of graded. Poor % includes one-way audio. p10 call MOS = worst-decile MOS of rated calls. One-way audio calls = call_quality_status='no_rtp'. Not graded = every other A row in range (unanswered, < 5 s, too few packets, no media data) — if it dwarfs Graded calls the quality panels are a small sample. Grades (plan D, ONE definition, applied to the stored 2-dp E-model MOS): great >= 4.34 (R>=90) · good >= 4.02 (R>=80) · fair >= 3.60 (R>=70) · poor < 3.60 or one-way audio. MOS is our ITU-T G.107 E-model from true RTP sequence loss (G.711 ceiling 4.41), not FreeSWITCH's estimator. No averages.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -2523,7 +2656,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) FILTER (WHERE mos IS NOT NULL) AS \"Rated calls\", avg(mos) AS \"Avg MOS\", avg(r_factor) AS \"Avg R-factor\", avg(jitter_max_ms) AS \"Avg peak jitter (ms)\", avg(packet_loss_pct) AS \"Avg loss %\", avg(quality_pct) AS \"Avg quality %\" FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
+          "rawSql": "SELECT count(call_quality_grade) AS \"Graded calls\", 100.0 * count(*) FILTER (WHERE call_quality_grade IN ('great','good')) / NULLIF(count(call_quality_grade), 0) AS \"Good+ %\", 100.0 * count(*) FILTER (WHERE call_quality_grade = 'poor') / NULLIF(count(call_quality_grade), 0) AS \"Poor % (incl. one-way)\", percentile_cont(0.1) WITHIN GROUP (ORDER BY call_mos) FILTER (WHERE call_quality_status = 'rated' AND call_mos IS NOT NULL) AS \"p10 call MOS\", count(*) FILTER (WHERE call_quality_status = 'no_rtp') AS \"One-way audio calls\", count(*) FILTER (WHERE call_quality_grade IS NULL) AS \"Not graded\" FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND $__timeFilter(start_time) AND CASE WHEN freeswitch_node LIKE 'west%' THEN 'west' WHEN freeswitch_node LIKE 'central%' THEN 'central' WHEN COALESCE(freeswitch_node,'') = '' THEN 'unknown' ELSE 'east' END LIKE '$zone';"
         }
       ],
       "options": {
@@ -2543,7 +2676,8 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "decimals": 2,
+          "decimals": 0,
+          "noValue": "—",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -2559,13 +2693,9 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Rated calls"
+              "options": "Graded calls"
             },
             "properties": [
-              {
-                "id": "decimals",
-                "value": 0
-              },
               {
                 "id": "color",
                 "value": {
@@ -2578,131 +2708,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Avg MOS"
-            },
-            "properties": [
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "red",
-                      "value": null
-                    },
-                    {
-                      "color": "orange",
-                      "value": 3.5
-                    },
-                    {
-                      "color": "green",
-                      "value": 4.0
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Avg R-factor"
-            },
-            "properties": [
-              {
-                "id": "decimals",
-                "value": 1
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "red",
-                      "value": null
-                    },
-                    {
-                      "color": "orange",
-                      "value": 70
-                    },
-                    {
-                      "color": "green",
-                      "value": 80
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Avg peak jitter (ms)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "ms"
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "orange",
-                      "value": 40
-                    },
-                    {
-                      "color": "red",
-                      "value": 80
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Avg loss %"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percent"
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "orange",
-                      "value": 1
-                    },
-                    {
-                      "color": "red",
-                      "value": 3
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Avg quality %"
+              "options": "Good+ %"
             },
             "properties": [
               {
@@ -2731,6 +2737,113 @@
                       "value": 97
                     }
                   ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Poor % (incl. one-way)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 3
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p10 call MOS"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 3.6
+                    },
+                    {
+                      "color": "green",
+                      "value": 4.02
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "One-way audio calls"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Not graded"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
                 }
               }
             ]
@@ -2930,7 +3043,7 @@
   "timezone": "browser",
   "title": "Call Quality",
   "uid": "noc-call-quality",
-  "version": 3,
+  "version": 4,
   "weekStart": "",
-  "description": "Call Quality wall board — the full voice picture from the CDR hypertable (voip-cdr-pg). Top strip: last-15m live snapshot (ASR / Concurrent / CPS / Avg MOS / On-net %) on the selected zone. Priority band (two rows of three): MOS trend, packet loss, per-zone volume, total volume, SIP response classes, and THE carrier split — inbound by carrier / PoP (Bandwidth vs Sinch), attribution from cdrs.inbound_carrier / inbound_carrier_pop stamped spoof-proof by Kamailio at carrier ingress. Below, themed rows: quality detail (jitter / MOS distribution / R-factor / quality %), delivery (answered-vs-failed, ASR trends, ACD, PDD), carrier detail (egress share from carrier_used, per-carrier ASR, plus a live Kamailio ingress counter that shows a call at INVITE time — before its CDR exists), and diagnostics (hangup causes, rated-call snapshot). Long trends use the cheap continuous aggregate cdr_hourly_stats (customer-scoped, no zone/carrier dimension — those trends span all zones); recent/quality panels read raw cdrs and honour the Zone filter. RTP metrics are NULL on unanswered & unrated calls and are filtered out. PDD is approximated as answer_time - start_time (time-to-answer) — true PDD to the first 18x needs Homer/SIP timing, not the CDR. Infrastructure health (VMs / VIPs / media nodes) lives on the Infrastructure / Home / Fleet dashboards. CDR A/B leg split (2026-09-23): cdrs holds one A row per call plus one B row per carrier bridge attempt (leg='B'); every raw-cdrs panel here filters leg IS DISTINCT FROM 'B' so it counts / rates quality on ONE row per call (A-leg stats). The only leg-aware panel is 'Carrier legs per call' in Diagnostics. ACD (cdr_hourly_stats) is restricted to direction='inbound' so outbound B rows in the aggregate are excluded."
+  "description": "Call Quality wall board — the full voice picture from the CDR hypertable (voip-cdr-pg). Top strip: last-15m live snapshot (ASR / Concurrent / CPS / Good-or-better calls / On-net %) on the selected zone. Priority band (two rows of three): call MOS p50/p10, true packet loss p95 by direction, per-zone volume, total volume, SIP response classes, and THE carrier split — inbound by carrier / PoP (Bandwidth vs Sinch), attribution from cdrs.inbound_carrier / inbound_carrier_pop stamped spoof-proof by Kamailio at carrier ingress. Below, themed rows: quality detail (RFC 3550 jitter by direction / call grade distribution / loss distribution / one-way audio per hour), delivery (answered-vs-failed, ASR trends, ACD, PDD), carrier detail (egress share from carrier_used, per-carrier ASR, plus a live Kamailio ingress counter that shows a call at INVITE time — before its CDR exists), and diagnostics (hangup causes, graded-call snapshot). Long trends use the cheap continuous aggregate cdr_hourly_stats (customer-scoped, no zone/carrier dimension — those trends span all zones); recent/quality panels read raw cdrs and honour the Zone filter. PDD is approximated as answer_time - start_time (time-to-answer) — true PDD to the first 18x needs Homer/SIP timing, not the CDR. Infrastructure health (VMs / VIPs / media nodes) lives on the Infrastructure / Home / Fleet dashboards. QUALITY (2026-09, docs/CALL_QUALITY_ACCURACY_PLAN.md): MOS is our ITU-T G.107 E-model from true RTP sequence loss (G.711 ceiling 4.41), graded ONCE — great >= 4.34 · good >= 4.02 · fair >= 3.60 · poor < 3.60 or one-way audio; only evidence-backed calls are graded (answered >= 5 s with >= 250 inbound packets, or one-way audio). Quality panels show shares and percentiles, never MOS averages. CDR A/B leg split (2026-09-23): cdrs holds one A row per call plus one B row per carrier bridge attempt (leg='B'); every call-counting raw-cdrs panel filters leg IS DISTINCT FROM 'B' (one row per call; call-level grade = the worse direction, stored on the A row). Leg-aware panels: the per-direction quality panels (loss p95, jitter, loss distribution, one-way audio — caller→platform = A row, callee→platform = B row) and 'Carrier legs per call' in Diagnostics. ACD (cdr_hourly_stats) is restricted to direction='inbound' so outbound B rows in the aggregate are excluded."
 }

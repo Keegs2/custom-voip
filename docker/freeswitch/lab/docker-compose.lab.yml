@@ -1,0 +1,73 @@
+# Call-quality acceptance lab (docs/CALL_QUALITY_ACCURACY_PLAN.md G.3).
+# Runs on west-loadtest ONLY (Linux, isolated, no carrier traffic). Never on a
+# production media/SBC VM. Everything is on a private bridge network; nothing
+# is published on the host. Driven by run_matrix.sh — see README.md.
+#
+#   lab-fs        the FreeSWITCH image under test (FS_LAB_IMAGE: patched or
+#                 unpatched), lab config from ./conf, CDRs to ./out/fs-log
+#   lab-sipp-uac  caller  (SIPp + lab RTP sender), netem target for A-in
+#   lab-sipp-uas  callee  (SIPp + lab RTP sender), netem target for B-in
+#
+# The sipp containers idle (sleep infinity); run_matrix.sh `docker exec`s
+# SIPp into them per scenario, and applies netem from the HOST into their
+# network namespace (nsenter), so the containers need no NET_ADMIN.
+name: rcf-quality-lab
+
+services:
+  lab-fs:
+    image: ${FS_LAB_IMAGE:-revup-fs-lab:patched}
+    build:
+      context: ..
+    container_name: lab-fs
+    entrypoint: ["/usr/local/freeswitch/bin/freeswitch"]
+    command: ["-nf", "-conf", "/lab/conf", "-log", "/var/log/freeswitch", "-db", "/tmp", "-scripts", "/tmp"]
+    environment:
+      - LAB_UAS_IP=${LAB_NET_PREFIX:-172.31.77}.30
+      - ESL_PASSWORD=${LAB_ESL_PASSWORD:-lab-only-not-a-secret}
+    volumes:
+      - ./conf:/lab/conf:ro
+      - ./out/fs-log:/var/log/freeswitch
+    networks:
+      labnet:
+        ipv4_address: ${LAB_NET_PREFIX:-172.31.77}.10
+    ulimits:
+      nofile: 65536
+
+  lab-sipp-uac:
+    image: revup-sipp-lab:latest
+    build:
+      context: ../../sipp
+    container_name: lab-sipp-uac
+    entrypoint: ["sleep", "infinity"]
+    environment:
+      - LAB_OUT=/lab/out
+    volumes:
+      - ./scenarios:/lab/scenarios:ro
+      - ./scripts:/lab/scripts:ro
+      - ./out:/lab/out
+    networks:
+      labnet:
+        ipv4_address: ${LAB_NET_PREFIX:-172.31.77}.20
+
+  lab-sipp-uas:
+    image: revup-sipp-lab:latest
+    container_name: lab-sipp-uas
+    entrypoint: ["sleep", "infinity"]
+    environment:
+      - LAB_OUT=/lab/out
+    volumes:
+      - ./scenarios:/lab/scenarios:ro
+      - ./scripts:/lab/scripts:ro
+      - ./out:/lab/out
+    networks:
+      labnet:
+        ipv4_address: ${LAB_NET_PREFIX:-172.31.77}.30
+    depends_on:
+      - lab-sipp-uac
+
+networks:
+  labnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${LAB_NET_PREFIX:-172.31.77}.0/24

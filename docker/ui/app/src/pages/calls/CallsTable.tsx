@@ -2,7 +2,7 @@
  * CallsTable — the merged Calls & Quality results table.
  *
  * Column union of the CDR Search table and the Call Quality table: Time,
- * Customer (staff), Product, Dir, From, To, Duration, MOS pill, Loss %,
+ * Customer (staff), Product, Dir, From, To, Duration, Quality pill, Loss %,
  * Status, Carrier (staff), Trunk, Cost Est. (staff). Row click opens the call-detail
  * modal (the old inline expanded-row idiom is gone — the modal carries all
  * of it and more, including the hangup cause, which no longer gets a column
@@ -23,6 +23,14 @@
  * em dash for pre-split legacy rows. Hidden in the default Calls mode, so the
  * default staff table and every tenant table render exactly as before.
  *
+ * Quality column (docs/CALL_QUALITY_ACCURACY_PLAN.md §E.4): the pill is the
+ * CALL grade (`call_quality_grade`, the worse audio direction) with the call
+ * MOS; one-way audio reads a red "One-way"; ungraded calls read "—" with the
+ * reason in the tooltip. Carrier B rows (staff All-legs / Carrier-legs views)
+ * carry no call grade, so they show their own leg grade. Loss % renders only
+ * for rated rows (`quality_status === 'rated'`) — never a number for a call
+ * that was not measured. Grades come from quality.ts only.
+ *
  * Cost is labeled "Cost Est." — RCF-V1 billing is estimates-only by design;
  * the billing of record is Equinox (title attr says so).
  *
@@ -37,7 +45,8 @@
  * panel at laptop widths (dlx4-tablewrap).
  */
 import { fmt, fmtMoneySmart } from '../../utils/format';
-import { mosTone, packetLossColor, INK_FAINT } from './quality';
+import { gradeLabel, gradeTone, packetLossColor, qualityStatusReason, INK_FAINT } from './quality';
+import type { Grade, QualityStatus } from './quality';
 import { carrierLabel, isOnNetCall, trunkLabel, EMPTY } from './callsFormat';
 import { fmtCallDuration } from '../../utils/callDuration';
 import type { Cdr, CdrRowsMode, ProductType, CallDirection } from '../../types/cdr';
@@ -69,11 +78,34 @@ function ProductTag({ pt }: { pt: ProductType }) {
   return <span className="dl-tag">{pt.toUpperCase()}</span>;
 }
 
-function MosPill({ mos }: { mos: number | null | undefined }) {
-  if (mos == null) return <span style={{ color: '#b6c2d4' }}>—</span>;
-  const tone = mosTone(mos);
+interface GradePillProps {
+  grade: Grade | null | undefined;
+  status: QualityStatus | null | undefined;
+  /** MOS to print inside the pill (omitted / null → the grade word). */
+  mos?: number | null;
+  /** Staff get the technical "not graded" reason in the tooltip. */
+  isStaff: boolean;
+}
+
+/**
+ * Grade pill — the ONE rendering of a quality grade on the Calls surfaces.
+ * One-way audio → red "One-way"; ungraded → "—" with the reason as tooltip.
+ */
+export function GradePill({ grade, status, mos, isStaff }: GradePillProps) {
+  const reason = qualityStatusReason(status, isStaff ? 'staff' : 'customer');
+  if (grade == null) {
+    return (
+      <span style={{ color: '#b6c2d4' }} title={reason ?? undefined} aria-label={reason ?? 'Not graded'}>
+        —
+      </span>
+    );
+  }
+  const tone = gradeTone(grade);
+  const word = gradeLabel(grade, status);
+  const text = status === 'no_rtp' || mos == null ? word : mos.toFixed(2);
   return (
     <span
+      title={status === 'no_rtp' ? (reason ?? word) : `${word}${mos != null ? ` · MOS ${mos.toFixed(2)}` : ''}`}
       style={{
         fontSize: '0.7rem',
         fontWeight: 700,
@@ -86,9 +118,21 @@ function MosPill({ mos }: { mos: number | null | undefined }) {
         whiteSpace: 'nowrap',
       }}
     >
-      {mos.toFixed(2)}
+      {text}
     </span>
   );
+}
+
+/** Row → the grade the Quality column shows (call grade; leg grade on B rows). */
+function rowGrade(cdr: Cdr): { grade: Grade | null; status: QualityStatus | null; mos: number | null } {
+  if (cdr.leg === 'B') {
+    return { grade: cdr.quality_grade ?? null, status: cdr.quality_status ?? null, mos: cdr.mos ?? null };
+  }
+  return {
+    grade: cdr.call_quality_grade ?? null,
+    status: cdr.call_quality_status ?? null,
+    mos: cdr.call_mos ?? null,
+  };
 }
 
 /** "A" / "B #attempt" leg badge; em dash on legacy (pre-split) rows. */
@@ -216,7 +260,7 @@ export function CallsTable({
               <th className="dl-th">From</th>
               <th className="dl-th">To</th>
               <th className="dl-th">Duration</th>
-              <th className="dl-th">MOS</th>
+              <th className="dl-th" title="Call quality — the worse of the two audio directions">Quality</th>
               <th className="dl-th">Loss %</th>
               <th className="dl-th">Status</th>
               {isStaff && <th className="dl-th">Carrier</th>}
@@ -254,6 +298,8 @@ export function CallsTable({
               const answered = cdr.answer_time != null;
               const isSelected = cdr.uuid === selectedUuid;
               const carrier = carrierLabel(cdr);
+              const q = rowGrade(cdr);
+              const lossPct = cdr.quality_status === 'rated' ? (cdr.packet_loss_pct ?? null) : null;
               const trunk = trunkLabel(cdr.trunk_id, trunkNames);
               const billedColor =
                 cdr.total_cost != null && cdr.total_cost > 0
@@ -297,16 +343,18 @@ export function CallsTable({
                       {fmtCallDuration(cdr, fmtDurationSec)}
                     </span>
                   </td>
-                  <td className="dlx-td"><MosPill mos={cdr.mos} /></td>
+                  <td className="dlx-td">
+                    <GradePill grade={q.grade} status={q.status} mos={q.mos} isStaff={isStaff} />
+                  </td>
                   <td className="dlx-td">
                     <span
                       style={{
                         fontVariantNumeric: 'tabular-nums',
                         fontWeight: 600,
-                        color: cdr.packet_loss_pct != null ? packetLossColor(cdr.packet_loss_pct) : INK_FAINT,
+                        color: lossPct != null ? packetLossColor(lossPct) : INK_FAINT,
                       }}
                     >
-                      {cdr.packet_loss_pct != null ? `${cdr.packet_loss_pct.toFixed(2)}%` : '—'}
+                      {lossPct != null ? `${lossPct.toFixed(2)}%` : '—'}
                     </span>
                   </td>
                   <td className="dlx-td">

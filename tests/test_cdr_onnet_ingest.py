@@ -77,19 +77,22 @@ def _base_variables(**overrides):
 # the two STIR-outcome columns ($56..$57, migration 47), then the three
 # leg-split columns ($58..$60, migration 48), so negative indices from the end
 # are -11..-1.
-IDX_ORIGIN = -11
-IDX_TERMINATING = -10
-IDX_ON_NET = -9
-IDX_ON_NET_HOPS = -8
-IDX_INBOUND_CARRIER = -7
-IDX_INBOUND_CARRIER_POP = -6
-IDX_STIR_OUTCOME = -5
-IDX_STIR_EFF_ACTUAL = -4
-IDX_LEG = -3
-IDX_CALL_ID = -2
-IDX_LEG_ATTEMPT = -1
+# Migration 50 appended 13 quality params ($61..$73) after the leg-split
+# tail, so every index above shifts by -13.
+_Q50 = 13
+IDX_ORIGIN = -11 - _Q50
+IDX_TERMINATING = -10 - _Q50
+IDX_ON_NET = -9 - _Q50
+IDX_ON_NET_HOPS = -8 - _Q50
+IDX_INBOUND_CARRIER = -7 - _Q50
+IDX_INBOUND_CARRIER_POP = -6 - _Q50
+IDX_STIR_OUTCOME = -5 - _Q50
+IDX_STIR_EFF_ACTUAL = -4 - _Q50
+IDX_LEG = -3 - _Q50
+IDX_CALL_ID = -2 - _Q50
+IDX_LEG_ATTEMPT = -1 - _Q50
 
-PARAM_COUNT = 60
+PARAM_COUNT = 73
 
 
 def _run(body):
@@ -171,7 +174,7 @@ def test_insert_param_count_matches_placeholders(cap):
     )}
     _run(body)
     placeholders = set(re.findall(r"\$(\d+)", cap.sql))
-    # highest placeholder index must equal the param count (60)
+    # highest placeholder index must equal the param count (73)
     assert max(int(x) for x in placeholders) == len(cap.params) == PARAM_COUNT
 
 

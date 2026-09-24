@@ -697,3 +697,113 @@ def test_migration_49_refuses_without_48(tmp_path):
         assert "apply 48_cdr_call_legs.sql first" in out.stdout + out.stderr
     finally:
         pg.stop()
+
+
+# ---- call-quality (migration 50, docs/CALL_QUALITY_ACCURACY_PLAN.md §C) ------
+# Legacy-image quality vars: 50 s talk at 20 ms = 2500 expected packets.
+_CLEAN_IN = {"rtp_audio_in_packet_count": "2500", "rtp_audio_in_jitter_loss_rate": "0",
+             "rtp_audio_in_mos": "4.50", "read_codec": "PCMU"}
+_LOSSY_IN = {"rtp_audio_in_packet_count": "2500", "rtp_audio_in_jitter_loss_rate": "0.05",
+             "rtp_audio_in_mos": "4.50", "read_codec": "PCMU"}
+_SILENT_IN = {"rtp_audio_in_packet_count": "0", "rtp_audio_in_mos": "4.50"}
+
+
+@pytest.mark.parametrize("order", ["a_first", "b_first"])
+def test_b_leg_ingest_refreshes_call_quality_either_order(leg_db, client, order):
+    """B-leg loss makes the CALL grade worse regardless of CDR arrival order:
+    both ingests run cdr_refresh_call_quality() after their INSERT."""
+    db = leg_db["db"]
+    a_uuid, b_uuid = f"cq-a-{order}", f"cq-b-{order}"
+    start = T0 + 10_000 + (0 if order == "a_first" else 1_000)
+
+    async def go():
+        a = _a_leg(a_uuid, start=start, **_CLEAN_IN)
+        failed = _b_leg(f"{b_uuid}-1", a_uuid, 1, start=start + 1, answered=False, talk=0,
+                        **_SILENT_IN)
+        b = _b_leg(b_uuid, a_uuid, 2, start=start + 2, **_LOSSY_IN)
+        bodies = [a, failed, b] if order == "a_first" else [failed, b, a]
+        for body in bodies:
+            r = await _post(client, body)
+            assert r["status"] in ("ok", "b_leg") and r.get("detail") != "dropped", r
+        row = await _row(db, a_uuid)
+        assert (row["quality_status"], row["quality_grade"], float(row["mos"])) == (
+            "rated", "great", 4.41)
+        brow = await _row(db, b_uuid)
+        assert (brow["quality_status"], brow["quality_grade"], float(brow["mos"])) == (
+            "rated", "fair", 3.92)
+        assert brow["call_quality_status"] is None          # call_* live on the A row only
+        assert (row["call_quality_status"], row["call_quality_grade"],
+                float(row["call_mos"]), row["call_quality_leg"]) == ("rated", "fair", 3.92, "B")
+        # the failed attempt (unanswered, silent) never counts
+        f = await _row(db, f"{b_uuid}-1")
+        assert f["quality_status"] == "unanswered" and f["mos"] is None
+        # a duplicate re-ingest re-runs the idempotent refresh, same answer
+        assert (await _post(client, a))["status"] == "duplicate"
+        row = await _row(db, a_uuid)
+        assert row["call_quality_grade"] == "fair"
+
+    _run(go())
+
+
+def test_one_way_b_leg_makes_the_call_no_rtp(leg_db, client, tokens):
+    """Callee->platform silent (the caller heard nothing) -> call no_rtp/poor,
+    call_mos NULL; the staff detail exposes both directions."""
+    db = leg_db["db"]
+    a_uuid, b_uuid = "cq-a-oneway", "cq-b-oneway"
+    start = T0 + 20_000
+
+    async def go():
+        await _post(client, _a_leg(a_uuid, start=start, **_CLEAN_IN))
+        await _post(client, _b_leg(b_uuid, a_uuid, 1, start=start + 1, **_SILENT_IN))
+        row = await _row(db, a_uuid)
+        assert (row["call_quality_status"], row["call_quality_grade"], row["call_mos"],
+                row["call_quality_leg"]) == ("no_rtp", "poor", None, "B")
+        r = await client.get(f"/v1/cdrs/{a_uuid}", headers=_h(tokens, "admin"))
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["call_quality_grade"] == "poor" and body["call_mos"] is None
+        qbd = body["quality_by_direction"]
+        assert qbd["caller_audio"]["quality_grade"] == "great"
+        assert qbd["caller_audio"]["mos"] == 4.41 and qbd["caller_audio"]["uuid"] == a_uuid
+        assert qbd["callee_audio"]["quality_status"] == "no_rtp"
+        assert qbd["callee_audio"]["mos"] is None and qbd["callee_audio"]["uuid"] == b_uuid
+        assert qbd["callee_audio"]["fs_mos"] == 4.5 and qbd["callee_audio"]["quality_source"] == "fs_legacy"
+        # the B row's own detail carries no direction block
+        r = await client.get(f"/v1/cdrs/{b_uuid}", headers=_h(tokens, "admin"))
+        assert r.json()["quality_by_direction"] is None
+        # the staff list carries the call-level columns (floated)
+        r = await client.get("/v1/cdrs", params={"call_id": a_uuid, "leg": "all"},
+                             headers=_h(tokens, "admin"))
+        rows = {c["uuid"]: c for c in r.json()["cdrs"]}
+        assert rows[a_uuid]["call_quality_status"] == "no_rtp"
+        assert rows[a_uuid]["mos"] == 4.41 and isinstance(rows[a_uuid]["mos"], float)
+
+    _run(go())
+
+
+def test_b_leg_uses_pre50_tier_but_never_below(monkeypatch):
+    """Fake db: without migration 50 a carrier B row still lands (60 params,
+    keeps `leg`); a B row is never written by the pre-48 (57) tier."""
+    import asyncpg as _apg
+    from db import database as db
+    from routers import cdrs
+
+    calls = []
+
+    async def fake_execute(sql, *params):
+        calls.append((sql, params))
+        if "INSERT INTO cdrs" in sql and "quality_status" in sql:
+            raise _apg.exceptions.UndefinedColumnError(
+                'column "quality_status" of relation "cdrs" does not exist')
+        return "INSERT 0 1"
+
+    async def fake_fetch_one(sql, *args):
+        return None
+
+    monkeypatch.setattr(db, "execute", fake_execute)
+    monkeypatch.setattr(db, "fetch_one", fake_fetch_one)
+    r = asyncio.run(cdrs._process_cdr_body(_b_leg("fk-b-50", "fk-a-50", 1)))
+    assert (r["status"], r["detail"]) == ("b_leg", "inserted"), r
+    ins = [p for s, p in calls if "INSERT INTO cdrs" in s]
+    assert [len(p) for p in ins] == [73, 60]
+    assert ins[1][57:60] == ("B", "fk-a-50", 1)

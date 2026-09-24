@@ -167,6 +167,7 @@ export function ReportDocument({ input }: { input: ReportPdfInput }) {
               <Text style={s.caption}>{GRADE_BLURB[q.grade]}</Text>
               {q.avg_mos != null && <Text style={s.caption}>Sound score {q.avg_mos.toFixed(1)} out of 5 (1 = hard to understand, 5 = crystal clear).</Text>}
               {q.pct_good_or_better != null && <Text style={s.caption}>{honestWhole(q.pct_good_or_better)} of every 100 measured calls sounded good or better.</Text>}
+              <Text style={s.caption}>Only answered calls of 5 seconds or more with measurable sound are graded; a call where one side had no sound counts as Poor.</Text>
             </View>
             <View style={s.col}>
               <Text style={s.eyebrow}>Busiest times</Text>
