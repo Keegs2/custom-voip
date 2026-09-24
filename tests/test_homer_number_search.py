@@ -9,7 +9,9 @@ The pinned contract (UI is built against this):
   * from_user/to_user keep working but pass through the SAME normalization.
   * number and from/to may combine — AND semantics (one LogQL line filter
     each, same composition as before).
-  * Response shape unchanged. require_support_or_admin gate unchanged.
+  * Response shape unchanged except the ADDITIVE leg-correlation fields
+    (legs / correlation_status / correlation_reason — see
+    tests/test_homer_leg_correlation.py). require_support_or_admin unchanged.
 
 Two layers:
 
@@ -401,13 +403,19 @@ def test_response_shape_unchanged_with_results(api, monkeypatch):
         loki_json=_loki_one_invite())
     assert r.status_code == 200, r.text
     body = r.json()
-    # Envelope: original keys unchanged + the two additive cursor-paging
-    # fields (always present). correlation_truncated stays present-only-when-
-    # true, so it is absent here.
+    # Envelope: original keys unchanged + the additive cursor-paging fields
+    # and the additive leg-correlation fields (always present).
+    # correlation_truncated (deprecated) stays present-only-when-true, so it
+    # is absent here.
     assert set(body.keys()) == {
         "data", "correlations", "pipeline_warnings", "oldest_ts_ns", "has_more",
+        "legs", "correlation_status", "correlation_reason",
     }
     assert body["correlations"] == {}
+    # correlate=false: no correlation ran — empty legs, status ok/"disabled".
+    assert body["legs"] == {}
+    assert body["correlation_status"] == "ok"
+    assert body["correlation_reason"] == "disabled"
     assert body["pipeline_warnings"] == []
     # Under-limit Step-1 fetch (1 << 500) -> the whole window was seen.
     assert body["has_more"] is False
@@ -431,20 +439,29 @@ def test_response_shape_unchanged_with_results(api, monkeypatch):
 
 
 @needs_web
-def test_correlate_step2_query_is_not_polluted_by_needles(api, monkeypatch):
+def test_correlate_never_runs_window_wide_xcid_scan(api, monkeypatch):
     r, mock = _search(
         api, monkeypatch, number="6174544217", correlate=True,
         loki_json=_loki_one_invite())
     assert r.status_code == 200, r.text
-    # Step 1 (needle) + Step 2 (X-CID discovery) — and the X-CID query must
-    # NOT carry the number filters (it fetches every X-CID in the window and
-    # filters by Call-ID in Python).
-    assert len(mock.requests) == 2
+    # Exactly ONE qryn query (the Step-1 needle search). The old window-wide
+    # {type="sip"} |~ "X-CID:" discovery scan is gone for good; correlation
+    # runs against ClickHouse bounded to the A call's own setup window.
+    loki = [q for q in mock.requests if "/loki/" in q.url.path]
+    assert len(loki) == 1
     assert mock.logql(0) == '{type="sip"} |~ "6174544217"'
-    assert mock.logql(1) == '{type="sip"} |~ "X-CID:"'
-    assert mock.requests[1].url.params["limit"] == "1000"
-    # Single-leg call, no X-CID found: self-group correlation only.
-    assert r.json()["correlations"] == {CALLID: [CALLID]}
+    assert all("X-CID" not in q.url.params.get("query", "") for q in loki)
+    ch_sql = [q.content.decode() for q in mock.requests if "/loki/" not in q.url.path]
+    assert len(ch_sql) == 1 and "multiSearchAny" in ch_sql[0]
+    assert "'test-call-1@67.231.13.185'" in ch_sql[0]
+    # Single-leg call, no B leg found: self-group correlation only.
+    body = r.json()
+    assert body["correlations"] == {CALLID: [CALLID]}
+    assert body["legs"] == {CALLID: {"role": "A", "a_callid": CALLID, "attempt": None}}
+    # No PG in this harness -> the CDR cross-check is unavailable: partial,
+    # never an error.
+    assert body["correlation_status"] == "partial"
+    assert body["correlation_reason"] == "cdr_unavailable"
 
 
 # ---- cursor paging: oldest_ts_ns / has_more / before_ns --------------------
@@ -601,6 +618,9 @@ def test_before_ns_at_or_before_window_start_short_circuits(api, monkeypatch):
     assert r.json() == {
         "data": [],
         "correlations": {},
+        "legs": {},
+        "correlation_status": "ok",
+        "correlation_reason": None,
         "pipeline_warnings": [],
         "oldest_ts_ns": None,
         "has_more": False,

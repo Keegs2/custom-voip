@@ -370,7 +370,15 @@ Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
 - The returned `data` (flat `HomerSearchResult[]`) plus the `correlations` map
   (Call-ID → related Call-IDs) are grouped into per-call rows via an in-component
   **union-find** (`groupMessagesByCall`) so A-leg and B-leg messages merge into one
-  call. Each group computes a representative message, final status, and duration.
+  call. Since 2026-09 grouping ALSO unions via the API's additive `legs` map
+  (`legs[cid].a_callid`; absent on older APIs ⇒ correlations-only, as before).
+  RESULT = final response to the A leg's INITIAL INVITE (a failed failover
+  attempt — 503/487/481 — can never override an answered 200); duration = A-leg
+  answer → A-leg BYE; B-leg bridge attempts are exposed as `group.attempts` and
+  shown as a quiet "2 att · 503 → 200" badge. A `correlation_status` of
+  partial/degraded (or `correlation_truncated`) shows a warning banner. The
+  ladder receives the group-scoped `ladderCorrelations`. Self-test:
+  `pages/troubleshooting/callGrouping.assert.ts` (esbuild | node).
 - Results render as a table; expanding a row renders the custom **`<SipLadder>`**
   diagram (see Components → SIP Ladder) for that call's messages.
 - Each row also offers an "Open in Grafana" deep link (`/grafana/d/sip-search/...`)

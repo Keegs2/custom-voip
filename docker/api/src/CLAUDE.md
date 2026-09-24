@@ -41,6 +41,7 @@ src/
     sipp.py                  # SIPp load-test presets + run (admin; runner not yet deployed)
     sbc.py                   # Per-SBC call distribution stats from cdrs.sbc_id (admin)
     homer.py                 # SIP trace search via qryn/ClickHouse (Homer 10) (admin)
+    homer_correlation.py     # Pure A/B leg correlation helpers (X-CID parse, windows, ClickHouse SQL, groups)
     onboarding.py            # New-customer intake pipeline (public POST + admin review)
     billing.py               # Read-only tenant-scoped ledger views (/billing/balance, /billing/ledger)
   services/
@@ -305,7 +306,7 @@ Admin-only SIPp load-test control. `GET /presets` lists scenarios; `POST /run` t
 Admin-only `GET /stats`: per-SBC call distribution over the last N minutes, aggregated from `cdrs.sbc_id` (the column added in `18_sbc_id_column.sql`). Used to monitor SBC failover/load-balancing health.
 
 ### homer.py
-Admin-only SIP trace search for Homer 10. Queries qryn (Loki-compatible API over ClickHouse) — there is no Homer 7 JWT flow. `GET /aliases` returns a static IP-to-name map for ladder diagrams. `POST /search` runs a phone-number search and A/B-leg correlation; correlation (Step 3) queries ClickHouse directly via `IN (...)` because qryn's RE2 engine 500s on large Call-ID regex alternations.
+Admin-only SIP trace search for Homer 10. Queries qryn (Loki-compatible API over ClickHouse) — there is no Homer 7 JWT flow. `GET /aliases` returns a static IP-to-name map for ladder diagrams. `POST /search` runs a phone-number search (qryn) and A/B-leg correlation (`_correlate_legs`; pure helpers in `homer_correlation.py`): (a) X-CID harvested from fetched INVITEs, (b) a ClickHouse `samples_v3` X-CID scan bounded to each A call's setup window + fingerprint -> call_id via `time_series`, (c) the `cdrs` B rows (failure-isolated, 3 s). heplify's `call_id` label is each packet's OWN Call-ID — there is no A-leg label. Leg fetches go to ClickHouse directly via `IN (...)` (qryn's RE2 engine 500s on large Call-ID alternations), chunked + paginated. Additive response fields: `legs` (`{callid: {role, a_callid, attempt}}`), `correlation_status` (`ok`/`partial`/`degraded`), `correlation_reason`; `correlation_truncated` is deprecated. Correlation never fails a search. `GET /pcap?correlated=true` uses the same engine (`X-Pcap-Correlation` header). Tests: `tests/test_homer_leg_correlation.py` (+ shared ClickHouse fake `tests/homer_ch_fake.py`).
 
 ### onboarding.py
 New-customer intake pipeline (`pending → completed`, or `→ rejected` — status-only since migration 27; billing/provisioning are external). Backed by `onboarding_requests`. `POST ""` is the **public, unauthenticated** intake form (exempted in middleware). All other endpoints (`GET` list/detail, `complete`, `reject`) require admin.

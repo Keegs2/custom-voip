@@ -659,3 +659,37 @@
    column itself — the path now lives as .dlx5-pathline in the expanded
    ladder frame, and the slimmer column set seats without panning far
    earlier than 1400px.) */
+
+/* ─── Failover-attempt trail beside the Result pill ("2 att · 503 → 200").
+   Deliberately quieter than the status pill: mono, faint, no fill — it is
+   context for the result, not a second result. Detail lives in the title. ─── */
+.dlx5-attempts {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  border: 1px dashed rgba(93, 111, 140, 0.32);
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+  cursor: help;
+  vertical-align: middle;
+}
+
+/* ─── Leg-correlation warning banner (partial / degraded / truncated) ─── */
+.dlx5-corr-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dlx5-corr-detail {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.68rem;
+  font-weight: 400;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}

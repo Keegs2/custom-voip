@@ -6,13 +6,28 @@ data as structured log entries queryable via LogQL.
 
 No authentication required for qryn (no more Homer 7 JWT flow).
 
-Call correlation (Step 3) queries ClickHouse directly instead of using
-LogQL regex alternation.  qryn's RE2 engine crashes with 500 errors on
-patterns like ``call_id=~"cid1|cid2|...|cid24"`` because SIP Call-IDs
-contain characters (@, ., -) that produce complex escaped alternations.
-ClickHouse SQL ``IN ('cid1','cid2',...)`` handles any number of values
-trivially with a single indexed lookup.
+A/B LEG CORRELATION (_correlate_legs, 2026-09 rewrite)
+-----------------------------------------------------
+Every forwarded call is one A leg + one B leg per carrier bridge attempt, each
+with its own SIP Call-ID; the only wire link is ``X-CID: <A Call-ID>`` on each
+B-leg INVITE.  heplify-server's Loki ``call_id`` label is the packet's OWN
+Call-ID (no A-leg label exists), so correlation reads the header from stored
+SIP text, from three deterministic, bounded sources (see homer_correlation.py
+for the full rationale):
+
+  (a) X-CID harvested from every fetched INVITE request (B -> A, no I/O);
+  (b) ClickHouse samples_v3 scan limited to each A call's own setup window
+      (A -> B), fingerprint -> call_id via time_series;
+  (c) the ``cdrs`` B rows (A -> B cross-check, failure-isolated).
+
+There is NO window-wide ``|~ "X-CID:"`` qryn scan and NO ">50 Call-IDs ->
+skip" rule any more.  Leg fetches (by Call-ID, direct ClickHouse ``IN (...)``
+— qryn's RE2 engine 500s on large Call-ID regex alternations) are chunked and
+paginated; any cap that is still hit, and any failed lookup, is REPORTED via
+``correlation_status`` / ``correlation_reason`` instead of silently dropping
+the correlation.
 """
+import asyncio
 import json
 import os
 import logging
@@ -36,6 +51,9 @@ from services.stir_outcome import badge_fields as stir_badge_fields
 # Pure stdlib module (same pattern as homer_pipeline) so the classification
 # truth table and pcap byte format are unit-testable without fastapi.
 from .homer_pcap import build_pcap, is_edge_packet
+# Pure (stdlib-only) correlation helpers: X-CID parsing, A-leg windows, the
+# ClickHouse SQL builders, grouping/attempt numbering, status bookkeeping.
+from . import homer_correlation as hc
 
 from .homer_pipeline import (
     _deduplicate_results,
@@ -233,19 +251,14 @@ def _needle_or_422(field: str, raw: Optional[str]) -> Optional[str]:
         raise HTTPException(status_code=422, detail=f"{field}: {exc}")
 
 
-def _parse_loki_response(
-    loki_data: dict,
-    extract_xcid: bool = False,
-) -> list[dict[str, Any]]:
+def _parse_loki_response(loki_data: dict) -> list[dict[str, Any]]:
     """Parse a Loki query_range response into normalized SIP trace records.
 
     heplify-server stores SIP data with metadata in stream LABELS (not in
     the log line, which is the raw SIP message text). We read from labels.
-
-    When extract_xcid=True, parses the raw SIP body for X-CID headers to
-    support A/B leg correlation mapping. With FORCEALEGID=false in
-    heplify-server, the call_id label contains the real Call-ID for both
-    A-leg and B-leg messages, so no real_callid extraction is needed.
+    The ``call_id`` label is the packet's OWN Call-ID for every leg
+    (FORCEALEGID=false; heplify 1.60.3 never emits an A-leg label) — leg
+    correlation reads X-CID from raw_msg later (homer_correlation).
 
     Loki response shape:
     {
@@ -267,7 +280,6 @@ def _parse_loki_response(
         }
     }
     """
-    _xcid_re = re.compile(r"X-CID:\s*(.+)", re.IGNORECASE) if extract_xcid else None
     results: list[dict[str, Any]] = []
 
     data = loki_data.get("data", {})
@@ -317,13 +329,6 @@ def _parse_loki_response(
                 "node": labels.get("node", ""),
                 "raw_msg": log_line if log_line else None,
             }
-
-            # Extract X-CID from raw SIP body for correlation
-            if _xcid_re is not None and log_line:
-                m = _xcid_re.search(log_line)
-                if m:
-                    record["x_cid"] = m.group(1).strip()
-
             results.append(record)
 
     return results
@@ -355,12 +360,8 @@ async def _query_qryn(
     start_ns: int,
     end_ns: int,
     limit: int = 200,
-    extract_xcid: bool = False,
 ) -> list[dict[str, Any]]:
     """Execute a LogQL query against qryn and return parsed results.
-
-    When extract_xcid=True, parses X-CID headers from the raw SIP body
-    to support A/B leg correlation mapping.
 
     Raises HTTPException on connection or protocol errors.
     """
@@ -409,7 +410,58 @@ async def _query_qryn(
             detail="qryn returned non-JSON response",
         )
 
-    return _parse_loki_response(loki_data, extract_xcid=extract_xcid)
+    return _parse_loki_response(loki_data)
+
+
+async def _clickhouse_post(
+    client: httpx.AsyncClient,
+    sql: str,
+    params: Optional[dict[str, str]] = None,
+) -> str:
+    """POST one SQL statement to the ClickHouse HTTP interface; return text.
+
+    Raises HTTPException (503 unreachable / timed out, 502 non-200) — the
+    same contract every ClickHouse caller in this router has always had.
+    ``params`` are ClickHouse settings passed as URL parameters (e.g.
+    max_execution_time) — never data.
+    """
+    try:
+        resp = await client.post(
+            CLICKHOUSE_URL,
+            content=sql.encode(),
+            headers={"Content-Type": "text/plain"},
+            params=params or None,
+        )
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        logger.error("ClickHouse unreachable at %s: %s", CLICKHOUSE_URL, exc)
+        raise HTTPException(
+            status_code=503,
+            detail=f"ClickHouse unreachable at {CLICKHOUSE_URL}",
+        )
+    except (httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout) as exc:
+        logger.error("ClickHouse query timed out: %s", exc)
+        raise HTTPException(status_code=503, detail="ClickHouse query timed out")
+
+    if resp.status_code != 200:
+        logger.error(
+            "ClickHouse query failed: HTTP %s — %s",
+            resp.status_code,
+            resp.text[:500],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"ClickHouse query returned HTTP {resp.status_code}",
+        )
+    return resp.text
+
+
+def _failure_reason(exc: BaseException) -> str:
+    """Map an upstream failure to a short correlation_reason token."""
+    if isinstance(exc, asyncio.TimeoutError):
+        return "timeout"
+    if isinstance(exc, HTTPException) and "timed out" in str(exc.detail):
+        return "timeout"
+    return "clickhouse_error"
 
 
 async def _query_clickhouse_by_callids(
@@ -436,15 +488,14 @@ async def _query_clickhouse_by_callids(
     if not call_ids:
         return []
 
-    # Build parameterized IN clause — ClickHouse HTTP interface uses
-    # query parameters for safe value injection, but for simplicity and
-    # because these are Call-ID strings from our own Loki labels (not user
-    # input), we use escaped string literals.  Call-IDs contain only
-    # printable ASCII (alphanumeric, @, ., -, _) so single-quote escaping
-    # is sufficient.
-    escaped_cids = ", ".join(
-        f"'{cid.replace(chr(39), chr(39)+chr(39))}'" for cid in call_ids
-    )
+    # Values are rendered with hc.ch_quote (full backslash + quote escaping
+    # — the previous quote-doubling let a trailing backslash swallow the
+    # closing quote) and anything that is not a printable-ASCII Call-ID is
+    # skipped outright (hc.is_safe_callid): never interpolated.
+    safe_cids = [c for c in call_ids if hc.is_safe_callid(c)]
+    if not safe_cids:
+        return []
+    escaped_cids = ", ".join(hc.ch_quote(cid) for cid in safe_cids)
 
     # Compute the date partition filter from the timestamp range.
     # ClickHouse partitions samples_v3 by day; time_series_gin by date.
@@ -466,7 +517,7 @@ async def _query_clickhouse_by_callids(
             FROM {CLICKHOUSE_DB}.time_series_gin
             WHERE key = 'call_id'
               AND val IN ({escaped_cids})
-              AND date >= '{from_date}'
+              AND date >= {hc.ch_quote(from_date)}
               AND type IN (1, 0)"""
 
     sql = f"""
@@ -489,43 +540,11 @@ async def _query_clickhouse_by_callids(
         FORMAT JSONEachRow
     """
 
-    try:
-        resp = await client.post(
-            CLICKHOUSE_URL,
-            content=sql.encode(),
-            headers={"Content-Type": "text/plain"},
-        )
-    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-        logger.error("ClickHouse unreachable at %s: %s", CLICKHOUSE_URL, exc)
-        raise HTTPException(
-            status_code=503,
-            detail=f"ClickHouse unreachable at {CLICKHOUSE_URL}",
-        )
-    except httpx.ReadTimeout as exc:
-        logger.error("ClickHouse query timed out: %s", exc)
-        raise HTTPException(status_code=503, detail="ClickHouse query timed out")
-
-    if resp.status_code != 200:
-        logger.error(
-            "ClickHouse query failed: HTTP %s — %s",
-            resp.status_code,
-            resp.text[:500],
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=f"ClickHouse query returned HTTP {resp.status_code}",
-        )
+    text = await _clickhouse_post(client, sql)
 
     # Parse JSONEachRow response — one JSON object per line
     results: list[dict[str, Any]] = []
-    for line in resp.text.strip().splitlines():
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
+    for row in hc.parse_json_each_row(text):
         # Parse the labels JSON string from time_series
         try:
             labels = json.loads(row.get("labels", "{}"))
@@ -573,53 +592,332 @@ async def _query_clickhouse_by_callids(
     return results
 
 
-def _extract_callids(results: list[dict[str, Any]]) -> set[str]:
-    """Extract unique non-empty call_id values from parsed results."""
-    return {r["callid"] for r in results if r.get("callid")}
+# ---------------------------------------------------------------------------
+# A/B leg correlation engine (sources (a)/(b)/(c) — see homer_correlation.py)
+# ---------------------------------------------------------------------------
+
+# (b) X-CID scan: A Call-IDs per ClickHouse query (multiSearchAny needle list;
+# the hard ClickHouse limit is 255) and the most A calls one request will
+# correlate. Above the cap the NEWEST A calls are correlated and the rest are
+# reported as cap_reached:<cap> (partial) — never silently skipped.
+XCID_SCAN_CHUNK = 50
+MAX_CORRELATE_A_CALLS = 200
+# Fingerprints per time_series point lookup.
+FINGERPRINT_CHUNK = 500
+# Leg fetch (fetch-by-Call-ID): Call-IDs per query, pages per chunk, and the
+# most Call-IDs one request will fetch. Chunks that fill their row limit are
+# paginated (timestamp cursor) up to the page cap; beyond that the cap is
+# reported as fetch_cap_reached:<limit>.
+FETCH_CHUNK_CALLIDS = 25
+FETCH_CHUNK_LIMIT = 2000
+FETCH_MAX_PAGES = 5
+MAX_FETCH_CALLIDS = 400
+# Concurrent ClickHouse requests per correlation pass.
+CLICKHOUSE_CONCURRENCY = 4
+# Whole-(b) budget; ClickHouse-side execution cap (URL setting) per query.
+XCID_SCAN_BUDGET_S = 12.0
+CLICKHOUSE_MAX_EXECUTION_S = "10"
+# (c) CDR cross-check: short, failure-isolated.
+CDR_LOOKUP_TIMEOUT_S = 3.0
+CDR_WINDOW_SLACK_NS = 60 * 1_000_000_000
+
+_CDR_B_LEGS_SQL = """
+    SELECT uuid, call_id, leg_attempt
+    FROM cdrs
+    WHERE leg = 'B'
+      AND call_id = ANY($1::text[])
+      AND start_time >= $2::timestamptz
+      AND start_time < $3::timestamptz
+"""
 
 
-def _build_correlations(
-    known_callids: set[str],
-    corr_results: list[dict[str, Any]],
-) -> dict[str, list[str]]:
-    """Build a correlations map from the X-CID data in correlated results.
+class _Correlation:
+    """Mutable result of one _correlate_legs pass."""
 
-    Each Call-ID maps to the full set of Call-IDs in its correlation group
-    (including itself). Both legs of a correlated pair point to the same list.
+    def __init__(self) -> None:
+        self.graph = hc.LegGraph()
+        self.health = hc.CorrelationHealth()
+        self.rows: list[dict[str, Any]] = []
 
-    Uses the ``x_cid`` field extracted from B-leg SIP bodies during the
-    correlation query (extract_xcid=True). The X-CID value is the A-leg
-    Call-ID that the B-leg references.
 
-    With FORCEALEGID=false in heplify-server, the call_id label contains
-    the real Call-ID for both A-leg and B-leg messages, so r["callid"]
-    is reliable and no real_callid workaround is needed.
+def _rows_by_callid(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        cid = r.get("callid")
+        if cid:
+            out.setdefault(cid, []).append(r)
+    return out
+
+
+def _row_key(r: dict[str, Any]) -> tuple:
+    return (r.get("timestamp_ns"), r.get("callid"), r.get("src_ip"),
+            r.get("dst_ip"), r.get("node"), r.get("raw_msg"))
+
+
+async def _fetch_legs(
+    client: httpx.AsyncClient,
+    call_ids: set[str],
+    start_ns: int,
+    end_ns: int,
+    health: hc.CorrelationHealth,
+    *,
+    chunk_limit: Optional[int] = None,
+    max_pages: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    """Fetch every stored message for ``call_ids`` — chunked, paginated.
+
+    Never raises: failures/caps are recorded on ``health``.  All chunks
+    failing marks the correlation degraded (the ClickHouse backbone is down).
     """
-    # Map: B-leg Call-ID -> A-leg Call-ID (from X-CID header)
-    bleg_to_aleg: dict[str, str] = {}
-    for r in corr_results:
-        xcid = r.get("x_cid", "")
-        bleg_cid = r.get("callid", "")
-        if xcid and bleg_cid and bleg_cid != xcid:
-            bleg_to_aleg[bleg_cid] = xcid
+    # Resolved at call time (module constants are tunable/monkeypatchable).
+    chunk_limit = chunk_limit or FETCH_CHUNK_LIMIT
+    max_pages = max_pages or FETCH_MAX_PAGES
+    cids = sorted(c for c in call_ids if hc.is_safe_callid(c))
+    if not cids:
+        return []
+    if len(cids) > MAX_FETCH_CALLIDS:
+        health.add(f"fetch_cap_reached:{MAX_FETCH_CALLIDS}")
+        health.truncated = True
+        cids = cids[:MAX_FETCH_CALLIDS]
+    chunks = [cids[i:i + FETCH_CHUNK_CALLIDS]
+              for i in range(0, len(cids), FETCH_CHUNK_CALLIDS)]
+    sem = asyncio.Semaphore(CLICKHOUSE_CONCURRENCY)
 
-    # Build correlation groups: A-leg -> set of all related Call-IDs
-    groups: dict[str, set[str]] = {}
-    for aleg_cid in known_callids:
-        groups.setdefault(aleg_cid, set()).add(aleg_cid)
+    async def one(chunk: list[str]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        seen: set[tuple] = set()
+        cursor = start_ns
+        for _page in range(max_pages):
+            async with sem:
+                page = await _query_clickhouse_by_callids(
+                    client, chunk, cursor, end_ns, limit=chunk_limit)
+            for r in page:
+                k = _row_key(r)
+                if k not in seen:
+                    seen.add(k)
+                    out.append(r)
+            if len(page) < chunk_limit:
+                return out
+            last = max((r.get("timestamp_ns") or 0) for r in page)
+            if last <= cursor:
+                break          # a whole page shares one timestamp: cannot advance
+            cursor = last      # inclusive re-read of the boundary ns, deduped above
+        health.add(f"fetch_cap_reached:{chunk_limit * max_pages}")
+        health.truncated = True
+        return out
 
-    for bleg_cid, aleg_cid in bleg_to_aleg.items():
-        groups.setdefault(aleg_cid, set()).add(aleg_cid)
-        groups[aleg_cid].add(bleg_cid)
+    results = await asyncio.gather(*(one(c) for c in chunks), return_exceptions=True)
+    rows: list[dict[str, Any]] = []
+    failures = 0
+    for res in results:
+        if isinstance(res, BaseException):
+            failures += 1
+            health.add(_failure_reason(res))
+            logger.warning("Homer correlation: leg fetch chunk failed: %s", res)
+        else:
+            rows.extend(res)
+    if failures and failures == len(chunks):
+        health.degraded = True
+    return rows
 
-    # Build the final map: every Call-ID -> sorted list of its group
-    correlations: dict[str, list[str]] = {}
-    for aleg_cid, group in groups.items():
-        sorted_group = sorted(group)
-        for cid in group:
-            correlations[cid] = sorted_group
 
-    return correlations
+async def _xcid_scan(
+    client: httpx.AsyncClient,
+    windows: dict[str, tuple[int, int]],
+    corr: _Correlation,
+) -> None:
+    """Source (b): A -> B via X-CID in samples_v3, bounded to A windows."""
+    items = sorted(windows.items())
+    chunks = [items[i:i + XCID_SCAN_CHUNK] for i in range(0, len(items), XCID_SCAN_CHUNK)]
+    ch_params = {"max_execution_time": CLICKHOUSE_MAX_EXECUTION_S}
+    sem = asyncio.Semaphore(CLICKHOUSE_CONCURRENCY)
+
+    async def one(chunk: list[tuple[str, tuple[int, int]]]) -> list[hc.ScanHit]:
+        a_ids = [a for a, _w in chunk]
+        sql = hc.build_xcid_scan_sql(
+            CLICKHOUSE_DB, a_ids, hc.merge_windows(w for _a, w in chunk))
+        async with sem:
+            text = await _clickhouse_post(client, sql, ch_params)
+        if len(hc.parse_json_each_row(text)) >= hc.XCID_SCAN_ROW_LIMIT:
+            corr.health.add(f"scan_cap_reached:{hc.XCID_SCAN_ROW_LIMIT}")
+            corr.health.truncated = True
+        return hc.parse_xcid_scan(text, set(a_ids))
+
+    results = await asyncio.gather(*(one(c) for c in chunks), return_exceptions=True)
+    hits: list[hc.ScanHit] = []
+    failures = 0
+    for res in results:
+        if isinstance(res, BaseException):
+            failures += 1
+            corr.health.add(_failure_reason(res))
+            logger.warning("Homer correlation: X-CID scan chunk failed: %s", res)
+        else:
+            hits.extend(res)
+    if chunks and failures == len(chunks):
+        corr.health.degraded = True
+        return
+    if not hits:
+        return
+
+    # fingerprint -> call_id label (authoritative identity for the fetch).
+    fps = sorted({h.fingerprint for h in hits})
+    fp_map: dict[int, str] = {}
+    try:
+        for i in range(0, len(fps), FINGERPRINT_CHUNK):
+            sql = hc.build_fingerprint_labels_sql(
+                CLICKHOUSE_DB, fps[i:i + FINGERPRINT_CHUNK])
+            fp_map.update(hc.parse_fingerprint_labels(
+                await _clickhouse_post(client, sql, ch_params)))
+    except HTTPException as exc:
+        # The scan already carries each hit's own Call-ID header — fall back
+        # to it rather than losing the B legs.
+        corr.health.add("fingerprint_map_error")
+        logger.warning("Homer correlation: fingerprint map failed: %s", exc)
+
+    for h in hits:
+        b = fp_map.get(h.fingerprint) or h.hdr_callid
+        if not b or b == h.xcid:
+            continue
+        corr.graph.add(b, h.xcid)
+        prev = corr.graph.scan_first_ns.get(b)
+        if h.first_ns and (prev is None or h.first_ns < prev):
+            corr.graph.scan_first_ns[b] = h.first_ns
+
+
+async def _cdr_b_legs(
+    windows: dict[str, tuple[int, int]],
+    corr: _Correlation,
+) -> None:
+    """Source (c): cdrs B rows for the A calls (uuid == B SIP Call-ID).
+
+    ``cdrs.call_id`` is the A-leg channel uuid, which on this platform IS the
+    inbound SIP Call-ID (internal sofia profile inbound-use-callid-as-uuid).
+    Failure-isolated with a short timeout: a DB hiccup costs only the
+    cross-check (correlation_reason cdr_unavailable), never the search.
+    """
+    a_ids = sorted(windows)
+    lo = min(w[0] for w in windows.values()) - CDR_WINDOW_SLACK_NS
+    hi = max(w[1] for w in windows.values()) + CDR_WINDOW_SLACK_NS
+    try:
+        rows = await asyncio.wait_for(
+            db.fetch_all(
+                _CDR_B_LEGS_SQL, a_ids,
+                datetime.fromtimestamp(lo / 1e9, tz=timezone.utc),
+                datetime.fromtimestamp(hi / 1e9, tz=timezone.utc),
+            ),
+            timeout=CDR_LOOKUP_TIMEOUT_S,
+        )
+    except Exception as exc:  # noqa: BLE001 — isolation is the contract
+        corr.health.add("cdr_unavailable")
+        logger.warning("Homer correlation: CDR B-leg lookup failed (%s: %s)",
+                       type(exc).__name__, exc)
+        return
+    wanted = set(a_ids)
+    for r in rows:
+        b, a, attempt = r["uuid"], r["call_id"], r["leg_attempt"]
+        if not b or a not in wanted or b == a:
+            continue
+        existing = corr.graph.b_to_a.get(b)
+        if existing is not None and existing != a:
+            # Wire evidence (X-CID) wins over the CDR row.
+            logger.warning("Homer correlation: CDR maps %s -> %s but X-CID says %s",
+                           b, a, existing)
+            continue
+        corr.graph.add(b, a)
+        if attempt is not None:
+            corr.graph.cdr_attempt[b] = int(attempt)
+
+
+async def _correlate_legs(
+    client: httpx.AsyncClient,
+    seed_rows: list[dict[str, Any]],
+    start_ns: int,
+    end_ns: int,
+    *,
+    prefetched: Optional[set[str]] = None,
+    chunk_limit: Optional[int] = None,
+    max_pages: Optional[int] = None,
+) -> _Correlation:
+    """Deterministic, bounded A/B leg correlation. NEVER raises.
+
+    1. (a) harvest X-CID from the seed INVITEs; fetch any referenced A leg we
+       do not have yet (so searching the forwarded-to number pulls the A leg).
+    2. A-leg setup windows from each A's own messages.
+    3. (b) X-CID scan + (c) CDR cross-check, concurrently.
+    4. Fetch every leg of every multi-leg call not fetched yet (this also
+       re-fetches the seed legs of those calls, filling responses/BYEs a
+       number-filtered seed never contains), then harvest again for attempt
+       ordering.
+
+    ``prefetched`` = Call-IDs whose FULL capture is already in ``seed_rows``
+    (pcap: the requested leg) — never re-fetched.
+    """
+    corr = _Correlation()
+    corr.rows = list(seed_rows)
+    fetched: set[str] = set(prefetched or ())
+
+    def harvest(rows: list[dict[str, Any]]) -> None:
+        for b, a in hc.harvest_xcid(rows).items():
+            corr.graph.add(b, a)
+
+    try:
+        harvest(corr.rows)
+        by_cid = _rows_by_callid(corr.rows)
+
+        # Step 1: A legs referenced by X-CID but absent from what we hold.
+        missing_a = set(corr.graph.b_to_a.values()) - set(by_cid) - fetched
+        if missing_a:
+            new_rows = await _fetch_legs(
+                client, missing_a, start_ns, end_ns, corr.health,
+                chunk_limit=chunk_limit, max_pages=max_pages)
+            fetched |= missing_a
+            corr.rows.extend(new_rows)
+            harvest(new_rows)
+            by_cid = _rows_by_callid(corr.rows)
+
+        # Step 2: A candidates = roots we hold messages for.
+        a_ids = {corr.graph.root(c) for c in by_cid}
+        windows: dict[str, tuple[int, int]] = {}
+        for a in a_ids:
+            if a in corr.graph.b_to_a or a not in by_cid or not hc.is_safe_callid(a):
+                continue
+            w = hc.a_leg_window(by_cid[a], end_ns)
+            if w is not None:
+                windows[a] = w
+        if len(windows) > MAX_CORRELATE_A_CALLS:
+            newest = sorted(windows, key=lambda a: windows[a][0], reverse=True)
+            windows = {a: windows[a] for a in newest[:MAX_CORRELATE_A_CALLS]}
+            corr.health.add(f"cap_reached:{MAX_CORRELATE_A_CALLS}")
+            corr.health.truncated = True
+
+        # Step 3: (b) + (c).
+        if windows:
+            async def scan() -> None:
+                try:
+                    await asyncio.wait_for(
+                        _xcid_scan(client, windows, corr), XCID_SCAN_BUDGET_S)
+                except asyncio.TimeoutError:
+                    corr.health.add("timeout")
+                    corr.health.degraded = True
+            await asyncio.gather(scan(), _cdr_b_legs(windows, corr))
+
+        # Step 4: fetch every leg of every multi-leg call not yet fetched.
+        known = set(by_cid) | set(corr.graph.b_to_a) | set(corr.graph.b_to_a.values())
+        groups: dict[str, set[str]] = {}
+        for cid in known:
+            groups.setdefault(corr.graph.root(cid), set()).add(cid)
+        to_fetch = {c for g in groups.values() if len(g) > 1 for c in g} - fetched
+        if to_fetch:
+            new_rows = await _fetch_legs(
+                client, to_fetch, start_ns, end_ns, corr.health,
+                chunk_limit=chunk_limit, max_pages=max_pages)
+            corr.rows.extend(new_rows)
+            harvest(new_rows)
+    except Exception as exc:  # noqa: BLE001 — correlation must never fail a search
+        logger.exception("Homer correlation failed unexpectedly")
+        corr.health.add(_failure_reason(exc))
+        corr.health.degraded = True
+    return corr
 
 
 # ---------------------------------------------------------------------------
@@ -741,34 +1039,53 @@ async def search_sip_traces(
                    via X-CID.
 
     Builds a LogQL query from the search parameters and queries qryn.
-    When correlation is enabled, performs A/B leg correlation in 3 steps:
+    When correlation is enabled (``correlate``, default true):
 
-    1. Initial phone number search (limit=500) via qryn LogQL finds both
-       A-leg and B-leg messages where the number appears in the SIP body.
-    2. Correlation query via qryn LogQL finds X-CID headers referencing
-       known Call-IDs, building a map of B-leg -> A-leg relationships.
-    3. Final query fetches ALL messages for ALL correlated Call-IDs using
-       a DIRECT ClickHouse SQL query with an IN clause. This bypasses
-       qryn's LogQL/RE2 engine entirely, avoiding the 500 errors that
-       occur with regex alternation patterns containing escaped SIP
-       Call-ID characters (@, ., -).
-
-    The final query ALWAYS runs when correlations are found, even if no
-    new Call-IDs were discovered. This is critical because the initial
-    phone-number regex query may truncate results at the limit, missing
-    some B-leg messages. The ClickHouse SQL query is precise and returns
-    complete data for all legs via indexed fingerprint lookup.
+    1. Step 1 — number search (limit=INITIAL_LIMIT) via qryn LogQL finds the
+       messages whose text contains the number (A and/or B legs).
+    2. _correlate_legs (see module docstring / homer_correlation.py):
+       (a) X-CID harvested from every fetched INVITE (B -> A; a discovered A
+           leg is fetched, so searching the forwarded-to number pulls the A
+           leg); (b) ClickHouse X-CID scan bounded to each A call's own setup
+           window (A -> B; searching a masked caller finds its B legs);
+           (c) cdrs B rows (A -> B cross-check).  NO window-wide X-CID scan,
+           no Call-ID-count skip.
+    3. Every leg of every multi-leg call is fetched by Call-ID via DIRECT
+       ClickHouse SQL (``IN (...)`` — qryn's RE2 engine 500s on large escaped
+       Call-ID alternations), chunked + paginated, so B-leg responses/BYEs a
+       number-filtered Step 1 never contains are present.
 
     RESPONSE CONTRACT (the UI builds the SIP ladder to this — all additions
     are backward-compatible / additive):
 
     Top level:
       data                  [message]  — in AUTHORITATIVE display order
-      correlations          {callid: [callid]}  — unchanged
+      correlations          {callid: [callid]}  — shape unchanged: every
+                            Call-ID in data -> sorted list of its whole call
+                            (A + every B attempt, itself included)
+      legs                  {callid: {role: "A"|"B", a_callid: str,
+                            attempt: int|null}} — every Call-ID in data. A:
+                            a_callid = itself, attempt null. B: a_callid = its
+                            A leg, attempt = 1-based bridge attempt (CDR
+                            leg_attempt when every B of the call has one,
+                            else order of first INVITE). {} when correlate is
+                            false.
+      correlation_status    "ok" | "partial" | "degraded" — partial: some
+                            lookup failed or a cap was hit but the rest
+                            worked; degraded: the ClickHouse correlation
+                            backbone could not run (Step-1 data only). The
+                            search itself never fails because of correlation.
+      correlation_reason    str|null — comma-joined short tokens, e.g.
+                            "clickhouse_error", "timeout", "cdr_unavailable",
+                            "cap_reached:200", "fetch_cap_reached:10000",
+                            "scan_cap_reached:5000", "fingerprint_map_error";
+                            "disabled" when correlate=false (status "ok").
       pipeline_warnings     [str]      — e.g. "2 messages reordered for SIP
                             causality", "13 ingest-stamped rows detected";
                             empty list when the pipeline saw nothing unusual
-      correlation_truncated true       — only present when Step 2 truncated
+      correlation_truncated true       — DEPRECATED (use correlation_status /
+                            correlation_reason); only present when a
+                            correlation cap was hit.
       oldest_ts_ns          int|null   — timestamp_ns of the OLDEST message
                             actually RETURNED in data (the true min over the
                             post-dedup result set); null when data is empty.
@@ -777,9 +1094,7 @@ async def search_sip_traces(
                             back at exactly INITIAL_LIMIT, i.e. the window was
                             truncated by the internal cap and older data (qryn
                             returns the NEWEST entries first) exists beyond
-                            what was returned. Under-limit -> false. Distinct
-                            from correlation_truncated (Step-2 X-CID scan),
-                            which is unchanged.
+                            what was returned. Under-limit -> false.
 
     CURSOR PAGING: when has_more is true, the frontend re-issues the SAME
     search with ``before_ns = oldest_ts_ns`` (strict ``timestamp_ns <
@@ -885,26 +1200,22 @@ async def search_sip_traces(
             return {
                 "data": [],
                 "correlations": {},
+                "legs": {},
+                "correlation_status": "ok",
+                "correlation_reason": None,
                 "pipeline_warnings": [],
                 "oldest_ts_ns": None,
                 "has_more": False,
             }
 
-    # Limits: 500 for initial phone-number search (8 calls x ~30 msgs = 240+),
-    # 1000 for the X-CID correlation query in Step 2 (it fetches EVERY X-CID
-    # message in the window and filters in Python, so the default limit of 200
-    # was easily truncated on busy windows -- consistent with FINAL_LIMIT),
-    # 1000 for the final call_id query which fetches both legs of all calls.
-    #
-    # These limits are ALSO the guardrail for broad partial needles: a
-    # 3-digit needle like "617" can match thousands of messages in a busy
-    # window, but Step 1 simply truncates at INITIAL_LIMIT, correlation is
-    # skipped entirely above 50 distinct Call-IDs (below), and every upstream
-    # query carries the 15s httpx timeout. The time WINDOW span itself is
+    # INITIAL_LIMIT (500) caps the Step-1 number search. It is ALSO the
+    # guardrail for broad partial needles: a 3-digit needle like "617" can
+    # match thousands of messages in a busy window, but Step 1 simply
+    # truncates (has_more tells the UI to page). Correlation is bounded per A
+    # call (MAX_CORRELATE_A_CALLS, windows, chunking) and every upstream query
+    # carries the 15s httpx timeout. The time WINDOW span itself is
     # client-chosen and not capped server-side.
     INITIAL_LIMIT = 500
-    CORRELATION_LIMIT = 1000
-    FINAL_LIMIT = 1000
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         # Step 1: Initial query — phone number regex match
@@ -925,7 +1236,11 @@ async def search_sip_traces(
         # SIP-causality ordering, hairpin marking, seq assignment) so the UI
         # receives the same per-message contract regardless of which path
         # produced the data.
-        async def _respond(results: list, correlations: dict, truncated: bool = False) -> dict:
+        async def _respond(
+            results: list,
+            corr: Optional[_Correlation] = None,
+            disabled: bool = False,
+        ) -> dict:
             if body.before_ns is not None:
                 # Belt-and-braces strict cursor bound: end_ns clamping already
                 # scoped every upstream fetch, but correlation refetches merge
@@ -946,129 +1261,41 @@ async def search_sip_traces(
                 (m["timestamp_ns"] for m in data if m.get("timestamp_ns")),
                 default=None,
             )
+            if corr is not None:
+                # Groups/legs cover exactly the Call-IDs present in data.
+                correlations, legs = hc.build_groups(
+                    {m["callid"] for m in data if m.get("callid")},
+                    corr.graph, _rows_by_callid(data),
+                )
+                status, reason = corr.health.status, corr.health.reason
+                truncated = corr.health.truncated
+            else:
+                correlations, legs = {}, {}
+                status, reason = "ok", ("disabled" if disabled else None)
+                truncated = False
             return {
                 "data": data,
                 "correlations": correlations,
+                "legs": legs,
+                "correlation_status": status,
+                "correlation_reason": reason,
                 "pipeline_warnings": pipeline_warnings,
                 # Additive cursor-paging fields (always present).
                 "oldest_ts_ns": oldest_ts_ns,
                 "has_more": base_truncated,
-                # Additive, backward-compatible: only present when True.
+                # DEPRECATED back-compat flag: only present when True.
                 **({"correlation_truncated": True} if truncated else {}),
             }
 
-        # If no results or correlation disabled, return immediately
-        if not initial_results or not body.correlate:
-            return await _respond(initial_results, {})
+        if not body.correlate:
+            return await _respond(initial_results, disabled=True)
+        if not initial_results:
+            return await _respond(initial_results, _Correlation())
 
-        known_callids = _extract_callids(initial_results)
-
-        if not known_callids or len(known_callids) > 50:
-            # Too many call_ids — skip correlation to avoid excessive queries.
-            # The ClickHouse IN clause can handle hundreds of values, but the
-            # X-CID correlation query in Step 2 still fetches ALL X-CID messages
-            # in the time window (expensive). Cap at 50 to keep Step 2 bounded.
-            if len(known_callids) > 50:
-                logger.info(
-                    "Skipping A/B correlation: %d call_ids exceeds limit of 50",
-                    len(known_callids),
-                )
-            return await _respond(initial_results, {})
-
-        # Step 2: Correlation — search for X-CID headers to find B-leg messages.
-        # Use a simple "X-CID:" filter (not a complex regex with all Call-IDs)
-        # because qryn's RE2 engine chokes on large alternation patterns with
-        # escaped special characters (@, .) — returns 500 Internal Server Error.
-        # We filter by specific Call-ID in Python after fetching.
-        corr_query = '{type="sip"} |~ "X-CID:"'
-
-        correlation_truncated = False
-        try:
-            corr_results = await _query_qryn(
-                client, corr_query, start_ns, end_ns,
-                limit=CORRELATION_LIMIT, extract_xcid=True,
-            )
-            # Truncation check BEFORE the Python-side filter: if qryn returned
-            # exactly the limit, there were likely more X-CID messages in the
-            # window that we never saw, so some B-leg -> A-leg mappings may be
-            # missing from the correlation map.
-            if len(corr_results) >= CORRELATION_LIMIT:
-                correlation_truncated = True
-                logger.warning(
-                    "A/B correlation may be incomplete: X-CID query returned "
-                    "%d results (limit=%d), correlation window truncated",
-                    len(corr_results), CORRELATION_LIMIT,
-                )
-            # Filter to only messages whose X-CID references one of our known Call-IDs
-            corr_results = [
-                r for r in corr_results
-                if r.get("x_cid", "") in known_callids
-            ]
-        except HTTPException:
-            # Correlation query failed — return initial results without correlation
-            logger.warning("A/B correlation query failed, returning initial results only")
-            return await _respond(initial_results, {})
-
-        # Build the correlations map from X-CID data BEFORE stripping x_cid
-        correlations = _build_correlations(known_callids, corr_results)
-
-        # Strip internal correlation fields from corr_results
-        for r in corr_results:
-            r.pop("x_cid", None)
-
-        # Collect any NEW call_ids discovered via correlation (B-leg IDs
-        # that weren't in the initial results, e.g. due to limit truncation).
-        new_callids = _extract_callids(corr_results) - known_callids
-
-        # Check if ANY correlations were actually found (i.e., any B-leg
-        # Call-ID was mapped to an A-leg Call-ID). This is the key check:
-        # even when new_callids is empty (both legs already in known_callids
-        # from the initial query), the initial results may be INCOMPLETE due
-        # to the query limit. B-leg responses (100 Trying, 183, 200 OK from
-        # carrier) don't contain the phone number, so they may have been
-        # truncated. The final query uses precise call_id label selectors
-        # and fetches ALL messages for all known legs.
-        has_correlations = any(
-            len(group) > 1 for group in correlations.values()
-        )
-
-        if not has_correlations:
-            # No A/B correlation found — merge what we have and return.
-            # All Call-IDs are independent calls, no B-legs to fetch.
-            return await _respond(
-                initial_results + corr_results,
-                correlations,
-                truncated=correlation_truncated,
-            )
-
-        # Step 3: Final query — get ALL messages from all correlated legs.
-        # Uses direct ClickHouse SQL with an IN clause instead of qryn LogQL
-        # regex alternation.  SQL ``IN ('cid1','cid2',...,'cid24')`` is an
-        # indexed lookup that handles any number of Call-IDs trivially.
-        # This eliminates the 500 errors from qryn's RE2 engine choking on
-        # large escaped alternation patterns.
-        all_callids = known_callids | new_callids
-        cid_list = sorted(all_callids)
-
-        try:
-            final_results = await _query_clickhouse_by_callids(
-                client, cid_list, start_ns, end_ns, limit=FINAL_LIMIT,
-            )
-        except HTTPException:
-            # ClickHouse query failed — merge initial + correlation results
-            logger.warning("ClickHouse correlation query failed, returning partial results")
-            return await _respond(
-                initial_results + corr_results,
-                correlations,
-                truncated=correlation_truncated,
-            )
-
-        # The final query is the definitive result set — it contains ALL
-        # messages for all Call-IDs. Merge with earlier results (dedup
-        # handles any overlap) to ensure nothing is lost if the final
-        # query itself hit its limit.
-        all_results = initial_results + corr_results + final_results
-        return await _respond(all_results, correlations, truncated=correlation_truncated)
+        # Steps 2-3: deterministic, bounded A/B correlation + leg fetch.
+        # Never raises; failures surface as correlation_status/_reason.
+        corr = await _correlate_legs(client, initial_results, start_ns, end_ns)
+        return await _respond(corr.rows, corr)
 
 
 # ---------------------------------------------------------------------------
@@ -1082,67 +1309,15 @@ async def search_sip_traces(
 PCAP_LOOKBACK_DAYS = 30
 # Row cap per the pinned contract (~2000 packets -> 413 when exceeded).
 PCAP_MAX_PACKETS = 2000
-# Margin around the primary leg's observed packet span used both for the
-# qryn X-CID correlation scan and the final multi-leg refetch.  B-legs are
-# created strictly within the A-leg's lifetime; 5 minutes is ample slack.
+# Margin around the requested leg's observed packet span for the correlated
+# leg fetch.  B-legs are created strictly within the A-leg's lifetime (and an
+# A leg's INVITE precedes its B legs by at most the failover loop, ~4 x 10 s);
+# 5 minutes is ample slack.  The A -> B X-CID scan itself is bounded far more
+# tightly, to each A call's own setup window (homer_correlation.a_leg_window).
 PCAP_CORRELATION_MARGIN_NS = 300 * 1_000_000_000
-
-# Same X-CID pattern the search correlation uses (_parse_loki_response).
-_PCAP_XCID_RE = re.compile(r"X-CID:\s*(.+)", re.IGNORECASE)
 
 # Content-Disposition filename characters we keep from the raw Call-ID.
 _PCAP_FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._@-]")
-
-
-async def _pcap_correlated_callids(
-    client: httpx.AsyncClient,
-    call_id: str,
-    rows: list[dict[str, Any]],
-) -> set[str]:
-    """Discover the full correlation group for one Call-ID (REUSES the
-    search pipeline's X-CID machinery, scoped to the call's own time span).
-
-    Two directions:
-      * given a B-leg: its OWN packets carry ``X-CID: <a-leg>`` — extracted
-        here directly from the fetched raw bodies;
-      * given an A-leg: sibling B-legs referencing it are found exactly like
-        /search Step 2 (qryn ``|~ "X-CID:"`` scan + Python filter +
-        _build_correlations), but over the call's span instead of a
-        user-chosen window, which keeps the scan cheap and complete.
-
-    FAIL-SOFT: a qryn error degrades to the already-fetched leg(s) rather
-    than failing the whole export (mirrors /search behavior).
-    """
-    known: set[str] = {call_id}
-    for r in rows:
-        m = _PCAP_XCID_RE.search(r.get("raw_msg") or "")
-        if m:
-            known.add(m.group(1).strip())
-
-    ts_values = [r["timestamp_ns"] for r in rows if r.get("timestamp_ns")]
-    if not ts_values:
-        return known
-    win_start = min(ts_values) - PCAP_CORRELATION_MARGIN_NS
-    win_end = max(ts_values) + PCAP_CORRELATION_MARGIN_NS
-
-    try:
-        corr_results = await _query_qryn(
-            client, '{type="sip"} |~ "X-CID:"', win_start, win_end,
-            limit=1000, extract_xcid=True,
-        )
-    except HTTPException:
-        logger.warning(
-            "pcap export: X-CID correlation query failed for %s — "
-            "exporting the requested leg(s) only", call_id,
-        )
-        return known
-
-    corr_results = [r for r in corr_results if r.get("x_cid", "") in known]
-    correlations = _build_correlations(known, corr_results)
-    group: set[str] = set(known)
-    for cids in correlations.values():
-        group.update(cids)
-    return group
 
 
 @router.get("/pcap")
@@ -1174,8 +1349,10 @@ async def export_pcap(
         never returned).
       * 400 on malformed/empty call_id; 413 with detail above the
         ~2000-packet cap.
-      * correlated=true also pulls the correlated legs (the A<->B X-CID
-        correlation the search pipeline computes).
+      * correlated=true also pulls EVERY correlated leg (the same A<->B
+        correlation POST /search computes: the A leg and every B bridge
+        attempt, whichever leg was requested).  X-Pcap-Correlation header:
+        ok | partial | degraded (a failed lookup exports what was found).
       * X-Pcap-Skipped header: count of stored rows that could not be
         represented as IPv4/UDP packets (rare; e.g. IPv6 endpoints).
 
@@ -1222,44 +1399,41 @@ async def export_pcap(
                 ),
             )
 
+        corr_status = "ok"
         if correlated:
-            group = await _pcap_correlated_callids(client, cid, rows)
-            if group != {cid}:
-                ts_values = [
-                    r["timestamp_ns"] for r in rows if r.get("timestamp_ns")
-                ]
-                win_start = (
-                    min(ts_values) - PCAP_CORRELATION_MARGIN_NS
-                    if ts_values else start_ns
+            # SAME engine as POST /search (X-CID harvest + bounded ClickHouse
+            # X-CID scan + CDR cross-check), seeded with this leg's full
+            # capture: requesting an A leg pulls every B attempt, requesting
+            # a B leg pulls its A leg AND the sibling attempts.  Fail-soft:
+            # a failed lookup exports what was found (status in the
+            # X-Pcap-Correlation header), never a 5xx.
+            ts_values = [r["timestamp_ns"] for r in rows if r.get("timestamp_ns")]
+            win_start = (min(ts_values) - PCAP_CORRELATION_MARGIN_NS
+                         if ts_values else start_ns)
+            win_end = (max(ts_values) + PCAP_CORRELATION_MARGIN_NS
+                       if ts_values else end_ns)
+            corr = await _correlate_legs(
+                client, rows, win_start, win_end,
+                prefetched={cid},
+                chunk_limit=PCAP_MAX_PACKETS + 1, max_pages=1,
+            )
+            corr_status = corr.health.status
+            if corr.health.status != "ok":
+                logger.warning(
+                    "pcap export: correlation for %s is %s (%s)",
+                    cid, corr.health.status, corr.health.reason,
                 )
-                win_end = (
-                    max(ts_values) + PCAP_CORRELATION_MARGIN_NS
-                    if ts_values else end_ns
+            rows = corr.rows
+            if len(rows) > PCAP_MAX_PACKETS:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"capture for Call-ID '{cid}' plus correlated "
+                        f"legs exceeds the {PCAP_MAX_PACKETS}-packet "
+                        "export cap — retry with correlated=false to "
+                        "export only this leg"
+                    ),
                 )
-                try:
-                    all_rows = await _query_clickhouse_by_callids(
-                        client, sorted(group), win_start, win_end,
-                        limit=PCAP_MAX_PACKETS + 1,
-                    )
-                except HTTPException:
-                    # Fail-soft (mirrors /search): keep the primary leg.
-                    logger.warning(
-                        "pcap export: correlated-leg fetch failed for %s — "
-                        "exporting the requested leg only", cid,
-                    )
-                    all_rows = []
-                if all_rows:
-                    rows = all_rows
-                if len(rows) > PCAP_MAX_PACKETS:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=(
-                            f"capture for Call-ID '{cid}' plus correlated "
-                            f"legs exceeds the {PCAP_MAX_PACKETS}-packet "
-                            "export cap — retry with correlated=false to "
-                            "export only this leg"
-                        ),
-                    )
 
     total_stored = len(rows)
     if not internal:
@@ -1302,5 +1476,7 @@ async def export_pcap(
             "Content-Disposition": f'attachment; filename="{filename}"',
             "X-Pcap-Skipped": str(skipped),
             "X-Pcap-Packets": str(packet_count),
+            # Additive: ok | partial | degraded (correlated=true), else ok.
+            "X-Pcap-Correlation": corr_status,
         },
     )

@@ -46,10 +46,53 @@ push endpoint. qryn stores data in ClickHouse.
 TroubleshootingPage (`docker/ui/app/src/pages/TroubleshootingPage.tsx`) POSTs to
 `/api/homer/search`, which nginx proxies to the FastAPI Homer router
 (`docker/api/src/routers/homer.py`, mounted at both `/homer` and `/v1/homer`).
-That router queries qryn (LogQL) for phone-number search + X-CID discovery, then
-queries ClickHouse **directly on port 8123** for the multi-Call-ID fetch (bypassing
-qryn's RE2 LogQL engine, which 500s on large regex alternations). Grafana is now a
-SECONDARY deep-link target for ad-hoc ladder inspection, not the main entry point.
+That router queries qryn (LogQL) for the phone-number search only, then queries
+ClickHouse **directly on port 8123** for A/B leg correlation and the multi-Call-ID
+fetch (bypassing qryn's RE2 LogQL engine, which 500s on large regex alternations).
+Grafana is now a SECONDARY deep-link target for ad-hoc ladder inspection, not the
+main entry point.
+
+## A/B leg correlation (how a forwarded call becomes ONE ladder)
+
+FreeSWITCH is a B2BUA: a forwarded call is one A leg (carrier -> FS) plus one B
+leg **per carrier bridge attempt** (failover loop), each with its OWN SIP Call-ID.
+The only wire link is the `X-CID: <A-leg SIP Call-ID>` header on every B-leg
+INVITE (FS dial strings in `inbound_router.lua` / `trunk_outbound.lua`; Kamailio
+re-adds it toward carriers), captured at FS-out, SBC-in and SBC-out.
+
+**heplify does NOT correlate legs for us.** heplify-server 1.60.3 sets the Loki
+`call_id` label to each packet's OWN Call-ID (`remotelog/loki.go`); `ALEGIDS=X-CID`
+produces no A-leg label in qryn/ClickHouse. So the API reads X-CID out of the stored
+SIP text itself (`docker/api/src/routers/homer.py` `_correlate_legs`, pure helpers
+in `routers/homer_correlation.py`), from three bounded sources:
+
+1. **Harvest (B -> A):** X-CID parsed (header-anchored, case-insensitive:
+   `(?mi)^X-CID:[ \t]*([^\r\n]+)`) from every INVITE already fetched. A referenced
+   A leg is fetched, so searching the forwarded-to number also pulls the A leg.
+2. **ClickHouse scan (A -> B):** `qryn.samples_v3` restricted to each A call's own
+   setup window `[first INVITE - 1 s, first final INVITE response + 2 s]`
+   (in-progress call -> search end), `multiSearchAny` over <= 50 A Call-IDs per
+   query, `extract()` of the X-CID value, fingerprint -> `call_id` via
+   `qryn.time_series` (primary-key lookup). Finds the B legs of a masked caller.
+3. **CDR cross-check:** `cdrs` rows with `leg='B'` and `call_id` = the A uuid (the
+   A uuid IS the inbound SIP Call-ID: internal profile
+   `inbound-use-callid-as-uuid=true`); the B `uuid` is the B SIP Call-ID. Finds a B
+   leg whose INVITE capture was lost; supplies `leg_attempt`.
+
+Every leg of every multi-leg call is then fetched by Call-ID (chunked, paginated).
+The response carries `legs` (`role` / `a_callid` / `attempt`) and
+`correlation_status` (`ok` | `partial` | `degraded`) + `correlation_reason` — a
+failed or capped lookup is reported, never silently swallowed. There is no
+window-wide `|~ "X-CID:"` qryn scan (the old one saw only the newest ~300 carrier
+legs platform-wide) and no ">50 Call-IDs -> skip correlation" rule.
+`GET /v1/homer/pcap?correlated=true` uses the same engine (all legs exported).
+
+Verify the ClickHouse assumptions on the services VM (read-only):
+`sudo docker exec voip-clickhouse clickhouse-client --query "SHOW CREATE TABLE qryn.samples_v3"`
+(the scan relies on `timestamp_ns` being the ORDER BY / partition key and the
+SIP text living in `string`), and
+`sudo docker exec voip-clickhouse clickhouse-client --query "SELECT extract('A: 1\r\nx-cid: abc@h  \r\nB: 2', '(?mi)^X-CID:[ \\t]*([^\\r\\n]+)')"`
+(must print `abc@h  ` — inline `(?mi)` flags honored by ClickHouse RE2).
 
 ## HEP Sources & Capture IDs
 
@@ -108,7 +151,7 @@ The quality panels read the honest columns from migration 50. They need `50_cdr_
 
 - **heplify-server** uses `DBSHEMA=mock` and `DBDRIVER=mock` -- it does NOT write to a database directly. Instead it pushes to qryn's Loki push endpoint (`LOKIURL`).
 - **`LOKIALLOWOUTOFORDER=true` is REQUIRED.** heplify-server's Loki client (remotelog/loki.go) keeps a single global `lastPktTime`; with the default `false`, any HEP packet arriving out of timestamp order gets its timestamp REPLACED with `time.Now()` (and poisons `lastPktTime`, cascading onto subsequent packets). Symptom: rows with full-nanosecond entropy, 15-20ms late, INVITEs sorting after their own 100 Trying in the ladder. Real HEP capture timestamps are µs precision (stored ns values end in `000`). The guard exists for genuine Grafana Loki; qryn/ClickHouse accepts out-of-order writes, so disabling the guard is safe here.
-- **ALEGIDS=X-CID** is preserved for call leg correlation (Kamailio sets X-CID header).
+- **ALEGIDS=X-CID** is set but does **NOT** give us leg correlation: heplify-server 1.60.3's Loki push labels every packet with its OWN Call-ID (`call_id` label) and never emits an A-leg label. A/B correlation is done by the API from the X-CID header text — see "A/B leg correlation" above.
 - **qryn** connects to ClickHouse on port 8123 (HTTP interface) with the default user (no password).
 - **Grafana** has anonymous viewer access enabled and serves from `/grafana/` subpath for reverse proxy compatibility.
 - **Flow panel plugin** (`qxip-flow-panel`) is installed at Grafana startup for SIP ladder diagrams.

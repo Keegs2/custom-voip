@@ -74,9 +74,44 @@ export interface HomerSearchResult {
   attestation?: MessageAttestation | null;
 }
 
+/** Which side of the FreeSWITCH B2BUA a Call-ID is on. */
+export type HomerLegRole = 'A' | 'B';
+
+/**
+ * Per-Call-ID leg classification computed by the API's leg correlation.
+ *
+ * - `role`: 'A' = the inbound/originating leg (carrier → FS), 'B' = an
+ *   FS-originated outbound leg (one per bridge attempt in the failover loop).
+ * - `a_callid`: the A leg this Call-ID belongs to (for an A leg, itself).
+ * - `attempt`: 1-based bridge-attempt ordinal for B legs; `null` when unknown
+ *   (and for A legs).
+ */
+export interface HomerLegInfo {
+  role: HomerLegRole;
+  a_callid: string;
+  attempt: number | null;
+}
+
+/**
+ * Health of the leg correlation for THIS response:
+ * - 'ok'       — every leg that could be correlated was.
+ * - 'partial'  — some legs could not be linked (a call may render split).
+ * - 'degraded' — correlation largely failed (e.g. a backing query errored).
+ */
+export type HomerCorrelationStatus = 'ok' | 'partial' | 'degraded';
+
 export interface HomerSearchResponse {
   data: HomerSearchResult[];
   correlations: Record<string, string[]>;
+  /**
+   * Call-ID → leg classification. Additive: absent on older APIs, in which
+   * case grouping falls back to `correlations` alone.
+   */
+  legs?: Record<string, HomerLegInfo>;
+  /** Correlation health. Absent on older APIs (treat as unknown/ok). */
+  correlation_status?: HomerCorrelationStatus;
+  /** Staff-facing reason for a non-'ok' `correlation_status`. */
+  correlation_reason?: string | null;
   /** Present (true) when the X-CID correlation window was truncated */
   correlation_truncated?: boolean;
   /** Pipeline diagnostics (e.g. timestamp-corruption notices) — show unobtrusively */
