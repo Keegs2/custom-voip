@@ -32,11 +32,16 @@ export interface TrunkDid {
   created_at: string;
 }
 
+/**
+ * Legacy stats shape. NOTE: GET /trunks/{id}/stats actually returns
+ * {trunk_id, current_channels, max_channels, channel_utilization, cps_limit,
+ * last_hour}; pages widen this locally. The API never returns cost to
+ * tenants (last_hour.total_cost is admin-only), so no cost field lives here.
+ */
 export interface TrunkStats {
   active_channels: number;
   calls_today: number;
   minutes_today: number;
-  cost_today: number;
 }
 
 export interface CallPathPackage {

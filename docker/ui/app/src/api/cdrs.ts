@@ -49,6 +49,11 @@ export function cdrSearchQuery(params: CdrSearchParams): URLSearchParams {
   if (params.zone) query.set('zone', params.zone);
   if (params.sbc_id) query.set('sbc_id', params.sbc_id);
   if (params.rated_only) query.set('rated_only', 'true');
+  // Staff-only row model. 'calls' is the server default, so it is never sent
+  // — tenant requests (which can only ever be 'calls') stay byte-identical.
+  if (params.leg && params.leg !== 'calls') query.set('leg', params.leg);
+  // Staff-only single-call filter — sent only when set (tenants never set it).
+  if (params.call_id) query.set('call_id', params.call_id);
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.offset !== undefined) query.set('offset', String(params.offset));
   return query;

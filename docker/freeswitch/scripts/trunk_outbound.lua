@@ -93,6 +93,90 @@ local function set_var(name, value)
 end
 
 -- ================================================================
+-- CDR A/B leg split: per-leg B-channel CDR variables
+-- ================================================================
+-- Contract: docs/CDR_LEG_SPLIT_CONTRACT.md. SAME helper as
+-- inbound_router.lua (kept inline, like the stir_outcome helpers, so a
+-- lib load failure can never touch the call path). With mod_json_cdr
+-- log-b-leg=true each carrier B channel POSTs its own CDR; the ingest
+-- writes a B row ONLY for cdr_leg=B + cdr_carrier_leg=true, built from
+-- these vars. Returned as a "[...]" PER-LEG block placed right before the
+-- endpoint: switch_ivr_originate applies it to that one new peer channel
+-- only — nothing is written back to this (A) channel, so the A-leg CDR is
+-- unchanged. Values are the A-leg's final values read back at bridge time,
+-- validated against a dial-string-safe charset; an unsafe/absent value is
+-- OMITTED (ingest logs + drops a B-leg missing cdr_customer_id/cdr_call_id)
+-- — attribution fails closed, the call never fails from this. PBX-originated
+-- trunk calls normally have no on_net/origin/terminating/inbound_carrier
+-- A-leg vars; those are then omitted on the B-leg too (verbatim copy of an
+-- absent value).
+local CDR_B_LEG_VARS = {
+    -- { B-leg var,                  A-leg source var,          validator }
+    { "cdr_customer_id",             "customer_id",             "int"   },
+    { "cdr_product_type",            "product_type",            "word"  },
+    { "cdr_trunk_id",                "trunk_id",                "int"   },
+    { "cdr_on_net",                  "on_net",                  "bool"  },
+    { "cdr_on_net_hops",             "on_net_hops",             "int"   },
+    { "cdr_origin_customer_id",      "origin_customer_id",      "int"   },
+    { "cdr_terminating_customer_id", "terminating_customer_id", "int"   },
+    { "cdr_inbound_carrier",         "inbound_carrier",         "token" },
+    { "cdr_inbound_carrier_pop",     "inbound_carrier_pop",     "token" },
+    { "cdr_sbc_id",                  "sip_h_X-SBC-ID",          "token" },
+}
+
+local function cdr_safe_value(v, kind)
+    if v == nil then return nil end
+    v = tostring(v)
+    if v == "" then return nil end
+    if kind == "int" then
+        return v:match("^%d+$")
+    elseif kind == "bool" then
+        if v == "true" or v == "false" then return v end
+        return nil
+    elseif kind == "word" then
+        return v:match("^[%a_]+$")
+    elseif kind == "token" then
+        return v:match("^[%w%._%-]+$")
+    elseif kind == "callid" then
+        -- A-leg uuid == inbound SIP Call-ID (internal profile
+        -- inbound-use-callid-as-uuid=true); already rides the dial string as X-CID.
+        return v:match("^[%w%._%-@:+~!%%*/]+$")
+    end
+    return nil
+end
+
+-- attempt_no: 1-based count of carrier bridges launched for this call.
+local function cdr_b_leg_block(attempt_no)
+    local parts = {
+        "cdr_leg=B",
+        "cdr_carrier_leg=true",
+        "cdr_leg_attempt=" .. string.format("%d", attempt_no),
+        "cdr_direction=outbound",
+    }
+    local a_uuid = get_var("uuid", nil)
+    local call_id = cdr_safe_value(a_uuid, "callid")
+    if call_id then
+        parts[#parts + 1] = "cdr_call_id=" .. call_id
+    else
+        freeswitch.consoleLog("WARNING", string.format(
+            "[trunk_outbound] cdr_call_id omitted (uuid %q not dial-string safe) — B-leg CDR will be dropped by ingest\n",
+            tostring(a_uuid)))
+    end
+    for _, spec in ipairs(CDR_B_LEG_VARS) do
+        local raw = get_var(spec[2], nil)
+        local val = cdr_safe_value(raw, spec[3])
+        if val then
+            parts[#parts + 1] = spec[1] .. "=" .. val
+        elseif raw ~= nil then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[trunk_outbound] %s omitted from B-leg (A-leg %s=%q not dial-string safe)\n",
+                spec[1], spec[2], tostring(raw)))
+        end
+    end
+    return "[" .. table.concat(parts, ",") .. "]"
+end
+
+-- ================================================================
 -- fs_node / fs_zone: which FreeSWITCH node produced this call
 -- ================================================================
 -- Plain channel variables, so mod_json_cdr carries them in the CDR
@@ -778,9 +862,10 @@ set_var("transfer_ringback", "%(2000,4000,440,480)")
 local dial_string = string.format(
     "{ignore_early_media=false,sip_enable_soa=false,progress_timeout=%d,call_timeout=60,sip_h_X-Carrier=primary" ..
     ",sip_h_X-CID=%s" ..
-    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
+    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}%ssofia/external/%s@" .. sbc_proxy_ip .. ":5060",
     bridge_progress_timeout,
     sip_call_id,
+    cdr_b_leg_block(1),  -- CDR leg split: per-leg [cdr_*] (B channel only), attempt 1
     normalized_dest  -- full +E.164 (KEEP the '+' — preserves country code; matches RCF)
 )
 
@@ -831,9 +916,10 @@ if disposition ~= "SUCCESS" and session:ready() then
     local failover_dial = string.format(
         "{ignore_early_media=false,sip_enable_soa=false,progress_timeout=%d,call_timeout=60,sip_h_X-Carrier=secondary" ..
         ",sip_h_X-CID=%s" ..
-        ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}sofia/external/%s@" .. sbc_proxy_ip .. ":5060",
+        ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true}%ssofia/external/%s@" .. sbc_proxy_ip .. ":5060",
         bridge_progress_timeout,
         sip_call_id,
+        cdr_b_leg_block(2),  -- CDR leg split: failover = attempt 2
         normalized_dest  -- full +E.164 (KEEP the '+' — preserves country code)
     )
 

@@ -1,4 +1,4 @@
-"""Deploy-order guard for the CDR ingest schema (migration 47).
+"""Deploy-order guard for the CDR ingest schema (migrations 47 + 48).
 
 WHY THIS EXISTS
 ---------------
@@ -21,9 +21,12 @@ must keep serving, and the ingest contract is untouched):
     GET /health/detailed as the `schema` component.
 
 routers/cdrs.py additionally makes the ingest itself survive the window: on
-UndefinedColumnError for one of these columns it retries the INSERT without
-them (see `_execute_cdr_insert`). This module is what tells the operator
-that this is happening.
+UndefinedColumnError for one of these columns it retries the INSERT with the
+next tail-truncated tier (full 60 -> pre-48 57 -> pre-47 55; see
+`_execute_cdr_insert`) so every A-leg call row lands. Carrier B-leg rows are
+NOT inserted without migration 48 (they would masquerade as calls), and the
+CDR read endpoints filter on `leg`, so they fail until 48 is applied. This
+module is what tells the operator that this is happening.
 
     >>> WHEN THE INGEST INSERT GAINS A COLUMN: add it to REQUIRED_CDR_COLUMNS <<<
 """
@@ -39,6 +42,9 @@ logger = logging.getLogger(__name__)
 REQUIRED_CDR_COLUMNS: tuple[tuple[str, str], ...] = (
     ("stir_outcome", "47_cdr_stir_outcome.sql"),
     ("stir_eff_actual", "47_cdr_stir_outcome.sql"),
+    ("leg", "48_cdr_call_legs.sql"),
+    ("call_id", "48_cdr_call_legs.sql"),
+    ("leg_attempt", "48_cdr_call_legs.sql"),
 )
 
 #: Where the init scripts live on every VM (CLAUDE.md: repo path /opt/revup).
@@ -47,6 +53,9 @@ MIGRATION_DIR = "/opt/revup/docker/postgres/init"
 #: The exact command an operator must run on the East primary (replicates to
 #: every zone). Formatted per migration file.
 REMEDY_TEMPLATE = "sudo -u postgres psql -d voip -f {dir}/{migration}"
+#: 48+ are applied with ON_ERROR_STOP (the maintenance-plan form).
+REMEDY_TEMPLATE_STRICT = "sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f {dir}/{migration}"
+_STRICT_FROM = "48_"
 
 _COLUMNS_SQL = """
     SELECT column_name
@@ -63,7 +72,8 @@ def remedies_for(missing: list[str]) -> list[str]:
     for col, mig in REQUIRED_CDR_COLUMNS:
         if col in missing and mig not in files:
             files.append(mig)
-    return [REMEDY_TEMPLATE.format(dir=MIGRATION_DIR, migration=m) for m in files]
+    return [(REMEDY_TEMPLATE_STRICT if m >= _STRICT_FROM else REMEDY_TEMPLATE)
+            .format(dir=MIGRATION_DIR, migration=m) for m in files]
 
 
 async def missing_cdr_columns() -> list[str]:
@@ -97,8 +107,9 @@ def describe(result: dict) -> str:
         return "healthy"
     if result["status"] == "missing":
         return ("degraded: cdrs is missing column(s) " + ", ".join(result["missing"])
-                + " — CDR INSERTs fall back to the pre-47 statement; apply on the "
-                  "East primary: " + " ; ".join(result["remedy"]))
+                + " — CDR INSERTs fall back to a tail-truncated statement (those "
+                  "columns are dropped; carrier B-leg rows are not inserted); apply "
+                  "on the East primary: " + " ; ".join(result["remedy"]))
     return f"unknown: {result.get('error') or 'schema probe failed'}"
 
 
@@ -109,8 +120,10 @@ async def run_startup_check() -> dict:
         logger.critical(
             "SCHEMA GUARD: cdrs is missing column(s) %s. The API build is AHEAD of "
             "the database — every CDR INSERT will hit UndefinedColumnError and fall "
-            "back to the pre-47 statement (STIR outcome columns dropped) until the "
-            "migration is applied. mod_json_cdr still gets HTTP 200 (contract), so "
+            "back to a tail-truncated statement (the missing columns dropped; "
+            "carrier B-leg rows NOT inserted; CDR list/summary endpoints that "
+            "filter on `leg` error) until the migration is applied. mod_json_cdr "
+            "still gets HTTP 200 (contract), so "
             "NOTHING will retry. Apply on the East primary NOW (replicates to every "
             "zone): %s",
             ", ".join(result["missing"]), " ; ".join(result["remedy"]),

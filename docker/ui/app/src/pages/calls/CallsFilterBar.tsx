@@ -9,7 +9,11 @@
  * validation + the Search / Export actions.
  *
  * Role gating (presentation only — the API tenant-scopes server-side):
- * - Staff (admin + support) see the Customer and Zone filters and Export CSV.
+ * - Staff (admin + support) see the Customer and Zone filters, the Rows
+ *   row-model control (Calls / All legs / Carrier legs — the CDR A/B leg
+ *   split, docs/CDR_LEG_SPLIT_CONTRACT.md), the "Call: <id>" single-call
+ *   chip (set from the call-detail modal's "Show all legs of this call";
+ *   its × clears the filter and re-runs the search), and Export CSV.
  * - Tenants get neither; the Trunk selector stays (listTrunks is
  *   tenant-scoped, so tenants only ever see their own trunks).
  *
@@ -25,8 +29,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { listCustomers } from '../../api/customers';
 import { listTrunks } from '../../api/trunks';
+import { API_CALLING_ENABLED } from '../../config/features';
 import {
   PRESET_LABELS,
+  ROWS_MODE_OPTIONS,
   presetRange,
   toDatetimeLocal,
   validateCallsFilters,
@@ -42,6 +48,8 @@ interface CallsFilterBarProps {
   exporting: boolean;
   /** Admin or support — shows Customer + Zone filters and Export CSV. */
   isStaff: boolean;
+  /** Clears the single-call filter AND re-runs the search (staff chip ×). */
+  onClearCallId?: () => void;
 }
 
 export function CallsFilterBar({
@@ -52,6 +60,7 @@ export function CallsFilterBar({
   searching,
   exporting,
   isStaff,
+  onClearCallId,
 }: CallsFilterBarProps) {
   // ALL hooks unconditionally at the top — React #310 prevention.
   const { data: customersData } = useQuery({
@@ -74,6 +83,11 @@ export function CallsFilterBar({
   });
 
   const rangeError = validateCallsFilters(filters);
+  const rangeAlert = (
+    <div role="alert" aria-live="polite">
+      {rangeError && <span className="dlx4-ferr">{rangeError}</span>}
+    </div>
+  );
 
   // While a preset is active the pickers show its live preview (recomputed
   // each render — close enough to "now" for a preview; the authoritative
@@ -160,7 +174,8 @@ export function CallsFilterBar({
             >
               <option value="">All</option>
               <option value="rcf">RCF</option>
-              <option value="api">API</option>
+              {/* API Calling is retired — its product filter only shows while enabled. */}
+              {API_CALLING_ENABLED && <option value="api">API</option>}
               <option value="trunk">Trunk</option>
             </select>
           </div>
@@ -268,6 +283,9 @@ export function CallsFilterBar({
             />
           </div>
 
+          {/* Rating state is a billing internal — staff only (the API also
+              ignores rated_only for tenants). */}
+          {isStaff && (
           <div className="dlx4-field" style={{ justifyContent: 'flex-end' }}>
             <label
               style={{
@@ -291,13 +309,63 @@ export function CallsFilterBar({
               Rated only
             </label>
           </div>
+          )}
+
+          {/* Row model — staff only. Tenants never see it and never send
+              `leg` (the API pins them to one row per call anyway). */}
+          {isStaff && (
+            <div className="dlx4-field">
+              <span className="dl-flabel">Rows</span>
+              <div className="dlx-seg" role="group" aria-label="Row model">
+                {ROWS_MODE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    title={opt.title}
+                    aria-pressed={filters.rows === opt.id}
+                    className={filters.rows === opt.id ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
+                    onClick={() => set('rows', opt.id)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer — inline validation on the left, actions on the right */}
         <div className="dlx4-filterfoot">
-          <div role="alert" aria-live="polite">
-            {rangeError && <span className="dlx4-ferr">{rangeError}</span>}
-          </div>
+          {/* Staff single-call filter: the chip + validation share the left
+              slot. Without a call filter the footer renders exactly as before
+              (tenants never have one). */}
+          {isStaff && filters.call_id ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
+              <span
+                className="dl-chip"
+                title={`Showing only rows of call ${filters.call_id}`}
+                style={{ gap: 6, padding: '3px 4px 3px 10px', maxWidth: '100%', minWidth: 0 }}
+              >
+                <span style={{ fontFamily: 'inherit', color: 'var(--rcf-ink-dim)', fontWeight: 700 }}>Call:</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+                  {filters.call_id}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => (onClearCallId ? onClearCallId() : set('call_id', ''))}
+                  aria-label="Clear call filter"
+                  title="Clear call filter"
+                  className="dlx4-pgbtn"
+                  style={{ height: 22, minWidth: 22, padding: '0 6px', fontSize: '0.72rem', flex: 'none' }}
+                >
+                  ×
+                </button>
+              </span>
+              {rangeAlert}
+            </div>
+          ) : (
+            rangeAlert
+          )}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <button
               type="submit"

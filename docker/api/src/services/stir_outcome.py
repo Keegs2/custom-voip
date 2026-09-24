@@ -177,8 +177,10 @@ def badge_fields(
 # ---------------------------------------------------------------------------
 # B-leg CDR detection (mod_json_cdr `log-b-leg=true` mode)
 # ---------------------------------------------------------------------------
-# BILLING-CRITICAL. A body classified as a B-leg is NEVER inserted, so a false
-# positive is a LOST BILLABLE ROW. Every signal below was verified against the
+# BILLING-CRITICAL. A body classified as a B-leg never takes the A-leg (call row)
+# INSERT path — it becomes at most a leg='B' carrier row, and only with the
+# explicit cdr_leg=B + cdr_carrier_leg=true vars (docs/CDR_LEG_SPLIT_CONTRACT.md)
+# — so a false positive is a LOST BILLABLE CALL ROW. Every signal below was verified against the
 # FreeSWITCH master source (signalwire/freeswitch, src/), not from memory:
 #
 #  * mod_json_cdr's OWN a/b decision, and its only one:

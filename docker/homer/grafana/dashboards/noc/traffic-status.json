@@ -48,7 +48,7 @@
       "transparent": true,
       "options": {
         "mode": "markdown",
-        "content": "## Traffic Status — live ops wall\n**Every panel is real-time** (VictoriaMetrics `voip-metrics-vm` — Kamailio + FreeSWITCH `mod_prometheus`, scraped ~15s), so this reflects the fleet as it is **right now**, not the retrospective CDR view (all CDR-delayed volume/ASR/carrier-split/hangup analytics moved to **Call Quality**). **CPS** = live seizures/sec; **connected calls** = FreeSWITCH `calls_active`; **dialogs** = Kamailio signaling concurrency; **Live ASR / failure %** = Kamailio INVITE reply-class rates over 5m. Carrier UP/DOWN is the only non-VM source — the SBCs' Kamailio-dispatcher OPTIONS probes via `carrier_trunk_health` (`voip-cdr-pg`), poller-fresh (~3–15s), not call-derived. `zone` label comes from `external_labels`; the **Zone** picker (`$zonere`) filters the SBC/dialog/ASR selectors. **Carriers:** Bandwidth Dallas (primary) · Bandwidth LA (secondary) · `local` = on-net. **Active SBC per zone** (top row — LEFT tile of each zone pair) = the NLB election per zone, decided by per-SBC scrape LIVENESS (present_over_time of an always-exported Kamailio gauge, 2m window) — with failover-ratio=0 the primary serves whenever its Kamailio is alive, so: green = primary ACTIVE (normal, even at zero traffic) · orange = ⚠ ON STANDBY (primary dark, standby serving) · red = ZONE DARK (both dark). Election truth at all times — it does NOT depend on call volume; per-SBC volume lives in 'Dialogs per SBC — now' + 'CPS per SBC (1m rate)'. **Active FS per zone** (top row — RIGHT tile of each zone pair) = the MEDIA election per zone, decided by the FS ESL exporter's own health gauge (last_over_time of freeswitch_esl_scrape_ok, 2m — VALUE-aware, so a dead FS container on a live VM reads unhealthy, not merely absent). Kamailio dispatcher priority selection (alg 8, FS-1 prio 10 / FS-2 prio 5) serves FS-1 whenever it is healthy, so: green = FS-1 ACTIVE (normal — a FLAT standby is BY DESIGN, this row is what separates 'standby idle' from 'broken') · orange = ⚠ FAILED OVER (FS-2 serving new calls) · red = MEDIA DOWN (both FS unhealthy — zone media dark). Per-FS volume lives in 'CPS per FreeSWITCH (1m rate)'."
+        "content": "## Traffic Status — live ops wall\n**Every panel is real-time** (VictoriaMetrics `voip-metrics-vm` — Kamailio `xhttp_prom` + the FreeSWITCH ESL exporter, scraped ~15s), so this reflects the fleet as it is **right now**, not the retrospective CDR view (all CDR-delayed volume/ASR/carrier-split/hangup analytics moved to **Call Quality**). **CPS** = live seizures/sec; **concurrent calls** = FreeSWITCH `calls_active` (live) with a **high-water-mark** ladder (1h/24h/7d/30d, per zone vs the 8K upgrade trigger, channels per node vs max-sessions 10,000) built on the burst-safe 30s-peak recording rules (`noc_concurrency`, fill in from rule deploy); **dialogs** = Kamailio signaling concurrency; **Live ASR / failure %** = Kamailio INVITE reply-class rates over 5m. Carrier UP/DOWN is the only non-VM source — the SBCs' Kamailio-dispatcher OPTIONS probes via `carrier_trunk_health` (`voip-cdr-pg`), poller-fresh (~3–15s), not call-derived. `zone` label comes from `external_labels`; the **Zone** picker (`$zonere`) filters the SBC/dialog/ASR selectors. **Carriers:** Bandwidth Dallas (primary) · Bandwidth LA (secondary) · `local` = on-net. **Active SBC per zone** (top row — LEFT tile of each zone pair) = the NLB election per zone, decided by per-SBC scrape LIVENESS (present_over_time of an always-exported Kamailio gauge, 2m window) — with failover-ratio=0 the primary serves whenever its Kamailio is alive, so: green = primary ACTIVE (normal, even at zero traffic) · orange = ⚠ ON STANDBY (primary dark, standby serving) · red = ZONE DARK (both dark). Election truth at all times — it does NOT depend on call volume; per-SBC volume lives in 'Dialogs per SBC — now' + 'CPS per SBC (1m rate)'. **Active FS per zone** (top row — RIGHT tile of each zone pair) = the MEDIA election per zone, decided by the FS ESL exporter's own health gauge (last_over_time of freeswitch_esl_scrape_ok, 2m — VALUE-aware, so a dead FS container on a live VM reads unhealthy, not merely absent). Kamailio dispatcher priority selection (alg 8, FS-1 prio 10 / FS-2 prio 5) serves FS-1 whenever it is healthy, so: green = FS-1 ACTIVE (normal — a FLAT standby is BY DESIGN, this row is what separates 'standby idle' from 'broken') · orange = ⚠ FAILED OVER (FS-2 serving new calls) · red = MEDIA DOWN (both FS unhealthy — zone media dark). Per-FS volume lives in 'CPS per FreeSWITCH (1m rate)'."
       },
       "fieldConfig": {
         "defaults": {},
@@ -1137,9 +1137,9 @@
       "description": "Fleet-wide calls per second right now: sum(rate(kamailio_trunk_cps[1m])) across all SBCs/zones. Rated capacity is ~500 CPS/zone; amber at 350, red at 500 on the all-zones view. Live from VictoriaMetrics (Kamailio mod_prometheus).\n\nServed by vmalert recording rule `zone:kamailio_trunk_cps:rate1m` (30s eval). Raw fallback query: `sum(rate(kamailio_trunk_cps[1m]))`. Recorded series only exist from the recording-rule deploy timestamp onward - on a now-6h wall any pre-deploy gap ages out within 6h.",
       "gridPos": {
         "h": 6,
-        "w": 3,
+        "w": 4,
         "x": 0,
-        "y": 18
+        "y": 30
       },
       "datasource": {
         "type": "prometheus",
@@ -1204,8 +1204,8 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Total connected calls — now",
-      "description": "Concurrent/active calls across the fleet at this instant — TRUE LIVE GAUGE from FreeSWITCH mod_prometheus (sum of freeswitch_calls_active over all media nodes), scraped every ~15s. Reflects calls actually up on the switches right now.",
+      "title": "Concurrent calls — live",
+      "description": "Connected (bridged) calls up on the switches right now, fleet-wide: sum(freeswitch_calls_active) over every FS node — ESL exporter :9103 (`show calls count`, ~10s poll, 15s scrape; mod_prometheus :9102 was dropped). One off-net RCF forward = 1 call = 2 channels. Top of the concurrency section: the HWM ladder below is the high-water mark of this figure. FLEET-WIDE (ignores the Zone filter, like the Calls ladder); informational blue — capacity colouring is per zone (Concurrent HWM per zone).",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1301,7 +1301,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1403,7 +1403,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '24 hours' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '24 hours' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1505,7 +1505,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '7 days' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '7 days' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1607,7 +1607,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '30 days' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '30 days' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1674,6 +1674,479 @@
       }
     },
     {
+      "id": 102,
+      "type": "stat",
+      "title": "Concurrent channels (legs) — live",
+      "description": "Live FreeSWITCH channels (call legs) fleet-wide: sum(freeswitch_channels_total), ESL exporter :9103. An off-net forward is 2 channels (A-leg + B-leg), so this runs at ~2x 'Concurrent calls — live'. Channels — not calls — are what FS max-sessions=10000 (switch.conf.xml) caps per node: see 'Channels HWM per FS node'. FLEET-WIDE, informational.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "sum(freeswitch_channels_total)",
+          "legendFormat": "channels",
+          "range": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "light-blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "light-blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 103,
+      "type": "stat",
+      "title": "Concurrent HWM — last 1h",
+      "description": "Concurrent-call high-water mark: the most calls up at once, fleet-wide, in the trailing 1 hour. INSTANT query max_over_time(fleet:freeswitch_calls_active_peak:sum[1h]). Rung of the live -> 1h -> 24h -> 7d -> 30d concurrency ladder, directly under the Calls ladder. Source: vmalert rule `fleet:freeswitch_calls_active_peak:sum` (docker/vmalert/rules/traffic.yml, group noc_concurrency, 15s eval) = per-node 30s-window peak from the ESL exporter (freeswitch_calls_active_peak, sampled every 2s) with a PER-NODE fallback to the raw freeswitch_calls_active gauge on any node whose exporter does not emit the peak yet (raw fallback only sees its ~10s poll, so it can miss sub-10s bursts). A sum of per-node 30s maxima is an upper bound on truly simultaneous calls (nodes may peak at different instants inside the window) — the conservative side for capacity.\n\nRecorded series only exist from the noc_concurrency rule deploy onward, so the HWM window FILLS IN from rollout (a 30d HWM is a partial-window figure for the first 30 days) — it never backfills. FIXED trailing window ending now — does NOT follow the time picker or the Volume window selector. FLEET-WIDE — ignores the Zone filter (per-zone HWM with capacity colouring is the panel below). Uncoloured volume number. An empty tile means the metrics plane / vmalert is not reporting, not zero calls.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 4,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max_over_time(fleet:freeswitch_calls_active_peak:sum[1h])",
+          "legendFormat": "HWM 1h",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0E6F0"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#E0E6F0",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 104,
+      "type": "stat",
+      "title": "Concurrent HWM — last 24h",
+      "description": "Concurrent-call high-water mark: the most calls up at once, fleet-wide, in the trailing 24 hours. INSTANT query max_over_time(fleet:freeswitch_calls_active_peak:sum[24h]). Rung of the live -> 1h -> 24h -> 7d -> 30d concurrency ladder, directly under the Calls ladder. Source: vmalert rule `fleet:freeswitch_calls_active_peak:sum` (docker/vmalert/rules/traffic.yml, group noc_concurrency, 15s eval) = per-node 30s-window peak from the ESL exporter (freeswitch_calls_active_peak, sampled every 2s) with a PER-NODE fallback to the raw freeswitch_calls_active gauge on any node whose exporter does not emit the peak yet (raw fallback only sees its ~10s poll, so it can miss sub-10s bursts). A sum of per-node 30s maxima is an upper bound on truly simultaneous calls (nodes may peak at different instants inside the window) — the conservative side for capacity.\n\nRecorded series only exist from the noc_concurrency rule deploy onward, so the HWM window FILLS IN from rollout (a 30d HWM is a partial-window figure for the first 30 days) — it never backfills. FIXED trailing window ending now — does NOT follow the time picker or the Volume window selector. FLEET-WIDE — ignores the Zone filter (per-zone HWM with capacity colouring is the panel below). Uncoloured volume number. An empty tile means the metrics plane / vmalert is not reporting, not zero calls.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 9,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max_over_time(fleet:freeswitch_calls_active_peak:sum[24h])",
+          "legendFormat": "HWM 24h",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0E6F0"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#E0E6F0",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 105,
+      "type": "stat",
+      "title": "Concurrent HWM — last 7d",
+      "description": "Concurrent-call high-water mark: the most calls up at once, fleet-wide, in the trailing 7 days. INSTANT query max_over_time(fleet:freeswitch_calls_active_peak:sum[7d]). Rung of the live -> 1h -> 24h -> 7d -> 30d concurrency ladder, directly under the Calls ladder. Source: vmalert rule `fleet:freeswitch_calls_active_peak:sum` (docker/vmalert/rules/traffic.yml, group noc_concurrency, 15s eval) = per-node 30s-window peak from the ESL exporter (freeswitch_calls_active_peak, sampled every 2s) with a PER-NODE fallback to the raw freeswitch_calls_active gauge on any node whose exporter does not emit the peak yet (raw fallback only sees its ~10s poll, so it can miss sub-10s bursts). A sum of per-node 30s maxima is an upper bound on truly simultaneous calls (nodes may peak at different instants inside the window) — the conservative side for capacity.\n\nRecorded series only exist from the noc_concurrency rule deploy onward, so the HWM window FILLS IN from rollout (a 30d HWM is a partial-window figure for the first 30 days) — it never backfills. FIXED trailing window ending now — does NOT follow the time picker or the Volume window selector. FLEET-WIDE — ignores the Zone filter (per-zone HWM with capacity colouring is the panel below). Uncoloured volume number. An empty tile means the metrics plane / vmalert is not reporting, not zero calls.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 14,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max_over_time(fleet:freeswitch_calls_active_peak:sum[7d])",
+          "legendFormat": "HWM 7d",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0E6F0"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#E0E6F0",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 106,
+      "type": "stat",
+      "title": "Concurrent HWM — last 30d",
+      "description": "Concurrent-call high-water mark: the most calls up at once, fleet-wide, in the trailing 30 days. INSTANT query max_over_time(fleet:freeswitch_calls_active_peak:sum[30d]). Rung of the live -> 1h -> 24h -> 7d -> 30d concurrency ladder, directly under the Calls ladder. Source: vmalert rule `fleet:freeswitch_calls_active_peak:sum` (docker/vmalert/rules/traffic.yml, group noc_concurrency, 15s eval) = per-node 30s-window peak from the ESL exporter (freeswitch_calls_active_peak, sampled every 2s) with a PER-NODE fallback to the raw freeswitch_calls_active gauge on any node whose exporter does not emit the peak yet (raw fallback only sees its ~10s poll, so it can miss sub-10s bursts). A sum of per-node 30s maxima is an upper bound on truly simultaneous calls (nodes may peak at different instants inside the window) — the conservative side for capacity.\n\nRecorded series only exist from the noc_concurrency rule deploy onward, so the HWM window FILLS IN from rollout (a 30d HWM is a partial-window figure for the first 30 days) — it never backfills. FIXED trailing window ending now — does NOT follow the time picker or the Volume window selector. FLEET-WIDE — ignores the Zone filter (per-zone HWM with capacity colouring is the panel below). Uncoloured volume number. An empty tile means the metrics plane / vmalert is not reporting, not zero calls.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max_over_time(fleet:freeswitch_calls_active_peak:sum[30d])",
+          "legendFormat": "HWM 30d",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0E6F0"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#E0E6F0",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 107,
+      "type": "stat",
+      "title": "Concurrent HWM per zone — 24h",
+      "description": "Highest concurrent connected calls per zone over the last 24h (recorded 30s-peak series zone:freeswitch_calls_active_peak:sum, evaluated every 15s). Follows the Zone picker. Each zone runs one FreeSWITCH with max-sessions=10000 CHANNELS; an RCF call is 2 legs, so the node's practical ceiling is ~5,000 calls. Green normal · orange >= 3,500 (70% of ceiling — capacity review trigger) · red >= 4,500 (90% — new calls at risk of refusal). Channel headroom against the hard limit is on 'Channels HWM per FS node'. HWM windows fill in from the rule rollout onward.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max by (zone) (max_over_time(zone:freeswitch_calls_active_peak:sum{zone=~\"$zonere\"}[24h]))",
+          "legendFormat": "{{zone}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3500
+              },
+              {
+                "color": "red",
+                "value": 4500
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 108,
+      "type": "bargauge",
+      "title": "Channels HWM per FS node — 24h vs max-sessions 10,000",
+      "description": "Per-FreeSWITCH-node channel (leg) high-water mark over the trailing 24h, against the hard FS limit max-sessions=10000 (switch.conf.xml; channels over it are rejected). INSTANT query max_over_time(node:freeswitch_channels_peak:max[24h]) per freeswitch_node, filtered by the Zone picker. Source: vmalert rule node:freeswitch_channels_peak:max (15s eval) = ESL exporter freeswitch_channels_peak (30s-window max, 2s sampling) with a per-node fallback to raw freeswitch_channels_total until the exporter ships the peak. Colour: green · orange >= 7,000 (70% growth review) · red >= 9,000 (90%, near hard reject). Hot-standby FS-2 nodes read ~0 by design. Recorded series only exist from the noc_concurrency rule deploy onward, so the HWM window FILLS IN from rollout (a 30d HWM is a partial-window figure for the first 30 days) — it never backfills.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "voip-metrics-vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "max by (freeswitch_node) (max_over_time(node:freeswitch_channels_peak:max{zone=~\"$zonere\"}[24h]))",
+          "legendFormat": "{{freeswitch_node}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "showUnfilled": true,
+        "namePlacement": "auto",
+        "sizing": "auto",
+        "minVizWidth": 8,
+        "minVizHeight": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "min": 0,
+          "max": 10000,
+          "noValue": "no data",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 7000
+              },
+              {
+                "color": "red",
+                "value": 9000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 40,
       "type": "stat",
       "title": "Live ASR (5m)",
@@ -1682,7 +2155,7 @@
         "h": 6,
         "w": 3,
         "x": 0,
-        "y": 31
+        "y": 43
       },
       "datasource": {
         "type": "prometheus",
@@ -1755,7 +2228,7 @@
         "h": 7,
         "w": 3,
         "x": 14,
-        "y": 24
+        "y": 36
       },
       "datasource": {
         "type": "prometheus",
@@ -1828,7 +2301,7 @@
         "h": 6,
         "w": 3,
         "x": 13,
-        "y": 31
+        "y": 43
       },
       "datasource": {
         "type": "prometheus",
@@ -1894,7 +2367,7 @@
         "h": 5,
         "w": 3,
         "x": 15,
-        "y": 37
+        "y": 49
       },
       "datasource": {
         "type": "prometheus",
@@ -1997,9 +2470,9 @@
       "description": "Live calls-per-second per zone: sum by (zone)(rate(kamailio_trunk_cps[1m])), one line per zone. Watch load balance across East / West / Central. All zones shown regardless of the Zone filter.\n\nServed by vmalert recording rule `zone:kamailio_trunk_cps:rate1m` (30s eval). Raw fallback query: `sum by (zone) (rate(kamailio_trunk_cps[1m]))`. Recorded series only exist from the recording-rule deploy timestamp onward - on a now-6h wall any pre-deploy gap ages out within 6h.",
       "gridPos": {
         "h": 6,
-        "w": 7,
-        "x": 3,
-        "y": 18
+        "w": 10,
+        "x": 4,
+        "y": 30
       },
       "datasource": {
         "type": "prometheus",
@@ -2064,13 +2537,13 @@
     {
       "id": 45,
       "type": "timeseries",
-      "title": "Concurrency over time — media vs signaling",
-      "description": "Live concurrency, fleet-wide: media (FreeSWITCH calls_active = bridged call pairs, and channels_total = legs) vs signaling (SBC dialog_active_dialogs). One off-net call = 2 FS channels = 2 Kamailio dialogs, so `gap (dialogs − FS channels)` should hover near 0 (on-net calls push it negative; calls_active runs at ~half the channel count). The dashed amber line at 10 is the vmalert SbcDialogLeak threshold on the gap series (for: 2h30m). After an SBC failover the gap is EXPECTED to bulge and decay within the 2h dialog timeout (ghost dialogs on the ex-active SBC); a gap that stays above the line longer than that is a persistent leak → alert. See docker/vmalert/rules/teardown.yml. All zones.",
+      "title": "Concurrency over time — media vs signaling (+ 30s peak)",
+      "description": "Live concurrency, fleet-wide: media (FreeSWITCH calls_active = bridged call pairs, and channels_total = legs) vs signaling (SBC dialog_active_dialogs). One off-net call = 2 FS channels = 2 Kamailio dialogs, so `gap (dialogs − FS channels)` should hover near 0 (on-net calls push it negative; calls_active runs at ~half the channel count). The dashed amber line at 10 is the vmalert SbcDialogLeak threshold on the gap series (for: 2h30m). After an SBC failover the gap is EXPECTED to bulge and decay within the 2h dialog timeout (ghost dialogs on the ex-active SBC); a gap that stays above the line longer than that is a persistent leak → alert. See docker/vmalert/rules/teardown.yml. `media (FS calls, 30s peak)` = fleet:freeswitch_calls_active_peak:sum (vmalert noc_concurrency, 15s eval): the burst-safe 30s-window peak the HWM tiles are built on; it sits at or just above the raw FS-calls line and exposes bursts the ~10s-polled raw gauge misses (raw-gauge fallback per node until the exporter ships freeswitch_calls_active_peak; the series starts at rule deploy, so older ranges show only the raw lines). The legend 'max' column of the peak series over the picker range is that range's HWM. All zones (fleet-wide by design — per-zone concurrency is 'Concurrent HWM per zone').",
       "gridPos": {
-        "h": 6,
-        "w": 7,
-        "x": 10,
-        "y": 18
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 22
       },
       "datasource": {
         "type": "prometheus",
@@ -2116,6 +2589,16 @@
           "expr": "sum(kamailio_dialog_active_dialogs) - sum(freeswitch_channels_total)",
           "range": true,
           "legendFormat": "gap (dialogs − FS channels)"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "voip-metrics-vm"
+          },
+          "expr": "fleet:freeswitch_calls_active_peak:sum",
+          "legendFormat": "media (FS calls, 30s peak)",
+          "range": true
         }
       ],
       "fieldConfig": {
@@ -2224,6 +2707,39 @@
                 "value": 0
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "media (FS calls, 30s peak)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dot",
+                  "dash": [
+                    2,
+                    4
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              }
+            ]
           }
         ]
       },
@@ -2250,9 +2766,9 @@
       "description": "Calls per second per media node = seizures per 1-minute bucket / 60, one series per freeswitch_node. Shows how call-start load is distributed across the FreeSWITCH fleet. Honours the Zone filter. Live from VictoriaMetrics.\n\nServed by vmalert recording rule `node:freeswitch_sessions:rate1m` (30s eval). Raw fallback query: `sum by (freeswitch_node) (rate(freeswitch_sessions_total{zone=~\"$zonere\"}[1m]))`. Recorded series only exist from the recording-rule deploy timestamp onward - on a now-6h wall any pre-deploy gap ages out within 6h.",
       "gridPos": {
         "h": 6,
-        "w": 7,
-        "x": 17,
-        "y": 18
+        "w": 10,
+        "x": 14,
+        "y": 30
       },
       "datasource": {
         "type": "prometheus",
@@ -2323,7 +2839,7 @@
         "h": 7,
         "w": 7,
         "x": 0,
-        "y": 24
+        "y": 36
       },
       "datasource": {
         "type": "prometheus",
@@ -2417,7 +2933,7 @@
         "h": 7,
         "w": 7,
         "x": 7,
-        "y": 24
+        "y": 36
       },
       "datasource": {
         "type": "prometheus",
@@ -2511,7 +3027,7 @@
         "h": 7,
         "w": 7,
         "x": 17,
-        "y": 24
+        "y": 36
       },
       "datasource": {
         "type": "prometheus",
@@ -2698,7 +3214,7 @@
         "h": 6,
         "w": 6,
         "x": 3,
-        "y": 31
+        "y": 43
       },
       "datasource": {
         "type": "prometheus",
@@ -2781,7 +3297,7 @@
         "h": 6,
         "w": 4,
         "x": 9,
-        "y": 31
+        "y": 43
       },
       "datasource": {
         "type": "postgres",
@@ -2892,7 +3408,7 @@
         "h": 6,
         "w": 4,
         "x": 16,
-        "y": 31
+        "y": 43
       },
       "datasource": {
         "type": "prometheus",
@@ -2984,7 +3500,7 @@
         "h": 6,
         "w": 4,
         "x": 20,
-        "y": 31
+        "y": 43
       },
       "datasource": {
         "type": "prometheus",
@@ -3076,7 +3592,7 @@
         "h": 5,
         "w": 7,
         "x": 0,
-        "y": 37
+        "y": 49
       },
       "datasource": {
         "type": "prometheus",
@@ -3159,7 +3675,7 @@
         "h": 5,
         "w": 4,
         "x": 7,
-        "y": 37
+        "y": 49
       },
       "datasource": {
         "type": "prometheus",
@@ -3226,7 +3742,7 @@
         "h": 5,
         "w": 4,
         "x": 11,
-        "y": 37
+        "y": 49
       },
       "datasource": {
         "type": "prometheus",
@@ -3296,7 +3812,7 @@
         "h": 5,
         "w": 6,
         "x": 18,
-        "y": 37
+        "y": 49
       },
       "datasource": {
         "type": "prometheus",
@@ -3363,7 +3879,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 54
       },
       "datasource": {
         "type": "prometheus",
@@ -3440,7 +3956,7 @@
       {
         "name": "zone",
         "label": "Zone",
-        "description": "Filter by zone. On this live wall the picker maps to $zonere (the PromQL regex twin) and is applied as zone=~\"$zonere\" inside the SBC / dialog / ASR / SIP-class selectors. Fleet-wide trend panels (CPS-by-zone, concurrency, pies, memory) intentionally show every zone.",
+        "description": "Filter by zone. On this live wall the picker drives $zonere (derived hidden variable) (the PromQL regex twin) and is applied as zone=~\"$zonere\" inside the SBC / dialog / ASR / SIP-class selectors. Fleet-wide trend panels (CPS-by-zone, the concurrency live/HWM ladder + 'Concurrency over time', pies, memory) intentionally show every zone; the per-zone / per-node concurrency panels ('Concurrent HWM per zone', 'Channels HWM per FS node') DO follow it.",
         "type": "custom",
         "hide": 0,
         "multi": false,
@@ -3477,39 +3993,26 @@
       {
         "name": "zonere",
         "label": "Zone (regex)",
-        "description": "Regex-valued twin of $zone for the PromQL (VictoriaMetrics) panels, used as zone=~\"$zonere\" inside metric selectors. Values map All->.* / East->east / West->west / Central->central, i.e. the same zone selections as $zone but expressed as a Prometheus regex instead of a SQL LIKE pattern (% is not a valid PromQL regex). Kept conceptually in sync with $zone; hidden from the dashboard bar. If you switch $zone, set this to the matching value (defaults to .* = all zones).",
-        "type": "custom",
+        "description": "Hidden regex twin of $zone for the PromQL (VictoriaMetrics) panels (used as zone=~\"$zonere\"). DERIVED from $zone by a trivial Postgres query (All '%' -> '.*', else the zone name), so the Zone picker actually drives every zone-aware panel. Previously a static hidden custom variable that no picker could change, so the board was always fleet-wide.",
+        "type": "query",
         "hide": 2,
+        "datasource": {
+          "type": "postgres",
+          "uid": "voip-cdr-pg"
+        },
+        "definition": "SELECT CASE WHEN '$zone' = '%' THEN '.*' ELSE '$zone' END AS zonere",
+        "query": "SELECT CASE WHEN '$zone' = '%' THEN '.*' ELSE '$zone' END AS zonere",
+        "refresh": 1,
+        "regex": "",
+        "sort": 0,
         "multi": false,
         "includeAll": false,
-        "query": "All : .*, East : east, West : west, Central : central",
         "current": {
           "selected": true,
-          "text": "All",
+          "text": ".*",
           "value": ".*"
         },
-        "options": [
-          {
-            "selected": true,
-            "text": "All",
-            "value": ".*"
-          },
-          {
-            "selected": false,
-            "text": "East",
-            "value": "east"
-          },
-          {
-            "selected": false,
-            "text": "West",
-            "value": "west"
-          },
-          {
-            "selected": false,
-            "text": "Central",
-            "value": "central"
-          }
-        ]
+        "options": []
       },
       {
         "name": "volwin",
@@ -3553,6 +4056,6 @@
   "timezone": "browser",
   "title": "Traffic Status",
   "uid": "noc-traffic-status",
-  "version": 1,
+  "version": 3,
   "weekStart": ""
 }

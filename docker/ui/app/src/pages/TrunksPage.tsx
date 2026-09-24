@@ -32,7 +32,7 @@ import { IconTrunk } from '../components/icons/ProductIcons';
 import { Spinner } from '../components/ui/Spinner';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { fmt, fmtMoney } from '../utils/format';
+import { fmt } from '../utils/format';
 
 import type { Trunk, TrunkIp, TrunkDid, TrunkAuthType } from '../types/trunk';
 import {
@@ -75,12 +75,14 @@ interface ExtendedTrunkStats {
   max_channels?: number;
   calls_today?: number;
   minutes_today?: number;
-  cost_today?: number;
   channel_utilization?: string;
   last_hour?: {
     total_calls?: number;
     asr?: string;
+    /** Staff (admin) rows only — exact seconds. */
     avg_duration_sec?: number;
+    /** Tenant rows only — 1-decimal minutes (no seconds, no cost). */
+    avg_duration_minutes?: number;
   };
 }
 
@@ -247,7 +249,6 @@ function LiveActivity({ trunkId, maxChannels }: { trunkId: number; maxChannels: 
             <StatTile
               label="Minutes today"
               value={loading ? '…' : Math.round(s?.minutes_today ?? 0).toLocaleString()}
-              hint={s?.cost_today != null ? `${fmtMoney(s.cost_today)} spend` : undefined}
             />
           </div>
 

@@ -41,7 +41,7 @@ OUTCOME = "eff=div;mode=relay;identities=1;base=1;div=1;stripped=0"
 # Bind positions of the two new INSERT columns (see cdrs.py $56/$57).
 IDX_STIR_OUTCOME = 55
 IDX_STIR_EFF_ACTUAL = 56
-PARAM_COUNT = 57
+PARAM_COUNT = 60
 
 
 class _Capture:
@@ -108,6 +108,10 @@ def _b_leg_body(a_uuid="a-leg-uuid-1", **var_overrides):
         "answer_epoch": "1700000005",
         "originating_leg_uuid": a_uuid,
         "sip_rh_X-Stir-Outcome": OUTCOME,
+        # Contract rule 4: only an ANSWERED CARRIER B-leg may update the
+        # A-leg's STIR outcome. No `cdr_leg=B` here, so no B row is inserted
+        # (rule 3) — these tests exercise the STIR path alone.
+        "cdr_carrier_leg": "true",
     }
     v.update(var_overrides)
     return {
@@ -329,6 +333,8 @@ def test_a_leg_with_stir_outcome_binds_raw_and_eff(cap):
     assert p[IDX_STIR_EFF_ACTUAL] == "div"
     assert "stir_outcome, stir_eff_actual" in sql
     assert "$56::text" in sql and "$57::text" in sql
+    assert "leg, call_id, leg_attempt" in sql       # migration 48 tail
+    assert p[57:] == ("A", "a-leg-uuid-1", None)
     assert max(int(x) for x in re.findall(r"\$(\d+)", sql)) == PARAM_COUNT
 
 
@@ -433,6 +439,26 @@ def test_b_leg_explicit_stir_outcome_var_also_accepted(cap):
     body["variables"]["stir_outcome"] = "eff=unsigned;mode=base;identities=0"
     r = _run(body)
     assert r["detail"] == "updated" and r["stir_eff_actual"] == "unsigned"
+
+
+def test_non_carrier_b_leg_never_updates_stir(cap):
+    """A B-leg without cdr_carrier_leg=true (on-net PBX delivery, pre-split
+    FS) produces no row AND no STIR update (contract rules 3 + 4)."""
+    body = _b_leg_body()
+    del body["variables"]["cdr_carrier_leg"]
+    r = _run(body)
+    assert r["status"] == "b_leg" and r["detail"] == "not a carrier leg; no row"
+    assert not cap.calls
+
+
+def test_unanswered_carrier_b_leg_never_updates_stir(cap):
+    """A FAILED failover attempt must not overwrite the winner's outcome
+    (plan §4.7 trap 1: last-POST-wins)."""
+    body = _b_leg_body(answer_epoch="0")
+    r = _run(body)
+    assert r["status"] == "b_leg"
+    assert r["detail"] == "unanswered carrier leg; no stir update"
+    assert not cap.calls
 
 
 def test_bulk_tallies_b_legs_separately(monkeypatch):

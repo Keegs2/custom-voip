@@ -109,7 +109,7 @@ Each VM has its own `.env` file at `/opt/revup/.env`. The `.env` is NOT in git �
 When a forwarded/placed destination is a number the platform **owns** (any product), FreeSWITCH short-circuits the carrier and delivers the call into that DID's own product handler instead of hairpinning out through Bandwidth and back in. Design: `docs/ONNET_ROUTING_DESIGN.md`.
 
 - **Oracle:** the `number_routing` view (`22_number_routing.sql`) — one `UNION ALL` over `rcf_numbers`/`api_dids`/`trunk_dids` joined to `customers`. `resolve_destination(did)` in `db_client.lua` does a single indexed point lookup (0 or 1 row). The view is **unfiltered** on enabled/active so the resolver can tell "not ours" (0 rows → keep carrier path) from "ours but disabled/suspended" (row present → hard reject).
-- **Chain:** an RCF DID whose `forward_to` is another RCF DID resolves the whole chain **in memory** (DB lookups only, NO SIP per hop) until a terminal (off-net PSTN / local ext / trunk DID / API DID). **Exactly one** carrier B-leg is emitted, and only if the terminal is off-net PSTN.
+- **Chain:** an RCF DID whose `forward_to` is another RCF DID resolves the whole chain **in memory** (DB lookups only, NO SIP per hop) until a terminal (off-net PSTN / local ext / trunk DID / API DID — the last is a 603 hard reject while API Calling is retired). **Exactly one** carrier B-leg is emitted, and only if the terminal is off-net PSTN.
 - **Terminators** (`inbound_router.lua`): `terminate_rcf` / `terminate_api` / `terminate_trunk`, dispatched via a `TERMINATORS` map. A future product enrolls by adding a `number_routing` arm + a terminator (no rewrite of detection).
 - **Billing:** one CDR records BOTH parties — `customer_id`=terminal (so `rate_cdr()` is unchanged), plus `origin_customer_id`/`terminating_customer_id`/`on_net`/`on_net_hops` (`23_onnet_cdr_columns.sql`). Off-net: `origin_customer_id==customer_id`, `on_net=false`.
 - **Caller-ID:** honors each DID's `pass_caller_id`, composed across the chain — "last `false` hop wins" (the masking DID closest to the terminal shows). Outbound From stays the terminal DID for Bandwidth auth.
@@ -120,15 +120,15 @@ When a forwarded/placed destination is a number the platform **owns** (any produ
 
 | Type | Description | Features |
 |------|------------|----------|
-| `rcf` | Remote Call Forwarding | DID → forward_to mapping only. No UI access for end customer. |
-| `api` | API Calling | Programmable voice via webhooks |
+| `rcf` | Remote Call Forwarding | DID → forward_to mapping. Customers log in to the portal (lands on `/rcf`: numbers, call activity, account). |
+| `api` | API Calling — **RETIRED (2026-09)** | Switched OFF, code kept: `API_CALLING_ENABLED` (API + FS env, UI `config/features.ts`) is off unless exactly `true`. Off ⇒ `/v1/calls` + API tiers unmounted, new `api` accounts/DID assignments rejected, calls to an API DID (direct or as an on-net terminal) hard-rejected 603, never hairpinned. |
 | `trunk` | SIP Trunking | IP-authenticated SIP trunks |
-| `hybrid` | API + Trunk | Both API and trunk features |
+| `hybrid` | RCF + SIP Trunking | Both RCF and trunk features (was API + Trunk before API Calling was retired). Granite Telephony is hybrid. |
 | `ucaas` | UCaaS (Full-System branch only) | WebRTC, voicemail, conferencing, chat |
 
-**RCF customers NEVER see UCaaS features.** Only api/trunk/hybrid get those (Full-System branch).
+**RCF customers NEVER see UCaaS features.** Only trunk/hybrid get those (Full-System branch).
 
-**On-net terminal is product-agnostic.** Any product's DID (rcf/api/trunk) can be the terminal of an on-net (internal) call — a forward that lands on a platform-owned number is delivered into that number's own handler (RCF bridge, API voice app, or trunk-to-PBX) instead of hairpinning through the carrier. This is a routing/billing optimization only; it does NOT change what any customer sees in the UI, and RCF customers still never see UCaaS. See On-Net Routing above and `docs/ONNET_ROUTING_DESIGN.md`.
+**On-net terminal is product-agnostic.** Any live product's DID (rcf/trunk; api only if `API_CALLING_ENABLED`) can be the terminal of an on-net (internal) call — a forward that lands on a platform-owned number is delivered into that number's own handler (RCF bridge, API voice app, or trunk-to-PBX) instead of hairpinning through the carrier. This is a routing/billing optimization only; it does NOT change what any customer sees in the UI, and RCF customers still never see UCaaS. See On-Net Routing above and `docs/ONNET_ROUTING_DESIGN.md`.
 
 ## Testing
 

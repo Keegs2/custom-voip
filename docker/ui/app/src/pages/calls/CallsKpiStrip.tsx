@@ -11,6 +11,12 @@
  * over the same committed filter set); the trend charts aggregate their own
  * up-to-1000-row fetch.
  *
+ * ROW-MODEL HONESTY (staff only — CDR A/B leg split): staff get a one-line
+ * note under the strip saying what a "row" is. Rows=Calls → figures are per
+ * call; Rows=All legs / Carrier legs → every carrier bridge attempt is its
+ * own row, so counts / ASR / averages are NOT call counts. Tenants are always
+ * one row per call (API-enforced) and see no note — their strip is unchanged.
+ *
  * Money cells (Total Cost / Avg Cost per call) render for STAFF only —
  * tenants never see cost anywhere. Em dash when nothing in the set is rated
  * (no fake "$0.0000"); color only on meaningful nonzero values.
@@ -21,7 +27,16 @@ import {
   GOOD, WARN, BAD, AZURE_DEEP,
   mosColor, packetLossColor, jitterColor, rFactorColor, fmtDurationShort,
 } from './quality';
-import type { Cdr } from '../../types/cdr';
+import { fmtAvgCallDuration } from '../../utils/callDuration';
+import { ROWS_MODE_NOTE } from './callsFilters';
+import type { Cdr, CdrRowsMode } from '../../types/cdr';
+
+/** Unit for the "of N matching …" hint (staff only). */
+const ROWS_UNIT: Record<CdrRowsMode, string> = {
+  calls: 'calls',
+  all: 'rows',
+  b: 'legs',
+};
 
 interface StatCellProps {
   label: string;
@@ -51,13 +66,15 @@ interface CallsKpiStripProps {
   total?: number;
   /** Admin or support — money KPIs render only for staff. */
   isStaff: boolean;
+  /** Committed row model (staff) — drives the per-call vs per-leg note. */
+  rowsMode?: CdrRowsMode;
 }
 
-export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
+export function CallsKpiStrip({ cdrs, total, isStaff, rowsMode = 'calls' }: CallsKpiStripProps) {
   const stats = useMemo(() => {
     const loaded = cdrs.length;
     let answered = 0;
-    let durSum = 0;
+    const answeredRows: Cdr[] = [];
     let mosSum = 0; let mosCount = 0;
     let plSum = 0; let plCount = 0;
     let jSum = 0; let jCount = 0;
@@ -68,7 +85,7 @@ export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
       // ring time, which would drag a talk-time average toward zero.
       if (c.answer_time != null) {
         answered++;
-        durSum += c.duration_seconds ?? 0;
+        answeredRows.push(c);
       }
       if (c.mos != null) { mosSum += c.mos; mosCount++; }
       if (c.packet_loss_pct != null) { plSum += c.packet_loss_pct; plCount++; }
@@ -85,7 +102,9 @@ export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
       loaded,
       answered,
       asr: loaded > 0 ? (answered / loaded) * 100 : 0,
-      avgDurSec: answered > 0 ? durSum / answered : null,
+      // Staff rows: exact seconds. Tenant rows: mean of whole minutes,
+      // 1 decimal ("2.3 min") — the API never sends tenants seconds.
+      avgDurLabel: fmtAvgCallDuration(answeredRows, fmtDurationShort),
       avgMos: mosCount > 0 ? mosSum / mosCount : null,
       avgLossPct: plCount > 0 ? plSum / plCount : null,
       avgJitterMs: jCount > 0 ? jSum / jCount : null,
@@ -99,18 +118,25 @@ export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
   const hasRated = stats.ratedCount > 0;
   const asrTone = stats.asr > 50 ? GOOD : stats.asr >= 30 ? WARN : BAD;
 
-  return (
+  const matchingHint =
+    total == null
+      ? undefined
+      : isStaff
+        ? `of ${total.toLocaleString()} matching ${ROWS_UNIT[rowsMode]}`
+        : `of ${total.toLocaleString()} matching`;
+
+  const strip = (
     <section className="dlx4-statgrid" aria-label="Call aggregates for the current page">
       <StatCell
         label="This Page"
         value={stats.loaded.toLocaleString()}
-        hint={total != null ? `of ${total.toLocaleString()} matching` : undefined}
+        hint={matchingHint}
       />
       <StatCell label="Answered" value={stats.answered.toLocaleString()} />
       <StatCell label="ASR" value={`${stats.asr.toFixed(1)}%`} tone={asrTone} />
       <StatCell
         label="Avg Duration"
-        value={stats.avgDurSec != null ? fmtDurationShort(stats.avgDurSec) : '—'}
+        value={stats.avgDurLabel}
         hint="answered calls"
       />
       <StatCell
@@ -144,11 +170,31 @@ export function CallsKpiStrip({ cdrs, total, isStaff }: CallsKpiStripProps) {
       )}
       {isStaff && (
         <StatCell
-          label="Avg Cost / Call"
+          label={rowsMode === 'calls' ? 'Avg Cost / Call' : 'Avg Cost / Row'}
           value={stats.avgCost != null ? fmtMoneySmart(stats.avgCost) : '—'}
           hint={hasRated ? `${stats.ratedCount.toLocaleString()} rated` : undefined}
         />
       )}
     </section>
+  );
+
+  // Tenants: the strip alone, exactly as before.
+  if (!isStaff) return strip;
+
+  return (
+    <>
+      {strip}
+      <p
+        className="dlx4-statcell-hint"
+        role="note"
+        style={{
+          margin: '-4px 2px 0',
+          whiteSpace: 'normal',
+          color: rowsMode === 'calls' ? undefined : 'var(--rcf-ink-soft)',
+        }}
+      >
+        {ROWS_MODE_NOTE[rowsMode]}
+      </p>
+    </>
   );
 }

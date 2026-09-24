@@ -9,7 +9,11 @@
  *   2. Hero quality tiles — MOS / R-Factor / Quality % / Loss % / Jitter,
  *      status-colored.
  *   3. Call Info — times, duration vs billable, zone/SBC, carrier, codecs,
- *      hangup cause + SIP code, SIP identities.
+ *      hangup cause + SIP code, SIP identities. STAFF also get the CDR A/B
+ *      leg-split identity: Leg (A / B / legacy), Call ID (copyable) and, on
+ *      carrier B rows, the bridge Attempt number, plus a "Show all legs of
+ *      this call" action (staff only — the parent passes `onShowAllLegs`)
+ *      that sets the list to Rows=All legs + call_id=<call_id ?? uuid>.
  *   4. STIR / SHAKEN — the shared <AttestationChain/> (handles its own
  *      404-for-old-rows case).
  *   5. RTP Detail — collapsible (default closed): packet/byte counters both
@@ -36,7 +40,21 @@ import {
   mosColor, rFactorColor, packetLossColor, jitterColor, qualityPctColor,
   fmtDurationShort, fmtBytes,
 } from './quality';
+import { fmtMinutes, hasExactDuration } from '../../utils/callDuration';
 import type { Cdr } from '../../types/cdr';
+
+/** Minute-precision timestamp — tenant rows are floored to the minute. */
+function fmtDateMinute(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
 
 function fmtDateFull(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -116,9 +134,12 @@ interface CdrDetailModalProps {
   isStaff: boolean;
   /** True admin — the Rate CDR write is admin-only (support gets 403). */
   isAdmin: boolean;
+  /** Staff only: drill the list down to every row of this call. Omitted for
+      tenants, which hides the action entirely. */
+  onShowAllLegs?: (callId: string) => void;
 }
 
-export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModalProps) {
+export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }: CdrDetailModalProps) {
   // ALL hooks unconditionally at the top — React #310 prevention.
   const { toastOk, toastErr } = useToast();
   const queryClient = useQueryClient();
@@ -161,6 +182,8 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
 
   const d = detail ?? cdr;
   const answered = d.answer_time != null;
+  // Staff rows carry exact seconds; tenant rows only whole minutes.
+  const exact = hasExactDuration(d);
   const zone = zoneOf(d.sbc_id);
   // Shared callsFormat mapping — same label as the table's Carrier column,
   // so the two can never drift. EMPTY folds to InfoItem's own em dash.
@@ -174,14 +197,19 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
     d.rtp_audio_in_packet_count != null || d.rtp_audio_out_packet_count != null ||
     d.jitter_avg_ms != null || d.flaw_total != null;
 
-  async function copyUuid() {
+  async function copyText(value: string, what: string) {
     try {
-      await navigator.clipboard.writeText(d.uuid);
-      toastOk('UUID copied');
+      await navigator.clipboard.writeText(value);
+      toastOk(`${what} copied`);
     } catch {
       toastErr('Copy failed');
     }
   }
+
+  const legLabel =
+    d.leg === 'A' ? 'A — call row'
+      : d.leg === 'B' ? 'B — carrier attempt'
+        : 'Legacy (pre-split)';
 
   return (
     <div
@@ -231,7 +259,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
               </span>
               <button
                 type="button"
-                onClick={() => void copyUuid()}
+                onClick={() => void copyText(d.uuid, 'UUID')}
                 title="Copy UUID"
                 aria-label="Copy call UUID"
                 className="dlx4-pgbtn"
@@ -287,14 +315,22 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
           <SectionTitle>Call Info</SectionTitle>
           <div className="dlx-info-grid">
             <InfoItem label="Start" value={fmtDateFull(d.start_time)} />
-            <InfoItem label="Answered" value={fmtDateFull(d.answer_time)} />
-            <InfoItem label="Ended" value={fmtDateFull(d.end_time)} />
+            {/* Tenant rows carry minute-floored answer/end times (API
+                tenant redaction) — render them at minute precision. */}
+            <InfoItem label="Answered" value={exact ? fmtDateFull(d.answer_time) : fmtDateMinute(d.answer_time)} />
+            <InfoItem label="Ended" value={exact ? fmtDateFull(d.end_time) : fmtDateMinute(d.end_time)} />
             <InfoItem
               label="Duration"
-              value={`${fmtDurationShort(d.duration_seconds)}${d.billable_seconds > 0 ? ` · billable ${fmtDurationShort(d.billable_seconds)}` : ''}`}
+              value={
+                exact
+                  ? `${fmtDurationShort(d.duration_seconds ?? 0)}${isStaff && (d.billable_seconds ?? 0) > 0 ? ` · billable ${fmtDurationShort(d.billable_seconds ?? 0)}` : ''}`
+                  : (d.duration_minutes ?? 0) > 0 ? `about ${fmtMinutes(d.duration_minutes)}` : '—'
+              }
             />
-            <InfoItem label="Zone / SBC" value={d.sbc_id ? `${zone ?? '—'} · ${d.sbc_id}` : null} mono />
-            <InfoItem label="Carrier" value={carrier === EMPTY ? null : carrier} />
+            {isStaff && (
+              <InfoItem label="Zone / SBC" value={d.sbc_id ? `${zone ?? '—'} · ${d.sbc_id}` : null} mono />
+            )}
+            {isStaff && <InfoItem label="Carrier" value={carrier === EMPTY ? null : carrier} />}
             <InfoItem
               label="Codec"
               value={
@@ -316,9 +352,9 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
               mono
               accent={d.hangup_cause === 'NORMAL_CLEARING' ? 'var(--rcf-green)' : d.hangup_cause ? 'var(--rcf-red)' : undefined}
             />
-            {d.traffic_grade && <InfoItem label="Traffic Grade" value={d.traffic_grade} />}
+            {isStaff && d.traffic_grade && <InfoItem label="Traffic Grade" value={d.traffic_grade} />}
             {d.trunk_id && <InfoItem label="Trunk" value={d.trunk_id} mono />}
-            {d.network_addr && <InfoItem label="Network Addr" value={d.network_addr} mono />}
+            {isStaff && d.network_addr && <InfoItem label="Network Addr" value={d.network_addr} mono />}
             {(d.sip_from_user || d.sip_to_user) && (
               <InfoItem
                 label="SIP From / To"
@@ -326,13 +362,64 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
                 mono
               />
             )}
-            {d.sip_user_agent && <InfoItem label="User Agent" value={d.sip_user_agent} mono wide />}
+            {isStaff && d.sip_user_agent && <InfoItem label="User Agent" value={d.sip_user_agent} mono wide />}
+            {/* CDR A/B leg split — staff only (tenant rows carry no leg fields). */}
+            {isStaff && <InfoItem label="Leg" value={legLabel} />}
+            {isStaff && d.leg === 'B' && (
+              <InfoItem label="Attempt" value={d.leg_attempt != null ? `#${d.leg_attempt}` : null} mono />
+            )}
+            {isStaff && (
+              <InfoItem
+                label="Call ID"
+                wide
+                value={
+                  d.call_id ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%', minWidth: 0 }}>
+                      <span
+                        className="dlx4-mono"
+                        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={d.call_id}
+                      >
+                        {d.call_id}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void copyText(d.call_id ?? '', 'Call ID')}
+                        title="Copy Call ID"
+                        aria-label="Copy call ID"
+                        className="dlx4-pgbtn"
+                        style={{ height: 22, minWidth: 0, padding: '0 8px', fontSize: '0.64rem', flex: 'none' }}
+                      >
+                        Copy
+                      </button>
+                    </span>
+                  ) : null
+                }
+              />
+            )}
           </div>
+
+          {/* Staff drill-down: every row of this call (A + carrier B-legs). */}
+          {isStaff && onShowAllLegs && (
+            <div style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="dl-btn dl-btn-ghost"
+                onClick={() => onShowAllLegs(d.call_id ?? d.uuid)}
+                title="Filter the list to this call's A-leg and every carrier attempt"
+              >
+                Show all legs of this call
+              </button>
+            </div>
+          )}
 
           {/* STIR / SHAKEN */}
           <div className="dlx4-xsection">
             <SectionTitle>STIR / SHAKEN</SectionTitle>
-            <AttestationChain callId={d.uuid} />
+            {/* Attestation is keyed by the CALL (A-leg uuid): a carrier B row
+                resolves through its call_id; A / legacy / tenant rows fall
+                back to their own uuid (== call_id on A rows). */}
+            <AttestationChain callId={d.call_id ?? d.uuid} />
           </div>
 
           {/* RTP Detail — collapsible */}
@@ -372,6 +459,11 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
 
               {rtpOpen && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 18, marginTop: 12 }}>
+                  {/* Packet/byte volume counters are staff-only: they scale
+                      1:1 with talk time (an exact-duration proxy), so the
+                      API withholds them from tenants. */}
+                  {isStaff && (
+                  <>
                   <div>
                     <p className="dlx4-subhead" style={{ color: INK_FAINT }}>Audio In (from carrier)</p>
                     <div className="dlx-info-grid" style={{ gridTemplateColumns: '1fr' }}>
@@ -392,6 +484,8 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin }: CdrDetailModa
                       <InfoItem label="Raw / Media Bytes" value={`${fmtBytes(d.rtp_audio_out_raw_bytes)} / ${fmtBytes(d.rtp_audio_out_media_bytes)}`} mono />
                     </div>
                   </div>
+                  </>
+                  )}
                   <div>
                     <p className="dlx4-subhead" style={{ color: INK_FAINT }}>Jitter &amp; Flaws</p>
                     <div className="dlx-info-grid" style={{ gridTemplateColumns: '1fr' }}>

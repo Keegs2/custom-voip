@@ -91,6 +91,8 @@ interface CdrPaginationBarProps {
   busy: boolean;
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
+  /** Accessible name for the pager landmark (default "CDR result pages"). */
+  ariaLabel?: string;
 }
 
 export function CdrPaginationBar({
@@ -104,6 +106,7 @@ export function CdrPaginationBar({
   busy,
   onPageChange,
   onPageSizeChange,
+  ariaLabel = 'CDR result pages',
 }: CdrPaginationBarProps) {
   const atFirst = page <= 1;
   const atLast = pageCount != null ? page >= pageCount : !hasNext;
@@ -113,7 +116,7 @@ export function CdrPaginationBar({
   };
 
   return (
-    <nav className="dlx4-pager" aria-label="CDR result pages">
+    <nav className="dlx4-pager" aria-label={ariaLabel}>
       <span className="dlx4-pager-range" aria-live="polite">
         {rangeEnd > 0 ? (
           <>

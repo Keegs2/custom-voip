@@ -66,9 +66,44 @@ inbound_router.lua executes:
      |
      |-- "rcf" -> terminate_rcf: ON-NET decision at the forward branch point
      |            (see below), else Bridge to forward_to number via carrier
-     |-- "api" -> terminate_api: Answer, then execute voice_webhook.lua
+     |-- "api" -> RETIRED (API_CALLING_ENABLED off, default): hard reject
+     |            CALL_REJECTED (603) + lua_routed=true. Flag on: terminate_api
+     |            (Answer, then execute voice_webhook.lua) — unchanged code.
      |-- "trunk" -> terminate_trunk: Bridge to customer PBX via Kamailio
 ```
+
+### API Calling product — RETIRED (flag `API_CALLING_ENABLED`, default OFF)
+
+The API Calling product (account_type `api`) is switched OFF; its code is KEPT.
+One env flag, `API_CALLING_ENABLED`, read via `os.getenv` like
+`BRIDGE_PROGRESS_TIMEOUT`: enabled ONLY when the value is exactly `true`
+(case-insensitive, trimmed). Unset / empty / `1` / `on` / anything else = OFF.
+Scripts are bind-mounted, so the retirement takes effect on `git pull` with no
+FS restart and no `.env` change. Re-enabling needs `API_CALLING_ENABLED=true` in
+`/opt/revup/.env` + container recreate (passed through `docker-compose.media.yml`).
+
+When OFF:
+- **Direct inbound to an api_did** — STEP 1 lookup order (RCF → API → Trunk) is
+  unchanged, so the DID is still recognized as OURS, but STEP 2 hard-rejects it
+  `CALL_REJECTED` (603) with `lua_routed=true` (dialplan does not mask with 404).
+  Never answered, never handed to `voice_webhook.lua`, never sent to a carrier.
+  `customer_id`/`product_type` carry the API DID's customer / `api`.
+- **On-net RCF chain whose terminal is an api_did** — rejected 603 in the chain
+  loop right beside the disabled/suspended check, same shape: no carrier
+  hairpin, terminal never dispatched, so `customer_id` stays the origin RCF
+  customer and `terminating_customer_id`/`on_net`/`on_net_hops` are not exported
+  (identical to the existing disabled-terminal reject).
+- **`api_outbound.lua` / `outbound_api.lua`** — defensive guard at the top of
+  each (before any Redis/DB load): log `API Calling retired ...` + hang up
+  `CALL_REJECTED`. The API originate endpoint is unmounted, so these are
+  normally unreachable; the `public.xml` `outbound_api` / `api_product_type`
+  extensions are left untouched (no reloadxml needed).
+- `number_routing` view / `db.resolve_destination` / `db.lookup_api_did` are
+  unchanged — the api arm stays so an api DID resolves as "ours → reject", not
+  "not ours → carrier".
+- RCF and SIP Trunking paths never consult the flag. Flag ON = byte-identical
+  to the pre-retirement behavior (harness-verified).
+- Log line to grep: `API Calling retired (API_CALLING_ENABLED off)`.
 
 ### On-Net (Internal) Routing (design: `docs/ONNET_ROUTING_DESIGN.md`)
 
@@ -145,6 +180,9 @@ inbound_router.lua (product_type == "rcf"):
        originate_timeout here: it caps time-to-ANSWER including ring time),
        X-Carrier, X-CID (sip_call_id for Homer A/B correlation),
        and RFC 4028 session timers (sip_session_timeout=1800, min=90).
+     - Each LAUNCHED attempt's dial string carries the per-leg `[cdr_*]`
+       CDR-split block (`cdr_leg_attempt` = launched count, 1..N) — see
+       "CDR A/B leg split" below. The local-extension bridge never does.
      - Loop breaks on `originate_disposition == "SUCCESS"` (the real FS bridge-result variable; `bridge_result` is NOT a channel variable and must never be used). `carrier_used` is set per attempt, so breaking on success records the winning carrier.
      - Export RFC 4028 session timers to B-leg as well.
      - Uses EXTERNAL profile so Via/Contact/SDP get public IP.
@@ -159,6 +197,55 @@ inbound_router.lua (product_type == "rcf"):
         (no carrier hairpin). RCF->RCF chains resolve in-memory to a terminal.
         See "On-Net (Internal) Routing" above.
 ```
+
+### CDR A/B leg split — per-leg B-channel vars (`cdr_*`, 2026-09-23)
+
+Contract: `docs/CDR_LEG_SPLIT_CONTRACT.md` (wins over the plan). With
+`log-b-leg=true` in `json_cdr.conf.xml` every originated B channel POSTs its own
+CDR. The ingest writes a B row **only** when the B channel carries
+`cdr_leg=B` AND `cdr_carrier_leg=true` (the explicit split trigger — never
+inferred from leg topology), built from these vars:
+
+| var | value |
+|---|---|
+| `cdr_leg` / `cdr_carrier_leg` / `cdr_direction` | `B` / `true` / `outbound` |
+| `cdr_leg_attempt` | 1-based count of carrier bridges **actually launched** for this call (TCP-pre-check-skipped attempts create no B channel and are not counted → rows 1..N, no gaps) |
+| `cdr_call_id` | A-leg `uuid` (= inbound SIP Call-ID, internal profile `inbound-use-callid-as-uuid=true`) |
+| `cdr_customer_id`, `cdr_product_type`, `cdr_trunk_id`, `cdr_on_net`, `cdr_on_net_hops`, `cdr_origin_customer_id`, `cdr_terminating_customer_id`, `cdr_inbound_carrier`, `cdr_inbound_carrier_pop` | the A-leg's same-named channel var, read back at bridge time (after on-net chain resolution / `dispatch_terminal`) |
+| `cdr_sbc_id` | the A-leg's `sip_h_X-SBC-ID` (what the ingest stores as the A row's `sbc_id`) |
+
+- **Where:** `cdr_b_leg_block(attempt)` (inline in `inbound_router.lua` and
+  `trunk_outbound.lua` — deliberately not a lib, so a load failure can never
+  touch the call path) is spliced into the dial string of: both RCF off-net
+  failover loops (table-driven `carrier_trunks` and the legacy fallback) and
+  `trunk_outbound.lua` primary (attempt 1) + failover (attempt 2).
+- **Never on:** `terminate_trunk` PBX delivery, local extension (`user/…`),
+  `terminate_api`, hard rejects (603/483/API-retired) — those produce NO B row.
+  Not added to the retired API paths (`api_outbound.lua`, `outbound_api.lua`,
+  `voice_webhook.lua <Dial>`) or the `public.xml` `default_outbound` /
+  `emergency_911` bridges: their B-legs post but the ingest writes no row.
+- **Scoping (why `[...]`):** the block is a per-leg `[...]` group placed
+  immediately before the endpoint: `{globals}[cdr_*]sofia/external/…`.
+  `switch_ivr_originate` parses `{}` into the originate-wide `var_event` and a
+  leading `[]` into that one leg's `local_var_event`; BOTH are applied only to
+  the newly created peer channel — nothing is written back to the caller, so
+  the A-leg CDR is untouched (commas inside `[]` are pre-escaped by the
+  originate parser, the same mechanism behind documented strings like
+  `{a=b}[leg_timeout=10,x=y]sofia/…`). NEVER `export` these (export also sets
+  the var on the A-leg → every A row flips to `direction=outbound`), never
+  `set` them on the A-leg.
+- **Dial-string safety:** every value is validated (ints `^%d+$`, bools
+  `true|false`, product `^[%a_]+$`, carrier/pop/sbc `^[%w._-]+$`, call-id
+  `^[%w._%-@:+~!%%*/]+$`); a value that fails is OMITTED with a WARNING, never
+  sanitized into the string. A missing `cdr_customer_id`/`cdr_call_id` makes the
+  ingest log + drop that B-leg — attribution fails closed, the call never fails.
+- **Trunk outbound:** the PBX-originated A-leg has no `on_net` / `origin_*` /
+  `terminating_*` / `inbound_carrier*` vars, so those are omitted on its B-leg
+  too (verbatim copy of an absent value → NULL, same as the A row).
+- **Tests:** `tests/lua/onnet_router_harness.lua` §6-§11 and
+  `tests/lua/trunk_outbound_cdr_harness.lua` (optional `BASELINE_ROUTER=` /
+  `BASELINE_TRUNK=` = pre-change script → asserts A-leg state + dial strings
+  minus the `[cdr_*]` block are byte-identical).
 
 **terminate_rcf note:** the RCF body now runs inside `terminate_rcf(dest, ctx)`.
 It operates on the **terminal** RCF DID (`dest.did`) and the **composed**
@@ -210,7 +297,7 @@ body is stripped is obsolete.
 - `number_routing` view -- on-net oracle for `forward_to` (resolve_destination)
 
 **Channel variables set for CDR:**
-`customer_id` (=terminal customer), `product_type`, `traffic_grade`, `trunk_id`, `carrier_used`, `forward_to`, `direction`, `call_start_time`, `hangup_cause`, `blocked_reason`, `fraud_score`, `lua_routed`, the inbound-carrier attribution `inbound_carrier` / `inbound_carrier_pop` (from Kamailio's X-Inbound-Carrier/X-Inbound-PoP; "bandwidth"/"" when absent), and the on-net set `origin_customer_id`, `terminating_customer_id`, `on_net`, `on_net_hops`.
+`customer_id` (=terminal customer), `product_type`, `traffic_grade`, `trunk_id`, `carrier_used`, `forward_to`, `direction`, `call_start_time`, `hangup_cause`, `blocked_reason`, `fraud_score`, `lua_routed`, the inbound-carrier attribution `inbound_carrier` / `inbound_carrier_pop` (from Kamailio's X-Inbound-Carrier/X-Inbound-PoP; "bandwidth"/"" when absent), and the on-net set `origin_customer_id`, `terminating_customer_id`, `on_net`, `on_net_hops`. These are all A-leg only. Carrier B-legs additionally get the per-leg `cdr_*` set (never on the A-leg) — see "CDR A/B leg split".
 
 ### trunk_outbound.lua
 
@@ -226,10 +313,15 @@ Call flow:
 7. [If Redis available] Velocity check (CPM/daily limits)
 8. Set caller ID: outbound_caller_id = trunk DID (carrier auth), effective_caller_id = PBX original
 9. Bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
-10. Failover with X-Carrier=secondary if primary fails
+   (per-leg `[cdr_*]` CDR-split block, `cdr_leg_attempt=1` — see "CDR A/B leg split")
+10. Failover with X-Carrier=secondary if primary fails (`cdr_leg_attempt=2`)
 11. Set `api_hangup_hook=lua channel_release.lua` for channel cleanup
 
 ### api_outbound.lua
+
+**RETIRED (API Calling product).** With `API_CALLING_ENABLED` off (default) the
+script rejects `CALL_REJECTED` at the very top and does nothing else; the flow
+below applies only with the flag on.
 
 **Called per ESL-originated outbound API call** from the `outbound_api` dialplan extension.
 
@@ -370,6 +462,9 @@ why `cdrs.freeswitch_node` was NULL on every production row), and
 
 ### outbound_api.lua
 
+**RETIRED (API Calling product)** — same top-of-script `API_CALLING_ENABLED`
+guard as api_outbound.lua (off = reject `CALL_REJECTED`).
+
 **Legacy/alternative outbound API handler.** Similar to api_outbound.lua but simpler:
 - Uses `require()` instead of `loadfile()` (may fail due to mod_lua path issue)
 - No tier-aware CPS checking
@@ -379,6 +474,8 @@ why `cdrs.freeswitch_node` was NULL on every production row), and
 ### voice_webhook.lua
 
 **TwiML-compatible XML execution engine** for API calling product.
+**RETIRED:** only reachable with `API_CALLING_ENABLED=true` (its callers
+terminate_api / api_outbound.lua / outbound_api.lua are gated); code kept.
 
 Supports these verbs: Say, Play, Gather, Dial, Hangup, Pause, Redirect, Reject.
 

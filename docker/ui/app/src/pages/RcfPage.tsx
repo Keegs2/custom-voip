@@ -11,6 +11,7 @@ import { apiRequest } from '../api/client';
 import { useToast } from '../components/ui/Toast';
 import { searchCdrs } from '../api/cdrs';
 import type { Cdr } from '../types/cdr';
+import { fmtAvgCallDuration, hasTalkTime } from '../utils/callDuration';
 import {
   listAvailableDids,
   listMyDids,
@@ -945,8 +946,9 @@ function callStatusInfo(cdr: Cdr): { label: string; bg: string; color: string; b
 
   const cause = (cdr.hangup_cause ?? '').toUpperCase();
 
-  // Answered calls (has answer_time and non-zero duration)
-  if (cdr.answer_time != null && cdr.duration_seconds > 0) {
+  // Answered calls (has answer_time and non-zero duration — exact seconds on
+  // staff rows, whole minutes on tenant rows; see utils/callDuration.ts)
+  if (cdr.answer_time != null && hasTalkTime(cdr)) {
     return { label: 'Answered', ...GOOD };
   }
 
@@ -1069,17 +1071,22 @@ interface CallActivityTabProps {
   customerId: number | undefined;
 }
 
+/** Staff ACD format (exact seconds) — unchanged from the original tile. */
+function fmtAcdExact(acd: number): string {
+  return acd >= 60 ? `${Math.floor(acd / 60)}m ${Math.round(acd % 60)}s` : `${Math.round(acd)}s`;
+}
+
 /** Compute aggregate quality stats from a list of CDRs. */
 function computeQualityStats(cdrs: Cdr[]) {
   let answered = 0;
   let mosSum = 0;
   let mosCount = 0;
-  let durationSum = 0;
+  const answeredRows: Cdr[] = [];
 
   for (const cdr of cdrs) {
-    if (cdr.answer_time != null && cdr.duration_seconds > 0) {
+    if (cdr.answer_time != null && hasTalkTime(cdr)) {
       answered++;
-      durationSum += cdr.duration_seconds;
+      answeredRows.push(cdr);
     }
     if (cdr.mos != null) {
       mosSum += cdr.mos;
@@ -1090,9 +1097,11 @@ function computeQualityStats(cdrs: Cdr[]) {
   const total = cdrs.length;
   const asr = total > 0 ? (answered / total) * 100 : null;
   const avgMos = mosCount > 0 ? mosSum / mosCount : null;
-  const acd = answered > 0 ? durationSum / answered : null;
+  // Staff rows: exact "Xm Ys". Tenant rows: mean of whole minutes, 1 decimal
+  // ("2.3 min") — the API never sends customers seconds.
+  const acdLabel = fmtAvgCallDuration(answeredRows, fmtAcdExact);
 
-  return { total, answered, asr, avgMos, acd };
+  return { total, answered, asr, avgMos, acdLabel };
 }
 
 // ─── DailyStats type ─────────────────────────────────────────────────────────
@@ -1115,7 +1124,7 @@ function buildDailyDots(cdrs: Cdr[]): DailyStats[] {
     const key = cdr.start_time.slice(0, 10);
     const bucket = byDate.get(key) ?? { mosSum: 0, mosCount: 0, total: 0, answered: 0 };
     bucket.total++;
-    if (cdr.answer_time != null && cdr.duration_seconds > 0) bucket.answered++;
+    if (cdr.answer_time != null && hasTalkTime(cdr)) bucket.answered++;
     if (cdr.mos != null) { bucket.mosSum += cdr.mos; bucket.mosCount++; }
     byDate.set(key, bucket);
   }
@@ -1607,6 +1616,10 @@ function WeeklyChart({ days }: WeeklyChartProps) {
 
 function CallActivityTab({ customerId }: CallActivityTabProps) {
   // ALL hooks unconditionally at top — rules of hooks (#310 prevention)
+  const { isAdmin, isSupport } = useAuth();
+  // Carrier routing is a platform internal — the API withholds carrier_used
+  // from tenant rows, so the Carrier Trunk column is staff-only.
+  const showCarrier = isAdmin || isSupport;
   const [activitySearch, setActivitySearch] = useState('');
   const [selectedDid, setSelectedDid] = useState<string | null>(null);
   const [didDropdownOpen, setDidDropdownOpen] = useState(false);
@@ -2048,7 +2061,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
           </div>
           <div className="rcf-stat rcf-stat-dim">
             <div className="rcf-stat-value">
-              {stats.acd != null ? (stats.acd >= 60 ? `${Math.floor(stats.acd / 60)}m ${Math.round(stats.acd % 60)}s` : `${Math.round(stats.acd)}s`) : '—'}
+              {stats.acdLabel}
             </div>
             <div className="rcf-stat-label">Avg duration</div>
           </div>
@@ -2129,7 +2142,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 580 }}>
             <thead>
               <tr>
-                {['Time', 'From', 'To (DID)', 'Carrier Trunk', 'Status', 'Quality'].map((h) => (
+                {['Time', 'From', 'To (DID)', ...(showCarrier ? ['Carrier Trunk'] : []), 'Status', 'Quality'].map((h) => (
                   <th key={h} className="rcf-th" style={{ padding: '11px 14px' }}>
                     {h}
                   </th>
@@ -2163,12 +2176,14 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                       </span>
                     </td>
 
-                    {/* Carrier Trunk */}
-                    <td style={{ padding: '12px 14px' }}>
-                      <span style={{ fontSize: '0.78rem', color: INK_DIM }}>
-                        {carrierDisplayName(cdr.carrier_used)}
-                      </span>
-                    </td>
+                    {/* Carrier Trunk — staff only */}
+                    {showCarrier && (
+                      <td style={{ padding: '12px 14px' }}>
+                        <span style={{ fontSize: '0.78rem', color: INK_DIM }}>
+                          {carrierDisplayName(cdr.carrier_used)}
+                        </span>
+                      </td>
+                    )}
 
                     {/* Status badge */}
                     <td style={{ padding: '12px 14px' }}>

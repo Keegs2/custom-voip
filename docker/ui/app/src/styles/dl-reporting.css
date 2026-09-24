@@ -1,0 +1,570 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   dl-reporting.css — page-scoped daylight styles for the customer Reporting
+   page (src/pages/reporting/*).
+
+   The `rpt-` prefix marks these as page-scoped. Everything else on the page
+   is the shared DAYLIGHT CONSOLE (`dl-*` in index.css), the segmented control
+   (`dlx-seg` in dl-admin.css), the stat strip + pager (`dlx4-*` in
+   dl-platform-b.css) and the chart card/tooltip (`dl-qtc-*` in
+   dl-trend-chart.css) — reused, never duplicated. Every color references the
+   shared `--rcf-*` custom properties declared on `.dl-scope`.
+   Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Screen-reader-only text (chart data tables, icon-only context) ─── */
+.rpt-sr {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Segmented controls wrap on phones instead of forcing a horizontal scroll */
+.rpt-scope .dlx-seg {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+/* ─── Staff customer picker bar ─── */
+.rpt-staffbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(47, 125, 246, 0.05);
+  border: 1px solid rgba(47, 125, 246, 0.18);
+}
+
+.rpt-staffbar-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+}
+
+.rpt-staffbar select { min-width: 240px; max-width: 100%; }
+
+.rpt-staffbar-note {
+  font-size: 0.72rem;
+  color: var(--rcf-ink-dim);
+}
+
+/* ─── Controls slab ─── */
+.rpt-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+}
+
+.rpt-controls-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 20px;
+  min-width: 0;
+}
+
+.rpt-controls-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rpt-custom-dates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 14px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rcf-line-soft);
+}
+
+.rpt-custom-dates .dl-input { min-width: 160px; }
+
+.rpt-tzline {
+  margin-top: 12px;
+  font-size: 0.7rem;
+  color: var(--rcf-ink-dim);
+}
+
+/* ─── Number picker (button + popover checklist) ─── */
+.rpt-numpick { position: relative; }
+
+.rpt-numpick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 210px;
+  max-width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rpt-numpick-pop {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(340px, calc(100vw - 48px));
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 10px;
+  box-shadow:
+    0 2px 6px rgba(14, 23, 38, 0.08),
+    0 18px 38px -16px rgba(14, 23, 38, 0.3);
+  overflow: hidden;
+}
+
+.rpt-numpick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--rcf-line-soft);
+  font-size: 0.72rem;
+  color: var(--rcf-ink-dim);
+}
+
+.rpt-numpick-list {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.rpt-numpick-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--rcf-ink);
+}
+
+.rpt-numpick-opt:hover { background: var(--rcf-tint-hover); }
+
+.rpt-numpick-opt input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--rcf-azure);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.rpt-numpick-num {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.rpt-numpick-name {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--rcf-ink-dim);
+}
+
+.rpt-linkbtn {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--rcf-azure-deep);
+  cursor: pointer;
+}
+
+.rpt-linkbtn:hover { text-decoration: underline; }
+.rpt-linkbtn:disabled { color: var(--rcf-ink-dim); cursor: default; text-decoration: none; }
+
+.rpt-linkbtn:focus-visible,
+.rpt-numpick-btn:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 2px;
+}
+
+/* ─── Summary hero — the ELI5 sentence ─── */
+.rpt-sentence {
+  margin: 0;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: clamp(1.05rem, 1.7vw, 1.32rem);
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: -0.012em;
+  color: var(--rcf-ink-soft);
+  max-width: 70ch;
+}
+
+.rpt-sentence strong {
+  font-weight: 700;
+  color: var(--rcf-ink);
+}
+
+.rpt-hero-stats { margin-top: 18px; }
+
+/* ─── Card grid — 1 → 2 → 3 columns ─── */
+.rpt-grid3 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--rcf-stack);
+}
+
+@media (min-width: 760px) {
+  .rpt-grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1180px) {
+  .rpt-grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* Cards in the grid stretch to equal height, explainer pinned to the foot */
+.rpt-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.rpt-card > .dl-panel-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rpt-card-foot { margin-top: auto; }
+
+/* ─── Big figure + caption (busiest day, grade word) ─── */
+.rpt-bigword {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 1.35rem;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  color: var(--rcf-ink);
+}
+
+.rpt-caption {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--rcf-ink-soft);
+}
+
+.rpt-eyebrow {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  margin-bottom: 5px;
+}
+
+.rpt-divider {
+  height: 1px;
+  background: var(--rcf-line-soft);
+  border: 0;
+  margin: 0;
+}
+
+/* ─── "What does this mean?" — native <details>, keyboard-ready ─── */
+.rpt-explain {
+  border-radius: 8px;
+}
+
+.rpt-explain > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--rcf-azure-deep);
+  border-radius: 6px;
+  padding: 2px 0;
+  user-select: none;
+}
+
+.rpt-explain > summary::-webkit-details-marker { display: none; }
+.rpt-explain > summary:hover { text-decoration: underline; }
+
+.rpt-explain > summary:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 2px;
+}
+
+.rpt-explain-chev { transition: transform var(--rcf-ease); }
+.rpt-explain[open] .rpt-explain-chev { transform: rotate(180deg); }
+
+.rpt-explain-body {
+  margin-top: 8px;
+  padding: 10px 13px;
+  border-radius: 8px;
+  background: rgba(47, 125, 246, 0.05);
+  border: 1px solid rgba(47, 125, 246, 0.16);
+  font-size: 0.76rem;
+  line-height: 1.6;
+  color: var(--rcf-ink-soft);
+}
+
+.rpt-explain-body p { margin: 0; }
+.rpt-explain-body p + p { margin-top: 6px; }
+
+/* ─── Simple labelled bars (missed reasons) ─── */
+.rpt-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.rpt-bar-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.78rem;
+  color: var(--rcf-ink);
+  margin-bottom: 5px;
+}
+
+.rpt-bar-count {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.rpt-bar-count span {
+  font-weight: 500;
+  color: var(--rcf-ink-dim);
+}
+
+.rpt-bar-track {
+  height: 8px;
+  border-radius: 8px;
+  background: var(--rcf-line-soft);
+  overflow: hidden;
+}
+
+.rpt-bar-fill {
+  height: 100%;
+  border-radius: 8px;
+  background: #d97706;
+}
+
+/* ─── Chart legend (color + text, never color alone) ─── */
+.rpt-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 0.72rem;
+  color: var(--rcf-ink-soft);
+}
+
+.rpt-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.rpt-legend-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.rpt-chart-svg:focus { outline: none; }
+
+.rpt-chart-svg:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.rpt-chart-hint {
+  font-size: 0.68rem;
+  color: var(--rcf-ink-dim);
+}
+
+/* ─── Outcome + grade badges (icon + word + color) ─── */
+.rpt-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 20px;
+  padding: 3px 9px 3px 7px;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+}
+
+.rpt-badge-ok {
+  color: #15803d;
+  background: rgba(22, 163, 74, 0.08);
+  border-color: rgba(22, 163, 74, 0.24);
+}
+
+.rpt-badge-miss {
+  color: #92400e;
+  background: rgba(217, 119, 6, 0.08);
+  border-color: rgba(217, 119, 6, 0.26);
+}
+
+.rpt-grade {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rpt-grade-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ─── Tables ─── */
+.rpt-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.rpt-table td {
+  padding: 11px 16px;
+  font-size: 0.8rem;
+  color: var(--rcf-ink);
+  vertical-align: middle;
+}
+
+.rpt-table .rpt-num { text-align: right; font-variant-numeric: tabular-nums; }
+.rpt-table th.rpt-num { text-align: right; }
+
+.rpt-mono {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.rpt-dim { color: var(--rcf-ink-dim); }
+
+.rpt-subline {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--rcf-ink-dim);
+  margin-top: 1px;
+}
+
+.rpt-table-foot {
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px;
+  border-top: 1px solid var(--rcf-line-soft);
+}
+
+/* ─── Call list filter row ─── */
+.rpt-listfilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  align-items: center;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--rcf-line);
+  background: var(--rcf-tint);
+}
+
+.rpt-listfilters-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ─── Glossary ─── */
+.rpt-glossary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px 28px;
+  margin: 0;
+}
+
+@media (min-width: 760px) {
+  .rpt-glossary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.rpt-glossary dt {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--rcf-ink);
+}
+
+.rpt-glossary dd {
+  margin: 3px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--rcf-ink-soft);
+}
+
+/* ─── Loading skeletons ─── */
+.rpt-skel {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #edf1f7 0%, #f6f8fb 45%, #edf1f7 90%);
+  background-size: 220% 100%;
+  animation: rpt-shimmer 1.3s ease-in-out infinite;
+}
+
+@keyframes rpt-shimmer {
+  from { background-position: 120% 0; }
+  to   { background-position: -120% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rpt-skel { animation: none; }
+  .rpt-explain-chev { transition: none; }
+}
+
+/* ─── Inline card error with retry ─── */
+.rpt-cardmsg {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* ─── Phone widths ─── */
+@media (max-width: 560px) {
+  .rpt-controls-actions { width: 100%; }
+  .rpt-controls-actions .dl-btn { flex: 1 1 auto; }
+  .rpt-numpick-btn { min-width: 0; width: 100%; }
+  .rpt-numpick { width: 100%; }
+  .rpt-controls-left { width: 100%; }
+  .rpt-controls-left > .dlx4-field { width: 100%; }
+  .rpt-staffbar select { min-width: 0; width: 100%; }
+  .rpt-table td { padding: 10px 12px; }
+  .rpt-listfilters { padding: 12px 14px; }
+}

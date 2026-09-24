@@ -7,7 +7,9 @@ import {
   IconRCF, IconTrunk, IconAPI, IconVoicemail, IconDocs,
   IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen, WalletMinimal } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen, BarChart3 } from 'lucide-react';
+import { API_CALLING_ENABLED } from '../../config/features';
+import { canSeeReporting } from '../../utils/reportingAccess';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -28,6 +30,19 @@ const allProductNavItems: NavItemDef[] = [
   { label: 'RCF',          icon: <IconRCF size={18} />,   to: '/rcf',      color: '#3b82f6', accountTypes: ['rcf', 'hybrid'] },
   { label: 'SIP Trunking', icon: <IconTrunk size={18} />, to: '/trunks',   color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
 ];
+
+/* ─── Insights nav items ──────────────────────────────────── */
+
+// Customer Reporting — rendered in its own group directly above
+// Documentation (so it sits right above Guides). Visibility is the shared
+// canSeeReporting() rule, identical to the /reporting route guard.
+const reportingNavItem: NavItemDef = {
+  label: 'Reporting',
+  icon: <BarChart3 size={18} />,
+  to: '/reporting',
+  color: '#3b82f6',
+  isActiveFn: (p) => p.startsWith('/reporting'),
+};
 
 /* ─── Documentation nav items ─────────────────────────────── */
 
@@ -60,14 +75,16 @@ interface ComingSoonItemDef {
 }
 
 // RCF and SIP Trunking are LIVE (gated by account_type in allProductNavItems).
-// API Calling and Visual Voicemail are pre-launch — shown as "Soon" items until
+// Visual Voicemail (and API Calling, when enabled) are pre-launch — shown as "Soon" items until
 // they graduate to live product portals, each linking to its coming-soon
 // showcase page. Like the group itself, these show for ALL authenticated
 // users regardless of account_type — same visibility the IVR item had.
-// (api/hybrid accounts can also reach /api-dids from their product pages; the
-// showcase renders identically for them.)
+// API Calling is RETIRED (2026-09): its item is kept but only listed while
+// API_CALLING_ENABLED is true (the /api-dids route redirects when it is off).
 const COMING_SOON_ITEMS: ComingSoonItemDef[] = [
-  { label: 'API Calling',      icon: <IconAPI size={18} />,       to: '/api-dids',  color: '#3b82f6' },
+  ...(API_CALLING_ENABLED
+    ? [{ label: 'API Calling', icon: <IconAPI size={18} />, to: '/api-dids', color: '#3b82f6' }]
+    : []),
   { label: 'Visual Voicemail', icon: <IconVoicemail size={18} />, to: '/voicemail', color: '#3b82f6' },
 ];
 
@@ -663,6 +680,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
     return {
       products:          stored.products          ?? true,
       comingSoon:        stored.comingSoon        ?? false,
+      insights:          stored.insights          ?? true,
       documentation:     stored.documentation     ?? true,
       administration:    stored.administration    ?? false,
     };
@@ -679,6 +697,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
   // whole nav — labeled "Support"), and readonly (Call Quality only: the one
   // support tool their role can actually call).
   const showAdmin = isAdmin || isSupport || isReadonly;
+  const showReporting = canSeeReporting(user);
 
   /* ── Product items filtered by role/account_type ───────── */
 
@@ -703,6 +722,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
     const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inDocs     = docPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inSoon     = soonPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inInsights = path === reportingNavItem.to || path.startsWith(reportingNavItem.to + '/');
 
     setGroupOpen((prev) => {
       const next = { ...prev };
@@ -710,7 +730,9 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
       if (inAdmin    && !prev.administration) next.administration = true;
       if (inDocs     && !prev.documentation)  next.documentation  = true;
       if (inSoon     && !prev.comingSoon)     next.comingSoon     = true;
+      if (inInsights && !prev.insights)       next.insights       = true;
       if (next.products       === prev.products &&
+          next.insights       === prev.insights &&
           next.administration === prev.administration &&
           next.documentation  === prev.documentation &&
           next.comingSoon     === prev.comingSoon) {
@@ -740,10 +762,6 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
 
   /* ── Admin items ───────────────────────────────────────── */
 
-  const paymentsDemoItem: NavItemDef = {
-    label: 'Payments Demo', to: '/admin/payments-demo', color: '#60a5fa', icon: <WalletMinimal size={15} strokeWidth={1.7} />,
-    isActiveFn: (p) => p.startsWith('/admin/payments-demo'),
-  };
   // The merged Calls & Quality page (CDR search + voice-quality analysis in
   // one). Staff enter via /cdrs; the tenant-facing entry keeps the familiar
   // "Call Quality" label via /call-quality — both routes render the same page.
@@ -993,7 +1011,23 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               </>
             )}
 
-            {/* ── GROUP 3: Documentation (hidden for support) ─ */}
+            {/* ── GROUP 3: Insights — Reporting, directly above Guides ─ */}
+            {showReporting && (
+              <>
+                <div style={{ height: 6 }} />
+                <CollapsibleGroup
+                  id="insights"
+                  label="Insights"
+                  icon={<BarChart3 size={11} strokeWidth={2.5} />}
+                  isOpen={groupOpen.insights}
+                  onToggle={toggleGroup}
+                >
+                  <SidebarNavItem item={reportingNavItem} onNavigate={closeMobile} small />
+                </CollapsibleGroup>
+              </>
+            )}
+
+            {/* ── GROUP 4: Documentation (hidden for support) ─ */}
             {!isSupport && (
               <>
                 <div style={{ height: 6 }} />
@@ -1011,7 +1045,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               </>
             )}
 
-            {/* ── GROUP 4: Administration / Support tools ──── */}
+            {/* ── GROUP 5: Administration / Support tools ──── */}
             {showAdmin && (
               <>
                 {!isSupport && <div style={{ height: 6 }} />}
@@ -1022,17 +1056,9 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                   isOpen={groupOpen.administration}
                   onToggle={toggleGroup}
                 >
-                  {/* ── Platform sub-group (admin only) ────
-                       Customer + platform administration moved to TED (the CRAG
-                       console); the Payments Demo is the only admin surface that
-                       still lives in revup. */}
-                  {isAdmin && (
-                    <>
-                      <SubGroupLabel label="Platform" />
-                      <SidebarNavItem item={paymentsDemoItem} onNavigate={closeMobile} small />
-                    </>
-                  )}
-
+                  {/* Customer + platform administration lives in TED (the CRAG
+                       console); the former Platform sub-group's last item, the
+                       Payments Demo, was removed 2026-09. */}
                   {isSupport ? (
                     /* Support role — its entire nav: the platform-read tools
                        the API grants this role. Calls & Quality is the merged

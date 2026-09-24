@@ -1,10 +1,12 @@
 """Customer management endpoints."""
 from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
+from config import API_CALLING_RETIRED_MESSAGE, api_calling_enabled
 from db import database as db
 from auth.dependencies import get_current_user, get_support_read_filter, require_admin
+from services import tenant_redaction as tr
 
 router = APIRouter()
 
@@ -24,7 +26,9 @@ router = APIRouter()
 #            concurrent call paths — PLUS any add-on call-path packages the trunks
 #            carry (sip_trunks.call_path_package_id -> call_path_packages.monthly_fee,
 #            summed across the customer's trunks) that stack on top of the bundle.
-#   - API:   cps_tiers.monthly_fee (via customers.api_tier_id).
+#   - API:   cps_tiers.monthly_fee (via customers.api_tier_id). API Calling is
+#            RETIRED (config.api_calling_enabled) — while off, NO api line is
+#            emitted for any account_type (hybrid now means RCF + SIP Trunking).
 RCF_LINE_MRC = Decimal("5.00")
 VOICEMAIL_BOX_MRC = Decimal("2.00")  # PLACEHOLDER — confirm with product
 
@@ -48,7 +52,8 @@ async def compute_billing_estimate(conn, customer_id: int) -> dict:
     customer's ``account_type`` are included:
       - rcf            -> RCF line
       - trunk/hybrid   -> SIP Trunking line (CPS tier + call paths)
-      - api/hybrid     -> API Calling line (CPS tier)
+      - api/hybrid     -> API Calling line (CPS tier) — ONLY when
+                          API_CALLING_ENABLED; retired (off) => omitted
 
     ``conn`` is a live asyncpg connection (pool-acquired by the caller) so the
     whole estimate reads from a single connection. All money is returned as
@@ -136,8 +141,10 @@ async def compute_billing_estimate(conn, customer_id: int) -> dict:
             ],
         })
 
-    # --- API Calling ---------------------------------------------------------
-    if account_type in ("api", "hybrid"):
+    # --- API Calling (RETIRED — only while API_CALLING_ENABLED) -------------
+    # Granite Telephony (primary prod customer) is hybrid; with the product
+    # retired its estimate must not carry an "API Calling" tier-fee line.
+    if account_type in ("api", "hybrid") and api_calling_enabled():
         tier_row = await conn.fetchrow(
             """
             SELECT t.name AS name, t.monthly_fee AS monthly_fee
@@ -201,6 +208,21 @@ class CustomerCreate(BaseModel):
     cpm_limit: int = 60
     ucaas_enabled: bool = False  # UCaaS add-on for api/trunk/hybrid customers
 
+    @field_validator("account_type")
+    @classmethod
+    def reject_retired_api(cls, v: str) -> str:
+        """422 for a NEW `api` account while API Calling is retired.
+
+        `hybrid` stays allowed (it now means RCF + SIP Trunking). Existing api
+        customers are untouched (CustomerUpdate cannot change account_type).
+        """
+        if v == "api" and not api_calling_enabled():
+            raise ValueError(
+                f"{API_CALLING_RETIRED_MESSAGE}: account_type 'api' can no longer "
+                "be created (use rcf, trunk or hybrid)"
+            )
+        return v
+
 
 class CustomerUpdate(BaseModel):
     name: Optional[str] = None
@@ -226,15 +248,22 @@ async def list_customers(
     Admins see every row with the full column set. Support sees every row but
     SLIM (financial/ops columns — balance, credit_limit, fraud_score,
     daily_limit, cpm_limit — are withheld). Tenant users see only their own
-    row, also slim. Same response shape otherwise (id + name for dropdowns).
+    row, also slim and additionally WITHOUT `traffic_grade` (internal routing
+    grade; see services/tenant_redaction.py). Same response shape otherwise
+    (id + name for dropdowns).
     """
     if user.get("role") == "admin":
         select_cols = """id, name, account_type, balance, credit_limit, status,
                traffic_grade, daily_limit, cpm_limit, fraud_score,
                ucaas_enabled, created_at"""
-    else:
+    elif customer_filter is None:
+        # Support (staff): slim, but keeps the internal routing grade.
         select_cols = """id, name, account_type, status,
                traffic_grade, ucaas_enabled, created_at"""
+    else:
+        # Tenant: no traffic_grade (internal routing grade — owner rule).
+        select_cols = """id, name, account_type, status,
+               ucaas_enabled, created_at"""
 
     query = f"""
         SELECT {select_cols}
@@ -263,6 +292,8 @@ async def list_customers(
     values.extend([limit, offset])
 
     results = await db.fetch_all(query, *values)
+    if customer_filter is not None:
+        return [tr.redact_customer_fields(r) for r in results]
     return [dict(r) for r in results]
 
 
@@ -315,17 +346,22 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
         "SELECT COUNT(*)::int AS n FROM rcf_numbers WHERE customer_id = $1::int",
         customer_id,
     )
-    api_count = await db.fetch_one(
-        "SELECT COUNT(*)::int AS n FROM api_dids WHERE customer_id = $1::int",
-        customer_id,
-    )
+    # API Calling is retired: while off the api_dids count is reported as 0
+    # (key kept so the response shape is stable for the UI) and not queried.
+    if api_calling_enabled():
+        api_count = await db.fetch_one(
+            "SELECT COUNT(*)::int AS n FROM api_dids WHERE customer_id = $1::int",
+            customer_id,
+        )
+    else:
+        api_count = {"n": 0}
     trunk_count = await db.fetch_one(
         "SELECT COUNT(*)::int AS n FROM sip_trunks WHERE customer_id = $1::int",
         customer_id,
     )
 
     c = dict(row)
-    return {
+    body = {
         "id": c["id"],
         "name": c["name"],
         "account_type": c["account_type"],
@@ -341,6 +377,9 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
             "trunks": trunk_count["n"],
         },
     }
+    # traffic_grade is an internal routing grade: staff only (an admin in
+    # "View as Customer" mode is still role=admin and keeps it).
+    return body if tr.is_staff(user) else tr.redact_customer_fields(body)
 
 
 # NOTE: like `/me` above, this literal `/me/billing` route MUST be declared

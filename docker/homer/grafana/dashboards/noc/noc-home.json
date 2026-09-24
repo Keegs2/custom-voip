@@ -6,7 +6,7 @@
     "home"
   ],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 3,
   "timezone": "browser",
   "editable": true,
   "graphTooltip": 0,
@@ -1009,7 +1009,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'bandwidth' AND inbound_carrier_pop = 'dallas';"
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'bandwidth' AND inbound_carrier_pop = 'dallas';"
         }
       ],
       "options": {
@@ -1195,7 +1195,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'bandwidth' AND inbound_carrier_pop = 'la';"
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'bandwidth' AND inbound_carrier_pop = 'la';"
         }
       ],
       "options": {
@@ -1381,7 +1381,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'sinch' AND inbound_carrier_pop = 'denver';"
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'sinch' AND inbound_carrier_pop = 'denver';"
         }
       ],
       "options": {
@@ -1576,7 +1576,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'sinch' AND inbound_carrier_pop = 'chicago';"
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND direction = 'inbound' AND inbound_carrier = 'sinch' AND inbound_carrier_pop = 'chicago';"
         }
       ],
       "options": {
@@ -1760,7 +1760,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT z.name, z.lat, z.lon, COALESCE(c.calls,0) AS calls_1h FROM (VALUES ('East',33.13::float8,-80.01::float8,'east'),('West',45.60::float8,-121.18::float8,'west'),('Central',41.26::float8,-95.86::float8,'central')) AS z(name,lat,lon,zk) LEFT JOIN (SELECT split_part(coalesce(sbc_id,''),'-',1) AS zone, count(*) AS calls FROM cdrs WHERE start_time > now() - interval '1 hour' GROUP BY 1) c ON c.zone=z.zk;"
+          "rawSql": "SELECT z.name, z.lat, z.lon, COALESCE(c.calls,0) AS calls_1h FROM (VALUES ('East',33.13::float8,-80.01::float8,'east'),('West',45.60::float8,-121.18::float8,'west'),('Central',41.26::float8,-95.86::float8,'central')) AS z(name,lat,lon,zk) LEFT JOIN (SELECT split_part(coalesce(sbc_id,''),'-',1) AS zone, count(*) AS calls FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' GROUP BY 1) c ON c.zone=z.zk;"
         },
         {
           "refId": "B",
@@ -2264,8 +2264,8 @@
     {
       "id": 20,
       "type": "stat",
-      "title": "Traffic · Active calls — now",
-      "description": "Live connected calls platform-wide: sum(freeswitch_calls_active) across every FS node, all zones — the same live gauge as Traffic & Status id 3 (ESL exporter :9103). Volume metric, informational blue.",
+      "title": "Traffic · Concurrent calls — live",
+      "description": "Connected (bridged) calls up right now, all zones: sum(freeswitch_calls_active) over every FS node — ESL exporter :9103 (`show calls count`, ~10s poll, 15s scrape). Same gauge as Traffic Status id 3. Informational blue: a fleet total has no capacity threshold because the zones are independent capacity domains — per-zone capacity colouring is on Traffic Status (Concurrent HWM per zone).",
       "datasource": {
         "type": "prometheus",
         "uid": "voip-metrics-vm"
@@ -2328,8 +2328,8 @@
     {
       "id": 21,
       "type": "stat",
-      "title": "Traffic · CPS — now (1m)",
-      "description": "Live calls-per-second, all zones: sum(zone:kamailio_trunk_cps:rate1m) — the vmalert recording rule over kamailio_trunk_cps (INVITE admits per carrier trunk), same query as Traffic & Status id 1. Green normal · orange >= 350 · red >= 500 (platform capacity guardrails).",
+      "title": "Traffic · Concurrent HWM — 24h",
+      "description": "Concurrent-call high-water mark: the most calls up at once platform-wide in the trailing 24 hours. INSTANT query max_over_time(fleet:freeswitch_calls_active_peak:sum[24h]). Source: vmalert rule `fleet:freeswitch_calls_active_peak:sum` (docker/vmalert/rules/traffic.yml, group noc_concurrency, 15s eval) = per-node 30s-window peak from the ESL exporter (freeswitch_calls_active_peak, sampled every 2s) with a PER-NODE fallback to the raw freeswitch_calls_active gauge on any node whose exporter does not emit the peak yet (raw fallback only sees its ~10s poll, so it can miss sub-10s bursts). A sum of per-node 30s maxima is an upper bound on truly simultaneous calls (nodes may peak at different instants inside the window) — the conservative side for capacity.\n\nROLLING 24h, deliberately not calendar 'today': 'Calls — today' (id 23) is a Postgres count cut at the DB server's midnight; a PromQL 'today' would need a Grafana relative-time override cut at the BROWSER's midnight, so the two 'today' tiles would disagree, and a calendar HWM is near-empty just after midnight. Rolling 24h is timezone-independent and always covers one full diurnal peak. Recorded series only exist from the noc_concurrency rule deploy onward, so the HWM window FILLS IN from rollout (a 30d HWM is a partial-window figure for the first 30 days) — it never backfills. Informational blue (fleet-level — see Traffic Status for per-zone capacity colouring and the 1h/7d/30d ladder).",
       "datasource": {
         "type": "prometheus",
         "uid": "voip-metrics-vm"
@@ -2342,14 +2342,15 @@
       },
       "targets": [
         {
-          "expr": "sum(zone:kamailio_trunk_cps:rate1m)",
-          "range": true,
-          "legendFormat": "CPS",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "voip-metrics-vm"
-          }
+          },
+          "expr": "max_over_time(fleet:freeswitch_calls_active_peak:sum[24h])",
+          "legendFormat": "HWM 24h",
+          "instant": true,
+          "range": false
         }
       ],
       "options": {
@@ -2368,27 +2369,20 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "cps",
-          "decimals": 1,
-          "noValue": "0",
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no data",
           "mappings": [],
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "blue"
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "blue",
                 "value": null
-              },
-              {
-                "color": "orange",
-                "value": 350
-              },
-              {
-                "color": "red",
-                "value": 500
               }
             ]
           }
@@ -2416,7 +2410,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE start_time > now() - interval '1 hour';",
+          "rawSql": "SELECT count(*) AS calls_1h FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour';",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2481,7 +2475,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS calls_today FROM cdrs WHERE start_time >= date_trunc('day', now());",
+          "rawSql": "SELECT count(*) AS calls_today FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time >= date_trunc('day', now());",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2546,7 +2540,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE start_time > now() - interval '15 minutes';",
+          "rawSql": "SELECT (count(*) FILTER (WHERE answer_time IS NOT NULL))::float / NULLIF(count(*), 0) AS asr FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes';",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2620,7 +2614,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float / NULLIF(count(*), 0) AS on_net_pct FROM cdrs WHERE start_time > now() - interval '15 minutes';",
+          "rawSql": "SELECT (count(*) FILTER (WHERE on_net))::float / NULLIF(count(*), 0) AS on_net_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes';",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2687,7 +2681,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(mos) AS avg_mos FROM cdrs WHERE start_time > now() - interval '15 minutes' AND mos IS NOT NULL;",
+          "rawSql": "SELECT avg(mos) AS avg_mos FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND mos IS NOT NULL;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2761,7 +2755,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(packet_loss_pct) AS avg_loss_pct FROM cdrs WHERE start_time > now() - interval '15 minutes' AND packet_loss_pct IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
+          "rawSql": "SELECT avg(packet_loss_pct) AS avg_loss_pct FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND packet_loss_pct IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2833,7 +2827,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(jitter_max_ms) AS avg_peak_jitter_ms FROM cdrs WHERE start_time > now() - interval '15 minutes' AND jitter_max_ms IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
+          "rawSql": "SELECT avg(jitter_max_ms) AS avg_peak_jitter_ms FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND jitter_max_ms IS NOT NULL AND billable_ms >= 10000 AND rtp_audio_in_packet_count >= 500;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2905,7 +2899,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(r_factor) AS avg_r_factor FROM cdrs WHERE start_time > now() - interval '15 minutes' AND r_factor IS NOT NULL;",
+          "rawSql": "SELECT avg(r_factor) AS avg_r_factor FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '15 minutes' AND r_factor IS NOT NULL;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -2979,7 +2973,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT avg(EXTRACT(EPOCH FROM (end_time - answer_time))) AS acd_sec FROM cdrs WHERE start_time > now() - interval '1 hour' AND answer_time IS NOT NULL AND end_time IS NOT NULL;",
+          "rawSql": "SELECT avg(EXTRACT(EPOCH FROM (end_time - answer_time))) AS acd_sec FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND answer_time IS NOT NULL AND end_time IS NOT NULL;",
           "refId": "A",
           "datasource": {
             "type": "postgres",
@@ -3044,7 +3038,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p95_answer_s FROM cdrs WHERE start_time > now() - interval '1 hour' AND answer_time IS NOT NULL;",
+          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (answer_time - start_time))) AS p95_answer_s FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND answer_time IS NOT NULL;",
           "refId": "A",
           "datasource": {
             "type": "postgres",

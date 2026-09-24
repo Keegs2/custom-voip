@@ -109,7 +109,7 @@ QueryClient defaults:
 
 ── inside AppLayout + RequireAuth (auth required) ──
 /rcf                      RcfPage
-/api-dids                 ApiDidsPage
+/api-dids                 ApiDidsPage          (API Calling RETIRED — redirects to product home while API_CALLING_ENABLED=false)
 /trunks                   TrunksPage
 /ivr                      IvrBuilderPage
 /documentation            → redirect to /docs/rcf
@@ -329,7 +329,7 @@ Standard query key conventions:
 
 **`DashboardPage`** (`/`)
 Navigation hub. Static card grid linking to all product areas. No API calls.
-Shows "Phase 2" badges on API Calling and IVR Builder.
+API Calling copy + product card render only while `API_CALLING_ENABLED` (src/config/features.ts) is true — the product is retired (2026-09), so they are hidden.
 
 **`RcfPage`** (`/rcf`)
 Lists RCF entries for the authenticated customer (or all customers for admin via
@@ -341,7 +341,8 @@ Currently a placeholder/coming-soon shell. Shows the page header but no data.
 Full trunk management lives in `admin/TrunksAdminPage`.
 
 **`ApiDidsPage`** (`/api-dids`)
-Currently a placeholder/coming-soon shell.
+API Calling showcase. **Retired 2026-09** — the page is kept in code but the route
+redirects to the user's product home while `API_CALLING_ENABLED` is false.
 
 **`IvrBuilderPage`** (`/ivr`)
 Currently a placeholder/coming-soon shell. The IVR engine code
@@ -670,8 +671,20 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 
 ### Phase 2 / Not yet customer-facing
 
-- **API Calling** (`account_type: 'api'`) — `ApiDidsPage` is a placeholder. Admin-side
-  `CustomerApiSection` works for admin config. DID management exists in admin only.
+- **API Calling** (`account_type: 'api'`) — **RETIRED 2026-09, code kept.** Every
+  API-product surface is gated on `API_CALLING_ENABLED` in `src/config/features.ts`
+  (currently `false`; mirrors the backend/FreeSWITCH env var of the same name — flip
+  BOTH to restore): the `/api-dids` route (redirects to product home), the Sidebar
+  "Coming Soon" item, My Account's API DID section/tiles, the IVR topbar DID fetch,
+  the Guides + `/docs/api` "calling" sections (slug redirects to the hub default),
+  the Calls "API" product filter, the onboarding API product option, and the landing
+  page's API Calling copy. With the flag off nothing calls `/api-dids`. `productHome`
+  sends `api` accounts to `/my-account`.
+- **Hybrid** (`account_type: 'hybrid'`) now means **RCF + SIP Trunking** (no API
+  section). Granite Telephony, the primary customer, is hybrid.
+- **Payments Demo** — REMOVED 2026-09 (`pages/admin/payments-demo/*` incl.
+  `X402Visualizer`, `styles/dl-payments.css`, its `/admin/payments-demo` route and
+  sidebar item). There is no revup `/admin` UI left; admin lives in TED.
 - **IVR Builder** — `IvrBuilderPage` is a placeholder. The IVR engine in `src/pages/ivr/`
   is complete code but not exposed to customers yet.
 - **UCaaS** (`ucaas_enabled: true`) — `CustomerUcaasSection` provides extension/voicemail

@@ -30,15 +30,13 @@ echo "  Test 1: RCF Functionality"
 echo "=============================================="
 bash "$SCRIPT_DIR/test_rcf.sh" || echo "RCF tests had some failures"
 
-echo ""
-echo "=============================================="
-echo "  Test 2: API Calling"
-echo "=============================================="
-bash "$SCRIPT_DIR/test_api_calling.sh" || echo "API calling tests had some failures"
+# API Calling (scripts/test_api_calling.sh) is NOT run: the product is RETIRED
+# (2026-09) and /v1/calls is unmounted unless the API runs with
+# API_CALLING_ENABLED=true. Run that script by hand against such an API.
 
 echo ""
 echo "=============================================="
-echo "  Test 3: Call Rating"
+echo "  Test 2: Call Rating"
 echo "=============================================="
 bash "$SCRIPT_DIR/test_rating.sh" || echo "Rating tests had some failures"
 

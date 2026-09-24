@@ -7,6 +7,7 @@ This directory contains the FastAPI application source. The container copies `sr
 ```
 src/
   main.py                    # App factory, lifespan, middleware, router mounts
+  config.py                  # Feature flags read LIVE from env — API_CALLING_ENABLED (api_calling_enabled / require_api_calling_enabled), CDR_B_LEG_ROWS (cdr_b_leg_rows_enabled; ON unless exactly `false`)
   auth/
     __init__.py
     security.py              # JWT creation/validation, bcrypt password hashing
@@ -17,7 +18,7 @@ src/
   db/
     __init__.py
     database.py              # asyncpg connection pool, query helpers
-    schema_check.py          # Deploy-order guard: are the migration-47 cdrs columns present? (startup CRITICAL + /health/detailed)
+    schema_check.py          # Deploy-order guard: are the migration-47 + 48 cdrs columns present? (startup CRITICAL + /health/detailed)
     redis_client.py          # Async Redis client, caching, CPS rate limiting
   models/
     __init__.py              # Empty -- Pydantic models are defined inline in routers
@@ -27,9 +28,10 @@ src/
     health.py                # /health and /health/detailed
     customers.py             # Customer CRUD + balance/credit
     rcf.py                   # RCF number provisioning
-    calls.py                 # API call origination + CPS enforcement
+    calls.py                 # API call origination + CPS enforcement — RETIRED product, mounted only if API_CALLING_ENABLED
     trunks.py                # SIP trunk management + call path packages
     cdrs.py                  # CDR ingest (from FreeSWITCH) + query endpoints
+    reports.py               # Customer Reporting (/v1/reports): overview, trend, numbers, calls, calls.csv, my-numbers
     search.py                # Admin DID search, user search
     number_inventory.py      # DID lifecycle management (inventory, assign, sync, reconcile)
     carriers.py              # Carrier gateway CRUD + reachability test (admin)
@@ -40,17 +42,141 @@ src/
     sbc.py                   # Per-SBC call distribution stats from cdrs.sbc_id (admin)
     homer.py                 # SIP trace search via qryn/ClickHouse (Homer 10) (admin)
     onboarding.py            # New-customer intake pipeline (public POST + admin review)
+    billing.py               # Read-only tenant-scoped ledger views (/billing/balance, /billing/ledger)
   services/
     __init__.py
     esl_client.py            # FreeSWITCH ESL TCP client
     bandwidth_client.py      # Bandwidth Numbers API (OAuth2 + XML parsing)
+    tenant_redaction.py      # What a CUSTOMER may see of a call (CDR allowlist, minutes-only durations)
+    ledger.py                # Append-only ledger (migration 37) — read by billing.py; no in-tree writer since the payments demo was removed
+    call_pricing.py          # Rate-deck lookups shared with rates.py (quote_call_price now unused)
+    reporting.py             # Customer Reporting pure logic (date/tz validation, buckets, missed reasons, grades, CSV)
 ```
+
+## Retired / removed products (2026-09)
+
+- **API Calling — RETIRED, code kept, OFF.** One flag: `config.api_calling_enabled()` — ON only when env `API_CALLING_ENABLED` is exactly `true` (trimmed, case-insensitive), read live on every call (tests use `monkeypatch.setenv`). While OFF: `main.py` does not mount `routers/calls.py` (`/v1/calls`, `/calls` → 404) and the router carries `Depends(require_api_calling_enabled)` as defense in depth; `GET /tiers/api` → 404 and tier validators reject `tier_type='api'`; `CustomerCreate` rejects `account_type='api'` (422; `hybrid` = RCF + SIP Trunking stays allowed); `compute_billing_estimate` emits no api line for any account_type; `/customers/me` returns `counts.api_dids = 0` (key kept); `AssignRequest` / `NumberRequest` reject `product_type='api'` (422; listing/reconcile/unassign of existing api rows unchanged); onboarding `ProductsPayload` rejects any `'api'` selection or block (422). All 422 messages start with `config.API_CALLING_RETIRED_MESSAGE` ("API Calling is retired"). Adding a new API-Calling surface? Gate it on `api_calling_enabled()` (read at request/validation time, not import time — except router mounting in main.py). Tests: `tests/test_api_calling_retired.py` (flag off, hermetic) + `tests/test_api_calls.py` (kept code, flag on, ephemeral PG).
+- **Payments demo — REMOVED.** `routers/payments.py`, `services/payments/`, `services/demo_seed.py`, `services/auto_recharge.py` and `PAYMENTS_DEMO_*` are gone. The demo-only branches of `calls.py` (x402 pay-per-call with a simulated facilitator that accepted any signature, ledger-posted per-call fee, `PAYMENTS_DEMO_FAKE_ORIGINATE`) went with it; calls.py is the former flag-off legacy flow. Migrations 37/38 and their tables are untouched.
+
+## Tenant redaction (customers never see how we bill/rate)
+
+Owner rule: tenant (non-staff) callers must NEVER receive rates, costs, carrier
+cost, margin, rating state, fraud internals, routing/supplier internals, or an
+exact call duration. "Tenant" = the endpoint's `customer_filter` is not None
+(`get_support_read_filter` → admin + support are staff; `get_customer_filter`
+→ admin only is staff; `user`/`readonly` with a customer_id are tenants).
+Staff shapes are unchanged. Everything lives in `services/tenant_redaction.py`:
+
+- **Two layers.** SQL: tenant queries SELECT only `TENANT_CDR_SELECT_COLUMNS`
+  (sensitive columns are never read). Response: every tenant CDR row is rebuilt
+  by `redact_cdr_row()` from the ALLOWLIST `TENANT_CDR_FIELDS` — a new `cdrs`
+  column does NOT reach tenants unless someone adds it to the allowlist.
+  `FORBIDDEN_TENANT_CDR_KEYS` is the test denylist (money, `rated_at`,
+  `destination_prefix`, `billable_*`/`duration_seconds`, RTP byte/packet
+  counters — duration proxies, `fraud_*`, `traffic_grade`, `carrier_used`,
+  `inbound_carrier*`, `on_net*`, `sbc_id`, `freeswitch_node`, `network_addr`,
+  `sip_user_agent`, `bridge_uuid`).
+- **Duration = TALK time.** Per call `duration_minutes` = whole minutes, half-up,
+  from `end_time - answer_time` (`tr.TALK_MS_SQL`, selected as `talk_ms`; Python
+  twin `tr.talk_ms()`) — never `duration_ms` (includes ring) nor `billable_ms`
+  (contract "Customer minutes"); unanswered → 0; any answered call with >0 ms → at least 1.
+  Totals (`total_minutes`) round the answered-call ms total ONCE (never a sum
+  of per-call minimums — that would mimic billing increments). Averages
+  (`avg_duration_minutes`) are the mean of per-call whole minutes, 1 decimal
+  ("2.3 min") — so a one-call window cannot leak sub-minute precision.
+  `answer_time`/`end_time` are floored to the minute for tenants (otherwise
+  `end - answer` re-derives the exact duration); `start_time` stays exact.
+- **One row per call.** Every tenant CDR query carries `leg IS DISTINCT FROM 'B'`
+  (list/total/summary via the shared builder, `GET /v1/cdrs/{uuid}` → a B uuid
+  is a 404, trunk stats, `/v1/calls/{id}`, every report). The staff `leg` /
+  `call_id` params are ignored for tenants; `leg`/`leg_attempt` are on the
+  forbidden list and never on the allowlist.
+- **Filters.** `rated_only`, `sbc_id`, `zone` are ignored for tenants on
+  `/v1/cdrs` + `/summary` (no inference oracle for rating state / withheld
+  routing columns). No cost/duration sort or filter params exist.
+- **Applied at:** `GET /v1/cdrs`, `GET /v1/cdrs/{uuid}`, `GET /v1/cdrs/summary`
+  (tenant rows: counts + `total_minutes` [+ `avg_duration_minutes` for
+  group_by=destination]; no `total_cost`), `GET /v1/trunks/{id}/stats`
+  (`last_hour.avg_duration_minutes`; no `total_cost`/`avg_duration_sec`),
+  `GET /v1/calls/{id}` (`duration_minutes`, minute-floored answer/end — only
+  reachable while `API_CALLING_ENABLED`).
+- **Adding a tenant-reachable endpoint that returns call data?** Route tenant
+  rows through `redact_cdr_row()` / `redact_summary_row()` and add a case to
+  `tests/test_tenant_redaction.py` (asserts the full denylist recursively).
+- **Deliberately NOT redacted:** `/customers/me/billing` (the customer's own
+  contracted plan line items — qty × unit_price), `/trunks/call-paths`
+  (package `monthly_fee` list prices), the `POST /calls` `per_call_fee`
+  (the caller's own tier fee; retired product), and `/billing/ledger` entries
+  (the customer's own money movements; legacy x402 demo entries carry quote
+  metadata).
+
+## Reporting (customer-facing, `/v1/reports` + `/reports`)
+
+Contract: `docs/CUSTOMER_REPORTING_DESIGN.md` (implemented exactly — read its
+"Implementation notes" for null/edge semantics). `routers/reports.py` owns the
+SQL; `services/reporting.py` is the pure logic (unit-tested without a DB).
+Tests: `tests/test_reports.py` (ephemeral PG 16).
+
+- **Endpoints:** `GET overview | trend | numbers | calls | calls.csv | my-numbers`.
+  Common params `start`/`end` (inclusive local `YYYY-MM-DD`, span ≤ 366 days),
+  `tz` (IANA, default America/New_York, validated case-insensitively against
+  `pg_timezone_names`, cached 24h per process), `numbers` (comma list),
+  `customer_id` (staff only). Parsed once by the `report_scope` dependency.
+- **Scoping:** `get_support_read_filter`. Tenants forced to their own customer
+  (the `customer_id` param is ignored); staff (admin/support) MUST pass
+  `customer_id` (422). Staff and tenants get the SAME redacted shape — there is
+  no staff-only variant of a report.
+- **One row per call:** the `base` CTE (and the `data_from` probe) carry
+  `c.leg IS DISTINCT FROM 'B'`; no report has a `leg` param.
+- **Redaction:** minutes only via `tenant_redaction` — TALK time: `base` selects
+  `tr.TALK_MS_SQL AS talk_ms`, per call `tr.call_minutes_sql('talk_ms')`,
+  `aggregate_minutes` on each row/bucket/total talk-ms sum — rounded once,
+  `average_minutes` for avg). Never selected/returned: costs, rates, billable,
+  answer/end times, carrier/SBC/FS/network columns. `hangup_cause` is read only
+  to map to a plain-English missed reason (`services/reporting.MISSED_REASONS`)
+  and never returned; no SIP codes. `tests/test_reports.py::assert_report_safe`
+  walks every response (and the CSV text) for forbidden keys/values.
+- **"The customer's number"** = `destination` for inbound, `caller_id` for
+  outbound (anything not `'outbound'` is inbound), canonicalized in SQL with the
+  `31_did_canonicalize.sql` CASE, matched against `rcf_numbers.did` +
+  `trunk_dids.did` (via `sip_trunks.customer_id`). The `numbers` filter is
+  canonicalized in Python and intersected with the owned set IN SQL (`sel` CTE)
+  — it can only narrow; a not-owned/junk entry is dropped, none left = empty.
+- **Query shape (all endpoints):** one `WITH owned, sel, base, f` prelude; bind
+  layout `$1 customer_id::int, $2 start::date, $3 end::date, $4 tz::text,
+  $5 numbers::text[]` (+ endpoint extras `$6…`), every bind explicitly cast.
+  The time predicate is `start_time >= ($2::date::timestamp AT TIME ZONE $4)`
+  AND `< (($3::date + 1)::timestamp AT TIME ZONE $4)` — stable expressions of
+  binds, so the `(customer_id, start_time DESC)` index range is used
+  (`test_report_scan_uses_customer_time_index` asserts it via EXPLAIN). Local
+  bucketing is `date_trunc(unit, start_time AT TIME ZONE tz)` (portable — no
+  Timescale `time_bucket`); trend zero-fill is `generate_series`. Overview is 2
+  queries (totals+previous-period in one FILTERed pass; day/hour/cause in one
+  `GROUPING SETS` pass), calls 2 (count + page), others 1. All LIMITed.
+- **Statement timeout:** every endpoint runs its queries in ONE
+  `BEGIN READ ONLY` transaction that first does `SET LOCAL statement_timeout =
+  REPORT_STATEMENT_TIMEOUT_MS` (env, default 15000, clamped 1000-60000).
+  `SET LOCAL` is transaction-scoped, so it is safe under PgBouncer transaction
+  pooling (never leaks to another client's server connection — asserted by the
+  test). A cancel → HTTP 503 "try a shorter date range". The pool's
+  `command_timeout=30` stays as the client-side backstop.
+- **CSV:** `StreamingResponse`; a `count(*) … LIMIT cap+1` probe sets
+  `X-Report-Truncated` (always sent, `true`/`false`) BEFORE streaming, then
+  keyset pages of `CSV_CHUNK_ROWS` (5000) on `(start_time, id)` DESC, each its
+  own short read-only transaction — a slow download never pins a pool
+  connection or holds a long snapshot. Cap `rp.CSV_ROW_CAP` = 100,000.
+  Formula-injection guard (`rp.csv_safe`) prefixes `'` on `= @ - \t \r` and on
+  `+` not followed by a phone number. CORS exposes `Content-Disposition` and
+  `X-Report-Truncated` (main.py) so the SPA can read them.
+- **Adding a metric?** Aggregate in SQL inside the existing passes (no N+1, no
+  per-row Python loops over CDRs), minutes through `tenant_redaction`, and extend
+  `assert_report_safe` coverage in the test.
 
 ## main.py -- Application Lifecycle
 
 ### Startup (lifespan context manager)
 1. `init_db()` -- creates asyncpg connection pool (parses `DATABASE_URL` with regex)
-2. `schema_check.run_startup_check()` -- probes `information_schema.columns` for `cdrs.stir_outcome` / `cdrs.stir_eff_actual` (migration 47, bound by the ingest INSERT). Missing → logs **CRITICAL** with the exact `sudo -u postgres psql -d voip -f /opt/revup/docker/postgres/init/47_cdr_stir_outcome.sql` remedy; DB unreachable → WARNING. Never raises — the API keeps serving.
+2. `schema_check.run_startup_check()` -- probes `information_schema.columns` for `cdrs.stir_outcome` / `stir_eff_actual` (47) and `leg` / `call_id` / `leg_attempt` (48), all bound by the ingest INSERT. Missing → logs **CRITICAL** with the exact remedy per migration file (`sudo -u postgres psql -d voip -f …/47_cdr_stir_outcome.sql`, `sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f …/48_cdr_call_legs.sql`); DB unreachable → WARNING. Never raises — the API keeps serving.
 3. `init_redis()` -- creates redis-py async client with retry logic (5 attempts, 2s backoff)
 
 ### Shutdown
@@ -89,7 +215,9 @@ Handles authentication and user management. Contains inline Pydantic models:
 Two endpoints, no auth. Both check DB (`SELECT 1`) and Redis (`ping`). Returns `healthy` or `degraded`. `/health/detailed` additionally reports `components.schema` via `db.schema_check.check_cdr_schema()` (time-bounded): `healthy`, `degraded: cdrs is missing column(s) … <remedy>`, or `unknown: <error>`. `/health` (Docker healthcheck) deliberately does NOT include it.
 
 ### customers.py
-CRUD for the `customers` table. Account types: `rcf`, `api`, `trunk`, `hybrid`, `ucaas`.
+CRUD for the `customers` table. Account types: `rcf`, `api` (RETIRED — create → 422 unless `API_CALLING_ENABLED`), `trunk`, `hybrid` (= RCF + SIP Trunking), `ucaas`.
+- **Billing estimate** (`compute_billing_estimate`, `/me/billing` + `/{id}/billing`): RCF line (by provisioned rcf_numbers count), SIP Trunking line (trunk/hybrid), API Calling line ONLY when `API_CALLING_ENABLED` — retired ⇒ hybrid (Granite Telephony) shows rcf + trunk only.
+- **`/me` counts**: `{rcf, api_dids, trunks}` — `api_dids` is 0 (not queried) while API Calling is retired.
 - Delete is transactional: wraps cascading deletes of `rcf_numbers`, `api_dids`, `trunk_dids`, `trunk_auth_ips`, `sip_trunks`, `api_credentials` in a single `conn.transaction()`.
 - Balance operations: `GET /{id}/balance` computes `available = balance + credit_limit`, `POST /{id}/credit` adds to balance.
 
@@ -103,12 +231,12 @@ RCF (Remote Call Forwarding) number provisioning. The core RCF product.
 - PATCH is an alias for PUT (both call `update_rcf`)
 
 ### calls.py
-API call origination with tiered CPS enforcement.
-- **STIR/SHAKEN attestation-A gate (Task 2.2, layer 1):** the from_did lookup in `create_call` (enabled `api_dids` row + tenant-scope check, cross-tenant → 404 no-leak) is the ownership verification that justifies attestation A. Both originate sites (prepaid + x402) pass `stir_attest="A"` to `originate_call`; `api_outbound.lua` re-verifies on dialplan paths and Kamailio coerces anything else to B. The demo fake-originate path skips ESL entirely — no SIP leg, no attestation. Do NOT weaken the from_did lookup without revisiting the STIR policy.
+API call origination with tiered CPS enforcement. **RETIRED product** — mounted only when `API_CALLING_ENABLED` (see "Retired / removed products"); every route also depends on `config.require_api_calling_enabled` (404 when off).
+- **STIR/SHAKEN attestation-A gate (Task 2.2, layer 1):** the from_did lookup in `create_call` (enabled `api_dids` row + tenant-scope check, cross-tenant → 404 no-leak) is the ownership verification that justifies attestation A. The single originate site passes `stir_attest="A"` to `originate_call`; `api_outbound.lua` re-verifies on dialplan paths and Kamailio coerces anything else to B. Do NOT weaken the from_did lookup without revisiting the STIR policy.
 - Tiers: `api_basic` (5 CPS, $0.01/call), `api_standard` (8 CPS, $0.008/call), `api_premium` (15 CPS, $0.005/call)
 - CPS check uses Redis sliding window (`check_cps_limit` in redis_client)
 - Velocity check (calls per minute) as a secondary guard
-- Per-call fee applied as a `BackgroundTasks` job (deducted from customer balance)
+- Per-call fee applied as a `BackgroundTasks` job (raw `customers.balance` decrement; the demo's ledger-posted variant was removed)
 - Call status: checks `active_calls` table first, then falls back to `cdrs` table for completed calls
 - Uses ESL client to originate via FreeSWITCH
 
@@ -117,7 +245,7 @@ SIP trunk management with call path packages.
 - Trunk auth types: `ip`, `credential`, `both`
 - Call path packages: predefined capacity tiers stored in `call_path_packages` table, assigned via `PUT /{trunk_id}/call-paths`
 - Sub-resources: `/{trunk_id}/ips` for IP ACL management, `/{trunk_id}/dids` for DID assignment
-- `GET /{trunk_id}/stats`: real-time channel count via ESL `show channels as json`, plus last-hour CDR aggregates (ASR, avg duration, cost)
+- `GET /{trunk_id}/stats`: real-time channel count via ESL `show channels as json`, plus last-hour CDR aggregates (ASR, avg duration, cost). Tenants get `avg_duration_minutes` and no cost (see Tenant redaction); admins keep `avg_duration_sec` + `total_cost`.
 - Cache invalidation on IP delete (`trunk_ip:{ip}`)
 
 ### cdrs.py
@@ -127,12 +255,15 @@ CDR ingestion and querying. The largest router file.
   - Cleans caller_id_number (handles SIP `"Display" <+1234>` format)
   - Computes R-factor from MOS using piecewise linear approximation
   - Extracts ~55 columns including full RTP quality metrics (jitter, packet loss, MOS, codec info), the on-net set `origin_customer_id`/`terminating_customer_id`/`on_net`/`on_net_hops` (records both parties of an internal call; `customer_id` stays the terminal so `rate_cdr()` is unchanged; off-net → `origin==customer`, `on_net=false`), and the inbound-carrier attribution pair `inbound_carrier`/`inbound_carrier_pop` (FS channel vars, migration 40; absent/empty → NULL)
-  - Explicit `::type` casts on all INSERT parameters for asyncpg/PgBouncer compatibility (the INSERT binds 55 positional params, `$1`–`$55`; on-net columns are `$50::int`/`$51::int`/`$52::bool`/`$53::smallint`, inbound-carrier columns `$54::varchar`/`$55::varchar`)
+  - Explicit `::type` casts on all INSERT parameters for asyncpg/PgBouncer compatibility (the INSERT binds 60 positional params, `$1`–`$60`; on-net columns are `$50::int`/`$51::int`/`$52::bool`/`$53::smallint`, inbound-carrier `$54::varchar`/`$55::varchar`, STIR outcome `$56::text`/`$57::text`, leg split `$58::varchar` leg / `$59::varchar` call_id / `$60::smallint` leg_attempt)
+  - Millisecond durations (`billmsec`/`mduration`, seconds×1000 fallback) and µs timestamps (`*_uepoch`, `*_epoch` fallback) — `_ms_duration` / `_leg_timestamp`
   - Duplicate detection via `WHERE NOT EXISTS` (the cdrs table uses a composite PK for TimescaleDB)
-  - **Pre-47 fallback** (`_cdr_insert_sql` / `_execute_cdr_insert`): `stir_outcome`/`stir_eff_actual` are the LAST two entries of the column and value lists, so on `asyncpg.UndefinedColumnError` for either the INSERT is retried without them (`params[:55]`) and the condition logged at ERROR once per 300s — the billable row lands even if the API build is ahead of migration 47. Other missing columns are NOT swallowed.
+  - **Three-tier fallback** (`_cdr_insert_sql(with_stir_outcome, with_call_legs)` / `_execute_cdr_insert`): full 60 → pre-48 57 → pre-47 55, strict tail truncations, on `asyncpg.UndefinedColumnError` naming a 48 / 47 column; ERROR once per 300s per tier. Other missing columns are NOT swallowed. `allow_fallback=False` for B rows (dropped instead — a B row without `leg` would count as a call).
+  - **A/B leg split** (contract `docs/CDR_LEG_SPLIT_CONTRACT.md`): A-legs write `leg='A'`, `call_id=uuid`. Topology B-leg (`stir_outcome.b_leg_a_uuid`) + `cdr_leg=B` + `cdr_carrier_leg=true` + `CDR_B_LEG_ROWS` on → `_b_leg_row_context` (attribution ONLY from `cdr_*` vars; `cdr_customer_id`/`cdr_call_id`/`cdr_product_type` required else dropped; direction forced `outbound`) → `_insert_b_leg_row`. Otherwise no row. `_b_leg_stir_update`: STIR UPDATE onto the A-leg only from an ANSWERED carrier leg. `_store_call_attestation`: A-leg only. `cdr_leg=B` on a topology A-leg → kept as the A row (ERROR). Result status for every B-leg body is `b_leg`.
   - Always returns 200 to prevent FreeSWITCH retry storms
-- **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours.
-- **Summary**: `GET /v1/cdrs/summary` grouped by day, hour, or destination prefix.
+- **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours. Tenant callers get the redacted allowlist shape (see the Tenant redaction section). **One row per call by default** (`ONE_ROW_PER_CALL_SQL` = `leg IS DISTINCT FROM 'B'`, applied in `_build_cdr_filters`, so list + total + all summary groupings agree). Staff-only `leg=calls|all|b` (`LegView`) and `call_id=` (all legs of one call: `(call_id = $1 OR uuid = $1)` — chosen over `COALESCE(call_id, uuid) = $1` so idx_cdrs_call_id + idx_cdrs_uuid BitmapOr; REPLACES the date window; page capped at `CALL_ID_LOOKUP_LIMIT`=50). Staff rows add `leg`, `call_id` (`COALESCE(call_id, uuid)`), `leg_attempt` (`_STAFF_LEG_COLUMNS_SQL`).
+- **Summary**: `GET /v1/cdrs/summary` grouped by day, hour, or destination prefix — same builder, same `leg`/`call_id` semantics.
+- **Other one-row-per-call surfaces** (`leg IS DISTINCT FROM 'B'`): `trunks.py` last-hour stats (tenant + staff), `sbc.py` `/stats`, `search.py` DID call history, `calls.py` completed-call lookup, `reports.py` (all), `scripts/backup/asr_guard.sh` (no longer depends on `direction`). The `call_attestations` → `cdrs` LATERAL joins match by `uuid` = the A-leg uuid, so they never hit a B row.
 - **Rating**: `POST /v1/cdrs/{uuid}/rate` calls a PostgreSQL function `rate_cdr()`.
 
 ### search.py
@@ -150,6 +281,7 @@ Complete DID lifecycle management backed by the `did_inventory` table.
 - **Customer endpoints**: `GET /available` (browse available DIDs), `GET /my` (customer's assigned numbers, includes `status`), `POST /{did}/request` (reserve a number for admin review), `POST /{did}/request-release`, `POST /{did}/cancel-release`
 - **Release workflow (request-based)**: customers cannot unassign directly. `POST /{did}/request-release` (tenant-scoped: non-admins only their own DIDs, cross-tenant → 404 no-leak; 409 unless status is 'assigned') sets `assigned` → `release_requested` and appends an audit line to `notes`. Admin approves via `POST /{did}/unassign` (its status guard accepts 'assigned', 'reserved', and 'release_requested') or denies via `POST /{did}/cancel-release` (back to 'assigned'; the customer can use it to withdraw). The `release_requested` status is added to the CHECK constraint by `34_release_requested_status.sql`; `GET /my` includes it in its status filters so pending-release numbers still show for the customer.
 - Assign creates the product record (e.g., `rcf_numbers` row for RCF) inside a transaction
+- **API Calling retired:** `AssignRequest` / `NumberRequest` reject `product_type='api'` (422 "API Calling is retired: …") unless `API_CALLING_ENABLED`; `/inventory`, `/my`, `/stats`, `/reconcile` and `/unassign` still handle existing api rows (admin cleanup)
 - Unassign removes the product record and resets status to 'available'
 - Sync is idempotent: inserts new TNs as 'available', updates metadata on existing, flags removed TNs
 - All assignment changes invalidate relevant Redis caches and are logged
@@ -164,7 +296,7 @@ Admin-only CRUD for `carrier_trunks` (migrations 40 + 42) at `/v1/carrier-trunks
 Admin-only management of `rate_tables` / `rates`. Plus `GET /margins` (rate vs cost analysis) and `GET /lookup` (longest-prefix rate match for a destination).
 
 ### tiers.py
-Admin-only CRUD for `cps_tiers`. Convenience filters `GET /trunk` and `GET /api` return tiers of that type.
+Admin-only CRUD for `cps_tiers`. Convenience filters `GET /trunk` and `GET /api` return tiers of that type. While API Calling is retired `GET /api` → 404 (route kept so it doesn't fall into `/{tier_id}`) and `tier_type='api'` is rejected (422) on create/update; `GET ""` still lists existing api rows.
 
 ### sipp.py
 Admin-only SIPp load-test control. `GET /presets` lists scenarios; `POST /run` triggers a test. The SIPp runner service is not yet deployed, so `POST /run` returns a mock result or 503.
@@ -180,7 +312,7 @@ New-customer intake pipeline (`pending → completed`, or `→ rejected` — sta
 
 **FCC KYC (FCC 26-27 FNPRM, adopted 2026-04-30):** the POST requires a nested `kyc: KycPayload` — `{is_high_volume, standard: KycStandard, high_volume: KycHighVolume|null, declared_peak_cps, declared_max_concurrent_calls}` — validated with Pydantic V2 (`Literal` enums, `@field_validator` + `@model_validator(mode="after")` for cross-field rules: EIN format NN-NNNNNNN, `state_of_registration` required for `state_registration`, `intended_use_description` required for `other`, `high_volume` required iff `is_high_volume`, alternate phone must differ from main phone). **Capacity declarations (v2, REQUIRED, top level on KycPayload):** `declared_peak_cps` int 1-1000 + `declared_max_concurrent_calls` int 1-100000. **Granite's high-volume threshold** (provider-defined per FCC 26-27; REPLACES the old 50k calls/month `model_validator` on `OnboardingSubmit`, now removed — `monthly_volume` is informational only): `KycPayload.validate_high_volume` forces `is_high_volume=true` (+ the block) when `declared_peak_cps > 1` **or** `declared_max_concurrent_calls > 1000`; the 422 message contains "high-volume threshold" (frontend fuzzy mapping). Exactly at threshold = not over; voluntary opt-in below stays allowed; >1000 trunk call paths is declared here (TrunkIntake cap unchanged). `alternate_phone` reuses `utils.phone.normalize_e164`; originating IPs are validated syntactically with `ipaddress` (bare v4/v6 or CIDR ≤ /24 v4 / ≤ /64 v6; private ranges accepted). Persisted to the nullable `onboarding_requests.kyc` JSONB (migration `35_onboarding_kyc.sql` — the v2 capacity fields ride in the JSONB, no new migration) shaped `{standard, high_volume|null, declared_peak_cps, declared_max_concurrent_calls, submitted_at, form_version: 'fcc-26-27-fnprm-v2'}` via `json.dumps(...)` bound `$11::jsonb`. 4-year retention per FCC 26-27 is operational policy (no purge automation here).
 
-**Product-aware intake (products-v1):** the POST also requires `products: ProductsPayload` — `{selected: list of 'rcf'|'trunk'|'api'|'voicemail' (min 1, no dupes), rcf?, trunk?, api?, voicemail?}` where each block must be **present iff selected** (`@model_validator` both directions). Rationale: each product needs different information to provision, so the form collects exactly the selected products' setup data. Blocks: `RcfIntake` (did_count/porting/forwarding_setup as `Literal`s of the exact form option strings — DID counts use EN dashes, porting uses EM dashes; `current_carrier` required when porting starts with Yes/Both), `TrunkIntake` (`signaling_ips` 1-10 validated with the same `_validate_ip_or_cidr` as KYC — **IP-peering only, no REGISTER auth**, so PBX/SBC public IPs are required to provision; `concurrent_call_paths` 1-1000; optional pbx_vendor/dids_needed), `ApiIntake` (use_case 1-300; optional expected_cps 1-1000 + http(s) webhook_url ≤255; needs_numbers bool), `VoicemailIntake` (mailbox_count 1-10000; attach_to Literal existing_numbers/new_numbers/unsure). Persisted to nullable `onboarding_requests.products` JSONB (migration `36_onboarding_products.sql`) as the validated payload + `form_version: 'products-v1'`, bound `$12::jsonb`. The legacy top-level RCF fields (`did_count`, `porting`, `current_carrier`, `forwarding_setup`) are now **Optional** on the model and nullable in the DB (36 drops NOT NULL); when 'rcf' is selected the INSERT backfills them from `products.rcf` (frontend-sent values win) so old admin queries stay meaningful — non-RCF submissions insert NULLs. Admin list/get decode `kyc` + `products` back to objects (`_decode_json_col` — no asyncpg JSONB codec is registered, so JSONB arrives as strings); pre-KYC/pre-products rows return null for those keys and stay fully operable.
+**Product-aware intake (products-v1):** the POST also requires `products: ProductsPayload` — `{selected: list of 'rcf'|'trunk'|'api'|'voicemail' (min 1, no dupes), rcf?, trunk?, api?, voicemail?}` where each block must be **present iff selected** (`@model_validator` both directions). Rationale: each product needs different information to provision, so the form collects exactly the selected products' setup data. Blocks: `RcfIntake` (did_count/porting/forwarding_setup as `Literal`s of the exact form option strings — DID counts use EN dashes, porting uses EM dashes; `current_carrier` required when porting starts with Yes/Both), `TrunkIntake` (`signaling_ips` 1-10 validated with the same `_validate_ip_or_cidr` as KYC — **IP-peering only, no REGISTER auth**, so PBX/SBC public IPs are required to provision; `concurrent_call_paths` 1-1000; optional pbx_vendor/dids_needed), `ApiIntake` (use_case 1-300; optional expected_cps 1-1000 + http(s) webhook_url ≤255; needs_numbers bool; **retired — `ProductsPayload` 422s when `'api'` is selected or `api` is non-null unless `API_CALLING_ENABLED`, never silently dropped**), `VoicemailIntake` (mailbox_count 1-10000; attach_to Literal existing_numbers/new_numbers/unsure). Persisted to nullable `onboarding_requests.products` JSONB (migration `36_onboarding_products.sql`) as the validated payload + `form_version: 'products-v1'`, bound `$12::jsonb`. The legacy top-level RCF fields (`did_count`, `porting`, `current_carrier`, `forwarding_setup`) are now **Optional** on the model and nullable in the DB (36 drops NOT NULL); when 'rcf' is selected the INSERT backfills them from `products.rcf` (frontend-sent values win) so old admin queries stay meaningful — non-RCF submissions insert NULLs. Admin list/get decode `kyc` + `products` back to objects (`_decode_json_col` — no asyncpg JSONB codec is registered, so JSONB arrives as strings); pre-KYC/pre-products rows return null for those keys and stay fully operable.
 
 ## Database Module (db/)
 

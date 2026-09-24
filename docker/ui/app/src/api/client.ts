@@ -125,6 +125,8 @@ export interface ApiBinaryResult {
   blob: Blob;
   /** Filename parsed from Content-Disposition, or null when absent/unparseable. */
   filename: string | null;
+  /** Raw response headers — for endpoint-specific signals (e.g. X-Report-Truncated). */
+  headers: Headers;
 }
 
 /**
@@ -177,5 +179,6 @@ export async function apiRequestBlob(path: string): Promise<ApiBinaryResult> {
     filename: parseContentDispositionFilename(
       response.headers.get('Content-Disposition'),
     ),
+    headers: response.headers,
   };
 }

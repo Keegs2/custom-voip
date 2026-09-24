@@ -52,6 +52,8 @@ REPO = Path(__file__).resolve().parents[1]
 API_SRC = REPO / "docker" / "api" / "src"
 
 sys.path.insert(0, str(API_SRC))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cdr_schema import apply_cdr_column_migrations  # noqa: E402
 
 
 def _find_pg_bin():
@@ -140,9 +142,17 @@ CREATE TABLE cdrs (
   network_addr VARCHAR(45),
   bridge_uuid VARCHAR(64),
   sbc_id VARCHAR(30),
+  inbound_carrier VARCHAR(20),       -- migration 40 (inline: 40 also builds carrier_trunks)
+  inbound_carrier_pop VARCHAR(50),
   PRIMARY KEY (id, start_time));
 
-GRANT ALL ON cdrs TO api;
+CREATE TABLE call_attestations (
+  call_id            TEXT PRIMARY KEY,
+  customer_id        INT NOT NULL,
+  signed_attestation TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now());
+
+GRANT ALL ON cdrs, call_attestations TO api;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO api;
 """
 
@@ -217,6 +227,8 @@ def search_db():
             min_size=1, max_size=2, statement_cache_size=0)
         async with owner.acquire() as conn:
             await conn.execute(_BASE_SCHEMA)
+            # 23 / 47 / 48 from the REAL migration files (tests/cdr_schema.py).
+            await apply_cdr_column_migrations(conn)
 
             async def seed(uuid, cid, sbc, direction, product, dest, start,
                            trunk=None, rated=False):
@@ -604,9 +616,10 @@ def test_tenant_scoping_preserved_records(client, tokens):
         r = await client.get("/v1/cdrs", params={"customer_id": CID_B}, headers=hdrs)
         assert _uuids(r) == {CDR_EAST1, CDR_WEST1, CDR_CENT1, CDR_NOSBC}
 
-        # zone composes WITH the tenant scope, never widens it.
+        # zone is IGNORED for tenants (tenant redaction — routing internal);
+        # it can never widen the scope either. Was `== {CDR_EAST1}` before.
         r = await client.get("/v1/cdrs", params={"zone": "east"}, headers=hdrs)
-        assert _uuids(r) == {CDR_EAST1}  # B's east row + cust0 invisible
+        assert _uuids(r) == {CDR_EAST1, CDR_WEST1, CDR_CENT1, CDR_NOSBC}
 
     _run(go())
 
@@ -621,8 +634,12 @@ def test_tenant_scoping_preserved_summary(client, tokens):
         r = await client.get("/v1/cdrs/summary", params={"customer_id": CID_B}, headers=hdrs)
         assert _total(r) == 4  # override ignored
 
+        # Tenant redaction (services/tenant_redaction.py): zone / sbc_id /
+        # rated_only are routing/billing internals and are IGNORED for
+        # tenants (an exact sbc_id filter would re-derive the withheld
+        # sbc_id column row by row). Was `== 1` before the redaction.
         r = await client.get("/v1/cdrs/summary", params={"zone": "east"}, headers=hdrs)
-        assert _total(r) == 1
+        assert _total(r) == 4
 
     _run(go())
 
@@ -728,9 +745,10 @@ def test_total_respects_tenant_scoping(client, tokens):
         r = await client.get("/v1/cdrs", params={"customer_id": CID_B}, headers=hdrs)
         assert r.json()["total"] == 4
 
-        # Scope composes with filters: east has 3 rows platform-wide, A owns 1.
+        # zone is IGNORED for tenants (tenant redaction — routing internal),
+        # so the scoped total is unchanged. Was `== 1` before the redaction.
         r = await client.get("/v1/cdrs", params={"zone": "east"}, headers=hdrs)
-        assert r.json()["total"] == 1
+        assert r.json()["total"] == 4
 
         # Scoped total is page-independent as well.
         r = await client.get("/v1/cdrs", params={"limit": 1, "offset": 1}, headers=hdrs)

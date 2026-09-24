@@ -59,6 +59,14 @@ services:
       # acceptance of a non-account TN in From (UNVERIFIED today). Then set
       # RCF_FROM_PASSTHROUGH=on in /opt/revup/.env and recreate the container.
       - RCF_FROM_PASSTHROUGH=${RCF_FROM_PASSTHROUGH:-off}
+      # API Calling product (account_type api) is RETIRED. DEFAULT OFF: an
+      # api_did is hard-rejected 603 (direct inbound and on-net terminal) and
+      # api_outbound.lua / outbound_api.lua reject CALL_REJECTED. Only the
+      # exact value "true" (case-insensitive) re-enables it (code is kept).
+      # Unset in the container env == off, so the retirement itself needs no
+      # recreate; RE-enabling needs API_CALLING_ENABLED=true in
+      # /opt/revup/.env + container recreate.
+      - API_CALLING_ENABLED=${API_CALLING_ENABLED:-false}
       # Optional node name recorded in the CDR channel variable fs_node
       # (e.g. east-fs-1). Unset => "<FS_ZONE>-fs". Set it where a zone runs a
       # second FreeSWITCH (fs-2) so CDRs can tell the two apart.

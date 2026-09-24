@@ -34,29 +34,33 @@
     <!-- Logging and Fallback                        -->
     <!-- ============================================ -->
 
-    <!-- When the HTTP POST fails, also write the CDR to disk so no
-         data is lost. A recovery process can replay these later. -->
+    <!-- log-http-and-disk=true: write EVERY CDR to log-dir on disk IN
+         ADDITION to the HTTP POST (not only on failure). With log-b-leg=true
+         this also writes one file per B-leg attempt — watch log-dir growth
+         on the freeswitch_logs volume. (A CDR whose POST fails after all
+         retries is written to err-log-dir.) -->
     <param name="log-http-and-disk" value="true"/>
 
-    <!-- Directory for fallback JSON CDR files when HTTP POST fails.
+    <!-- Directory for the on-disk JSON CDR copies (see log-http-and-disk).
          This path is inside the container (freeswitch_logs volume). -->
     <param name="log-dir" value="/var/log/freeswitch/json_cdr"/>
 
-    <!-- Log errors to the FreeSWITCH console when HTTP POST fails,
-         so operators see failures in real time. -->
+    <!-- Directory where a CDR is written when its HTTP POST still fails
+         after all retries (replay source). Not a console-logging switch. -->
     <param name="err-log-dir" value="/var/log/freeswitch/json_cdr/errors"/>
 
     <!-- ============================================ -->
     <!-- Leg Selection                               -->
     <!-- ============================================ -->
 
-    <!-- Only generate CDRs for the A-leg. The B-leg CDR is redundant
-         for billing because the A-leg already contains the full call
-         duration, hangup cause, and all custom channel variables set
-         by the Lua routing scripts. Skipping B-leg CDRs halves the
-         CDR volume and avoids double-counting in billing. -->
+    <!-- The ONLY live leg filter in mod_json_cdr is `log-b-leg` (HTTP
+         Request Settings block below). There is NO `cdr-leg` parameter —
+         the old `cdr-leg=a` line here was inert and has been removed.
+
+         prefix-a-leg: naming of the ON-DISK CDR files only (A-leg files get
+         an "a_" prefix so they are distinguishable from B-leg files now that
+         B-legs are logged). It does NOT select which legs are posted. -->
     <param name="prefix-a-leg" value="true"/>
-    <param name="cdr-leg" value="a"/>
 
     <!-- ============================================ -->
     <!-- JSON Encoding                               -->
@@ -85,6 +89,12 @@
          payload size), uncomment the lines below and set
          "channel-vars" to the explicit list. For now, we include
          everything and let the API server pick what it needs.
+
+         MUST STAY COMMENTED while the A/B split is on: the B-leg rows are
+         built from the cdr_* vars (cdr_leg, cdr_carrier_leg, cdr_call_id,
+         cdr_leg_attempt, cdr_direction, cdr_customer_id, ...) and the
+         stale list below contains none of them — enabling it would make
+         every B-leg POST drop at the ingest.
     -->
 
     <!--
@@ -92,20 +102,55 @@
     -->
 
     <!-- ============================================ -->
-    <!-- HTTP Request Settings                       -->
+    <!-- HTTP Request Settings / B-leg split         -->
     <!-- ============================================ -->
 
-    <!-- Content-Type header for the POST request. -->
+    <!-- encode=true: the body is POSTed as application/x-www-form-urlencoded
+         `cdr=<url-encoded JSON>` (the ingest handles this form,
+         docker/api/src/routers/cdrs.py ~:1182). NOT a Content-Type knob and
+         NOT base64 (that would be encode=base64). Leave as-is. -->
     <param name="encode" value="true"/>
 
-    <!-- Disable base64 encoding of the JSON body — send plain JSON. -->
-    <param name="log-b-leg" value="false"/>
+    <!-- log-b-leg=true: CDR A/B LEG SPLIT IS ON (docs/CDR_LEG_SPLIT_CONTRACT.md,
+         docs/CDR_BILLING_REMEDIATION_PLAN.md section 4). Every ORIGINATED
+         (B-leg) session also posts its own CDR, not just the A-leg. This is
+         THE per-zone cutover switch; false = A-leg only (pre-split behavior).
 
-    <!-- Number of retries if the HTTP POST fails. -->
+         The ingest writes a B row ONLY when the B channel carries
+         cdr_leg=B AND cdr_carrier_leg=true — set per-leg ("[cdr_*]" dial-
+         string block) ONLY on carrier bridge attempts by inbound_router.lua
+         (RCF off-net failover loops) and trunk_outbound.lua. On-net B-legs
+         (trunk PBX delivery, local ext) post but produce NO row.
+
+         Volume: one POST per bridge ATTEMPT. RCF worst case = 8 carrier
+         attempts (4 trunks x 2 SBCs) + the A-leg = 9 POSTs for one call;
+         typical answered call = 2.
+
+         Activation: this file is read ONLY at module load. The conf dir is
+         bind-mounted, so after `git pull` run `reloadxml` then
+         `reload mod_json_cdr` via fs_cli (see docker/freeswitch/conf/CLAUDE.md
+         "mod_json_cdr"). A container restart is NOT required. -->
+    <param name="log-b-leg" value="true"/>
+
+    <!-- Retries after a failed POST (so up to 1+retries attempts per CDR). -->
     <param name="retries" value="2"/>
 
-    <!-- Delay between retries in seconds. -->
+    <!-- Seconds to wait between retries. -->
     <param name="delay" value="2"/>
+
+    <!-- SYNCHRONOUS-POST EXPOSURE (plan section 4.7 trap 2): mod_json_cdr posts
+         from the session's own reporting state handler, so a slow/dead API
+         holds each finished session (thread + memory, NOT the RTP ports,
+         which are released at hangup) for up to
+         timeout x (1+retries) + delay x retries = 5x3 + 2x2 = 19 s
+         before the CDR falls back to err-log-dir. The split multiplies the
+         number of sessions posting (up to 9 per RCF call in a full failover
+         storm), so a sustained API outage at high CPS inflates the live
+         session count toward switch.conf max-sessions=10000 — watch
+         `show channels count`/`show calls count` if the API is degraded.
+         Each B-leg reports on ITS OWN session thread, so a slow POST never
+         delays the A-leg's next failover attempt. Values deliberately
+         unchanged (retries/timeout tuning is a separate decision). -->
 
   </settings>
 </configuration>

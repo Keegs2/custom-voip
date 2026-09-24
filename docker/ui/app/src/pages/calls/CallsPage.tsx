@@ -43,7 +43,9 @@
  * staff = admin (incl. support: today's /cdrs audience). Staff-only:
  * customer + zone filters, Customer + Cost columns, money KPIs, Billing
  * modal section, Summary tab, CSV export. The Rate CDR write inside the
- * modal is strictly admin. Tenants see their own calls with full quality
+ * modal is strictly admin. The "Rows" row model (Calls / All legs / Carrier
+ * legs — CDR A/B leg split) is staff-only too; tenants never send `leg`.
+ * Tenants see their own calls with full quality
  * depth and zero money.
  *
  * React #310: every hook is called unconditionally at the top.
@@ -59,7 +61,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { exportCdrsCsv } from '../../utils/csv';
 import { useToast } from '../../components/ui/Toast';
 import { CallsFilterBar } from './CallsFilterBar';
-import { defaultCallsFilters, filtersToParams, validateCallsFilters } from './callsFilters';
+import { defaultCallsFilters, filtersToParams, rowsModeOf, validateCallsFilters } from './callsFilters';
 import { CdrPaginationBar } from './CdrPaginationBar';
 import { CallsKpiStrip } from './CallsKpiStrip';
 import { CallsTable } from './CallsTable';
@@ -191,6 +193,34 @@ export function CallsPage() {
     setQuickFilter(''); // page-scoped quick filter resets with the result set
   }, [draftFilters]);
 
+  /**
+   * Commit a new filter set immediately (draft + committed together), as if
+   * the operator edited the filters and clicked Search. Used by the staff
+   * single-call drill-down and its chip ×.
+   */
+  const commitFilters = useCallback((next: CallsFilters) => {
+    if (validateCallsFilters(next) !== null) return;
+    setDraftFilters(next);
+    setCommitted((prev) => ({ params: filtersToParams(next), nonce: prev.nonce + 1 }));
+    setPage(1);
+    setQuickFilter('');
+  }, []);
+
+  /** Staff: "Show all legs of this call" — Rows=All legs + call_id filter. */
+  const handleShowAllLegs = useCallback(
+    (callId: string) => {
+      setSelectedCdr(null);
+      setActiveTab('records');
+      commitFilters({ ...draftFilters, rows: 'all', call_id: callId });
+    },
+    [commitFilters, draftFilters],
+  );
+
+  /** Staff chip ×: drop the single-call filter and re-run the search. */
+  const handleClearCallId = useCallback(() => {
+    commitFilters({ ...draftFilters, call_id: '' });
+  }, [commitFilters, draftFilters]);
+
   const handlePageChange = useCallback(
     (next: number) => {
       setPage(Math.max(1, next));
@@ -255,6 +285,9 @@ export function CallsPage() {
 
   const cdrs = useMemo(() => data?.items ?? [], [data]);
 
+  /** Row model of the COMMITTED search (staff "Rows" filter; tenants: 'calls'). */
+  const rowsMode = rowsModeOf(committed.params);
+
   // Page-scoped quick filter (the Call Quality page's free-text search).
   // Deliberately CLIENT-SIDE over the loaded page — the table toolbar labels
   // it as such; server-side narrowing is the filter bar's job.
@@ -266,12 +299,16 @@ export function CallsPage() {
       c.destination.toLowerCase().includes(q) ||
       (c.hangup_cause ?? '').toLowerCase().includes(q) ||
       c.uuid.toLowerCase().includes(q) ||
+      // Call ID (staff rows only): pasting a call's A-leg uuid with Rows=All
+      // legs narrows the page to that call's A row + its carrier attempts.
+      (c.call_id ?? '').toLowerCase().includes(q) ||
       c.direction.includes(q) ||
       (c.read_codec ?? '').toLowerCase().includes(q) ||
       (customerNames[c.customer_id] ?? '').toLowerCase().includes(q) ||
       // Carrier: both the rendered label ("bw·dallas", "on-net") and the raw
-      // stored values, so either vocabulary matches.
-      carrierLabel(c).toLowerCase().includes(q) ||
+      // stored values, so either vocabulary matches. Staff only — tenant rows
+      // carry no carrier fields (carrierLabel would fall back to the default).
+      (isStaff && carrierLabel(c).toLowerCase().includes(q)) ||
       (c.carrier_used ?? '').toLowerCase().includes(q) ||
       (c.inbound_carrier ?? '').toLowerCase().includes(q) ||
       // Trunk: resolved name (or the raw id for unresolved trunks).
@@ -279,7 +316,7 @@ export function CallsPage() {
         ? (trunkNames[String(c.trunk_id)] ?? String(c.trunk_id)).toLowerCase().includes(q)
         : false),
     );
-  }, [cdrs, quickFilter, customerNames, trunkNames]);
+  }, [cdrs, quickFilter, customerNames, trunkNames, isStaff]);
 
   /** Full match count — undefined until the API ships `total`. */
   const total = data?.total;
@@ -345,6 +382,7 @@ export function CallsPage() {
             searching={isLoading}
             exporting={exporting}
             isStaff={isStaff}
+            onClearCallId={isStaff ? handleClearCallId : undefined}
           />
 
           {isError && (
@@ -354,7 +392,7 @@ export function CallsPage() {
           )}
 
           {activeTab === 'records' && !isLoading && !isError && cdrs.length > 0 && (
-            <CallsKpiStrip cdrs={cdrs} total={total} isStaff={isStaff} />
+            <CallsKpiStrip cdrs={cdrs} total={total} isStaff={isStaff} rowsMode={rowsMode} />
           )}
 
           {/* Quality trends — collapsible, own window-wide fetch */}
@@ -427,6 +465,7 @@ export function CallsPage() {
                         onSelect={handleSelect}
                         selectedUuid={selectedCdr?.uuid ?? null}
                         isStaff={isStaff}
+                        rowsMode={rowsMode}
                       />
                     )}
                   </div>
@@ -450,6 +489,7 @@ export function CallsPage() {
           onClose={handleCloseModal}
           isStaff={isStaff}
           isAdmin={isAdmin}
+          onShowAllLegs={isStaff ? handleShowAllLegs : undefined}
         />
       )}
     </div>

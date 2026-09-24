@@ -108,6 +108,7 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 | `API_PORT` | `8000` | FastAPI server port |
 | `ESL_PASSWORD` | `ClueCon` | Event Socket password. CHANGE IN PRODUCTION. |
 | `TEST_MODE` | `false` | When true, plays tone instead of bridging to carrier |
+| `API_CALLING_ENABLED` | `false` | API Calling product (account_type `api`) is **RETIRED**. Only the exact value `true` (case-insensitive, trimmed) re-enables it. Off: api_did inbound (direct or on-net RCF terminal) is hard-rejected `CALL_REJECTED` (603, `lua_routed=true`, no carrier leg, no webhook) and `api_outbound.lua` / `outbound_api.lua` reject `CALL_REJECTED`. RCF/trunk unaffected. See `scripts/CLAUDE.md`. |
 | `BRIDGE_PROGRESS_TIMEOUT` | `10` | Per-attempt `progress_timeout` (seconds) on carrier bridges — max wait for a provisional response (180/183) before failing over. Do NOT replace with originate_timeout (caps time-to-answer incl. ring). |
 
 ## Health Check
@@ -147,7 +148,9 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 8. **Session timer export**: Channel variables must be `export`ed (not just `set`) to propagate to the B-leg. Without this, Bandwidth tears down calls after Session-Expires (30s) because FreeSWITCH doesn't send refresh re-INVITEs.
 
-9. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
+9. **CDR A/B leg split (2026-09-23)**: `json_cdr.conf.xml` `log-b-leg=true` — every originated B-leg posts its own CDR. Only CARRIER dial strings (RCF off-net failover loops, trunk_outbound) carry the per-leg `[cdr_leg=B,cdr_carrier_leg=true,cdr_leg_attempt=N,…]` block that makes the ingest write a B row; on-net deliveries never do. Vars are per-leg `[]` dial-string vars — never `export`/`set` them on the A-leg. Activation after `git pull` = `reloadxml` + `reload mod_json_cdr` (no restart). Details: `scripts/CLAUDE.md` "CDR A/B leg split", `conf/CLAUDE.md` "json_cdr.conf.xml", `docs/CDR_LEG_SPLIT_CONTRACT.md`.
+
+10. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
 
 ## Volumes (docker-compose.media.yml)
 

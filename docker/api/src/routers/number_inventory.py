@@ -35,6 +35,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
+from config import API_CALLING_RETIRED_MESSAGE, api_calling_enabled
 from db import database as db
 from db import redis_client as cache
 from auth.dependencies import require_admin, get_current_user, get_customer_filter
@@ -49,6 +50,20 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
+def _reject_retired_api_product(v: str) -> str:
+    """422 for a NEW 'api' assignment/request while API Calling is retired.
+
+    Only the write-side inputs (assign / customer request) run this. Listing,
+    reconciling and unassigning EXISTING api_dids rows keep working so admins
+    can clean them up.
+    """
+    if v == "api" and not api_calling_enabled():
+        raise ValueError(
+            f"{API_CALLING_RETIRED_MESSAGE}: product_type 'api' can no longer be assigned"
+        )
+    return v
+
 
 class AssignRequest(BaseModel):
     customer_id: int
@@ -65,7 +80,7 @@ class AssignRequest(BaseModel):
         allowed = ("rcf", "trunk", "api", "ucaas")
         if v not in allowed:
             raise ValueError(f"product_type must be one of {allowed}")
-        return v
+        return _reject_retired_api_product(v)
 
 
 class UnassignRequest(BaseModel):
@@ -120,7 +135,7 @@ class NumberRequest(BaseModel):
         allowed = ("rcf", "trunk", "api")
         if v not in allowed:
             raise ValueError(f"product_type must be one of {allowed}")
-        return v
+        return _reject_retired_api_product(v)
 
 
 # ---------------------------------------------------------------------------

@@ -81,6 +81,16 @@ send HEP to port 9060 on the services VM. Only the backend storage and UI change
 | `grafana/dashboards/noc/*.json` | Production NOC dashboards (infra + voice-product), provisioned into the "Production NOC" Grafana folder by a second dashboards provider |
 | `scripts/ip-alias.lua` | heplify-server Lua script: rewrites HEP SrcIP/DstIP to friendly node names before Loki labels are generated |
 
+## NOC dashboards reading `cdrs` — one row per call (A/B leg split, 2026-09-23)
+
+Since migration 48 `cdrs` holds one A row per call (`leg='A'`, `call_id=uuid`) plus one **B row per carrier bridge attempt** (`leg='B'`, `call_id`=A-leg uuid, `leg_attempt` 1..N, `direction='outbound'`, its own RTP stats); pre-48 rows have `leg IS NULL`. Contract: `docs/CDR_LEG_SPLIT_CONTRACT.md`.
+
+- **Every** SQL panel/target that reads `cdrs` (datasource `voip-cdr-pg`) MUST carry `leg IS DISTINCT FROM 'B'` (alias-qualified, e.g. `c.leg ...`) — counts, ASR, minutes, on-net %, carrier splits AND quality (MOS/jitter/loss/R-factor = A-leg stats only). A new panel without it double-counts every carrier call and mixes B-leg RTP samples into quality. Filtering `direction='inbound'` is NOT a substitute.
+- The panels are the predicate's only home: the `leg` column must exist (migration 48 applied on the primary) BEFORE these dashboards are deployed, or every cdrs panel errors.
+- The only leg-aware panel is call-quality.json id 76 "Carrier legs per call — last 24h (orphan-leg check)" (Diagnostics row): B rows, calls with ≥1 B, max/avg `leg_attempt`, orphan B rows (no A row, call started >3h ago — must be 0, red otherwise) and "B awaiting A" (in-progress calls — A CDR posts at hangup; informational).
+- `cdr_hourly_stats` (continuous aggregate) has no `leg` dimension. Its only dashboard consumer is call-quality.json id 3 (ACD), filtered `direction='inbound'` so B rows (all `outbound`) drop out. Any new CAGG consumer needs the same filter unless the aggregate is recreated with the leg predicate.
+- Counting vs rating: minutes/volume panels = A rows only. B rows carry their own `billed_seconds` for rating (Equinox); no NOC panel shows "billed" totals today — if one is added, decide per-leg rating semantics explicitly rather than reusing the A-only predicate.
+
 ## Key Configuration
 
 - **heplify-server** uses `DBSHEMA=mock` and `DBDRIVER=mock` -- it does NOT write to a database directly. Instead it pushes to qryn's Loki push endpoint (`LOKIURL`).

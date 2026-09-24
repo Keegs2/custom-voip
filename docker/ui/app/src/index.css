@@ -2159,6 +2159,10 @@ select.landing-input {
   grid-auto-rows: 1fr; /* equal-height cards — both rows share the tallest */
   gap: 10px;
 }
+/* Odd card count (3 while API Calling is retired) — the orphan spans the row. */
+.landing-product-grid > .landing-product-card:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
 
 @media (max-width: 519px) {
   .landing-product-grid {

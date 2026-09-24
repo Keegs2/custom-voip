@@ -118,6 +118,18 @@ def make_row(**overrides):
         # 40_carrier_trunks.sql
         "inbound_carrier": "sinch",
         "inbound_carrier_pop": "denver",
+        # 47_cdr_stir_outcome.sql
+        "stir_outcome": "eff=A;mode=reorig",
+        "stir_eff_actual": "A",
+        # 48_cdr_call_legs.sql
+        "leg_attempt": None,
+        # SELECT_DERIVED (computed in SQL; the fake row carries the results)
+        "answered": True,
+        "billed_ms": 57000,
+        "billed_seconds": 57,
+        "ring_ms": 3000,
+        "call_id": "abc-123-uuid",
+        "leg": "A",
     }
     base.update(overrides)
     return FakeRow(base)
@@ -676,6 +688,8 @@ def _all_cdrs_columns() -> list[str]:
         + _cdrs_added_columns("18_sbc_id_column.sql")
         + _cdrs_added_columns("23_onnet_cdr_columns.sql")
         + _cdrs_added_columns("40_carrier_trunks.sql")
+        + _cdrs_added_columns("47_cdr_stir_outcome.sql")
+        + _cdrs_added_columns("48_cdr_call_legs.sql")
     ):
         if col in _WATERMARK_EXCLUDED or col in seen:
             continue
@@ -701,12 +715,37 @@ def test_schema_parse_smoke():
     assert _cdrs_added_columns("40_carrier_trunks.sql") == [
         "inbound_carrier", "inbound_carrier_pop",
     ]
+    # plan §8 item 2: the guard used to stop at 40, so 47 was silently
+    # missing from the export. 47 and 48 are now parsed too.
+    assert _cdrs_added_columns("47_cdr_stir_outcome.sql") == [
+        "stir_outcome", "stir_eff_actual"]
+    assert _cdrs_added_columns("48_cdr_call_legs.sql") == [
+        "leg", "call_id", "leg_attempt"]
+
+
+def test_drift_guard_covers_every_cdrs_add_column_migration():
+    """Every init script that ADDs a cdrs column must be in the guard's list —
+    a future 5x_*.sql that isn't wired in fails HERE (the §8 item 2 hole)."""
+    guarded = {"16_cdr_detail_columns.sql", "18_sbc_id_column.sql",
+               "23_onnet_cdr_columns.sql", "40_carrier_trunks.sql",
+               "47_cdr_stir_outcome.sql", "48_cdr_call_legs.sql",
+               "21_cdr_export.sql"}   # 21 = exported_at watermark (excluded)
+    for f in sorted(_INIT.glob("*.sql")):
+        code = "\n".join(line.split("--", 1)[0] for line in f.read_text().splitlines())
+        if re.search(r"ALTER\s+TABLE\s+(IF\s+EXISTS\s+)?cdrs\b[^;]*ADD\s+COLUMN",
+                     code, re.IGNORECASE | re.DOTALL):
+            assert f.name in guarded, f"{f.name} adds cdrs columns but the export drift guard ignores it"
 
 
 def test_select_columns_equal_full_cdrs_schema():
-    """exporter.SELECT_COLUMNS == every cdrs data column (excl. exported_at)."""
+    """exporter.SELECT_COLUMNS ∪ SHADOWED == every cdrs data column (excl.
+    exported_at). SHADOWED columns (leg, call_id) are exported through the
+    same-named derived field instead of raw."""
     schema_cols = set(_all_cdrs_columns())
-    select_cols = set(exp.SELECT_COLUMNS)
+    assert exp.SHADOWED_COLUMNS <= schema_cols
+    assert exp.SHADOWED_COLUMNS <= set(exp.DERIVED_ALIASES)
+    assert not (exp.SHADOWED_COLUMNS & set(exp.SELECT_COLUMNS))
+    select_cols = set(exp.SELECT_COLUMNS) | exp.SHADOWED_COLUMNS
 
     missing = schema_cols - select_cols   # a new column not wired into export
     extra = select_cols - schema_cols     # a projected column with no schema home
@@ -715,7 +754,7 @@ def test_select_columns_equal_full_cdrs_schema():
     assert "exported_at" not in select_cols
 
     # No duplicate projections.
-    assert len(exp.SELECT_COLUMNS) == len(select_cols)
+    assert len(exp.SELECT_COLUMNS) == len(set(exp.SELECT_COLUMNS))
 
 
 def test_formatter_source_keys_match_select_columns():
@@ -726,7 +765,9 @@ def test_formatter_source_keys_match_select_columns():
     """
     source_keys = [src for (_name, src, _fmt) in _FIELD_DEFS]
     source_set = set(source_keys)
-    select_set = set(exp.SELECT_COLUMNS)
+    # FIELDS == SELECT_COLUMNS ∪ derived aliases (plan §2 step 4)
+    select_set = set(exp.SELECT_COLUMNS) | set(exp.DERIVED_ALIASES)
+    assert not (set(exp.SELECT_COLUMNS) & set(exp.DERIVED_ALIASES))
 
     assert source_set <= select_set, (
         f"formatter references non-selected columns: {sorted(source_set - select_set)}"
@@ -738,3 +779,147 @@ def test_formatter_source_keys_match_select_columns():
     assert FIELDS == source_keys
     # No duplicate field defs.
     assert len(source_keys) == len(source_set)
+
+
+# ---------------------------------------------------------------------------
+# Billing contract (plan §2 step 4 / docs/CDR_LEG_SPLIT_CONTRACT.md)
+# ---------------------------------------------------------------------------
+
+BILLING_HEADER = [
+    "call_id", "leg", "uuid", "customer_id", "product_type", "direction",
+    "answered", "billed_seconds", "billed_ms", "ring_ms", "duration_ms",
+    "billable_ms", "start_time", "answer_time", "end_time", "caller_id",
+    "destination", "carrier_used", "on_net", "origin_customer_id",
+    "terminating_customer_id", "hangup_cause", "sip_code",
+]
+
+
+def test_header_billing_block_first_exact_order():
+    assert FIELDS[:len(BILLING_HEADER)] == BILLING_HEADER
+    # new migration columns are APPENDED (existing positions never move again)
+    assert FIELDS[-3:] == ["stir_outcome", "stir_eff_actual", "leg_attempt"]
+    # plan §8 item 2: STIR outcome is in the export
+    assert {"stir_outcome", "stir_eff_actual"} <= set(FIELDS)
+    header = EquinoxFormatter().header()
+    assert header.split(",")[:len(BILLING_HEADER)] == BILLING_HEADER
+
+
+def test_select_list_contains_derived_expressions():
+    sql = exp.select_list_sql()
+    assert "(answer_time IS NOT NULL) AS answered" in sql
+    assert "CASE WHEN answer_time IS NULL THEN 0" in sql
+    assert "COALESCE(call_id, uuid) AS call_id" in sql
+    assert "COALESCE(leg, 'A') AS leg" in sql
+    # raw leg/call_id are NOT projected (would collide with the aliases)
+    cols = [c.strip() for c in sql.split(",")]
+    assert "leg" not in cols and "call_id" not in cols
+
+
+def test_unanswered_row_renders_explicit_zero():
+    fmt = EquinoxFormatter()
+    idx = {name: i for i, name in enumerate(FIELDS)}
+    parts = fmt.format_record(make_row(answer_time=None, answered=False,
+                                       billed_ms=0, billed_seconds=0,
+                                       ring_ms=60000)).split(",")
+    assert parts[idx["answered"]] == "false"
+    assert parts[idx["billed_seconds"]] == "0" and parts[idx["billed_ms"]] == "0"
+
+
+# ---- real PostgreSQL: the derived SQL evaluates correctly on every shape ----
+import asyncio as _asyncio  # noqa: E402
+import os as _os  # noqa: E402
+import shutil as _shutil  # noqa: E402
+import subprocess as _subprocess  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+from datetime import timedelta as _td  # noqa: E402
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from cdr_schema import apply_cdr_column_migrations  # noqa: E402
+
+
+def _pg_bin():
+    for d in filter(None, [_os.getenv("TEST_PG_BIN"),
+                           str(pathlib.Path(_shutil.which("pg_ctl")).parent)
+                           if _shutil.which("pg_ctl") else None,
+                           "/opt/homebrew/opt/postgresql@16/bin", "/usr/lib/postgresql/16/bin"]):
+        if pathlib.Path(d, "initdb").exists():
+            return d
+    return None
+
+
+def _cdrs_ddl() -> str:
+    """The real 05 CREATE TABLE cdrs (no Timescale calls) + 16/18/40 columns."""
+    sql = (_INIT / "05_schema_cdr.sql").read_text()
+    m = re.search(r"CREATE\s+TABLE\s+cdrs\s*\(.*?\n\)\s*;", sql, re.IGNORECASE | re.DOTALL)
+    return (m.group(0) + "\nALTER TABLE cdrs ADD COLUMN IF NOT EXISTS sbc_id VARCHAR(30),"
+            " ADD COLUMN IF NOT EXISTS inbound_carrier VARCHAR(20),"
+            " ADD COLUMN IF NOT EXISTS inbound_carrier_pop VARCHAR(50),"
+            " ADD COLUMN IF NOT EXISTS exported_at TIMESTAMPTZ;")
+
+
+def test_export_select_on_real_pg_a_b_legacy_unanswered():
+    asyncpg = pytest.importorskip("asyncpg")
+    pg_bin = _pg_bin()
+    if pg_bin is None:
+        pytest.skip("no local PostgreSQL binaries")
+    tmp = _tempfile.mkdtemp(prefix="revup_export_pg.")
+    data, sock, port = f"{tmp}/data", f"{tmp}/sock", 55442
+    _os.makedirs(sock)
+    _subprocess.run([f"{pg_bin}/initdb", "-D", data, "-U", "postgres", "--auth=trust"],
+                    check=True, capture_output=True)
+    _subprocess.run([f"{pg_bin}/pg_ctl", "-D", data, "-o",
+                     f"-p {port} -k {sock} -c listen_addresses=''", "-w", "-l",
+                     f"{tmp}/log", "start"], check=True, capture_output=True)
+
+    async def go():
+        conn = await asyncpg.connect(host=sock, port=port, user="postgres",
+                                     database="postgres", statement_cache_size=0)
+        try:
+            await conn.execute(_cdrs_ddl())
+            await apply_cdr_column_migrations(conn)
+            t0 = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+            ins = ("INSERT INTO cdrs (uuid, customer_id, product_type, direction,"
+                   " destination, start_time, answer_time, end_time, duration_ms,"
+                   " billable_ms, leg, call_id, leg_attempt) VALUES"
+                   " ($1,7,'rcf',$2,'+17744045256',$3,$4,$5,$6,$7,$8,$9,$10)")
+            # A-leg answered: ring 3.25s, talk 57.5s
+            await conn.execute(ins, "a1", "inbound", t0, t0 + _td(seconds=3.25),
+                               t0 + _td(seconds=60.75), 60750, 57500, "A", "a1", None)
+            # B attempt 1 failed (unanswered) — billable_ms poisoned (rate_cdr)
+            await conn.execute(ins, "b1", "outbound", t0 + _td(seconds=1), None,
+                               t0 + _td(seconds=2), 1000, 6000, "B", "a1", 1)
+            # B attempt 2 answered
+            await conn.execute(ins, "b2", "outbound", t0 + _td(seconds=2), t0 + _td(seconds=3.2),
+                               t0 + _td(seconds=60.7), 58700, 57500, "B", "a1", 2)
+            # legacy pre-48 row
+            await conn.execute(ins, "legacy", "inbound", t0, t0 + _td(seconds=2),
+                               t0 + _td(seconds=10), 10000, 8000, None, None, None)
+            rows = await conn.fetch(
+                f"SELECT {exp.select_list_sql()} FROM cdrs ORDER BY start_time, id")
+        finally:
+            await conn.close()
+        return {r["uuid"]: r for r in rows}
+
+    try:
+        by = _asyncio.new_event_loop().run_until_complete(go())
+    finally:
+        _subprocess.run([f"{pg_bin}/pg_ctl", "-D", data, "-w", "stop"], capture_output=True)
+        _shutil.rmtree(tmp, ignore_errors=True)
+
+    a, b1, b2, leg0 = by["a1"], by["b1"], by["b2"], by["legacy"]
+    assert (a["answered"], a["billed_ms"], a["billed_seconds"], a["ring_ms"]) == (True, 57500, 58, 3250)
+    assert (a["leg"], a["call_id"]) == ("A", "a1")
+    # unanswered B attempt: explicit zero even though billable_ms was poisoned
+    assert (b1["answered"], b1["billed_ms"], b1["billed_seconds"]) == (False, 0, 0)
+    assert b1["ring_ms"] == 1000 and b1["leg"] == "B" and b1["call_id"] == "a1"
+    assert b1["leg_attempt"] == 1
+    assert (b2["billed_seconds"], b2["leg_attempt"], b2["call_id"]) == (58, 2, "a1")
+    # legacy row: leg -> 'A', call_id -> own uuid (zero backfill)
+    assert (leg0["leg"], leg0["call_id"]) == ("A", "legacy")
+    # every row renders through the formatter with the full field count
+    fmt = EquinoxFormatter()
+    for r in by.values():
+        import csv as _csv
+        assert len(next(_csv.reader([fmt.format_record(r)]))) == len(FIELDS)
+    # "count calls = leg='A' rows"
+    assert sum(1 for r in by.values() if r["leg"] == "A") == 2

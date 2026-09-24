@@ -7,6 +7,7 @@ import { Spinner } from '../components/ui/Spinner';
 import { useToast } from '../components/ui/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { fmt } from '../utils/format';
+import { fmtAvgMinutes } from '../utils/callDuration';
 
 /**
  * Extended stats shape returned by the API — the typed TrunkStats in types/trunk.ts
@@ -19,12 +20,14 @@ interface ExtendedTrunkStats {
   max_channels?: number;
   calls_today?: number;
   minutes_today?: number;
-  cost_today?: number;
   channel_utilization?: string;
   last_hour?: {
     total_calls?: number;
     asr?: string;
+    /** Staff (admin) rows only — exact seconds. */
     avg_duration_sec?: number;
+    /** Tenant rows only — 1-decimal minutes (no seconds, no cost). */
+    avg_duration_minutes?: number;
   };
 }
 
@@ -469,6 +472,8 @@ export function TrunkCard({ trunk }: TrunkCardProps) {
               ? '…'
               : lastHour?.avg_duration_sec != null
               ? `${lastHour.avg_duration_sec.toFixed(1)}s`
+              : lastHour?.avg_duration_minutes != null
+              ? fmtAvgMinutes(lastHour.avg_duration_minutes)
               : '--'}
           </span>
           <span style={{ fontSize: '0.68rem', color: '#718096', marginTop: 4, lineHeight: 1 }}>

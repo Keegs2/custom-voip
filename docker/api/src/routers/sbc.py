@@ -31,6 +31,7 @@ async def sbc_stats(
                AVG(duration_ms) FILTER (WHERE answer_time IS NOT NULL) as avg_duration_ms
         FROM cdrs
         WHERE start_time >= $1 AND sbc_id IS NOT NULL
+          AND leg IS DISTINCT FROM 'B'   -- one row per call (leg split)
         GROUP BY sbc_id
         ORDER BY total_calls DESC
         """,

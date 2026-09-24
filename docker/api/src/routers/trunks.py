@@ -21,6 +21,7 @@ from typing import Optional, List
 from db import database as db
 from db import redis_client as cache
 from auth.dependencies import get_customer_filter, get_support_read_filter, require_admin
+from services import tenant_redaction as tr
 from utils import phone
 
 logger = logging.getLogger(__name__)
@@ -563,7 +564,45 @@ async def get_trunk_stats(
     except Exception as e:
         logger.warning(f"ESL channel count failed: {e}")
 
-    # Get recent CDR stats
+    # Tenant view (services/tenant_redaction.py): no cost, no second-level
+    # duration — avg_duration_minutes (1 decimal, mean of per-call whole
+    # minutes) replaces avg_duration_sec, and total_cost is never SELECTed.
+    if customer_filter is not None:
+        stats = await db.fetch_one(
+            f"""
+            SELECT
+                COUNT(*) as total_calls,
+                COUNT(*) FILTER (WHERE answer_time IS NOT NULL) as answered_calls,
+                AVG({tr.TENANT_CALL_MINUTES_SQL})
+                    FILTER (WHERE answer_time IS NOT NULL) as avg_call_minutes
+            FROM cdrs
+            WHERE trunk_id = $1 AND start_time > NOW() - INTERVAL '1 hour'
+              AND leg IS DISTINCT FROM 'B'
+            """,
+            trunk_id
+        )
+        last_hour = {
+            "total_calls": stats["total_calls"] or 0,
+            "answered_calls": stats["answered_calls"] or 0,
+            "asr": f"{(stats['answered_calls'] or 0) / max(stats['total_calls'] or 1, 1) * 100:.1f}%",
+            "avg_duration_minutes": tr.average_minutes(stats["avg_call_minutes"]) or 0.0,
+        }
+    else:
+        last_hour = await _staff_last_hour_stats(trunk_id)
+
+    return {
+        "trunk_id": trunk_id,
+        "current_channels": current_channels or 0,
+        "max_channels": trunk["max_channels"],
+        "channel_utilization": f"{((current_channels or 0) / trunk['max_channels'] * 100):.1f}%",
+        "cps_limit": trunk["cps_limit"],
+        "last_hour": last_hour,
+    }
+
+
+async def _staff_last_hour_stats(trunk_id: int) -> dict:
+    """Staff (admin) last-hour roll-up — the historical shape, including
+    exact avg_duration_sec and total_cost."""
     stats = await db.fetch_one(
         """
         SELECT
@@ -573,21 +612,15 @@ async def get_trunk_stats(
             SUM(total_cost) as total_cost
         FROM cdrs
         WHERE trunk_id = $1 AND start_time > NOW() - INTERVAL '1 hour'
+          AND leg IS DISTINCT FROM 'B'
         """,
         trunk_id
     )
 
     return {
-        "trunk_id": trunk_id,
-        "current_channels": current_channels or 0,
-        "max_channels": trunk["max_channels"],
-        "channel_utilization": f"{((current_channels or 0) / trunk['max_channels'] * 100):.1f}%",
-        "cps_limit": trunk["cps_limit"],
-        "last_hour": {
-            "total_calls": stats["total_calls"] or 0,
-            "answered_calls": stats["answered_calls"] or 0,
-            "asr": f"{(stats['answered_calls'] or 0) / max(stats['total_calls'] or 1, 1) * 100:.1f}%",
-            "avg_duration_sec": (stats["avg_duration_ms"] or 0) / 1000,
-            "total_cost": float(stats["total_cost"] or 0)
-        }
+        "total_calls": stats["total_calls"] or 0,
+        "answered_calls": stats["answered_calls"] or 0,
+        "asr": f"{(stats['answered_calls'] or 0) / max(stats['total_calls'] or 1, 1) * 100:.1f}%",
+        "avg_duration_sec": (stats["avg_duration_ms"] or 0) / 1000,
+        "total_cost": float(stats["total_cost"] or 0)
     }
