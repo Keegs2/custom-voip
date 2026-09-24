@@ -84,11 +84,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Clone FreeSWITCH source and dependencies
 # Use full clone for libks to get git tags (needed for cmake)
 WORKDIR /usr/src
-RUN git clone --depth 1 https://github.com/signalwire/freeswitch.git /usr/src/freeswitch
-RUN git clone https://github.com/signalwire/libks.git /usr/src/libs/libks
-RUN git clone --depth 1 https://github.com/freeswitch/sofia-sip.git /usr/src/libs/sofia-sip
-RUN git clone --depth 1 https://github.com/freeswitch/spandsp.git /usr/src/libs/spandsp
-RUN git clone --depth 1 https://github.com/signalwire/signalwire-c.git /usr/src/libs/signalwire-c
+# PINNED (2026-09-24). Every source is fixed to an exact commit so a routine
+# `docker compose build` can never pull new upstream code. Before this pin the
+# clones tracked upstream HEAD: rebuilding east-fs-2 on 2026-09-23 produced
+# FreeSWITCH 1.11.4-dev (fd1cab5) while the fleet ran 1.11.2-dev (0a54a48).
+# FREESWITCH_REF = the fleet's running build (fs-media-v2 `version`:
+# 1.11.2-dev git 0a54a48 2026-07-17). Library refs = each repo's last commit
+# before 2026-07-18, i.e. what that build cloned. To upgrade: bump the refs
+# deliberately, rebuild ONE standby FS, test, then roll.
+ARG FREESWITCH_REF=0a54a48f3762ddb7ac9c263b7800f6da09fda3dd
+ARG LIBKS_REF=b756a6da9ccbc5ed92d1416d45cdb8b06a75d35b
+ARG SOFIA_SIP_REF=7333682a297f28130ff46d5ef0f9e2f72adca0e8
+ARG SPANDSP_REF=0c7bcebef4f057b99832a338aafab7e379ef1395
+ARG SIGNALWIRE_C_REF=d1d524c5a0fe3bd0b0023af69deab81401e75728
+# Shallow fetch of one exact commit (GitHub allows fetch-by-SHA).
+RUN git init -q /usr/src/freeswitch && git -C /usr/src/freeswitch fetch -q --depth 1 https://github.com/signalwire/freeswitch.git ${FREESWITCH_REF} && git -C /usr/src/freeswitch checkout -q FETCH_HEAD
+# libks needs full history + tags (cmake derives its version from git describe).
+RUN git clone -q https://github.com/signalwire/libks.git /usr/src/libs/libks && git -C /usr/src/libs/libks checkout -q ${LIBKS_REF}
+RUN git init -q /usr/src/libs/sofia-sip && git -C /usr/src/libs/sofia-sip fetch -q --depth 1 https://github.com/freeswitch/sofia-sip.git ${SOFIA_SIP_REF} && git -C /usr/src/libs/sofia-sip checkout -q FETCH_HEAD
+RUN git init -q /usr/src/libs/spandsp && git -C /usr/src/libs/spandsp fetch -q --depth 1 https://github.com/freeswitch/spandsp.git ${SPANDSP_REF} && git -C /usr/src/libs/spandsp checkout -q FETCH_HEAD
+RUN git init -q /usr/src/libs/signalwire-c && git -C /usr/src/libs/signalwire-c fetch -q --depth 1 https://github.com/signalwire/signalwire-c.git ${SIGNALWIRE_C_REF} && git -C /usr/src/libs/signalwire-c checkout -q FETCH_HEAD
 
 # Build libks
 # Note: libks uses git describe for version, fetch tags if shallow clone causes issues
