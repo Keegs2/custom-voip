@@ -30,7 +30,7 @@ Production (7 days, A rows): 65% of answered calls are exactly 4.50. The 4 answe
 4. **Existing column names are kept but now carry honest values** (`mos`, `r_factor`, `packet_loss_pct`, `packet_loss_count`, `jitter_avg_ms`, `jitter_max_ms`), so no customer field is renamed. `quality_pct` and `jitter_min_ms` are deprecated and written NULL. Raw FS values move to new `fs_*` / `rtp_audio_in_skip_packet_count` columns. History is recomputed by an idempotent backfill.
 5. **Call quality = the worse direction.** A-in (caller→platform) and the answered carrier B-in (callee→platform) are combined into `call_quality_*` / `call_mos` on the A row by a SQL function, `cdr_refresh_call_quality()`. Both ingests call it after their own INSERT commits, so it is correct whichever CDR arrives first.
 6. **One grade definition**, taken from the G.107/G.109 R bands (R 90/80/70). It is applied to the stored 2-dp MOS: **great ≥ 4.34 · good ≥ 4.02 · fair ≥ 3.60 · poor < 3.60 (or no_rtp) · none = not graded**. It is used everywhere.
-7. **Alerting:** `scripts/backup/media_guard.sh`, an on-VM SQL watchdog modelled on `asr_guard.sh`. It uses the existing `revup-alert` → Cloud Logging page path, plus a Grafana panel. vmalert is not used (it cannot read PG).
+7. **Alerting (DROPPED 2026-09-24 — dashboards only):** `scripts/backup/media_guard.sh`, an on-VM SQL watchdog modelled on `asr_guard.sh`. It uses the existing `revup-alert` → Cloud Logging page path, plus a Grafana panel. vmalert is not used (it cannot read PG).
 
 ---
 
@@ -846,6 +846,8 @@ Only rated rows are counted; the sample count comes from graded rows.
 ---
 
 ## F. Alerting — one-way / no-inbound-RTP detector
+
+> **DROPPED by owner, 2026-09-24.** No pager or watchdog: quality is measured accurately and shown on dashboards only. `media_guard.sh`, its systemd units and the installer hook were removed. The text below is kept for history.
 
 The decision is an **on-VM SQL watchdog**, the same pattern as `scripts/backup/asr_guard.sh`. It is the platform's existing PG → page path: `logger -t revup-alert` → Ops Agent → Cloud Logging → `revup_alert_log` policy (infra/monitoring/main.tf:488, 30-min rate limit).
 

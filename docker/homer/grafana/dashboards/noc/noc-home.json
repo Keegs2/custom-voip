@@ -2885,7 +2885,7 @@
       "id": 33,
       "type": "stat",
       "title": "Voice · One-way audio — 1h",
-      "description": "Calls in the last hour, all zones, whose call quality is one-way audio (call_quality_status='no_rtp': answered >= 5 s, one direction delivered < 10% of the expected RTP packets while the other carried audio). Calls with no audio either way (no_media — failed/test calls, both parties silent) are not counted. Any is red — one a week is normal carrier noise, several per hour means a media-path regression (Cloud NAT / bypass-vpn, SDP c=, RTP source IP); scripts/backup/media_guard.sh pages on it. Detail: Call Quality id 22.",
+      "description": "Calls in the last hour, all zones, whose call quality is one-way audio (call_quality_status='no_rtp': answered >= 5 s, one direction delivered < 10% of the expected RTP packets while the other carried audio). Calls with no audio either way (no_media — failed/test calls, both parties silent) are not counted.sh pages on it. Detail: Call Quality id 22.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"

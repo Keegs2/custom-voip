@@ -151,10 +151,9 @@ def q51():
         await _mkdb("q51")        # migration + parity
         await _mkdb("rc")         # reclassification
         await _mkdb("pre51")      # 50 only: the reclassify must refuse
-        await _mkdb("mg51")       # media_guard.sh never counts no_media
 
     _run(_setup())
-    for db in ("q51", "rc", "mg51"):
+    for db in ("q51", "rc"):
         for _ in range(2):        # applies on top of 50, twice
             out = _psql(pg, db, "-f", str(MIG51))
             assert out.returncode == 0, out.stderr
@@ -373,44 +372,7 @@ def test_reclassify_aborts_without_migration_51(q51):
     assert n == 0
 
 
-# ---------------------------------------------------------------------------
-# media_guard.sh counts ONLY no_rtp (true one-way) — no_media never pages
-# ---------------------------------------------------------------------------
-MEDIA_GUARD = REPO / "scripts" / "backup" / "media_guard.sh"
 
 
-def _guard(q51, db, *args, **env_extra):
-    pg = q51["pg"]
-    env = dict(os.environ, PGHOST=pg.sock, PGPORT=str(pg.port), PGUSER="postgres",
-               BACKUP_DB=db, MEDIA_GUARD_SKIP_SUDO="1",
-               PATH=f"{PG_BIN}:{os.environ.get('PATH', '')}", **env_extra)
-    return subprocess.run(["bash", str(MEDIA_GUARD), *args], capture_output=True,
-                          text=True, env=env)
 
 
-def test_media_guard_ignores_no_media_calls(q51):
-    if not MEDIA_GUARD.is_file():
-        pytest.skip("scripts/backup/media_guard.sh not present")
-    pool = q51["pools"]["mg51"]
-    now = datetime.now(timezone.utc)
-
-    async def seed(prefix, n, status):
-        for i in range(n):
-            await pool.execute(
-                """INSERT INTO cdrs (uuid, customer_id, product_type, direction, destination,
-                       start_time, answer_time, end_time, leg, call_id, call_quality_status)
-                   VALUES ($1, 7, 'rcf', 'inbound', '+1555', $2, $2, $3, 'A', $1, $4)""",
-                f"{prefix}-{i}", now - timedelta(minutes=5), now - timedelta(minutes=4), status)
-
-    # a Jul-20-style burst of failed/test calls: 20 no_media, 2 rated -> silent
-    _run(seed("nm", 20, "no_media"))
-    _run(seed("ok", 2, "rated"))
-    out = _guard(q51, "mg51", "--dry-run")
-    assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == "", out.stdout
-    # true one-way calls still page, and no_media is in neither count
-    _run(seed("ow", 3, "no_rtp"))
-    out = _guard(q51, "mg51", "--dry-run")
-    assert out.returncode == 0, out.stderr
-    lines = [ln for ln in out.stdout.splitlines() if ln.strip()]
-    assert len(lines) == 1 and lines[0].startswith("one-way-audio calls=3/5 "), out.stdout

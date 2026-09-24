@@ -1,6 +1,5 @@
 """Migration 50 (docker/postgres/init/50_cdr_quality_accuracy.sql), its
-backfill (docker/postgres/backfill/50_cdr_quality_backfill.psql) and the
-media_guard.sh watchdog — against an ephemeral PostgreSQL 16 (no TimescaleDB:
+backfill (docker/postgres/backfill/50_cdr_quality_backfill.psql) — against an ephemeral PostgreSQL 16 (no TimescaleDB:
 the backfill's `\\if has_ts` branch runs in production only; its per-chunk
 statement is the same UPDATE body the plain branch runs here).
 
@@ -15,9 +14,7 @@ Covers (plan §G.1):
     idempotent re-run;
   * backfill: only quality_source IS NULL rows touched, second run changes
     nothing, snapshot populated, fs_mos = old mos, unanswered mos NULL,
-    legacy rated loss_rate 0.02 -> 2.00 / 4.23, the documented EXACT rollback;
-  * media_guard.sh: bash -n (+ shellcheck when installed), --dry-run pages
-    exactly one line for 3 no_rtp A rows, silent exit 0 without the column.
+    legacy rated loss_rate 0.02 -> 2.00 / 4.23, the documented EXACT rollback.
 
 Run:  TEST_PG_BIN=/opt/homebrew/bin python3 -m pytest tests/test_cdr_quality_migration50.py -q
 """
@@ -45,7 +42,6 @@ from services import call_quality as cq  # noqa: E402
 INIT = REPO / "docker" / "postgres" / "init"
 MIG50 = INIT / "50_cdr_quality_accuracy.sql"
 BACKFILL = REPO / "docker" / "postgres" / "backfill" / "50_cdr_quality_backfill.psql"
-MEDIA_GUARD = REPO / "scripts" / "backup" / "media_guard.sh"
 
 
 # ---------------------------------------------------------------------------
@@ -520,85 +516,9 @@ def test_backfill_aborts_without_migration_50(q50):
     assert "migration 50 not applied" in out.stderr
 
 
-# ---------------------------------------------------------------------------
-# media_guard.sh
-# ---------------------------------------------------------------------------
-def test_media_guard_bash_syntax_and_shellcheck():
-    subprocess.run(["bash", "-n", str(MEDIA_GUARD)], check=True)
-    sc = shutil.which("shellcheck")
-    if sc:
-        subprocess.run([sc, "-S", "warning", str(MEDIA_GUARD)], check=True)
-    txt = MEDIA_GUARD.read_text()
-    assert "leg IS DISTINCT FROM 'B'" in txt
-    assert "column_name = 'call_quality_status'" in txt
-    units = REPO / "scripts" / "backup" / "systemd"
-    svc = (units / "revup-media-guard.service").read_text()
-    assert "OnFailure=revup-alert@%p.service" in svc and "User=postgres" in svc
-    assert "OnCalendar=*:0/10" in (units / "revup-media-guard.timer").read_text()
-    inst = (REPO / "scripts" / "backup" / "install_backup_timers.sh").read_text()
-    assert "revup-media-guard.timer" in inst and "media_guard.sh" in inst
 
 
-def _guard(q50, db, *args, **env_extra):
-    pg = q50["pg"]
-    env = dict(os.environ, PGHOST=pg.sock, PGPORT=str(pg.port), PGUSER="postgres",
-               BACKUP_DB=db, MEDIA_GUARD_SKIP_SUDO="1",
-               PATH=f"{PG_BIN}:{os.environ.get('PATH', '')}", **env_extra)
-    return subprocess.run(["bash", str(MEDIA_GUARD), *args], capture_output=True,
-                          text=True, env=env)
 
 
-def test_media_guard_pages_one_line_on_one_way_spike(q50):
-    pool = q50["pools"]["mg"]
-    now = datetime.now(timezone.utc)
-
-    async def seed():
-        for i in range(3):
-            await pool.execute(
-                """INSERT INTO cdrs (uuid, customer_id, product_type, direction, destination,
-                       start_time, answer_time, end_time, leg, call_id, call_quality_status,
-                       inbound_carrier, inbound_carrier_pop)
-                   VALUES ($1, 7, 'rcf', 'inbound', '+1555', $2, $2, $3, 'A', $1, 'no_rtp',
-                           $4, $5)""",
-                f"mg-{i}", now - timedelta(minutes=5), now - timedelta(minutes=4),
-                "sinch" if i == 0 else None, "denver" if i == 0 else None)
-        # a no_rtp B row must never be counted (one row per call)
-        await pool.execute(
-            """INSERT INTO cdrs (uuid, customer_id, product_type, direction, destination,
-                   start_time, end_time, leg, call_id, call_quality_status)
-               VALUES ('mg-b', 7, 'rcf', 'outbound', '+1555', $1, $1, 'B', 'mg-0', 'no_rtp')""",
-            now - timedelta(minutes=5))
-        for i in range(7):
-            await pool.execute(
-                """INSERT INTO cdrs (uuid, customer_id, product_type, direction, destination,
-                       start_time, answer_time, end_time, leg, call_id, call_quality_status)
-                   VALUES ($1, 7, 'rcf', 'inbound', '+1555', $2, $2, $3, 'A', $1, 'rated')""",
-                f"mg-ok-{i}", now - timedelta(minutes=6), now - timedelta(minutes=3))
-    _run(seed())
-
-    out = _guard(q50, "mg", "--dry-run")
-    assert out.returncode == 0, out.stderr
-    lines = [ln for ln in out.stdout.splitlines() if ln.strip()]
-    assert len(lines) == 1, out.stdout
-    assert lines[0] == (
-        "one-way-audio calls=3/10 window=30m carriers=bandwidth/-,sinch/denver — check media "
-        "path (Cloud NAT/bypass-vpn, SDP c=, RTPs source IP) + Homer")
-
-    # below the MIN_CALLS floor -> no page
-    out = _guard(q50, "mg", "--dry-run", MEDIA_GUARD_MIN_CALLS="4")
-    assert out.returncode == 0 and out.stdout.strip() == ""
-    # share below the floor -> no page (3/10 = 30% < 40%)
-    out = _guard(q50, "mg", "--dry-run", MEDIA_GUARD_MIN_SHARE_PCT="40")
-    assert out.returncode == 0 and out.stdout.strip() == ""
-    # window excludes the calls -> nothing to check, quiet
-    out = _guard(q50, "mg", "--dry-run", MEDIA_GUARD_WINDOW_MIN="1")
-    assert out.returncode == 0 and out.stdout.strip() == ""
-    # garbage tunable -> refuses (never inlined into SQL)
-    out = _guard(q50, "mg", "--dry-run", MEDIA_GUARD_WINDOW_MIN="1; DROP TABLE cdrs")
-    assert out.returncode == 2
 
 
-def test_media_guard_silent_without_migration_50(q50):
-    out = _guard(q50, "mgold", "--dry-run")
-    assert out.returncode == 0
-    assert out.stdout == "" and out.stderr == ""

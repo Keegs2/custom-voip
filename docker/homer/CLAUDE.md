@@ -101,7 +101,7 @@ The quality panels read the honest columns from migration 50. They need `50_cdr_
 - **No MOS averages anywhere.** Use shares (Good+ %), percentiles (p50 / p10 MOS, p95 loss and jitter), distributions and one-way counts. `quality_pct` and `jitter_min_ms` are deprecated (always NULL). `r_factor` is no longer a relabelled MOS, but it is not charted. `jitter_max_ms` is not charted either.
 - **Jitter panels stay empty until FS images carry quality patch v1.** Legacy images and history write `jitter_avg_ms` NULL. The old FS variance-derived peak survives only as `fs_jitter_max_std_ms` (diagnostic).
 - **call-quality.json:** #43 Good-or-better calls 15m · #12 Call MOS p50/p10 · #21 True loss p95 by direction · #20 RFC 3550 jitter by direction · #11 Call grade distribution (Great / Good / Fair / Poor (audio) / One-way audio) · #13 Loss distribution (barchart, 7 bands) · #22 One-way audio per hour + partial inbound media · #30 Graded-call snapshot. **noc-home.json** Voice row: #30 Good+ 15m · #31 Loss p95 15m · #32 Jitter p95 15m · #33 One-way audio 1h.
-- SLIs built on these panels: `infra/monitoring/SLOS.md` "Voice quality SLI". Paging for one-way audio: `scripts/backup/media_guard.sh` (`no_rtp` only).
+- SLIs built on these panels: `infra/monitoring/SLOS.md` "Voice quality SLI". No paging on quality (owner decision): one-way audio is dashboard-only.
 - `tests/test_grafana_quality_sql.py` runs every edited panel's SQL (macros substituted) against an ephemeral PG16 with migrations 50 + 51 (seeds include `no_media` calls) and asserts the result shapes, the leg predicate, the thresholds and that no MOS average exists. Run it after any quality-panel edit.
 
 ## Key Configuration

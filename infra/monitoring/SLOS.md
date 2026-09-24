@@ -57,7 +57,7 @@ A call is graded only when there is evidence: answered, ≥ 5 s billable, and ei
 | **Objective** | **≥ 97% over 30 days** |
 | **Measured by** | Grafana Call Quality #43 (15 min, per zone) and #30 (range snapshot); Home #30 (15 min, all zones). Monthly review runs the SQL below on the primary |
 | **Alert (now)** | None. The 15-min stat colours red below 90% and amber below 97% |
-| **Gap to close** | A burn-rate alert (for example < 90% over 1 h) through a scheduled PG check. vmalert cannot read PG, so it would use the `media_guard.sh` / `asr_guard.sh` pattern |
+| **Gap to close** | A burn-rate alert (for example < 90% over 1 h) through a scheduled PG check. vmalert cannot read PG, so it would use the `asr_guard.sh` pattern (not planned — no quality paging) |
 
 ```sql
 SELECT 100.0 * count(*) FILTER (WHERE call_quality_grade IN ('great','good'))
@@ -73,7 +73,7 @@ SELECT 100.0 * count(*) FILTER (WHERE call_quality_grade IN ('great','good'))
 | **SLI** | One-way-audio calls (`call_quality_status='no_rtp'`: we sent audio, received none) per 1,000 answered calls of ≥ 5 s. Calls with no audio in either direction (`no_media`) are not one-way and never count or page |
 | **Objective** | **≤ 1 per 1,000 over 30 days** |
 | **Measured by** | Grafana Home #33 (last hour) and Call Quality #22 (per hour, by direction, plus "partial inbound media") |
-| **Alert (now)** | `scripts/backup/media_guard.sh` (every 10 min, `revup-alert` → Cloud Logging page). It pages when ≥ `MEDIA_GUARD_MIN_CALLS` (3) one-way calls make up ≥ `MEDIA_GUARD_MIN_SHARE_PCT` (2%) of graded calls in `MEDIA_GUARD_WINDOW_MIN` (30) minutes. That catches a media-path regression (Cloud NAT / bypass-vpn, SDP `c=`, RTP source IP), not the single stray one-way call a week |
+| **Alert (now)** | None — owner decision 2026-09-24: quality is measured and shown on dashboards, not paged |
 | **Gap to close** | None beyond the monthly review of the SQL below |
 
 ```sql
