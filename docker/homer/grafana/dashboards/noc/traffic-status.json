@@ -1301,7 +1301,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '1 hour' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1403,7 +1403,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '24 hours' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '24 hours' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1505,7 +1505,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '7 days' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '7 days' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1607,7 +1607,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '30 days' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND start_time > now() - interval '30 days' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -4056,6 +4056,6 @@
   "timezone": "browser",
   "title": "Traffic Status",
   "uid": "noc-traffic-status",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
