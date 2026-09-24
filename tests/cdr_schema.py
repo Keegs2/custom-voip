@@ -54,6 +54,9 @@ CDR_COLUMN_MIGRATIONS = (
     # objects are CREATE OR REPLACE FUNCTIONs (+ role-guarded grants), so it
     # is as replay-safe as the column-only files above. Requires 48.
     "50_cdr_quality_accuracy.sql",
+    # the 5-argument cq_leg_status (no_rtp vs no_media split). Functions,
+    # comments and role-guarded grants only; requires 50.
+    "51_cdr_quality_no_media.sql",
 )
 
 

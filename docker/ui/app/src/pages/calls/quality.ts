@@ -19,6 +19,10 @@
  * Grade bands (G.109 R 90/80/70 mapped to MOS, applied to the STORED 2-dp
  * value so Python, SQL and this file agree on every row):
  *   great ≥ 4.34 · good ≥ 4.02 · fair ≥ 3.60 · poor < 3.60 (or one-way audio)
+ * One-way audio (`no_rtp`) = < 10% of the expected packets received while
+ * ≥ 50% were sent; `no_media` (migration 51) = < 10% received AND < 50% sent —
+ * no audio either way (failed setup, test call, both parties silent). It is
+ * NOT graded and never counts as one-way.
  * Secondary colour-only thresholds for raw numbers:
  *   R ≥ 80 / ≥ 70 · loss ≤ 4% / ≤ 8% · jitter ≤ 20 ms / ≤ 50 ms.
  *
@@ -40,7 +44,14 @@ export const AZURE_DEEP = '#1d63dd';
 export type Grade = 'great' | 'good' | 'fair' | 'poor';
 
 /** Per-leg / per-call grading outcome (contract B.2). */
-export type QualityStatus = 'rated' | 'no_rtp' | 'low_sample' | 'short' | 'unanswered' | 'no_data';
+export type QualityStatus =
+  | 'rated'
+  | 'no_rtp'
+  | 'no_media'
+  | 'low_sample'
+  | 'short'
+  | 'unanswered'
+  | 'no_data';
 
 /** MOS cut points — G.109 R 90 / 80 / 70 → MOS, rounded to 2 dp. */
 export const GRADE_MOS_GREAT = 4.34;
@@ -142,6 +153,10 @@ const STATUS_REASON: Record<Exclude<QualityStatus, 'rated'>, Record<ReasonAudien
     customer: 'One-way audio — no sound came through from one side',
     staff: 'One-way audio: no inbound media',
   },
+  no_media: {
+    customer: 'No audio either way — the call never carried sound',
+    staff: 'No media either direction (in < 10%, out < 50% of expected packets) — not graded',
+  },
   short: {
     customer: 'Not graded — the call was under 5 seconds',
     staff: 'Not graded — call under 5 s',
@@ -176,6 +191,7 @@ export function qualityStatusReason(
 
 const STATUS_SHORT: Record<Exclude<QualityStatus, 'rated' | 'no_rtp'>, string> = {
   short: 'under 5 sec',
+  no_media: 'no audio either way',
   low_sample: 'too little sound',
   no_data: 'no sound data',
   unanswered: 'not answered',

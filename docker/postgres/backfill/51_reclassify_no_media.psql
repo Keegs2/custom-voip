@@ -1,0 +1,169 @@
+-- ==========================================================================
+-- 51_reclassify_no_media.psql — one-off reclassification for migration 51
+-- (docker/postgres/init/51_cdr_quality_no_media.sql).
+--
+-- A psql SCRIPT (\gset / \if / \gexec). Deliberately OUTSIDE init/ so initdb
+-- never runs it. Autocommit: every UPDATE is its own transaction, one per
+-- TimescaleDB chunk. NEVER run it with -1 / --single-transaction / in BEGIN.
+--
+-- WHAT IT DOES — stored legs with quality_status = 'no_rtp' that the
+-- migration-51 rule says carried NO media in EITHER direction, i.e.
+--     cq_leg_status(answered, billable_ms, in_packets, 20, out_packets) = 'no_media'
+-- (inbound < 10% of expected AND outbound < 50% of expected, or the outbound
+-- count is NULL; ptime 20 like the 50 backfill — the stored row has no ptime):
+--   * quality_status := 'no_media', quality_grade := NULL, mos / r_factor :=
+--     NULL (already NULL for no_rtp; set anyway). inbound_media_ratio is kept
+--     (it is meaningful for no_media). Nothing else on the row changes.
+--   * then cdr_refresh_call_quality() re-runs for every affected CALL row
+--     (the reclassified row itself when it is an A row; the A row of its
+--     call — uuid = the B row's call_id — when it is a carrier B row), so
+--     call_quality_status / call_quality_grade / call_mos / call_quality_leg
+--     are recomputed (a call whose only no_rtp leg was no_media is no longer
+--     one-way; it becomes not graded, or the other leg's grade).
+-- Genuine one-way legs (outbound >= 50% of expected) stay 'no_rtp'.
+-- Production expectation (2026-09-24 finding): ~480 of the 485 no_rtp legs
+-- are reclassified (479 zero-in/zero-out from the week of 2026-07-20 + the
+-- 902 s 1863-in/397-out call); the ~5 true one-way legs remain no_rtp.
+--
+-- SAFETY
+--   * IDEMPOTENT: only rows still 'no_rtp' are touched; a re-run reclassifies
+--     nothing (UPDATE 0) and the call refresh is a deterministic function of
+--     committed rows. Re-run it after any re-run of
+--     50_cdr_quality_backfill.psql (which still applies the inbound-only gate).
+--   * SNAPSHOT-FIRST, EXACT ROLLBACK: every row it will touch (reclassified
+--     legs AND the A rows it refreshes) is copied into
+--     cdr_quality_reclass_51_snapshot BEFORE any UPDATE (ON CONFLICT DO
+--     NOTHING keeps the first, pre-51 values on a re-run), and the UPDATE is
+--     driven FROM that snapshot.
+--   * RING-FENCED: reads only stored columns; never touches billing/rating
+--     columns (billable_ms, rate_per_min, total_cost, carrier_cost, margin,
+--     rated_at), timing, attribution or exported_at (Equinox is NOT re-fed).
+--   * TimescaleDB: UPDATE on compressed chunks is supported (>= 2.11);
+--     max_tuples_decompressed_per_dml_transaction = 0 (unlimited) so a DML
+--     that decompresses a whole chunk cannot abort; one chunk per statement.
+--
+-- RUN (East primary only — replicates; AFTER migration 51):
+--   hostname | grep -q '^services$' && sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f /opt/revup/docker/postgres/backfill/51_reclassify_no_media.psql
+-- VERIFY:
+--   hostname | grep -q '^services$' && sudo -u postgres psql -d voip -Atc "SELECT quality_status, count(*) FROM cdrs WHERE quality_status IN ('no_rtp','no_media') GROUP BY 1 ORDER BY 1"
+--
+-- EXACT ROLLBACK (restores every column this script changed, on every row it touched):
+--   hostname | grep -q '^services$' && sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -c "SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0; UPDATE cdrs c SET quality_status=s.quality_status, quality_grade=s.quality_grade, mos=s.mos, r_factor=s.r_factor, call_quality_status=s.call_quality_status, call_quality_grade=s.call_quality_grade, call_mos=s.call_mos, call_quality_leg=s.call_quality_leg FROM cdr_quality_reclass_51_snapshot s WHERE c.uuid=s.uuid AND c.start_time=s.start_time"
+--   (re-runnable; the SET is a harmless placeholder GUC without TimescaleDB).
+--   Keep the snapshot until the release is accepted; then
+--   `DROP TABLE cdr_quality_reclass_51_snapshot;` (a plain table).
+-- ==========================================================================
+
+\set ON_ERROR_STOP on
+\pset pager off
+
+-- ---- 0. Guards ----------------------------------------------------------
+SELECT to_regprocedure('cq_leg_status(boolean,integer,integer,integer,integer)') IS NOT NULL
+       AS has_q51 \gset
+\if :has_q51
+\else
+\echo 'ABORT: cq_leg_status(bool,int,int,int,int) is missing — apply docker/postgres/init/51_cdr_quality_no_media.sql first.'
+DO $$ BEGIN RAISE EXCEPTION 'migration 51 not applied (5-argument cq_leg_status missing)'; END $$;
+\endif
+
+SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') AS has_ts \gset
+\if :has_ts
+SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0;
+\set ranges_sql 'SELECT range_start AS lo, range_end AS hi FROM timescaledb_information.chunks WHERE hypertable_schema = current_schema() AND hypertable_name = ''cdrs'' ORDER BY range_start'
+\else
+-- Plain PostgreSQL (test harness): one unbounded range.
+\set ranges_sql 'SELECT ''-infinity''::timestamptz AS lo, ''infinity''::timestamptz AS hi'
+\endif
+SET statement_timeout = 0;
+
+-- ---- 1. Snapshot for exact rollback -------------------------------------
+CREATE TABLE IF NOT EXISTS cdr_quality_reclass_51_snapshot (
+    uuid                varchar(64),
+    start_time          timestamptz,
+    call_id             varchar(64),
+    is_a                boolean,        -- A / pre-48 row: gets the call refresh
+    reclassified        boolean,        -- this leg is converted no_rtp -> no_media
+    quality_status      varchar(12),
+    quality_grade       varchar(5),
+    mos                 numeric(3,2),
+    r_factor            numeric(5,2),
+    call_quality_status varchar(12),
+    call_quality_grade  varchar(5),
+    call_mos            numeric(3,2),
+    call_quality_leg    varchar(1),
+    PRIMARY KEY (uuid, start_time)
+);
+
+-- 1a. the legs to reclassify
+INSERT INTO cdr_quality_reclass_51_snapshot
+       (uuid, start_time, call_id, is_a, reclassified, quality_status, quality_grade,
+        mos, r_factor, call_quality_status, call_quality_grade, call_mos, call_quality_leg)
+SELECT uuid, start_time, call_id, leg IS DISTINCT FROM 'B', true, quality_status, quality_grade,
+       mos, r_factor, call_quality_status, call_quality_grade, call_mos, call_quality_leg
+  FROM cdrs
+ WHERE quality_status = 'no_rtp'
+   AND cq_leg_status(answer_time IS NOT NULL, billable_ms, rtp_audio_in_packet_count, 20,
+                     rtp_audio_out_packet_count) = 'no_media'
+ON CONFLICT DO NOTHING;
+
+-- 1b. the A (call) rows of reclassified carrier B legs — same A lookup window
+--     as cdr_refresh_call_quality()
+INSERT INTO cdr_quality_reclass_51_snapshot
+       (uuid, start_time, call_id, is_a, reclassified, quality_status, quality_grade,
+        mos, r_factor, call_quality_status, call_quality_grade, call_mos, call_quality_leg)
+SELECT DISTINCT a.uuid, a.start_time, a.call_id, true, false, a.quality_status, a.quality_grade,
+       a.mos, a.r_factor, a.call_quality_status, a.call_quality_grade, a.call_mos, a.call_quality_leg
+  FROM cdr_quality_reclass_51_snapshot s
+  JOIN cdrs a
+    ON a.uuid = s.call_id AND a.leg IS DISTINCT FROM 'B'
+   AND a.start_time >= s.start_time - interval '1 day'
+   AND a.start_time <= s.start_time + interval '1 minute'
+ WHERE s.reclassified AND NOT s.is_a
+ON CONFLICT DO NOTHING;
+
+-- ---- 2. Per-leg reclassification, one UPDATE per chunk (autocommit each) -
+SELECT format($f$
+UPDATE cdrs c SET
+  quality_status = 'no_media', quality_grade = NULL, mos = NULL, r_factor = NULL
+FROM cdr_quality_reclass_51_snapshot s
+WHERE s.reclassified AND c.uuid = s.uuid AND c.start_time = s.start_time
+  AND c.quality_status = 'no_rtp'
+  AND c.start_time >= %1$L AND c.start_time < %2$L
+$f$, r.lo, r.hi)
+FROM (:ranges_sql) r \gexec
+
+-- ---- 3. Call-level recompute of every affected A row, per chunk ----------
+-- The candidate list is materialised (ORDER BY) before the function runs.
+SELECT format($f$
+SELECT count(cdr_refresh_call_quality(t.uuid, t.start_time)) AS call_rows_refreshed
+  FROM (SELECT uuid, start_time FROM cdr_quality_reclass_51_snapshot
+         WHERE is_a AND start_time >= %1$L AND start_time < %2$L
+         ORDER BY start_time) t
+$f$, r.lo, r.hi)
+FROM (:ranges_sql) r \gexec
+
+-- ---- 4. Marker (same data_migrations table as 43 / 50) --------------------
+CREATE TABLE IF NOT EXISTS data_migrations (
+    migration_id TEXT PRIMARY KEY,
+    applied_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    cutoff_time  TIMESTAMPTZ,
+    notes        TEXT
+);
+INSERT INTO data_migrations (migration_id, notes)
+VALUES ('51_reclassify_no_media', 'no_rtp legs with no outbound media either -> no_media (not graded)')
+ON CONFLICT (migration_id) DO UPDATE SET applied_at = now();
+
+-- ---- 5. Summary -----------------------------------------------------------
+\echo '== 51 reclassify: snapshot (legs reclassified / call rows refreshed) =='
+SELECT count(*) FILTER (WHERE reclassified) AS legs_reclassified,
+       count(*) FILTER (WHERE is_a)         AS call_rows_refreshed
+  FROM cdr_quality_reclass_51_snapshot;
+\echo '== legs by status now (no_rtp = true one-way audio; no_media = no audio either way) =='
+SELECT quality_status, count(*) AS legs
+  FROM cdrs WHERE quality_status IN ('no_rtp', 'no_media') GROUP BY 1 ORDER BY 1;
+\echo '== refreshed calls: call-level status / grade now =='
+SELECT c.call_quality_status, c.call_quality_grade, count(*) AS calls
+  FROM cdrs c JOIN cdr_quality_reclass_51_snapshot s
+    ON c.uuid = s.uuid AND c.start_time = s.start_time
+ WHERE s.is_a
+ GROUP BY 1, 2 ORDER BY 1, 2;

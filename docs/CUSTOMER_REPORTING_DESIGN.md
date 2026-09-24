@@ -65,9 +65,10 @@ Reports read the CALL-level columns (`cdrs.call_quality_grade` / `call_mos` = th
 worse of the caller→platform and callee→platform directions, migration 50). A call is
 **rated (graded) ⇔ `call_quality_grade IS NOT NULL`** — per plan §B.2 only an answered
 call of ≥ 5 s with ≥ 250 inbound packets is graded; an answered ≥ 5 s call with < 10 %
-of the expected inbound packets is one-way audio (`no_rtp`) and is graded **poor with
-no MOS** (CSV "Poor"). Unanswered, short, low-sample and no-data calls are not graded
-("Not rated"). `avg_mos` = mean `call_mos` over graded calls that have one;
+of the expected inbound packets while ≥ 50 % went out is one-way audio (`no_rtp`) and
+is graded **poor with no MOS** (CSV "Poor"). Unanswered, short, low-sample, no-data
+and `no_media` calls (migration 51: < 10 % in AND < 50 % out — no audio either way) are
+not graded ("Not rated"). `avg_mos` = mean `call_mos` over graded calls that have one;
 `pct_good_or_better` = share of graded calls with grade great/good. An aggregate whose
 graded calls were all one-way audio is `poor` (never `none`).
 

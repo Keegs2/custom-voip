@@ -8,7 +8,7 @@ can be imported read-only by:
   * services/reporting.py      — `grade_for_mos` delegates here
   * docker/freeswitch/lab/eval_cdrs.py — the SIPp/netem acceptance lab
   * tests                      — incl. the Python/SQL parity test against the
-                                 IMMUTABLE `cq_*` functions of migration 50
+                                 IMMUTABLE `cq_*` functions of migrations 50/51
 
 Model: ITU-T G.107 E-model, packet-loss impairment only.
 
@@ -62,7 +62,17 @@ BURST_R_MIN, BURST_R_MAX = 1.0, 10.0
 # ---------------------------------------------------------------------------
 MIN_TALK_MS = 5000
 MIN_PACKETS = 250
+#: Inbound media gate: a leg whose inbound packets are < NO_RTP_RATIO of the
+#: packets its talk time implies (billable_ms / ptime) received (almost) no
+#: audio. Which of the two "no inbound audio" statuses it gets depends on the
+#: OUTBOUND side (migration 51, owner-approved 2026-09-24):
 NO_RTP_RATIO = 0.10
+#: ... we SENT >= ONE_WAY_MIN_OUT_RATIO of the expected packets -> TRUE
+#: one-way audio (`no_rtp`, graded poor). We sent less, or the outbound count
+#: is unknown -> no media in EITHER direction (`no_media`, not graded): a
+#: failed / test call, or both parties silent (hold, DTX). Same expected basis
+#: as the inbound gate. Mirrored by SQL cq_leg_status(bool,int,int,int,int).
+ONE_WAY_MIN_OUT_RATIO = 0.50
 DEFAULT_PTIME_MS = 20
 PTIME_MIN_MS, PTIME_MAX_MS = 10, 120
 
@@ -71,12 +81,16 @@ STATUS_UNANSWERED = "unanswered"
 STATUS_NO_DATA = "no_data"
 STATUS_SHORT = "short"
 STATUS_NO_RTP = "no_rtp"
+STATUS_NO_MEDIA = "no_media"
 STATUS_LOW_SAMPLE = "low_sample"
 STATUS_RATED = "rated"
-STATUSES = (STATUS_RATED, STATUS_NO_RTP, STATUS_LOW_SAMPLE, STATUS_SHORT,
-            STATUS_UNANSWERED, STATUS_NO_DATA)
-#: statuses for which inbound_media_ratio is meaningful (B.3)
-MEDIA_RATIO_STATUSES = frozenset({STATUS_RATED, STATUS_NO_RTP, STATUS_LOW_SAMPLE})
+STATUSES = (STATUS_RATED, STATUS_NO_RTP, STATUS_NO_MEDIA, STATUS_LOW_SAMPLE,
+            STATUS_SHORT, STATUS_UNANSWERED, STATUS_NO_DATA)
+#: statuses that carry a grade: rated (from the MOS) and no_rtp (poor)
+GRADED_STATUSES = frozenset({STATUS_RATED, STATUS_NO_RTP})
+#: statuses for which inbound_media_ratio is meaningful (B.3; no_media since 51)
+MEDIA_RATIO_STATUSES = frozenset({STATUS_RATED, STATUS_NO_RTP, STATUS_NO_MEDIA,
+                                  STATUS_LOW_SAMPLE})
 
 # quality_source values (cdrs.quality_source, VARCHAR(16))
 SOURCE_PATCH = "fs_patch_v1"      # patched FS image (rtp_audio_in_qpatch=1 + seq vars)
@@ -273,9 +287,15 @@ def ptime_ms(value: Any) -> int:
 
 
 def leg_status(answered: bool, billable_ms: Any, in_packets: Any,
-               ptime: int = DEFAULT_PTIME_MS) -> str:
+               ptime: int = DEFAULT_PTIME_MS, out_packets: Any = None) -> str:
     """Rules 1-5 + 7 of B.2 (first match wins). Rule 6 (loss input unavailable)
-    is applied by the caller. Mirrors SQL cq_leg_status()."""
+    is applied by the caller. Mirrors SQL cq_leg_status(bool,int,int,int,int)
+    (migration 51).
+
+    Rule 4 (inbound < NO_RTP_RATIO of expected) splits on the outbound side:
+    out_packets >= ONE_WAY_MIN_OUT_RATIO of expected -> no_rtp (true one-way);
+    otherwise, or out_packets None -> no_media (no audio either way).
+    """
     if not answered:
         return STATUS_UNANSWERED
     if in_packets is None:
@@ -284,7 +304,9 @@ def leg_status(answered: bool, billable_ms: Any, in_packets: Any,
     if bms < MIN_TALK_MS:
         return STATUS_SHORT
     if in_packets < NO_RTP_RATIO * float(bms) / ptime:
-        return STATUS_NO_RTP
+        if out_packets is not None and out_packets >= ONE_WAY_MIN_OUT_RATIO * float(bms) / ptime:
+            return STATUS_NO_RTP
+        return STATUS_NO_MEDIA
     if in_packets < MIN_PACKETS:
         return STATUS_LOW_SAMPLE
     return STATUS_RATED
@@ -416,9 +438,10 @@ def assess_leg(variables: Mapping[str, Any], *, answered: bool,
 
     # ---- rating rule -----------------------------------------------------
     in_packets = _clamp_int(v.get("rtp_audio_in_packet_count"))
+    out_packets = _clamp_int(v.get("rtp_audio_out_packet_count"))
     pt = ptime_ms(v.get("rtp_use_codec_ptime"))
     bms = billable_ms if billable_ms is not None else 0
-    status = leg_status(bool(answered), bms, in_packets, pt)
+    status = leg_status(bool(answered), bms, in_packets, pt, out_packets)
 
     loss_rate = None
     if source == SOURCE_LEGACY:
@@ -439,6 +462,7 @@ def assess_leg(variables: Mapping[str, Any], *, answered: bool,
     if status == STATUS_NO_RTP:
         out["quality_grade"] = "poor"          # one-way audio; MOS stays NULL
         return out
+    # no_media (and every other non-rated status): not graded, MOS NULL.
     if status != STATUS_RATED:
         return out
 
@@ -482,7 +506,9 @@ def combine_call(a: Mapping[str, Any], b: Optional[Mapping[str, Any]] = None) ->
     * worse direction = lowest grade rank; tie -> no_rtp first, then lower
       MOS (NULL last), then A.
     * call_quality_status = no_rtp if either leg is no_rtp, else rated if
-      either is rated, else the A status.
+      either is rated, else the A status (so a no_media A with no graded B is
+      no_media — not graded; no_media legs never carry a grade and never win
+      the worse-direction pick).
     * call_mos = min MOS over rated legs; NULL when the status is no_rtp.
     No B row -> call quality = A quality.
     """

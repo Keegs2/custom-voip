@@ -788,7 +788,8 @@ function TelemetryReference() {
         maximum — and <IC>r_factor</IC> is the G.107 transmission rating (0–100) behind it. Both are{' '}
         <IC>null</IC> unless the call was graded: <IC>quality_status</IC> is <IC>rated</IC> for graded
         calls, or explains why not (<IC>unanswered</IC>, <IC>short</IC> = under 5 s,{' '}
-        <IC>low_sample</IC>, <IC>no_data</IC>, or <IC>no_rtp</IC> = one-way audio, graded poor).{' '}
+        <IC>low_sample</IC>, <IC>no_data</IC>, <IC>no_media</IC> = no audio in either direction, not
+        graded, or <IC>no_rtp</IC> = one-way audio, graded poor).{' '}
         <IC>quality_grade</IC> is <IC>great</IC> (MOS ≥ 4.34) / <IC>good</IC> (≥ 4.02) /{' '}
         <IC>fair</IC> (≥ 3.60) / <IC>poor</IC>. <IC>packet_loss_pct</IC> / <IC>packet_loss_count</IC>{' '}
         are true network loss; <IC>jitter_avg_ms</IC> / <IC>jitter_max_ms</IC> are RFC 3550 interarrival

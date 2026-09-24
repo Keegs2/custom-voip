@@ -162,23 +162,46 @@ def test_burst_ratio_formula_and_clamp():
 # ---------------------------------------------------------------------------
 # B.2 — rating rule
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("answered,bms,pkts,ptime,status", [
-    (False, 0, 0, 20, "unanswered"),
-    (False, 60_000, 3000, 20, "unanswered"),
-    (True, 60_000, None, 20, "no_data"),
-    (True, 0, 0, 20, "short"),                 # 0 s answered-then-hung-up
-    (True, 1_000, 50, 20, "short"),            # 1 s
-    (True, 4_999, 250, 20, "short"),
-    (True, 11_000, 0, 20, "no_rtp"),           # the 11 s Sinch one-way call
-    (True, 60_000, 299, 20, "no_rtp"),         # < 10% of 3000
-    (True, 60_000, 300, 20, "rated"),          # exactly 10% -> not no_rtp
-    (True, 5_000, 25, 20, "low_sample"),       # 10% of 250 = 25 -> not no_rtp
-    (True, 5_000, 249, 20, "low_sample"),
-    (True, 5_000, 250, 20, "rated"),
-    (True, 60_000, 1500, 40, "rated"),
+@pytest.mark.parametrize("answered,bms,pkts,ptime,out,status", [
+    (False, 0, 0, 20, None, "unanswered"),
+    (False, 60_000, 3000, 20, 3000, "unanswered"),
+    (True, 60_000, None, 20, 3000, "no_data"),
+    (True, 0, 0, 20, 0, "short"),                 # 0 s answered-then-hung-up
+    (True, 1_000, 50, 20, 50, "short"),           # 1 s
+    (True, 4_999, 250, 20, 250, "short"),
+    (True, 11_000, 0, 20, 591, "no_rtp"),         # the 11 s Sinch one-way call
+    (True, 60_000, 299, 20, 3000, "no_rtp"),      # < 10% of 3000 in, all out
+    (True, 60_000, 300, 20, 3000, "rated"),       # exactly 10% -> not no_rtp
+    (True, 5_000, 25, 20, 0, "low_sample"),       # 10% of 250 = 25 -> not no_rtp
+    (True, 5_000, 249, 20, 250, "low_sample"),
+    (True, 5_000, 250, 20, 250, "rated"),
+    (True, 60_000, 1500, 40, 1500, "rated"),
+    # migration 51 — the outbound split of rule 4
+    (True, 60_000, 0, 20, 0, "no_media"),         # nothing either way
+    (True, 60_000, 0, 20, None, "no_media"),      # outbound count unknown
+    (True, 60_000, 299, 20, 1499, "no_media"),    # out 49.97% -> not one-way
+    (True, 60_000, 299, 20, 1500, "no_rtp"),      # out exactly 50% -> one-way
+    (True, 902_000, 1863, 20, 397, "no_media"),   # production: both sides quiet
+    (True, 12_000, 2, 20, 613, "no_rtp"),         # production: true one-way
+    (True, 60_000, 0, 40, 750, "no_rtp"),         # expected basis follows ptime
+    (True, 60_000, 0, 40, 749, "no_media"),
 ])
-def test_leg_status_table(answered, bms, pkts, ptime, status):
-    assert cq.leg_status(answered, bms, pkts, ptime) == status
+def test_leg_status_table(answered, bms, pkts, ptime, out, status):
+    assert cq.leg_status(answered, bms, pkts, ptime, out) == status
+
+
+def test_leg_status_without_out_count_is_no_media():
+    # 4-argument call (no outbound count) can never claim one-way audio
+    assert cq.leg_status(True, 11_000, 0, 20) == "no_media"
+    assert cq.leg_status(True, 60_000, 3000, 20) == "rated"
+
+
+def test_no_media_constants_are_the_contract():
+    assert (cq.NO_RTP_RATIO, cq.ONE_WAY_MIN_OUT_RATIO) == (0.10, 0.50)
+    assert cq.STATUS_NO_MEDIA == "no_media" and cq.STATUS_NO_MEDIA in cq.STATUSES
+    assert cq.STATUS_NO_MEDIA not in cq.GRADED_STATUSES
+    assert cq.STATUS_NO_MEDIA in cq.MEDIA_RATIO_STATUSES
+    assert all(len(s) <= 12 for s in cq.STATUSES)          # VARCHAR(12)
 
 
 def test_ptime_parsing():
@@ -212,6 +235,30 @@ def test_production_case_11s_one_way_sinch_call():
     assert qm["mos"] is None and qm["r_factor"] is None
     assert qm["fs_mos"] == 4.5              # FS scored silence 4.50 — traceability only
     assert qm["inbound_media_ratio"] == 0.0
+
+
+@pytest.mark.parametrize("pin,pout,bms,status", [
+    (0, 0, 60_000, "no_media"),          # Jul-20 load-test week: nothing either way
+    (0, None, 60_000, "no_media"),       # outbound count missing
+    (2, 613, 12_000, "no_rtp"),          # genuine one-way (in 2 / out 613, 12 s)
+    (134, 2204, 45_000, "no_rtp"),       # genuine one-way
+    (1863, 397, 902_000, "no_media"),    # 902 s, both directions near-silent (hold/DTX)
+])
+def test_production_cases_no_media_vs_one_way(pin, pout, bms, status):
+    kw = {} if pout is None else {"rtp_audio_out_packet_count": str(pout)}
+    qm = cq.assess_leg(_legacy(pin, **kw), answered=True, billable_ms=bms)
+    assert qm["quality_status"] == status
+    assert qm["mos"] is None and qm["r_factor"] is None
+    assert qm["quality_grade"] == ("poor" if status == "no_rtp" else None)
+    assert qm["packet_loss_pct"] is None
+    assert qm["inbound_media_ratio"] == cq.inbound_media_ratio(pin, bms)
+    assert qm["inbound_media_ratio"] < cq.NO_RTP_RATIO
+
+
+def test_clean_call_still_rated_with_out_count():
+    qm = cq.assess_leg(_legacy(3000, rtp_audio_out_packet_count="3000"), answered=True,
+                       billable_ms=60_000)
+    assert (qm["quality_status"], qm["quality_grade"], qm["mos"]) == ("rated", "great", 4.41)
 
 
 def test_production_case_unanswered_with_fs_mos():
@@ -335,6 +382,21 @@ def test_combine_tie_lower_mos_then_a():
     assert c["call_quality_leg"] == "B" and c["call_mos"] == 4.10
     c = cq.combine_call(_leg("rated", "good", 4.10), _leg("rated", "good", 4.10))
     assert c["call_quality_leg"] == "A"
+
+
+def test_combine_no_media_is_not_graded_and_not_one_way():
+    c = cq.combine_call(_leg("no_media"))
+    assert c == {"call_quality_status": "no_media", "call_quality_grade": None,
+                 "call_quality_leg": None, "call_mos": None}
+    c = cq.combine_call(_leg("no_media"), _leg("rated", "good", 4.2))
+    assert c == {"call_quality_status": "rated", "call_quality_grade": "good",
+                 "call_quality_leg": "B", "call_mos": 4.2}
+    c = cq.combine_call(_leg("rated", "great", 4.41), _leg("no_media"))
+    assert c == {"call_quality_status": "rated", "call_quality_grade": "great",
+                 "call_quality_leg": "A", "call_mos": 4.41}
+    # a true one-way leg still wins over a no_media one
+    c = cq.combine_call(_leg("no_media"), _leg("no_rtp", "poor"))
+    assert c["call_quality_status"] == "no_rtp" and c["call_quality_leg"] == "B"
 
 
 def test_combine_ungraded_a_rated_b():

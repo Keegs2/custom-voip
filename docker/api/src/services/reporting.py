@@ -237,7 +237,10 @@ def grade_for_mos(mos: Any) -> str:
     one-way-audio call (quality_status 'no_rtp') is graded poor with no MOS;
     per-call report rows therefore take the stored grade word
     (cdrs.call_quality_grade), not this function. Only answered calls of 5 s
-    or more with measurable audio are graded.
+    or more with measurable audio are graded; a call with no audio in EITHER
+    direction (quality_status 'no_media', migration 51 — failed setup, test
+    call, both parties silent) has no grade and reports as "Not rated",
+    never "Poor".
     """
     return cq.grade_for_mos(mos) or "none"
 

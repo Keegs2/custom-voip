@@ -255,9 +255,13 @@ def test_parity_leg_status_grid(q50):
             [c[0] for c in cases], [c[1] for c in cases], [c[2] for c in cases],
             [c[3] for c in cases])
 
+    # The migration-50 4-argument function is the inbound-only gate: its
+    # no_rtp covers both statuses the current (migration-51) rule splits it
+    # into — the 5-argument parity lives in tests/test_cdr_quality_migration51.py.
     for row in _run(go()):
         a, b, p, t = cases[row["i"] - 1]
-        assert row["s"] == cq.leg_status(a, b, p, t), (a, b, p, t)
+        py = cq.leg_status(a, b, p, t)
+        assert row["s"] == ("no_rtp" if py == cq.STATUS_NO_MEDIA else py), (a, b, p, t)
 
 
 def test_parity_grade_every_2dp_mos(q50):

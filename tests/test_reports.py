@@ -322,6 +322,12 @@ def reports_db():
                 "UPDATE cdrs SET call_quality_status = 'no_rtp', "
                 "call_quality_grade = 'poor', call_mos = NULL WHERE uuid = $1",
                 _uuid("a15"))
+            # a16: answered, no audio either way (no_media, migration 51) ->
+            # NOT graded: grade NULL, never Poor / one-way
+            await conn.execute(
+                "UPDATE cdrs SET call_quality_status = 'no_media', "
+                "call_quality_grade = NULL, call_mos = NULL WHERE uuid = $1",
+                _uuid("a16"))
         await owner.close()
         db.pool = await asyncpg.create_pool(
             host=pg.sock, port=pg.port, user="api", password="api_secret",
@@ -672,7 +678,8 @@ def test_calls_csv_header_rows_escaping(client, tokens):
     # one-way audio (no_rtp): graded Poor with no MOS — never "Not rated"
     assert ["2026-08-25", "11:00", "Inbound", "+12085550015", A_MAIN, A_MAIN,
             "Answered", "1", "Poor"] in data
-    # an answered call that was never graded stays "Not rated"
+    # an answered call that was never graded (a16: no_media, no audio either
+    # way) stays "Not rated" — never "Poor"
     assert ["2026-08-25", "11:05", "Inbound", "+12085550016", A_MAIN, A_MAIN,
             "Answered", "1", "Not rated"] in data
     assert ["2026-08-21", "08:00", "Inbound", "+12085550008", A_TRUNK, A_TRUNK,

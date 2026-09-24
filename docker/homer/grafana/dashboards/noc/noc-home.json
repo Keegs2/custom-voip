@@ -6,7 +6,7 @@
     "home"
   ],
   "schemaVersion": 39,
-  "version": 4,
+  "version": 5,
   "timezone": "browser",
   "editable": true,
   "graphTooltip": 0,
@@ -2665,7 +2665,7 @@
       "id": 30,
       "type": "stat",
       "title": "Voice · Good+ calls — 15m",
-      "description": "Share of graded calls, trailing 15 min, all zones, whose CALL grade (worse direction) is great or good — Call Quality id 43's query with the zone filter dropped (noc-home has no zone variable). Graded = answered >= 5 s with measurable audio, or one-way audio (graded poor). Red < 90% · orange < 97% · green >= 97% (SLI 1 target).",
+      "description": "Share of graded calls, trailing 15 min, all zones, whose CALL grade (worse direction) is great or good — Call Quality id 43's query with the zone filter dropped (noc-home has no zone variable). Graded = answered >= 5 s with measurable audio, or one-way audio (graded poor); no audio either way (no_media) is not graded. Red < 90% · orange < 97% · green >= 97% (SLI 1 target).",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -2885,7 +2885,7 @@
       "id": 33,
       "type": "stat",
       "title": "Voice · One-way audio — 1h",
-      "description": "Calls in the last hour, all zones, whose call quality is one-way audio (call_quality_status='no_rtp': answered >= 5 s but one direction delivered < 10% of the expected RTP packets). Any is red — one a week is normal carrier noise, several per hour means a media-path regression (Cloud NAT / bypass-vpn, SDP c=, RTP source IP); scripts/backup/media_guard.sh pages on it. Detail: Call Quality id 22.",
+      "description": "Calls in the last hour, all zones, whose call quality is one-way audio (call_quality_status='no_rtp': answered >= 5 s, one direction delivered < 10% of the expected RTP packets while the other carried audio). Calls with no audio either way (no_media — failed/test calls, both parties silent) are not counted. Any is red — one a week is normal carrier noise, several per hour means a media-path regression (Cloud NAT / bypass-vpn, SDP c=, RTP source IP); scripts/backup/media_guard.sh pages on it. Detail: Call Quality id 22.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"

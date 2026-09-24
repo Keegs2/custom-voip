@@ -37,7 +37,7 @@ DBL_VARS = ("in_jitter_min_variance", "in_jitter_max_variance", "in_jitter_loss_
 
 
 def leg_vars(uuid, leg, answered, secs, sent, lost=0, events=0, reordered=0, epochs=1,
-             jitter=0.8, clock="kernel", dtmf=0, a_uuid=None, media=True):
+             jitter=0.8, clock="kernel", dtmf=0, a_uuid=None, media=True, out=None):
     v = {"uuid": uuid, "answer_epoch": "1790000000" if answered else "0",
          "billmsec": str(int(secs * 1000) if answered else 0), "rtp_use_codec_name": "PCMU",
          "rtp_use_codec_ptime": "20", "read_codec": "PCMU"}
@@ -50,6 +50,9 @@ def leg_vars(uuid, leg, answered, secs, sent, lost=0, events=0, reordered=0, epo
         v["rtp_audio_" + k] = "0"
     for k in DBL_VARS:
         v["rtp_audio_" + k] = "0.00"
+    # what FS SENT on this leg = what it relayed from the other leg (migration
+    # 51 splits "no inbound RTP" on it: out >= 50% of expected -> no_rtp)
+    v["rtp_audio_out_packet_count"] = str(sent if out is None else out)
     v.update({"rtp_audio_in_packet_count": str(recv), "rtp_audio_in_media_packet_count": str(recv - dtmf),
               "rtp_audio_in_dtmf_packet_count": str(dtmf), "rtp_audio_in_raw_bytes": str(recv * 172),
               "rtp_audio_in_flaw_total": str(lost * 3), "rtp_audio_in_mos": "4.50",
@@ -128,7 +131,8 @@ def scenario(name, secs=60, a_imp=None, b_imp=None, mode="normal", answered=True
             dtmf = 32
         if mode == "ssrc":
             epochs = 2
-        a = leg_vars(au, "A", answered, secs, sent, lost, events, reord, epochs, jit, dtmf=dtmf, media=answered)
+        a = leg_vars(au, "A", answered, secs, sent, lost, events, reord, epochs, jit, dtmf=dtmf, media=answered,
+                     out=n - 50)
         blost, bev = bern_loss(n - 50, 0.03) if b_imp == "loss" else (0, 0)
         b = leg_vars(bu, "B", answered, secs, n - 50, blost, bev, a_uuid=au, media=answered)
         man = {"call_id": au, "role": "uac", "sent": sent, "no_rtp": sent == 0,

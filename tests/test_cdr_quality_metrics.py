@@ -189,12 +189,23 @@ def test_patched_ssrc_changes_and_burst_ratio():
 def test_patched_but_no_rtp_ever_is_no_rtp_with_zero_expected():
     v = dict(PATCHED_CLEAN, rtp_audio_in_packet_count="0", rtp_audio_in_seq_expected="0",
              rtp_audio_in_seq_received="0", rtp_audio_in_seq_lost="0",
-             rtp_audio_in_seq_epochs="0")
+             rtp_audio_in_seq_epochs="0", rtp_audio_out_packet_count="750")
     qm = _qm(v, billable_ms=15_000)
     assert qm["quality_status"] == "no_rtp" and qm["quality_grade"] == "poor"
     assert qm["mos"] is None and qm["r_factor"] is None
     assert qm["packets_expected"] == 0          # "measured zero", not NULL
     assert qm["inbound_media_ratio"] == 0.0
+
+
+def test_patched_no_media_either_way_is_not_graded():
+    """Migration 51: nothing received AND nothing sent -> no_media, not one-way."""
+    v = dict(PATCHED_CLEAN, rtp_audio_in_packet_count="0", rtp_audio_in_seq_expected="0",
+             rtp_audio_in_seq_received="0", rtp_audio_in_seq_lost="0",
+             rtp_audio_in_seq_epochs="0", rtp_audio_out_packet_count="0")
+    qm = _qm(v, billable_ms=15_000)
+    assert qm["quality_status"] == "no_media" and qm["quality_grade"] is None
+    assert qm["mos"] is None and qm["r_factor"] is None
+    assert qm["packets_expected"] == 0 and qm["inbound_media_ratio"] == 0.0
 
 
 def test_patched_expected_zero_but_packets_is_no_data():
