@@ -77,15 +77,14 @@
         <action application="set" data="direction=outbound"/>
         <action application="set" data="call_start_time=${strftime(%Y-%m-%d %H:%M:%S)}"/>
 
-        <!-- RFC 4028 session timers: force FS to include Session-Expires and Min-SE
-             in the outbound INVITE. Without these, Bandwidth sends Session-Expires:30
-             in 200 OK and tears down the call when FS doesn't send refresh re-INVITEs.
-
-             CRITICAL: Must use "export" not "set". "set" puts the variable on the
-             A-leg only. "export" copies it to the B-leg, where mod_sofia reads it
-             when constructing the outbound INVITE. Without export, the B-leg sees
-             no session timer channel variables and relies solely on the sofia profile
-             defaults, which may not produce the headers in all code paths. -->
+        <!-- RFC 4028 session timers — NOTE (2026-09-24): these three exports (and
+             the same names in the bridge {} blocks below) are NO-OPS: mod_sofia
+             reads none of sip_session_timeout / sip_minimum_session_expires /
+             enable_timer. The only per-call knob is sofia_session_timeout (A-leg
+             answer interval, see inbound_router.lua). The carrier B-leg's
+             Session-Expires/Min-SE are added by Kamailio route[TO_CARRIER].
+             Left in place (unreachable in RCF-V1: no registered users; editing
+             actions would need reloadxml for zero benefit). -->
         <action application="export" data="sip_session_timeout=1800"/>
         <action application="export" data="sip_minimum_session_expires=90"/>
         <action application="export" data="enable_timer=true"/>

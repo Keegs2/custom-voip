@@ -14,6 +14,9 @@
 --   (3) No cdr_* var is ever set/exported on the A-leg; A-leg direction stays
 --       the script's own "outbound" and product_type "trunk".
 --   (4) Unauthorized caller DID (reject path) emits no bridge at all.
+--   (6) RFC 4028: sofia_session_timeout=1800 is SET (not exported) on the
+--       A-leg before every bridge, is absent from every B-leg dial string,
+--       and the removed no-op timer exports are gone (2026-09-24).
 --
 -- Usage: lua tests/lua/trunk_outbound_cdr_harness.lua [path/to/trunk_outbound.lua]
 -- Optional: BASELINE_TRUNK=<pre-change trunk_outbound.lua> additionally asserts
@@ -23,7 +26,7 @@ local SCRIPT = arg[1] or "docker/freeswitch/scripts/trunk_outbound.lua"
 local LIB_DIR = "docker/freeswitch/scripts/lib/"
 
 local function run(sc, script_path)
-    local captured = { setvars = {}, bridges = {}, executes = {}, hangups = {} }
+    local captured = { setvars = {}, bridges = {}, executes = {}, hangups = {}, timer_seen = {} }
     local vars = {
         uuid               = sc.uuid or "218382592_122992403@67.231.13.185",
         destination_number = sc.dest or "+17745550199",
@@ -43,12 +46,15 @@ local function run(sc, script_path)
     function session:getVariable(k) return vars[k] end
     function session:setVariable(k, v) vars[k] = v; captured.setvars[k] = v end
     function session:ready() return true end
-    function session:answer() end
+    function session:answer()
+        captured.timer_seen[#captured.timer_seen+1] = "answer=" .. tostring(vars.sofia_session_timeout)
+    end
     function session:sleep(_) end
     function session:hangup(c) captured.hangups[#captured.hangups+1] = c end
     function session:execute(app, data)
         if app == "bridge" then
             captured.bridges[#captured.bridges+1] = data
+            captured.timer_seen[#captured.timer_seen+1] = "bridge=" .. tostring(vars.sofia_session_timeout)
             idx = idx + 1
             vars.originate_disposition = results[idx] or "NORMAL_TEMPORARY_FAILURE"
         else
@@ -196,18 +202,67 @@ do
     no_cdr_on_a(c, "reject")
 end
 
+-- The removed no-op exports (mod_sofia reads none of these names).
+local NOOP_TIMER_EXPORTS = {
+    ["sip_session_timeout=1800"] = true,
+    ["sip_minimum_session_expires=90"] = true,
+    ["enable_timer=true"] = true,
+}
+
+do
+    print("[6] A-leg sofia_session_timeout=1800 (setvar, NOT export)")
+    for _, sc in ipairs({ { bridge_results = { "SUCCESS" } },
+                          { bridge_results = { "NORMAL_TEMPORARY_FAILURE", "SUCCESS" } },
+                          { bridge_results = { "NORMAL_TEMPORARY_FAILURE", "NO_ANSWER" } },
+                          { owned = false } }) do
+        local label = table.concat(sc.bridge_results or { "reject" }, "+")
+        local c = run(sc)
+        check(label .. ": sofia_session_timeout=1800 set on A-leg",
+              c.setvars.sofia_session_timeout == "1800", tostring(c.setvars.sofia_session_timeout))
+        local late = {}
+        for _, t in ipairs(c.timer_seen) do if not t:match("=1800$") then late[#late+1] = t end end
+        check(label .. ": set BEFORE every answer/bridge (" .. #c.timer_seen .. " seen)",
+              #late == 0, table.concat(late, ","))
+        local bad = {}
+        for _, e in ipairs(c.executes) do
+            local d = tostring(e.data)
+            if e.app == "export" and (d:match("^sofia_session_timeout") or NOOP_TIMER_EXPORTS[d]) then
+                bad[#bad+1] = d
+            end
+        end
+        check(label .. ": no session-timer export", #bad == 0, table.concat(bad, ","))
+        local leaked = {}
+        for _, b in ipairs(c.bridges) do
+            if b:find("sofia_session_timeout", 1, true) then leaked[#leaked+1] = b end
+        end
+        check(label .. ": sofia_session_timeout NOT in any B-leg dial string", #leaked == 0,
+              table.concat(leaked, " | "))
+    end
+end
+
 local BASE = os.getenv("BASELINE_TRUNK")
 if BASE and BASE ~= "" then
     print("[5] BASELINE regression vs " .. BASE)
-    local function dump(c, strip)
+    -- Session-timer change (2026-09-24) normalized out on both sides:
+    -- new side drops setvar sofia_session_timeout, baseline side drops the
+    -- removed no-op exports ([6] asserts both). [cdr_*] blocks are stripped
+    -- on both sides (block() returns a pre-split dial string unchanged), so
+    -- the baseline may be pre-split or origin/RCF-V1.
+    local function dump(c, is_new)
         local keys, out = {}, {}
-        for k in pairs(c.setvars) do keys[#keys+1] = k end
+        for k in pairs(c.setvars) do
+            if not (is_new and k == "sofia_session_timeout") then keys[#keys+1] = k end
+        end
         table.sort(keys)
         for _, k in ipairs(keys) do out[#out+1] = k .. "=" .. tostring(c.setvars[k]) end
         for _, b in ipairs(c.bridges) do
-            local _, s = block(b); out[#out+1] = "#bridge=" .. (strip and s or b)
+            local _, s = block(b); out[#out+1] = "#bridge=" .. s
         end
-        for _, e in ipairs(c.executes) do out[#out+1] = "#exec=" .. e.app .. ":" .. tostring(e.data) end
+        for _, e in ipairs(c.executes) do
+            if not (e.app == "export" and NOOP_TIMER_EXPORTS[tostring(e.data)]) then
+                out[#out+1] = "#exec=" .. e.app .. ":" .. tostring(e.data)
+            end
+        end
         out[#out+1] = "#hangups=" .. table.concat(c.hangups, ",")
         return table.concat(out, "\n")
     end

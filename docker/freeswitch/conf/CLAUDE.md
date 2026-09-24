@@ -106,8 +106,7 @@ Context: public (all calls enter public dialplan context)
 
 **Session Timers (RFC 4028):**
 - `enable-timer=true`
-- `sip-session-timeout=1800` (30 min)
-- `sip-min-session-expires=90` (minimum per RFC 4028)
+- `sip-session-timeout=1800` / `sip-min-session-expires=90` — **IGNORED**: not mod_sofia params (sofia.c parses `session-timeout` / `minimum-session-expires`). Left in place on purpose. The real floor is `minimum-session-expires=90`. Profile session_timeout is therefore 0, and because aggressive-nat-detection NAT-flags every SBC-relayed INVITE, sofia_answer_channel uses `SOFIA_NAT_SESSION_TIMEOUT` (90 → 120 in sofia-sip) unless the channel var `sofia_session_timeout` is set — the Lua routers set it to 1800 (2026-09-24). Do NOT rename the param to `session-timeout`: the NAT override would still win (90 → cut at ~81s).
 
 **Media:**
 - `rtcp-audio-interval-msec=5000` -- Drives ONLY `rtcp_stats()` + the RTCP SR/RR FS sends. It does NOT gate quality measurement: `check_jitter()`/`do_mos()` and the quality patch v1 tracker run on the RTP read path regardless of RTCP (the old comment claiming otherwise was wrong and was rewritten 2026-09).
@@ -145,7 +144,7 @@ Context: public
 **Key differences from internal:**
 - `ext-sip-ip` and `ext-rtp-ip` control outbound INVITE headers (this is WHY this profile exists)
 - `aggressive-nat-detection=false` and `NDLB-force-rport=false` -- Not needed; ext-ip handles addressing. The **internal** profile sets BOTH of these to `true` (for local Zoiper softphone testing where real NAT exists); the external profile leaves them `false`.
-- Session timers enabled with same values as internal (minimum-session-expires=90)
+- Session timers enabled (`enable-timer`, `minimum-session-expires=90`); `sip-session-timeout`/`sip-min-session-expires` ignored as on internal. B-leg Session-Expires comes from Kamailio TO_CARRIER + the carrier's 200 OK.
 - Homer capture is GLOBAL only (`capture_id=200` for both profiles, set in `sofia.conf.xml`); there is no per-profile capture_id.
 - `rtcp-audio-interval-msec=5000` mirrors internal (RTCP reports only). B-leg quality DOES reach the CDR: `log-b-leg=true` posts each carrier B-leg's own `rtp_audio_in_*` (callee->platform) into a `leg='B'` row, which feeds the A row's `call_quality_*` (worse direction). Removing this param would not affect any quality stat.
 - No gateways defined -- bridges use `sofia/external/dest@proxy` syntax

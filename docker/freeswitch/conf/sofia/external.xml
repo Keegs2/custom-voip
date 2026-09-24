@@ -128,6 +128,13 @@
       minimum-session-expires: Floor for negotiation (see below).
     -->
     <param name="enable-timer" value="true"/>
+    <!-- NOTE (2026-09-24): "sip-session-timeout" / "sip-min-session-expires"
+         are NOT mod_sofia params (sofia.c parses "session-timeout" and
+         "minimum-session-expires") and are silently ignored; left in place
+         (removal is a no-op; no profile restart needed for this note). The
+         B-leg interval is whatever the carrier's 200 OK carries after
+         Kamailio REPLY_HANDLER (kept if 90..1800, else 1800;refresher=uac);
+         Kamailio route[TO_CARRIER] adds the INVITE's Session-Expires/Min-SE. -->
     <param name="sip-session-timeout" value="1800"/>
     <param name="sip-min-session-expires" value="90"/>
     <!--

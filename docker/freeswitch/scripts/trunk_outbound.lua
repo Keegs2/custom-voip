@@ -381,6 +381,18 @@ local traffic_grade = get_var("traffic_grade", "standard")
 set_var("product_type", "trunk")
 set_var("direction", "outbound")
 
+-- RFC 4028 session timer for the A-leg (the PBX-facing inbound channel on
+-- the internal profile). sofia_session_timeout is the ONLY per-call knob
+-- mod_sofia reads for the interval it answers with, and it is read AFTER the
+-- aggressive-nat-detection override (SOFIA_NAT_SESSION_TIMEOUT 90, which
+-- sofia-sip raises to 120) in sofia_answer_channel (mod_sofia.c ~944-958).
+-- Without it FS answered the PBX "Session-Expires: 120" and — with
+-- Kamailio no longer rewriting FS replies — a UAC-refresher PBX that
+-- refreshes late would be cut at ~108s. Same fix as inbound_router.lua.
+-- Plain set (NOT export): only the A-leg answer reads it. Set before the
+-- TEST_MODE answer and the bridge; harmless on the reject paths below.
+set_var("sofia_session_timeout", "1800")
+
 -- ============================================
 -- STEP 2: Validate Destination
 -- ============================================
@@ -880,14 +892,14 @@ set_var("hangup_after_bridge", "true")
 -- Mark that Lua is handling routing (prevents dialplan fallback 404)
 set_var("lua_routed", "true")
 
--- RFC 4028 session timers: export to B-leg so mod_sofia includes
--- Session-Expires and Min-SE in the outbound INVITE.
--- CRITICAL: set_var() only sets on the A-leg. export via session:execute
--- marks the variable for propagation to the B-leg channel.
--- Belt-and-suspenders: these are also included in the bridge {} blocks.
-pcall(function() session:execute("export", "sip_session_timeout=1800") end)
-pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
-pcall(function() session:execute("export", "enable_timer=true") end)
+-- RFC 4028 session timers: NOTHING to export here. The former
+-- `export sip_session_timeout/sip_minimum_session_expires/enable_timer`
+-- was a no-op (mod_sofia reads none of those names) and was removed
+-- 2026-09-24. The A-leg interval is set above via sofia_session_timeout;
+-- the B-leg's Session-Expires/Min-SE are added by Kamailio
+-- route[TO_CARRIER] and the negotiated value comes back in the carrier's
+-- 200 OK. The same three names inside the bridge {} dial strings are
+-- equally inert; left in place only to keep the dial strings byte-identical.
 
 -- Execute bridge
 stir_outcome_reset()
