@@ -705,7 +705,10 @@ _CLEAN_IN = {"rtp_audio_in_packet_count": "2500", "rtp_audio_in_jitter_loss_rate
              "rtp_audio_in_mos": "4.50", "read_codec": "PCMU"}
 _LOSSY_IN = {"rtp_audio_in_packet_count": "2500", "rtp_audio_in_jitter_loss_rate": "0.05",
              "rtp_audio_in_mos": "4.50", "read_codec": "PCMU"}
-_SILENT_IN = {"rtp_audio_in_packet_count": "0", "rtp_audio_in_mos": "4.50"}
+# Silent INBOUND while we sent full audio out = true one-way (no_rtp). With
+# nothing sent either it would be no_media (migration 51), not one-way.
+_SILENT_IN = {"rtp_audio_in_packet_count": "0", "rtp_audio_out_packet_count": "2500",
+              "rtp_audio_in_mos": "4.50"}
 
 
 @pytest.mark.parametrize("order", ["a_first", "b_first"])

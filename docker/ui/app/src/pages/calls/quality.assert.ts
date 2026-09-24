@@ -8,6 +8,7 @@ import {
   jitterColor,
   percentileCont,
   qualityStatusReason,
+  qualityStatusShort,
   summarizeCallQuality,
   GOOD,
   WARN,
@@ -100,6 +101,16 @@ export function runQualitySelfTest(): number {
   check('reason(null) = no data', qualityStatusReason('no_data', 'customer'), qualityStatusReason(null, 'customer'));
   n += 6;
 
+  // no_media (migration 51): no audio either way — NOT graded, never one-way.
+  check('gradeLabel(null, no_media)', '—', gradeLabel(null, 'no_media'));
+  check('reason(no_media, customer)', 'No audio either way — the call never carried sound',
+    qualityStatusReason('no_media', 'customer'));
+  check('reason(no_media, staff)',
+    'No media either direction (in < 10%, out < 50% of expected packets) — not graded',
+    qualityStatusReason('no_media', 'staff'));
+  check('short(no_media)', 'no audio either way', qualityStatusShort('no_media'));
+  n += 4;
+
   // percentile_cont semantics.
   check('p50 [1,2,3,4]', 2.5, percentileCont([4, 1, 3, 2], 0.5));
   check('p95 [0..100]', 95, percentileCont(Array.from({ length: 101 }, (_, i) => i), 0.95));
@@ -113,6 +124,7 @@ export function runQualitySelfTest(): number {
     { call_quality_status: 'rated', call_quality_grade: 'fair', call_mos: 3.7 },
     { call_quality_status: 'no_rtp', call_quality_grade: 'poor', call_mos: null },
     { call_quality_status: 'short', call_quality_grade: null, call_mos: null },
+    { call_quality_status: 'no_media', call_quality_grade: null, call_mos: null },
   ];
   const s = summarizeCallQuality(rows);
   check('summary.graded', 4, s.graded);

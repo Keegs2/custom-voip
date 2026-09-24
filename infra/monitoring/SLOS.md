@@ -39,7 +39,7 @@ tighten only with data.
 
 Source: the per-call grade written by the CDR ingest (`docs/CALL_QUALITY_ACCURACY_PLAN.md` B.2 / C / D, migration `50_cdr_quality_accuracy.sql`). MOS is **our ITU-T G.107 E-model computed from true RTP sequence loss** (RFC 3550 expected − received, FreeSWITCH quality patch v1; FS's `lossrate` on legacy images and history). It is not FreeSWITCH's own MOS estimator, which scored silent calls 4.50. The G.107 ceiling for G.711 at default delay is **4.41**, so a perfectly clean call reads 4.41, not 4.50. Call quality is the **worse direction** of caller→platform (A row) and the answered carrier callee→platform (B row), stored on the A row (`call_quality_*`, `call_mos`).
 
-A call is graded only when there is evidence: answered, ≥ 5 s billable, and either ≥ 250 inbound packets (`rated`) or < 10% of the expected inbound packets (`no_rtp` = one-way audio, graded **poor**). Everything else (unanswered, short, low sample, no media data) is ungraded and is left out of both SLIs.
+A call is graded only when there is evidence: answered, ≥ 5 s billable, and either ≥ 250 inbound packets (`rated`) or < 10% of the expected inbound packets while ≥ 50% of the expected packets went out (`no_rtp` = one-way audio, graded **poor**). Everything else (unanswered, short, low sample, no media data, and `no_media` = < 10% in AND < 50% out — no audio either way: a failed/test call or both parties silent, migration 51) is ungraded and is left out of both SLIs' numerators (`no_media` answered calls stay in SLI 2's answered-call denominator).
 
 | Grade | R band (G.109) | Stored 2-dp MOS | Loss at BurstR=1, G.711+PLC |
 |---|---|---|---|
@@ -57,7 +57,7 @@ A call is graded only when there is evidence: answered, ≥ 5 s billable, and ei
 | **Objective** | **≥ 97% over 30 days** |
 | **Measured by** | Grafana Call Quality #43 (15 min, per zone) and #30 (range snapshot); Home #30 (15 min, all zones). Monthly review runs the SQL below on the primary |
 | **Alert (now)** | None. The 15-min stat colours red below 90% and amber below 97% |
-| **Gap to close** | A burn-rate alert (for example < 90% over 1 h) through a scheduled PG check. vmalert cannot read PG, so it would use the `media_guard.sh` / `asr_guard.sh` pattern |
+| **Gap to close** | A burn-rate alert (for example < 90% over 1 h) through a scheduled PG check. vmalert cannot read PG, so it would use the `asr_guard.sh` pattern (not planned — no quality paging) |
 
 ```sql
 SELECT 100.0 * count(*) FILTER (WHERE call_quality_grade IN ('great','good'))
@@ -70,10 +70,10 @@ SELECT 100.0 * count(*) FILTER (WHERE call_quality_grade IN ('great','good'))
 
 | | |
 |---|---|
-| **SLI** | One-way-audio calls (`call_quality_status='no_rtp'`) per 1,000 answered calls of ≥ 5 s |
+| **SLI** | One-way-audio calls (`call_quality_status='no_rtp'`: we sent audio, received none) per 1,000 answered calls of ≥ 5 s. Calls with no audio in either direction (`no_media`) are not one-way and never count or page |
 | **Objective** | **≤ 1 per 1,000 over 30 days** |
 | **Measured by** | Grafana Home #33 (last hour) and Call Quality #22 (per hour, by direction, plus "partial inbound media") |
-| **Alert (now)** | `scripts/backup/media_guard.sh` (every 10 min, `revup-alert` → Cloud Logging page). It pages when ≥ `MEDIA_GUARD_MIN_CALLS` (3) one-way calls make up ≥ `MEDIA_GUARD_MIN_SHARE_PCT` (2%) of graded calls in `MEDIA_GUARD_WINDOW_MIN` (30) minutes. That catches a media-path regression (Cloud NAT / bypass-vpn, SDP `c=`, RTP source IP), not the single stray one-way call a week |
+| **Alert (now)** | None — owner decision 2026-09-24: quality is measured and shown on dashboards, not paged |
 | **Gap to close** | None beyond the monthly review of the SQL below |
 
 ```sql

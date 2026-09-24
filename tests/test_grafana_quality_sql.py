@@ -290,7 +290,9 @@ def _leg(status, grade=None, mos=None, loss=None, jit=None, imr=None, answered=T
 
 CALLS = [
     ("c1", "fs-media-v2", 5, _leg("rated", "great", 4.41, 0.00, 1.9, 1.01), [_leg("rated", "good", 4.23, 2.00, 3.0, 1.0)]),
-    ("c2", "west-fs", 5, _leg("rated", "great", 4.41, 0.00, 2.0, 0.45), []),
+    # c2's carrier B leg carried no audio either way (no_media, migration 51):
+    # not graded, never one-way — the call stays great via A.
+    ("c2", "west-fs", 5, _leg("rated", "great", 4.41, 0.00, 2.0, 0.45), [_leg("no_media", None, None, None, None, 0.0)]),
     ("c3", "central-fs", 6, _leg("rated", "fair", 3.92, 5.00, 8.0, 1.0), [_leg("rated", "great", 4.37, 0.50, 4.0, 1.0)]),
     ("c4", "fs-media-v2", 6, _leg("rated", "great", 4.41, 0.00, None, 1.0), [_leg("no_rtp", "poor", None, None, None, 0.0)]),
     ("c5", "fs-media-v2", 7, _leg("no_rtp", "poor", None, None, None, 0.02), []),
@@ -298,6 +300,9 @@ CALLS = [
     ("c7", "west-fs", 8, _leg("short"), []),
     ("c8", "fs-media-v2", 8, _leg("rated", "poor", 2.63, 20.00, 60.0, 1.0), [_leg("low_sample", None, None, None, None, 0.30)]),
     ("c9", "fs-media-v2", 40, _leg("no_rtp", "poor", None, None, None, 0.0), []),
+    # Jul-20-style failed/test call: answered 60 s, nothing in AND nothing out
+    # -> no_media: "Not graded", never One-way / Poor.
+    ("c10", "fs-media-v2", 9, _leg("no_media", None, None, None, None, 0.0), []),
 ]
 
 
@@ -330,10 +335,12 @@ def pg():
     async def setup():
         conn = await asyncpg.connect(host=srv.sock, port=srv.port, user="postgres", database="postgres")
         await conn.execute(_SCHEMA)
-        await apply_cdr_column_migrations(conn, names=tuple(n for n in CDR_COLUMN_MIGRATIONS if not n.startswith("50_")))
+        await apply_cdr_column_migrations(
+            conn, names=tuple(n for n in CDR_COLUMN_MIGRATIONS if not n.startswith(("50_", "51_"))))
         m50 = MIGRATION_50.read_text()
         await conn.execute(m50)
         await conn.execute(m50)  # idempotent replay
+        await apply_cdr_column_migrations(conn, names=("51_cdr_quality_no_media.sql",))  # no_media split
         for uuid, node, ago, a, bs in CALLS:
             start = NOW - timedelta(minutes=ago)
             await _insert_leg(conn, uuid, node, start, a, "A", None, uuid)
@@ -371,6 +378,8 @@ def test_seed_call_level_columns_from_real_refresh(pg):
     assert (rows["c1"]["call_quality_grade"], float(rows["c1"]["call_mos"]), rows["c1"]["call_quality_leg"]) == ("good", 4.23, "B")
     assert (rows["c4"]["call_quality_status"], rows["c4"]["call_quality_grade"], rows["c4"]["call_mos"]) == ("no_rtp", "poor", None)
     assert rows["c6"]["call_quality_grade"] is None and rows["c7"]["call_quality_grade"] is None
+    assert (rows["c10"]["call_quality_status"], rows["c10"]["call_quality_grade"], rows["c10"]["call_mos"]) == ("no_media", None, None)
+    assert (rows["c2"]["call_quality_status"], rows["c2"]["call_quality_grade"], rows["c2"]["call_quality_leg"]) == ("rated", "great", "A")
 
 
 @pytest.mark.parametrize("name", DASHBOARDS)
@@ -424,11 +433,11 @@ def test_cq20_jitter_by_direction(pg):
 def test_cq11_grade_distribution(pg):
     rows = _q(pg, "call-quality.json", 11)
     assert [(r["band"], r["calls"]) for r in rows] == [
-        ("Great", 1), ("Good", 1), ("Fair", 1), ("Poor (audio)", 1), ("One-way / no audio", 3)]
+        ("Great", 1), ("Good", 1), ("Fair", 1), ("Poor (audio)", 1), ("One-way audio", 3)]
     # zone filter honoured; empty bands still render
     rows = _q(pg, "call-quality.json", 11, zone="central")
     assert [(r["band"], r["calls"]) for r in rows] == [
-        ("Great", 0), ("Good", 0), ("Fair", 1), ("Poor (audio)", 0), ("One-way / no audio", 0)]
+        ("Great", 0), ("Good", 0), ("Fair", 1), ("Poor (audio)", 0), ("One-way audio", 0)]
 
 
 def test_cq13_loss_distribution(pg):
@@ -442,8 +451,8 @@ def test_cq13_loss_distribution(pg):
 def test_cq22_one_way_and_partial_media(pg):
     rows = _q(pg, "call-quality.json", 22, "A")
     assert list(rows[0].keys()) == ["time", "caller→platform silent", "callee→platform silent"]
-    assert sum(r["caller→platform silent"] for r in rows) == 2   # c5, c9
-    assert sum(r["callee→platform silent"] for r in rows) == 1   # c4's B
+    assert sum(r["caller→platform silent"] for r in rows) == 2   # c5, c9 (c10 no_media is not one-way)
+    assert sum(r["callee→platform silent"] for r in rows) == 1   # c4's B (c2's no_media B is not one-way)
     rows = _q(pg, "call-quality.json", 22, "B")
     assert list(rows[0].keys()) == ["time", "partial inbound media"]
     assert sum(r["partial inbound media"] for r in rows) == 2    # c2 A (0.45) + c8 B low_sample (0.30)
@@ -458,7 +467,7 @@ def test_cq30_snapshot(pg):
     assert float(r["Poor % (incl. one-way)"]) == pytest.approx(100 * 4 / 7)
     assert r["p10 call MOS"] == pytest.approx(2.63 + 0.3 * (3.92 - 2.63))  # [2.63, 3.92, 4.23, 4.41]
     assert r["One-way audio calls"] == 3
-    assert r["Not graded"] == 2
+    assert r["Not graded"] == 3                                  # c6, c7, c10 (no_media)
 
 
 def test_noc_home_voice_row(pg):
@@ -481,5 +490,6 @@ def test_slos_voice_quality_sli_sql(pg):
     (sli1,) = _run(_as_grafana(pg, blocks[0].strip().rstrip(";")))
     assert float(sli1["good_or_better_pct"]) == pytest.approx(100 * 2 / 7)
     (sli2,) = _run(_as_grafana(pg, blocks[1].strip().rstrip(";")))
-    # 3 one-way calls / 7 answered >= 5 s A rows (c1-c5, c8, c9)
-    assert float(sli2["one_way_per_1000"]) == pytest.approx(1000 * 3 / 7)
+    # 3 one-way calls / 8 answered >= 5 s A rows (c1-c5, c8, c9, c10); c10 is
+    # no_media — in the denominator (answered), never in the one-way numerator
+    assert float(sli2["one_way_per_1000"]) == pytest.approx(1000 * 3 / 8)

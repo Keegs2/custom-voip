@@ -493,7 +493,8 @@ def _shape_call(r: asyncpg.Record) -> dict:
         **rp.outcome_fields(answered, r["hangup_cause"]),
         "length_minutes": int(r["length_minutes"]),
         # the STORED call grade (worse direction); one-way audio (no_rtp)
-        # is 'poor' with no MOS -> "Poor" in the CSV, never "Not rated"
+        # is 'poor' with no MOS -> "Poor" in the CSV, never "Not rated";
+        # no audio either way (no_media) carries no grade -> "Not rated"
         "quality": r["grade"] or "none",
     }
     return out

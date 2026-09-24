@@ -866,6 +866,9 @@ Contract: `docs/CALL_QUALITY_ACCURACY_PLAN.md` (§B.3 column semantics, §C.3
   `quality_grade` / `mos` describe ONE direction (A row = caller's audio).
 - **Honesty rules.** One-way audio (`no_rtp`) renders as a red "One-way"
   (graded poor, MOS NULL) — never a score. Ungraded calls render "—" / "Not
-  rated" with the reason. No averages of MOS/loss/jitter anywhere — shares
+  rated" with the reason. `no_media` (migration 51 — no audio in EITHER
+  direction: failed/test call, both parties silent) is ungraded, never
+  "One-way": customer reason "No audio either way — the call never carried
+  sound". No averages of MOS/loss/jitter anywhere — shares
   and percentiles only. Tenants keep the existing redaction (no FS raw values,
   no packet/byte counters, no money).

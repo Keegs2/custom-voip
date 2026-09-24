@@ -123,7 +123,7 @@ export interface Cdr extends StirBadgeFields {
       rows the old API wrote that the backfill has not reached. */
   quality_status?: QualityStatus | null;
   /** Leg grade (§D): great/good/fair/poor, or NULL when not graded. no_rtp
-      (one-way audio) is graded 'poor'. */
+      (one-way audio) is graded 'poor'; no_media (no audio either way) is NULL. */
   quality_grade?: Grade | null;
   /** ITU-T G.107 E-model MOS from TRUE sequence loss (G.711 ceiling 4.41).
       Rated-only. */
@@ -150,7 +150,7 @@ export interface Cdr extends StirBadgeFields {
   /** Forward sequence gaps (loss bursts); patched FS only, any status. */
   loss_bursts?: number | null;
   /** Inbound packets ÷ packets expected from talk time (1.0 ≈ full audio);
-      set for rated / no_rtp / low_sample. */
+      set for rated / no_rtp / no_media / low_sample. */
   inbound_media_ratio?: number | null;
 
   // Jitter — RFC 3550 §6.4.1 interarrival jitter in ms (patched FS only;
@@ -165,7 +165,7 @@ export interface Cdr extends StirBadgeFields {
   // Call-level quality (A rows only; the WORSE of the two audio directions,
   // written server-side by cdr_refresh_call_quality()).
   /** no_rtp if either direction is one-way; rated if either is rated; else
-      the A status. */
+      the A status (may be no_media = no audio either way, not graded). */
   call_quality_status?: QualityStatus | null;
   /** Grade of the worse direction; NULL when neither direction was graded. */
   call_quality_grade?: Grade | null;

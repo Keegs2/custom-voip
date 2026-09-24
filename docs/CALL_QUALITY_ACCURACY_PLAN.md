@@ -30,7 +30,7 @@ Production (7 days, A rows): 65% of answered calls are exactly 4.50. The 4 answe
 4. **Existing column names are kept but now carry honest values** (`mos`, `r_factor`, `packet_loss_pct`, `packet_loss_count`, `jitter_avg_ms`, `jitter_max_ms`), so no customer field is renamed. `quality_pct` and `jitter_min_ms` are deprecated and written NULL. Raw FS values move to new `fs_*` / `rtp_audio_in_skip_packet_count` columns. History is recomputed by an idempotent backfill.
 5. **Call quality = the worse direction.** A-in (caller→platform) and the answered carrier B-in (callee→platform) are combined into `call_quality_*` / `call_mos` on the A row by a SQL function, `cdr_refresh_call_quality()`. Both ingests call it after their own INSERT commits, so it is correct whichever CDR arrives first.
 6. **One grade definition**, taken from the G.107/G.109 R bands (R 90/80/70). It is applied to the stored 2-dp MOS: **great ≥ 4.34 · good ≥ 4.02 · fair ≥ 3.60 · poor < 3.60 (or no_rtp) · none = not graded**. It is used everywhere.
-7. **Alerting:** `scripts/backup/media_guard.sh`, an on-VM SQL watchdog modelled on `asr_guard.sh`. It uses the existing `revup-alert` → Cloud Logging page path, plus a Grafana panel. vmalert is not used (it cannot read PG).
+7. **Alerting (DROPPED 2026-09-24 — dashboards only):** `scripts/backup/media_guard.sh`, an on-VM SQL watchdog modelled on `asr_guard.sh`. It uses the existing `revup-alert` → Cloud Logging page path, plus a Grafana panel. vmalert is not used (it cannot read PG).
 
 ---
 
@@ -389,7 +389,8 @@ Evaluate in this order; the first match wins:
 | 1 | not answered | `unanswered` | NULL |
 | 2 | `in_packets` is NULL | `no_data` | NULL |
 | 3 | `billable_ms < 5000` | `short` | NULL |
-| 4 | `in_packets < 0.10 * expected_by_time` | `no_rtp` | `poor` |
+| 4 | `in_packets < 0.10 * expected_by_time` AND `out_packets >= 0.50 * expected_by_time` (since 51) | `no_rtp` | `poor` |
+| 4b | `in_packets < 0.10 * expected_by_time` AND (`out_packets < 0.50 * expected_by_time` OR `out_packets` NULL) (since 51) | `no_media` | NULL |
 | 5 | `in_packets < 250` | `low_sample` | NULL |
 | 6 | loss input unavailable (patched: `seq_expected` missing/0; legacy: `rtp_audio_in_jitter_loss_rate` absent) | `no_data` | NULL |
 | 7 | otherwise | `rated` | `cq_grade(mos)` |
@@ -398,10 +399,20 @@ The same rule is implemented in SQL as `cq_leg_status()` (B.4). Rule 6 is applie
 
 Against production facts:
 - The three 0-1 s answered-then-hung-up calls fall under rule 3 (`short`, not graded).
-- The 11 s Sinch call with 0 received packets falls under rule 4 (`no_rtp`, poor).
+- The 11 s Sinch call with 0 received / 591 sent packets falls under rule 4 (`no_rtp`, poor).
 - The 17 unanswered calls fall under rule 1 (`unanswered`, MOS NULL).
 
 **Known limit, documented:** `in_packets` includes pre-answer early media. A leg whose audio died after answer, but which had long early media, can escape `no_rtp`. The Grafana `inbound_media_ratio` distribution panel (E.1 #22) exposes those.
+
+**Addendum — migration 51 (2026-09-24, owner-approved): `no_rtp` vs `no_media`.**
+The migration-50 backfill marked 485 legs `no_rtp`. 479 of them (week of 2026-07-20, the load-test / rollout week) had `rtp_audio_in_packet_count = 0` AND `rtp_audio_out_packet_count = 0` — no media in EITHER direction (failed / test calls), not one-way audio. One 902 s call had 1863 packets in / 397 out (in ratio 0.041, out 0.009): both sides quiet (hold / DTX). The 5 genuine one-way cases had 2–134 packets in and 613–2204 out. Rule 4 therefore now also looks at the leg's outbound count, on the SAME expected basis:
+- `out_packets` = `rtp_audio_out_packet_count` (NULL = unknown).
+- constants (ONE place: `services/call_quality.py`; SQL mirrors the literals): `NO_RTP_RATIO = 0.10`, `ONE_WAY_MIN_OUT_RATIO = 0.50`.
+- rule 4 → `no_rtp` (TRUE one-way: we sent audio, received none): graded `poor`, MOS NULL — unchanged semantics.
+- rule 4b → `no_media` ("no audio either way — the call never carried media: failed setup, test call, or both parties silent"): **not graded** (grade NULL, MOS NULL), excluded from every one-way count (Grafana #11 / #22 / #30 / noc-home #33, SLI 2 numerator), lands in "Not graded", and never pages (`media_guard.sh` counts `no_rtp` only). `inbound_media_ratio` is still written (B.3).
+- SQL: new overload `cq_leg_status(bool, int, int, int, int)` in `docker/postgres/init/51_cdr_quality_no_media.sql`; the 4-argument migration-50 function is kept unchanged (the inbound-only gate, still used by the 50 backfill). `cdr_refresh_call_quality()` needs no change: a `no_media` leg has no grade (never the worse direction), is not `no_rtp` (never makes the call one-way) and is not `rated`; a `no_media` A with no graded B gives `call_quality_status = 'no_media'`.
+- History: `docker/postgres/backfill/51_reclassify_no_media.psql` converts stored `no_rtp` legs whose outbound count says no media either way, then re-runs `cdr_refresh_call_quality()` for every affected call (snapshot-first, exact rollback in its header, idempotent). Expected on production: ~480 legs reclassified, ~5 stay `no_rtp`.
+- UI: customer reason "No audio either way — the call never carried sound"; staff "No media either direction (in < 10%, out < 50% of expected packets) — not graded".
 
 ### B.3 Column semantics after this change (every value the API writes)
 
@@ -430,7 +441,7 @@ Against production facts:
 | `packets_reordered` NEW | INTEGER | `seq_reordered`, patched, any status | raw |
 | `ssrc_changes` NEW | SMALLINT | `max(seq_epochs - 1, 0)`, patched, any status | raw |
 | `burst_ratio` NEW | NUMERIC(6,3) | BurstR used in the model, rated-only | B.1 |
-| `inbound_media_ratio` NEW | NUMERIC(6,3) | `min(in_packets / expected_by_time, 999.999)` for statuses `rated/no_rtp/low_sample`, else NULL | B.2 |
+| `inbound_media_ratio` NEW | NUMERIC(6,3) | `min(in_packets / expected_by_time, 999.999)` for statuses `rated/no_rtp/low_sample` (+ `no_media` since 51), else NULL | B.2 |
 | `call_quality_status` NEW (A rows) | VARCHAR(12) | set by `cdr_refresh_call_quality()` only | C |
 | `call_quality_grade` NEW (A rows) | VARCHAR(5) | same | C |
 | `call_mos` NEW (A rows) | NUMERIC(3,2) | same | C |
@@ -836,6 +847,8 @@ Only rated rows are counted; the sample count comes from graded rows.
 
 ## F. Alerting — one-way / no-inbound-RTP detector
 
+> **DROPPED by owner, 2026-09-24.** No pager or watchdog: quality is measured accurately and shown on dashboards only. `media_guard.sh`, its systemd units and the installer hook were removed. The text below is kept for history.
+
 The decision is an **on-VM SQL watchdog**, the same pattern as `scripts/backup/asr_guard.sh`. It is the platform's existing PG → page path: `logger -t revup-alert` → Ops Agent → Cloud Logging → `revup_alert_log` policy (infra/monitoring/main.tf:488, 30-min rate limit).
 
 The alternatives were rejected:
@@ -868,6 +881,8 @@ SELECT count(*) FILTER (WHERE call_quality_status = 'no_rtp') AS one_way,
 - `--dry-run` prints the line instead of calling logger.
 
 The single real one-way call per week seen in production does not page. A NAT/SDP regression (which hits every call) pages within 10 minutes.
+
+Since migration 51, `no_media` calls (no audio in either direction — failed / test calls, both parties silent) are in NEITHER count: a burst of failed test calls can never page as one-way audio.
 
 The visibility half is Grafana noc-home #33 and call-quality #22.
 

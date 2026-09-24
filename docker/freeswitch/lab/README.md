@@ -91,7 +91,7 @@ A-leg) unless noted.
 | 4 | `S04_reorder` | `delay 10ms reorder 5% 50%` | per call loss ≤ 0.1% (`#4a`). `packets_reordered` > 0 (`#4b`) |
 | 5 | `S05_dup` | `duplicate 2%` | per call loss 0.00 (`#5`) |
 | 6 | `S06_jitter` | `delay 30ms 5ms distribution normal` | mean `jitter_avg_ms` ∈ [0.75, 1.25] × 5.64 ms (`#6a`; 5.64 = 2σ/√π, because RFC 3550 J → E\|D\| and D ~ N(0, 2σ²)). Per call loss ≤ 0.2% (`#6b`) |
-| 7 | `S07_norpt` | the UAC sends **no** RTP, 15 s calls | A: `quality_status`=`no_rtp`, grade `poor`, MOS NULL, `packets_expected`=0. Call status `no_rtp` (`#7`) |
+| 7 | `S07_norpt` | the UAC sends **no** RTP, 15 s calls (FS must still send ≥ 50% of the expected packets TO the UAC — else migration 51 grades it `no_media`, not `no_rtp`) | A: `quality_status`=`no_rtp`, grade `poor`, MOS NULL, `packets_expected`=0. Call status `no_rtp` (`#7`) |
 | 8 | `S08_short` | 2 s calls | every leg `short`, all quality NULL (`#8`) |
 | 9 | `S09_cancel` | the UAS never answers, the UAC CANCELs after 5 s | every leg `unanswered`, MOS NULL (`#9`). FS's legacy `rtp_audio_in_mos` may still be 4.50; it is shown only as `fs_mos` |
 | 10 | `S10_dtmf` | none; RFC 2833 digits "1234" at t=20 s in the same seq/SSRC space | per call loss 0.00, `seq_epochs`=1, `rtp_audio_in_dtmf_packet_count` > 0 (`#10`). `seq_expected` == sent (`#10b`) |
