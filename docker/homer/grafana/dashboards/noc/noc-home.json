@@ -228,7 +228,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.10.2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.10.2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=\"fs-media-v2\"}[2m])) or vector(0))",
+          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.10.2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.10.2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"east\", job=\"node\", reporting_instance=~\"fs-media-v2|east-fs-1\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -509,7 +509,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.20.2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.20.2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=\"west-fs\"}[2m])) or vector(0))",
+          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.20.2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.20.2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"west\", job=\"node\", reporting_instance=~\"west-fs|west-fs-1\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -778,7 +778,7 @@
             "type": "prometheus",
             "uid": "voip-metrics-vm"
           },
-          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.30.2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.30.2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=\"central-fs\"}[2m])) or vector(0))",
+          "expr": "2 * (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.30.2\"}[2m])) or vector(0), 1)) + (1 - (clamp_max(max(last_over_time(fs_dispatcher_disabled{fs_ip=\"192.168.30.2\"}[2m])) or vector(0), 1))) * (max(last_over_time(up{zone=\"central\", job=\"node\", reporting_instance=~\"central-fs|central-fs-1\"}[2m])) or vector(0))",
           "instant": true,
           "range": false,
           "format": "time_series",
