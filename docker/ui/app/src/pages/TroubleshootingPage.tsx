@@ -55,7 +55,14 @@ import type { HomerSearchParams, HomerSearchResult } from '../api/homer';
 import { fmt } from '../utils/format';
 import { toDatetimeLocal } from './calls/callsFilters';
 import { SipLadder } from '../components/sip-ladder';
-import { groupMessagesByCall, type CallGroup } from './troubleshooting/callGrouping';
+import {
+  deriveCorrelationNotice,
+  groupMessagesByCall,
+  summarizeAttempts,
+  type CallGroup,
+  type CorrelationNotice,
+  type LegAttempt,
+} from './troubleshooting/callGrouping';
 import { PcapExportControl } from '../components/pcap/PcapExportControl';
 import type { MessageAttestation } from '../types/stir';
 import {
@@ -65,6 +72,13 @@ import {
   resolveStirBadge,
 } from '../components/stir/attestationColors';
 import '../styles/dl-troubleshoot.css';
+
+// Dev-only self-test for one-row-per-call grouping (RESULT from the A leg,
+// failover attempts, correlation notice). `import.meta.env.DEV` is statically
+// false in production builds, so the module is dead-code-eliminated.
+if (import.meta.env.DEV) {
+  void import('./troubleshooting/callGrouping.assert');
+}
 
 // ─── Daylight palette constants (mirror the .dl-scope CSS vars) ──────────────
 
@@ -447,10 +461,11 @@ function deriveCarrierEndpoints(
 
 // ─── Call grouping ───────────────────────────────────────────────────────────
 // groupMessagesByCall + CallGroup live in ./troubleshooting/callGrouping.ts —
-// a PURE module (no React/deps) so the sip-ladder fidelity self-test
-// (components/sip-ladder/sipLadderFidelity.assert.ts) can bundle-and-node-
+// a PURE module (no React/deps) so the self-tests (callGrouping.assert.ts,
+// components/sip-ladder/sipLadderFidelity.assert.ts) can bundle-and-node-
 // execute the REAL grouping code, same pattern as ladderOrder.assert.ts.
-// Imported at the top of this file; behavior is unchanged.
+// Groups link via `correlations` AND the API's `legs` map; RESULT/duration
+// come from the A leg, failover attempts are exposed as `group.attempts`.
 
 /** Format seconds into a human-readable duration string. */
 function fmtCallDuration(seconds: number): string {
@@ -479,6 +494,53 @@ function StatusPill({ status }: StatusPillProps) {
   else if (status >= 400) toneClass = 'dlx5-status-warn';
   else if (status >= 100 && status < 200) toneClass = 'dlx5-status-info';
   return <span className={`dlx5-status ${toneClass}`}>{status}</span>;
+}
+
+/**
+ * Compact failover trail beside the Result pill — only when FS made 2+
+ * bridge attempts (e.g. "2 att · 503 → 200"). Full per-attempt detail
+ * (ordinal, outcome, Call-ID) lives in the tooltip so the row stays quiet.
+ */
+function AttemptsBadge({ attempts }: { attempts: ReadonlyArray<LegAttempt> }) {
+  const trail = summarizeAttempts(attempts);
+  if (trail === null) return null;
+  const detail = attempts
+    .map((a, i) => {
+      const n = a.attempt ?? i + 1;
+      const outcome = a.finalStatus !== null ? String(a.finalStatus) : 'no final response';
+      return `#${n}: ${outcome} — ${a.callid}`;
+    })
+    .join('\n');
+  return (
+    <span
+      className="dlx5-attempts"
+      title={`${attempts.length} B-leg bridge attempts (failover)\n${detail}`}
+      aria-label={`${attempts.length} bridge attempts: ${trail}`}
+    >
+      {attempts.length} att · {trail}
+    </span>
+  );
+}
+
+/**
+ * Shown above the results when the API reports it could not link every call
+ * leg (correlation_status partial/degraded) or truncated the correlation
+ * window — a single call may then appear as two rows. The reason line is
+ * the API's staff-facing diagnostic, verbatim.
+ */
+function CorrelationBanner({ notice }: { notice: CorrelationNotice }) {
+  const facts: string[] = [];
+  if (notice.status !== null && notice.status !== 'ok') facts.push(`correlation ${notice.status}`);
+  if (notice.truncated) facts.push('correlation window truncated');
+  return (
+    <div className="dl-banner dl-banner-warn dlx5-corr-banner" role="status">
+      Some call legs could not be linked — results may show a call split in two.
+      <span className="dlx5-corr-detail">
+        {facts.join(' · ')}
+        {notice.reason !== null ? ` — ${notice.reason}` : ''}
+      </span>
+    </div>
+  );
 }
 
 // ─── Attestation badge ───────────────────────────────────────────────────────
@@ -670,7 +732,6 @@ function EmptyState() {
 
 interface ResultsTableProps {
   callGroups: CallGroup[];
-  correlations: Record<string, string[]>;
   /** Pipeline diagnostics from the API — surfaced above each expanded ladder */
   pipelineWarnings: string[];
   /** The COMMITTED search window (frozen at Search time) — Grafana-link fallback. */
@@ -678,7 +739,7 @@ interface ResultsTableProps {
   windowEndIso: string;
 }
 
-function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartIso, windowEndIso }: ResultsTableProps) {
+function ResultsTable({ callGroups, pipelineWarnings, windowStartIso, windowEndIso }: ResultsTableProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   return (
@@ -791,8 +852,9 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
                   </td>
 
                   {/* Result */}
-                  <td style={{ padding: '9px 10px' }}>
+                  <td style={{ padding: '9px 10px', whiteSpace: 'nowrap' }}>
                     <StatusPill status={group.finalStatus} />
+                    <AttemptsBadge attempts={group.attempts} />
                   </td>
 
                   {/* Attestation */}
@@ -875,9 +937,12 @@ function ResultsTable({ callGroups, correlations, pipelineWarnings, windowStartI
                               <span className="dlx5-pathline-arrow" aria-hidden="true">→</span>
                               {row.dst_ip}
                             </div>
+                            {/* Group-scoped correlations: every leg of this
+                                call (A + each failover attempt) is linked
+                                however the API linked it (X-CID or legs). */}
                             <SipLadder
                               messages={group.messages}
-                              correlations={correlations}
+                              correlations={group.ladderCorrelations}
                               pipelineWarnings={pipelineWarnings}
                             />
                           </div>
@@ -1037,12 +1102,14 @@ export function TroubleshootingPage() {
   const searchData = searchMutation.data;
   const results = useMemo(() => searchData?.data ?? [], [searchData]);
   const correlations = useMemo(() => searchData?.correlations ?? {}, [searchData]);
+  const legs = searchData?.legs; // absent on older APIs → correlations-only grouping
   const pipelineWarnings = searchData?.pipeline_warnings ?? [];
 
   const callGroups = useMemo(
-    () => groupMessagesByCall(results, correlations),
-    [results, correlations],
+    () => groupMessagesByCall(results, correlations, legs),
+    [results, correlations, legs],
   );
+  const correlationNotice = useMemo(() => deriveCorrelationNotice(searchData), [searchData]);
 
   // ── Cursor paging handlers (hooks — still above any early return) ──
   // Next: push this page's oldest_ts_ns and re-issue the COMMITTED search
@@ -1425,11 +1492,16 @@ export function TroubleshootingPage() {
               {/* key={page}: a page swap is new data under the same component —
                   remount so an expanded ladder from the outgoing page can never
                   point at a different call on the incoming one. */}
+              {!isLoading && !isError && correlationNotice !== null && results.length > 0 && (
+                <div style={{ padding: '12px 20px 0' }}>
+                  <CorrelationBanner notice={correlationNotice} />
+                </div>
+              )}
+
               {!isLoading && !isError && callGroups.length > 0 && lastSearch && (
                 <ResultsTable
                   key={page}
                   callGroups={callGroups}
-                  correlations={correlations}
                   pipelineWarnings={pipelineWarnings}
                   windowStartIso={lastSearch.startIso}
                   windowEndIso={lastSearch.endIso}

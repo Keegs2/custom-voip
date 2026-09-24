@@ -25,7 +25,7 @@ Two layers (mirrors tests/test_homer_number_search.py):
   2) ENDPOINT layer — the REAL homer router behind the REAL
      JWTAuthMiddleware with REAL minted JWTs; only the qryn/ClickHouse HTTP
      hop is mocked via httpx.MockTransport (the ClickHouse mock answers the
-     actual SQL the router ships, keyed on the Call-IDs in the IN clause).
+     actual SQL the router ships — tests/homer_ch_fake.py).
 
 Run:  JWT_SECRET_KEY=x python3 -m pytest tests/test_homer_pcap_export.py -q
 """
@@ -52,6 +52,9 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 API_SRC = REPO / "docker" / "api" / "src"
 LUA_ALIAS_FILE = REPO / "docker" / "homer" / "scripts" / "ip-alias.lua"
 sys.path.insert(0, str(API_SRC))
+sys.path.insert(0, str(REPO / "tests"))
+
+from homer_ch_fake import FakeCDR, FakeClickHouse  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Layer 1 — pure module, loaded by file path (no fastapi required)
@@ -371,49 +374,31 @@ def _bleg_rows(xcid=A_LEG):
     ]
 
 
-def _loki_xcid_hit(bleg_cid=B_LEG, aleg_cid=A_LEG):
-    """qryn Step-2 style response: one B-leg message whose body carries
-    X-CID: <a-leg> (what the |~ "X-CID:" scan returns)."""
-    raw = _sipmsg(bleg_cid, xcid=aleg_cid)
-    return {"data": {"result": [{
-        "stream": {"type": "sip", "method": "INVITE", "call_id": bleg_cid,
-                   "src_ip": "FreeSWITCH", "dst_ip": "SBC-SigVIP",
-                   "node": "200"},
-        "values": [[str(BASE_NS + 2_000_000), raw]],
-    }]}}
-
-
 class _UpstreamMock:
-    """MockTransport for BOTH upstream hops: qryn (GET query_range) and
-    ClickHouse (POST SQL).  The ClickHouse handler answers the router's real
-    SQL by extracting the Call-IDs from the ``val IN (...)`` clause and
-    returning the fixture rows for exactly those calls — so the correlated
-    refetch is exercised end-to-end, not stubbed."""
+    """MockTransport for BOTH upstream hops.  ClickHouse (POST SQL) is served
+    by the shared FakeClickHouse (tests/homer_ch_fake.py), which answers the
+    router's REAL SQL — fetch-by-Call-ID, the bounded X-CID scan and the
+    fingerprint map — so the correlated export is exercised end-to-end.
+    qryn is never used by /pcap; any qryn request is recorded (and asserted
+    absent) rather than answered with data."""
 
-    def __init__(self, ch_rows=None, loki_json=None):
+    def __init__(self, ch_rows=None, ch_fail=()):
         self.requests = []
-        self.ch_rows = ch_rows or {}   # {call_id: [JSONEachRow dict, ...]}
-        self.loki_json = loki_json if loki_json is not None \
-            else {"data": {"result": []}}
+        self.ch = FakeClickHouse(ch_rows or {}, fail=ch_fail)
 
     def _handle(self, request):
         self.requests.append(request)
         if "/loki/api/v1/query_range" in request.url.path:
-            return httpx.Response(200, json=self.loki_json)
-        # ClickHouse SQL over HTTP
-        sql = request.content.decode()
-        m = re.search(r"val IN \(([^)]*)\)", sql)
-        cids = re.findall(r"'([^']*)'", m.group(1)) if m else []
-        limit = int(re.search(r"LIMIT (\d+)", sql).group(1))
-        rows = []
-        for cid in cids:
-            rows.extend(self.ch_rows.get(cid, []))
-        rows.sort(key=lambda r: r["timestamp_ns"])
-        return httpx.Response(
-            200, text="\n".join(json.dumps(r) for r in rows[:limit]))
+            return httpx.Response(200, json={"data": {"result": []}})
+        code, text = self.ch.handle(request.content.decode(),
+                                    dict(request.url.params))
+        return httpx.Response(code, text=text)
 
     def factory(self, *args, **kwargs):
         return _REAL_ASYNC_CLIENT(transport=httpx.MockTransport(self._handle))
+
+    def kinds(self):
+        return [k for k, _sql, _p in self.ch.calls]
 
 
 @pytest.fixture(scope="module")
@@ -460,10 +445,12 @@ def _auth(api, role):
     return {"Authorization": f"Bearer {api['tokens'][role]}"}
 
 
-def _export(api, monkeypatch, role="support", ch_rows=None, loki_json=None,
-            **params):
-    mock = _UpstreamMock(ch_rows, loki_json)
+def _export(api, monkeypatch, role="support", ch_rows=None, ch_fail=(),
+            cdr=None, **params):
+    mock = _UpstreamMock(ch_rows, ch_fail)
     monkeypatch.setattr(api["homer"].httpx, "AsyncClient", mock.factory)
+    if cdr is not None:
+        monkeypatch.setattr(api["homer"].db, "fetch_all", cdr.fetch_all)
     r = _run(api["client"].get(
         "/v1/homer/pcap", headers=_auth(api, role), params=params))
     return r, mock
@@ -609,27 +596,28 @@ def test_pcap_404_onnet_detail_when_edge_filter_empties(api, monkeypatch):
     assert len(pkts) == 2
 
 
-# ---- correlated legs (REUSED X-CID machinery) ------------------------------
+# ---- correlated legs (the SAME engine as POST /search) ---------------------
 
 @needs_web
 def test_pcap_correlated_default_pulls_b_leg(api, monkeypatch):
-    # correlated defaults TRUE: A-leg requested, the qryn X-CID scan finds
-    # the B-leg, and the ClickHouse refetch returns both legs' packets.
+    # correlated defaults TRUE: A-leg requested, the bounded ClickHouse X-CID
+    # scan finds the B-leg, and the leg fetch returns its packets.
     r, mock = _export(
         api, monkeypatch,
         ch_rows={A_LEG: _aleg_rows(), B_LEG: _bleg_rows()},
-        loki_json=_loki_xcid_hit(),
         call_id=A_LEG, internal="true")
     assert r.status_code == 200, r.text
     payloads, pkts = _payloads(r.content)
     assert len(pkts) == 6           # 4 A-leg + 2 B-leg
     assert any(f"Call-ID: {B_LEG}" in p for p in payloads)
-    # Upstream sequence: CH primary fetch, qryn X-CID scan, CH refetch.
-    kinds = ["loki" if "loki" in q.url.path else "ch" for q in mock.requests]
-    assert kinds == ["ch", "loki", "ch"]
-    # The refetch's IN clause carries BOTH Call-IDs.
-    refetch_sql = mock.requests[2].content.decode()
-    assert A_LEG in refetch_sql and B_LEG in refetch_sql
+    # Upstream sequence: primary fetch, X-CID scan, fingerprint map, B fetch.
+    # qryn is NEVER touched (no window-wide |~ "X-CID:" scan any more).
+    assert all("loki" not in q.url.path for q in mock.requests)
+    assert mock.kinds() == ["fetch", "scan", "fpmap", "fetch"]
+    # The B fetch carries ONLY the new leg (the requested leg is not re-read).
+    b_sql = mock.ch.calls[3][1]
+    assert B_LEG in b_sql and A_LEG not in b_sql
+    assert r.headers["x-pcap-correlation"] in ("ok", "partial")
 
 
 @needs_web
@@ -641,7 +629,6 @@ def test_pcap_correlated_edge_flavor_includes_b_leg_edge_packets(api,
     r, _mock = _export(
         api, monkeypatch,
         ch_rows={A_LEG: _aleg_rows(), B_LEG: _bleg_rows()},
-        loki_json=_loki_xcid_hit(),
         call_id=A_LEG)
     assert r.status_code == 200, r.text
     _payload_list, pkts = _payloads(r.content)
@@ -652,8 +639,8 @@ def test_pcap_correlated_edge_flavor_includes_b_leg_edge_packets(api,
 
 @needs_web
 def test_pcap_correlated_from_b_leg_side(api, monkeypatch):
-    # Requesting the B-LEG Call-ID: its own packets carry X-CID: <a-leg>,
-    # so the A-leg is discovered even with an EMPTY qryn scan result.
+    # Requesting the B-LEG Call-ID: its own INVITE carries X-CID: <a-leg>, so
+    # the A-leg is fetched directly (harvest), no scan hit needed.
     r, _mock = _export(
         api, monkeypatch,
         ch_rows={A_LEG: _aleg_rows(), B_LEG: _bleg_rows()},
@@ -664,20 +651,83 @@ def test_pcap_correlated_from_b_leg_side(api, monkeypatch):
     assert any(f"Call-ID: {A_LEG}" in p for p in payloads)
 
 
+B_LEG_2 = "bleg-test-2@192.168.10.2"
+
+
+def _bleg2_rows():
+    """Second failover attempt of the same A call (its own Call-ID)."""
+    m_inv = _sipmsg(B_LEG_2, xcid=A_LEG)
+    return [
+        _ch_row(B_LEG_2, BASE_NS + 4_000_000, "FreeSWITCH", "SBC-SigVIP",
+                m_inv, sport="5090", node="200"),
+        _ch_row(B_LEG_2, BASE_NS + 4_500_000, "SBC-VIP", "BW-DAL", m_inv),
+    ]
+
+
+@needs_web
+def test_pcap_from_b_leg_includes_every_sibling_attempt(api, monkeypatch):
+    # Requesting ONE failover attempt exports the A leg AND the other
+    # attempt: harvest finds A, the A-window scan finds both B legs.
+    r, _mock = _export(
+        api, monkeypatch,
+        ch_rows={A_LEG: _aleg_rows(), B_LEG: _bleg_rows(),
+                 B_LEG_2: _bleg2_rows()},
+        call_id=B_LEG, internal="true")
+    assert r.status_code == 200, r.text
+    payloads, pkts = _payloads(r.content)
+    assert len(pkts) == 8           # 4 A + 2 + 2
+    for cid in (A_LEG, B_LEG, B_LEG_2):
+        assert any(f"Call-ID: {cid}" in p for p in payloads), cid
+
+
+@needs_web
+def test_pcap_cdr_only_leg_is_exported(api, monkeypatch):
+    # The B leg's INVITE capture is LOST (no X-CID anywhere): only its 200 OK
+    # and BYE are stored.  The CDR cross-check names it -> exported.
+    b_rows = [
+        _ch_row(B_LEG, BASE_NS + 3_000_000, "BW-DAL", "SBC-VIP",
+                _sipmsg(B_LEG, first_line="SIP/2.0 200 OK")),
+        _ch_row(B_LEG, BASE_NS + 9_000_000, "BW-DAL", "SBC-VIP",
+                _sipmsg(B_LEG, first_line="BYE sip:x SIP/2.0")),
+    ]
+    cdr = FakeCDR([{"uuid": B_LEG, "call_id": A_LEG, "leg_attempt": 1}])
+    r, _mock = _export(
+        api, monkeypatch, ch_rows={A_LEG: _aleg_rows(), B_LEG: b_rows},
+        cdr=cdr, call_id=A_LEG, internal="true")
+    assert r.status_code == 200, r.text
+    payloads, pkts = _payloads(r.content)
+    assert len(pkts) == 6
+    assert any(f"Call-ID: {B_LEG}" in p for p in payloads)
+    assert cdr.calls, "CDR cross-check must run for the A leg"
+
+
+@needs_web
+def test_pcap_correlation_failure_is_soft(api, monkeypatch):
+    # X-CID scan fails: the export still succeeds with the requested leg and
+    # says so in X-Pcap-Correlation.
+    r, _mock = _export(
+        api, monkeypatch,
+        ch_rows={A_LEG: _aleg_rows(), B_LEG: _bleg_rows()},
+        ch_fail={"scan"}, call_id=A_LEG, internal="true")
+    assert r.status_code == 200, r.text
+    _p, pkts = _payloads(r.content)
+    assert len(pkts) == 4
+    assert r.headers["x-pcap-correlation"] == "degraded"
+
+
 @needs_web
 def test_pcap_correlated_false_exports_single_leg(api, monkeypatch):
     r, mock = _export(
         api, monkeypatch,
         ch_rows={A_LEG: _aleg_rows(), B_LEG: _bleg_rows()},
-        loki_json=_loki_xcid_hit(),
         call_id=A_LEG, internal="true", correlated="false")
     assert r.status_code == 200, r.text
     payloads, pkts = _payloads(r.content)
     assert len(pkts) == 4
     assert not any(f"Call-ID: {B_LEG}" in p for p in payloads)
-    # correlated=false must not touch qryn at all.
+    # correlated=false: exactly the one primary fetch, nothing else.
     assert all("loki" not in q.url.path for q in mock.requests)
-    assert len(mock.requests) == 1
+    assert mock.kinds() == ["fetch"]
 
 
 # ---- packet cap ------------------------------------------------------------
@@ -706,7 +756,7 @@ def test_pcap_413_over_cap_via_correlation_suggests_single_leg(api,
                       _sipmsg(B_LEG, xcid=A_LEG)) for i in range(1500)]
     r, _mock = _export(
         api, monkeypatch, ch_rows={A_LEG: rows_a, B_LEG: rows_b},
-        loki_json=_loki_xcid_hit(), call_id=A_LEG)
+        call_id=A_LEG)
     assert r.status_code == 413, r.text
     assert "correlated=false" in r.json()["detail"]
 
