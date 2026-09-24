@@ -124,7 +124,19 @@
     <!-- T4 timer - max message lifetime (4000ms) -->
     <param name="sip-timer-T4" value="4000"/>
 
-    <!-- Session expires (RFC 4028) -->
+    <!-- Session expires (RFC 4028)
+         NOTE (2026-09-24): "sip-session-timeout" and "sip-min-session-expires"
+         are NOT mod_sofia params (sofia.c parses "session-timeout" and
+         "minimum-session-expires"); both lines below are silently ignored.
+         They are left in place deliberately: removing them is a no-op and
+         renaming "sip-session-timeout" to "session-timeout" would NOT give
+         1800 on this profile anyway — every SBC-relayed INVITE is NAT-flagged
+         (aggressive-nat-detection), and sofia_answer_channel then overrides
+         the profile value with SOFIA_NAT_SESSION_TIMEOUT (90 -> calls cut at
+         ~81s). The A-leg interval is set per call via the channel variable
+         sofia_session_timeout=1800 in inbound_router.lua / trunk_outbound.lua
+         (read AFTER the NAT override). The real floor is the
+         "minimum-session-expires" param further down. -->
     <param name="sip-session-timeout" value="1800"/>
     <param name="sip-min-session-expires" value="90"/>
 

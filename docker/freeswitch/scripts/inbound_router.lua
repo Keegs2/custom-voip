@@ -726,6 +726,29 @@ freeswitch.consoleLog("DEBUG", string.format(
     uuid, inbound_carrier, inbound_carrier_pop
 ))
 
+-- ================================================================
+-- RFC 4028 session timer for the A-leg (this inbound channel)
+-- ================================================================
+-- sofia_session_timeout is the ONLY per-call knob mod_sofia reads for the
+-- interval it answers with: sofia_answer_channel() starts from the
+-- profile's session_timeout, then — when the channel has TFLAG_NAT
+-- (aggressive-nat-detection on the internal profile flags every
+-- SBC-relayed INVITE) — overrides it with SOFIA_NAT_SESSION_TIMEOUT (90),
+-- and only AFTER that reads this variable (mod_sofia.c ~944-958). Without
+-- it FS answered "Session-Expires: 120;refresher=uac" (90 raised to
+-- sofia-sip's min_se 120) and tore Sinch-originated calls down at ~108s
+-- with BYE 408 "Session timeout" when the carrier had not refreshed yet.
+-- 1800 = the platform interval (refresh at ~900s by the negotiated
+-- refresher). Plain set (NOT export): the A-leg answer is the only reader;
+-- the B-leg (external profile) interval comes from the carrier's 200 OK.
+-- Set at top level, before ANY answer/pre_answer/ring_ready/bridge on every
+-- path (RCF, on-net chain, trunk-DID delivery, local ext, TEST_MODE, API
+-- terminal) — harmless on the reject paths (never answered).
+-- NOT a replacement for the profile param: "sip-session-timeout" in
+-- internal.xml is not a mod_sofia param (sofia.c reads "session-timeout")
+-- and is ignored; renaming it would yield the NAT override 90 -> cut at 81s.
+set_var("sofia_session_timeout", "1800")
+
 -- Validate DID
 if did == "" then
     hangup("UNALLOCATED_NUMBER", "[" .. uuid .. "] Empty destination - rejecting")
@@ -1520,14 +1543,15 @@ local function terminate_rcf(dest, ctx)
     -- regardless. sip_copy_custom_headers is deliberately untouched.
     session:setVariable("sip_h_identity", "")
 
-    -- RFC 4028 session timers: export to B-leg so mod_sofia includes
-    -- Session-Expires and Min-SE in the outbound INVITE.
-    -- CRITICAL: set_var() only sets on the A-leg. export via session:execute
-    -- marks the variable for propagation to the B-leg channel.
-    -- Belt-and-suspenders: these are also included in the bridge {} blocks.
-    pcall(function() session:execute("export", "sip_session_timeout=1800") end)
-    pcall(function() session:execute("export", "sip_minimum_session_expires=90") end)
-    pcall(function() session:execute("export", "enable_timer=true") end)
+    -- RFC 4028 session timers: NOTHING to export here. The former
+    -- `export sip_session_timeout/sip_minimum_session_expires/enable_timer`
+    -- was a no-op (mod_sofia reads none of those names) and was removed
+    -- 2026-09-24. The A-leg interval is set above via sofia_session_timeout
+    -- (the only per-call knob); the B-leg's Session-Expires/Min-SE are added
+    -- by Kamailio route[TO_CARRIER] (1800;refresher=uac, Min-SE 90) and the
+    -- negotiated value comes back in the carrier's 200 OK. The same three
+    -- names inside the bridge {} dial strings below are equally inert; they
+    -- are left in place only to keep the dial strings byte-identical.
 
     -- ================================================================
     -- Per-DID concurrent call limit (mod_hash, no Redis needed)

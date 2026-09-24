@@ -353,6 +353,8 @@ local function run_scenario(sc, script_path)
         hangups   = {},
         answered  = false,
         webhook   = false,
+        -- sofia_session_timeout value seen at each answer / bridge (order check)
+        timer_seen = {},
     }
 
     -- ---- session stub ----
@@ -374,12 +376,16 @@ local function run_scenario(sc, script_path)
     function session:getVariable(k) return session_vars[k] end
     function session:setVariable(k, v) session_vars[k] = v; captured.setvars[k] = v end
     function session:ready() return true end
-    function session:answer() captured.answered = true end
+    function session:answer()
+        captured.answered = true
+        captured.timer_seen[#captured.timer_seen+1] = "answer=" .. tostring(session_vars.sofia_session_timeout)
+    end
     function session:sleep(_) end
     function session:hangup(cause) captured.hangups[#captured.hangups+1] = cause end
     function session:execute(app, data)
         if app == "bridge" then
             captured.bridges[#captured.bridges+1] = data
+            captured.timer_seen[#captured.timer_seen+1] = "bridge=" .. tostring(session_vars.sofia_session_timeout)
             -- Scripted bridge outcome (originate_disposition) per attempt,
             -- only for scenarios that define one (older scenarios unchanged).
             if bridge_results then
@@ -878,12 +884,93 @@ do
     no_cdr_on_a_leg(c, "unsafe")
 end
 
+-- ------------------------------------------------------------------
+-- RFC 4028 A-leg session timer (sofia_session_timeout, 2026-09-24)
+-- ------------------------------------------------------------------
+-- The removed no-op exports (mod_sofia reads none of these names).
+local NOOP_TIMER_EXPORTS = {
+    ["sip_session_timeout=1800"] = true,
+    ["sip_minimum_session_expires=90"] = true,
+    ["enable_timer=true"] = true,
+}
+
+do
+    print("[12] A-leg sofia_session_timeout=1800 (setvar, NOT export) on every path")
+    local names = {}
+    for name in pairs(scenarios) do names[#names+1] = name end
+    table.sort(names)
+    for _, name in ipairs(names) do
+        for _, flag in ipairs({ false, true }) do
+            local sc = flag and with_env(scenarios[name], { API_CALLING_ENABLED = "true" })
+                or scenarios[name]
+            local c = run_scenario(sc)
+            local label = string.format("%s (api flag %s)", name, tostring(flag))
+            check(label .. ": sofia_session_timeout=1800 set on A-leg",
+                  c.setvars["sofia_session_timeout"] == "1800",
+                  tostring(c.setvars["sofia_session_timeout"]))
+            local late = {}
+            for _, t in ipairs(c.timer_seen) do
+                if not t:match("=1800$") then late[#late+1] = t end
+            end
+            check(label .. ": set BEFORE every answer/bridge (" .. #c.timer_seen .. " seen)",
+                  #late == 0, table.concat(late, ","))
+            local bad = {}
+            for _, e in ipairs(c.executes) do
+                local d = tostring(e.data)
+                if e.app == "export" and (d:match("^sofia_session_timeout") or NOOP_TIMER_EXPORTS[d]) then
+                    bad[#bad+1] = e.app .. ":" .. d
+                end
+            end
+            check(label .. ": no session-timer export (sofia_session_timeout / removed no-ops)",
+                  #bad == 0, table.concat(bad, ","))
+            local leaked = {}
+            for _, b in ipairs(c.bridges) do
+                if b:find("sofia_session_timeout", 1, true) then leaked[#leaked+1] = b end
+            end
+            check(label .. ": sofia_session_timeout NOT in any B-leg dial string",
+                  #leaked == 0, table.concat(leaked, " | "))
+        end
+    end
+end
+
 -- Optional regression mode against the pre-split router.
 local BASELINE = os.getenv("BASELINE_ROUTER")
 if BASELINE and BASELINE ~= "" then
     print("[11] BASELINE regression: A-leg state + dial strings (minus [cdr_*]) identical to " .. BASELINE)
+    -- Session-timer change (2026-09-24) is normalized out on BOTH sides so
+    -- everything else (A-leg vars, dial strings, hangups, other executes)
+    -- must be byte-identical: the new router's added setvar
+    -- sofia_session_timeout is dropped, and the baseline's removed no-op
+    -- exports are dropped. Their presence/absence is asserted by [12].
+    local function strip_timer(c, is_baseline)
+        local sv = {}
+        for k, v in pairs(c.setvars) do
+            if is_baseline or k ~= "sofia_session_timeout" then sv[k] = v end
+        end
+        local ex = {}
+        for _, e in ipairs(c.executes) do
+            if not (e.app == "export" and NOOP_TIMER_EXPORTS[tostring(e.data)]) then
+                ex[#ex+1] = e
+            end
+        end
+        return sv, ex
+    end
     local function dump_stripped(c)
-        local copy = { setvars = c.setvars, hangups = c.hangups, executes = c.executes,
+        local sv, ex = strip_timer(c, false)
+        local copy = { setvars = sv, hangups = c.hangups, executes = ex,
+                       answered = c.answered, webhook = c.webhook, bridges = {} }
+        for i, b in ipairs(c.bridges) do
+            local _, stripped = cdr_block(b)
+            copy.bridges[i] = stripped
+        end
+        return dump(copy)
+    end
+    -- [cdr_*] blocks are stripped on the baseline side too (cdr_block()
+    -- returns a pre-split dial string unchanged), so the baseline may be
+    -- either the pre-CDR-split router or any later one (e.g. origin/RCF-V1).
+    local function dump_baseline(c)
+        local sv, ex = strip_timer(c, true)
+        local copy = { setvars = sv, hangups = c.hangups, executes = ex,
                        answered = c.answered, webhook = c.webhook, bridges = {} }
         for i, b in ipairs(c.bridges) do
             local _, stripped = cdr_block(b)
@@ -899,7 +986,7 @@ if BASELINE and BASELINE ~= "" then
             local sc = flag and with_env(scenarios[name], { API_CALLING_ENABLED = "true" })
                 or scenarios[name]
             local new = dump_stripped(run_scenario(sc))
-            local old = dump(run_scenario(sc, BASELINE))
+            local old = dump_baseline(run_scenario(sc, BASELINE))
             check(string.format("%s (api flag %s): identical to baseline", name, tostring(flag)),
                   new == old, "\n--- baseline ---\n" .. old .. "\n--- new ---\n" .. new)
         end

@@ -350,12 +350,22 @@ Called ONLY for inbound traffic from Bandwidth and re-INVITEs from external sour
 - SDP scrubbing on all replies: private IPs replaced with **FS_PUBLIC_IP** (RTP
   target), not ADVERTISE_IP. Only the SDP body uses FS_PUBLIC_IP; headers keep VIP.
 - Contact rewriting on FS-originated replies: Replace FS Contact with Kamailio's address.
-- **Session timer normalization (BIDIRECTIONAL)**: Any reply passing through with a
-  Session-Expires header gets normalized to `1800;refresher=uac` — in BOTH
-  directions (carrier->FS and FS->carrier). Bandwidth sometimes sends
-  Session-Expires: 30 (below RFC min 90), which FS silently ignores -> call
-  disconnection; FS may answer Bandwidth's inbound proposal with a short value too.
-  Normalizing every leg to 1800 guarantees both sides set up the refresh timer.
+- **Session timer normalization (CARRIER REPLIES ONLY, 2026-09-24)**: only replies
+  whose `$si` is NOT FreeSWITCH (narrow FS-ish check: VOIP_SUBNET / DOCKER_NETWORK /
+  LOCALHOST_NETWORK — deliberately not IS_INTERNAL_SOURCE, so a carrier reply the
+  peer SBC hands over (§8.12, `$si` = peer's SBC_INTERNAL_IP) is still normalized).
+  Rule: delta <90 / unparseable / >1800 -> `1800;refresher=uac` (Bandwidth SE:30
+  protection, unchanged); 90..1800 -> carrier delta KEPT, `refresher=uac`. `Min-SE: 90`
+  appended if absent. FS's own replies (A-leg 200, 200 to carrier re-INVITE/UPDATE)
+  pass through UNMODIFIED: the old bidirectional rule rewrote FS's
+  `Session-Expires: 120` to 1800 toward the carrier and caused the ~108s
+  "Session timeout" cut of Sinch-originated calls (FS now answers 1800 itself via
+  `sofia_session_timeout` in the Lua routers).
+- **Armed for INVITE and UPDATE** (`route[RELAY]`: `t_on_reply("REPLY_HANDLER")` for
+  `INVITE|UPDATE`; `t_on_branch` stays INVITE-only). UPDATE is a target refresh: FS's
+  200 to a carrier UPDATE gets the same Contact->VIP rewrite as a re-INVITE 200. All
+  blocks are UPDATE-safe (SDP scrub has_body-gated, STIR hand-back gated on
+  `$avp(stir_outcome)` which in-dialog transactions never carry).
 
 ### 4.10 route[SCANNER_DETECT]
 
@@ -564,7 +574,7 @@ Kamailio (34.74.71.32:5060)
   v
 Bandwidth (67.231.2.12:5060)
   - 200 OK flows back through Kamailio
-  - REPLY_HANDLER normalizes Session-Expires to 1800
+  - REPLY_HANDLER normalizes the carrier's Session-Expires (<90 or >1800 -> 1800; else kept)
   - REPLY_HANDLER rewrites FS Contact to Kamailio address
   - In-dialog BYE/re-INVITE routed via WITHINDIALOG to FS port 5090
 ```
@@ -651,7 +661,9 @@ Bandwidth sends the same inbound call from multiple edge proxies simultaneously 
 
 ### 8.6 Session Timer Normalization is Required
 
-Bandwidth sometimes sends `Session-Expires: 30` in 200 OK (below RFC minimum of 90). FreeSWITCH has `minimum-session-expires=90` and silently ignores any value below that, never setting up the refresh timer. The carrier then kills the call when its 30-second timer expires. REPLY_HANDLER normalizes all carrier Session-Expires to 1800.
+Bandwidth sometimes sends `Session-Expires: 30` in 200 OK (below RFC minimum of 90). FreeSWITCH has `minimum-session-expires=90` and silently ignores any value below that, never setting up the refresh timer. The carrier then kills the call when its 30-second timer expires. REPLY_HANDLER normalizes carrier Session-Expires: <90 (or unparseable) and >1800 become `1800;refresher=uac`, 90..1800 is kept (never raise a legitimate carrier interval — FS as B-leg UAC refreshes at interval/2 of what it is told).
+
+**Never rewrite FreeSWITCH's own replies (2026-09-24).** Until then the normalization ran on ALL replies, including FS's A-leg 200 OK toward the carrier. FS's internal profile answered `Session-Expires: 120;refresher=uac` (aggressive-nat-detection → `SOFIA_NAT_SESSION_TIMEOUT` 90 → sofia-sip min 120; the `sip-session-timeout` profile param is not a mod_sofia param); Kamailio told the carrier 1800, Sinch (refresher) planned ~900s, FS's own timer expired at ~108s → FS BYE `Reason: SIP;cause=408;text="Session timeout"`. Fix = both halves: FS answers 1800 (`sofia_session_timeout` in inbound_router.lua / trunk_outbound.lua) AND REPLY_HANDLER leaves FS replies alone, so the carrier always sees the interval FS actually armed.
 
 ### 8.7 Double Record-Route for Multi-SBC NLB
 

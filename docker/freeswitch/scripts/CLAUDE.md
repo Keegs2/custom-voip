@@ -179,12 +179,17 @@ inbound_router.lua (product_type == "rcf"):
        carrier PDD only; ringing then continues to call_timeout. NEVER use
        originate_timeout here: it caps time-to-ANSWER including ring time),
        X-Carrier, X-CID (sip_call_id for Homer A/B correlation),
-       and RFC 4028 session timers (sip_session_timeout=1800, min=90).
+       and the legacy session-timer trio (sip_session_timeout=1800,
+       sip_minimum_session_expires=90, enable_timer=true) — INERT (mod_sofia
+       reads none of them; kept only for byte-identical dial strings).
      - Each LAUNCHED attempt's dial string carries the per-leg `[cdr_*]`
        CDR-split block (`cdr_leg_attempt` = launched count, 1..N) — see
        "CDR A/B leg split" below. The local-extension bridge never does.
      - Loop breaks on `originate_disposition == "SUCCESS"` (the real FS bridge-result variable; `bridge_result` is NOT a channel variable and must never be used). `carrier_used` is set per attempt, so breaking on success records the winning carrier.
-     - Export RFC 4028 session timers to B-leg as well.
+     - RFC 4028: NO export (the old no-op exports were removed 2026-09-24).
+       The A-leg answer interval is `sofia_session_timeout=1800`, `set` at top
+       level before any answer/bridge (the only per-call knob; read after the
+       internal profile's NAT override 90/120). B-leg timers: Kamailio.
      - Uses EXTERNAL profile so Via/Contact/SDP get public IP.
   6. If all 4 attempts fail -> NORMAL_TEMPORARY_FAILURE (SIP 503)
      - lua_routed=true prevents dialplan from masking with 404

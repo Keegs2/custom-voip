@@ -193,8 +193,10 @@ These are specific Kamailio behaviors that caused production bugs:
 
 Bandwidth sometimes sends `Session-Expires: 30` in 200 OK (below RFC 4028 minimum of 90). FreeSWITCH has `minimum-session-expires=90` and silently ignores any value below that, never setting up the refresh timer. Bandwidth then kills the call when its 30-second timer expires.
 
-- **Fix:** Kamailio REPLY_HANDLER normalizes all carrier Session-Expires to 1800.
-- **Both sides:** FS exports `sip_session_timeout=1800` and `sip_min_session_expires=90` to the B-leg. Kamailio adds `Session-Expires: 1800;refresher=uac` and `Min-SE: 90` on outbound INVITEs.
+- **B-leg (FS → carrier):** Kamailio `route[TO_CARRIER]` adds `Session-Expires: 1800;refresher=uac` + `Min-SE: 90` to the outbound INVITE (FS's external profile emits none — the `sip-session-timeout` profile param and the `sip_session_timeout`/`sip_minimum_session_expires`/`enable_timer` dial-string/export vars are NOT read by mod_sofia; they are inert).
+- **Carrier replies only (REPLY_HANDLER):** Session-Expires below 90 (or unparseable) or above 1800 → `1800;refresher=uac`; 90..1800 → the carrier's interval is KEPT (never raised — raising a carrier's 600 to 1800 would make FS refresh at ~900s after the carrier had already expired the session), always `refresher=uac` (= FS). `Min-SE: 90` appended if absent. "Carrier" = any source that is not FreeSWITCH (VOIP_SUBNET/docker/loopback), so replies handed over by the peer SBC (§8.12) are normalized too. Armed for INVITE and UPDATE (`route[RELAY]` + TO_CARRIER).
+- **FS's own replies are NEVER rewritten** (fixed 2026-09-24). The old "normalize ALL replies" rule rewrote FS's A-leg `200 OK Session-Expires: 120;refresher=uac` to 1800 toward the carrier; Sinch (the refresher) planned its refresh at ~900s while FS's real 120s timer fired → BYE `Reason: SIP;cause=408;text="Session timeout"` at ~108s on every Sinch-originated call.
+- **A-leg (carrier/PBX → FS internal profile):** `inbound_router.lua` and `trunk_outbound.lua` `set` (not export) `sofia_session_timeout=1800` at top level before any answer/bridge. It is the ONLY per-call knob and is read in `sofia_answer_channel` AFTER the `aggressive-nat-detection` override (TFLAG_NAT → `SOFIA_NAT_SESSION_TIMEOUT` 90, raised to sofia-sip's 120). Do NOT "fix" the profile param name to `session-timeout` — the NAT override would still give 90 (calls cut at ~81s).
 
 ### Bandwidth Carrier Behaviors
 
