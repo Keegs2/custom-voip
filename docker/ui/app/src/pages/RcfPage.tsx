@@ -11,6 +11,10 @@ import { apiRequest } from '../api/client';
 import { useToast } from '../components/ui/Toast';
 import { searchCdrs } from '../api/cdrs';
 import type { Cdr } from '../types/cdr';
+import {
+  gradeColor, gradeLabel, goodShareColor, percentileCont, qualityStatusReason,
+  qualityStatusShort, summarizeCallQuality,
+} from './calls/quality';
 import { fmtAvgCallDuration, hasTalkTime } from '../utils/callDuration';
 import {
   listAvailableDids,
@@ -920,13 +924,40 @@ function timeAgo(isoString: string): string {
   return `${diffDay}d ago`;
 }
 
-// ─── Quality colour helpers (daylight palette — green/red semantics only) ─────
+// ─── Call quality label (the ONE grade definition — pages/calls/quality.ts) ───
 
-function mosLabel(mos: number | null | undefined): { text: string; color: string; dot: string } {
-  if (mos == null) return { text: '—', color: INK_FAINT, dot: INK_FAINT };
-  if (mos >= 4.0) return { text: 'Great', color: GREEN, dot: '#16a34a' };
-  if (mos >= 3.0) return { text: 'OK', color: INK_SOFT, dot: '#94a3b8' };
-  return { text: 'Poor', color: RED, dot: '#dc2626' };
+interface CallQualityLabel {
+  /** Great / Good / Fair / Poor / One-way, or null when the call wasn't graded. */
+  text: string | null;
+  color: string;
+  /** Plain-language explanation (why not graded / what one-way means). */
+  reason: string | null;
+  /** Short reason for the table cell when not graded ("under 5 sec"). */
+  short: string | null;
+}
+
+/**
+ * The call's grade = the WORSE of the two audio directions
+ * (`call_quality_grade`). One-way audio reads "One-way" in red — never a
+ * perfect score for a call nobody could hear.
+ */
+function callQualityLabel(cdr: Cdr): CallQualityLabel {
+  const grade = cdr.call_quality_grade ?? null;
+  const status = cdr.call_quality_status ?? null;
+  if (grade == null) {
+    return {
+      text: null,
+      color: INK_FAINT,
+      reason: qualityStatusReason(status, 'customer'),
+      short: qualityStatusShort(status),
+    };
+  }
+  return {
+    text: gradeLabel(grade, status),
+    color: gradeColor(grade),
+    reason: status === 'no_rtp' ? qualityStatusReason(status, 'customer') : null,
+    short: null,
+  };
 }
 
 function carrierDisplayName(carrier: string | null | undefined): string {
@@ -1079,8 +1110,6 @@ function fmtAcdExact(acd: number): string {
 /** Compute aggregate quality stats from a list of CDRs. */
 function computeQualityStats(cdrs: Cdr[]) {
   let answered = 0;
-  let mosSum = 0;
-  let mosCount = 0;
   const answeredRows: Cdr[] = [];
 
   for (const cdr of cdrs) {
@@ -1088,20 +1117,17 @@ function computeQualityStats(cdrs: Cdr[]) {
       answered++;
       answeredRows.push(cdr);
     }
-    if (cdr.mos != null) {
-      mosSum += cdr.mos;
-      mosCount++;
-    }
   }
 
   const total = cdrs.length;
   const asr = total > 0 ? (answered / total) * 100 : null;
-  const avgMos = mosCount > 0 ? mosSum / mosCount : null;
+  // Call grades → shares only (never an average of MOS).
+  const quality = summarizeCallQuality(cdrs);
   // Staff rows: exact "Xm Ys". Tenant rows: mean of whole minutes, 1 decimal
   // ("2.3 min") — the API never sends customers seconds.
   const acdLabel = fmtAvgCallDuration(answeredRows, fmtAcdExact);
 
-  return { total, answered, asr, avgMos, acdLabel };
+  return { total, answered, asr, quality, acdLabel };
 }
 
 // ─── DailyStats type ─────────────────────────────────────────────────────────
@@ -1113,19 +1139,19 @@ interface DailyStats {
   total: number;
   answered: number;
   asr: number | null;    // 0–100, null if no calls
-  avgMos: number | null; // 1.0–5.0, null if no MOS data
+  medianMos: number | null; // median call MOS over graded calls, null if none
 }
 
 /** Build daily quality summary for the last 7 days. */
 function buildDailyDots(cdrs: Cdr[]): DailyStats[] {
-  const byDate = new Map<string, { mosSum: number; mosCount: number; total: number; answered: number }>();
+  const byDate = new Map<string, { moses: number[]; total: number; answered: number }>();
 
   for (const cdr of cdrs) {
     const key = cdr.start_time.slice(0, 10);
-    const bucket = byDate.get(key) ?? { mosSum: 0, mosCount: 0, total: 0, answered: 0 };
+    const bucket = byDate.get(key) ?? { moses: [], total: 0, answered: 0 };
     bucket.total++;
     if (cdr.answer_time != null && hasTalkTime(cdr)) bucket.answered++;
-    if (cdr.mos != null) { bucket.mosSum += cdr.mos; bucket.mosCount++; }
+    if (cdr.call_quality_status === 'rated' && cdr.call_mos != null) bucket.moses.push(cdr.call_mos);
     byDate.set(key, bucket);
   }
 
@@ -1139,13 +1165,13 @@ function buildDailyDots(cdrs: Cdr[]): DailyStats[] {
     const b = byDate.get(key);
 
     if (!b || b.total === 0) {
-      result.push({ date: key, label, shortLabel, total: 0, answered: 0, asr: null, avgMos: null });
+      result.push({ date: key, label, shortLabel, total: 0, answered: 0, asr: null, medianMos: null });
       continue;
     }
 
     const asr = (b.answered / b.total) * 100;
-    const avgMos = b.mosCount > 0 ? b.mosSum / b.mosCount : null;
-    result.push({ date: key, label, shortLabel, total: b.total, answered: b.answered, asr, avgMos });
+    const medianMos = percentileCont(b.moses, 0.5);
+    result.push({ date: key, label, shortLabel, total: b.total, answered: b.answered, asr, medianMos });
   }
   return result;
 }
@@ -1265,7 +1291,7 @@ function WeeklyChart({ days }: WeeklyChartProps) {
 
   const mosMemo = useMemo(() => {
     const pts = days.map((d, i) =>
-      d.avgMos !== null ? { x: xPos(i), y: yMos(d.avgMos) } : null,
+      d.medianMos !== null ? { x: xPos(i), y: yMos(d.medianMos) } : null,
     );
     return {
       linePath: buildSplinePath(pts),
@@ -1480,10 +1506,10 @@ function WeeklyChart({ days }: WeeklyChartProps) {
                 {hasData ? (
                   <>
                     {/* MOS dot */}
-                    {day.avgMos !== null && (
+                    {day.medianMos !== null && (
                       <circle
                         cx={x}
-                        cy={yMos(day.avgMos)}
+                        cy={yMos(day.medianMos)}
                         r={isHovered ? 4.5 : 3}
                         fill={isHovered ? CHART_MOS : '#ffffff'}
                         stroke={CHART_MOS}
@@ -1578,7 +1604,7 @@ function WeeklyChart({ days }: WeeklyChartProps) {
                     MOS
                   </span>
                   <span style={{ fontSize: '0.68rem', fontWeight: 600, color: INK, fontVariantNumeric: 'tabular-nums' }}>
-                    {hoveredDay.avgMos !== null ? hoveredDay.avgMos.toFixed(2) : '—'}
+                    {hoveredDay.medianMos !== null ? hoveredDay.medianMos.toFixed(2) : '—'}
                   </span>
                 </div>
               </div>
@@ -1594,7 +1620,7 @@ function WeeklyChart({ days }: WeeklyChartProps) {
             <line x1="0" y1="3" x2="20" y2="3" stroke={CHART_MOS} strokeWidth="2" strokeLinecap="round" />
             <circle cx="10" cy="3" r="2.5" fill="#ffffff" stroke={CHART_MOS} strokeWidth="1.5" />
           </svg>
-          <span style={{ fontSize: '0.66rem', color: INK_DIM }}>MOS (left axis, 1–5)</span>
+          <span style={{ fontSize: '0.66rem', color: INK_DIM }}>Median MOS of graded calls (left axis, 1–5)</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <svg width="20" height="6" style={{ flexShrink: 0 }}>
@@ -1695,18 +1721,12 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
     ? `${fmt(selectedEntry.did)}${selectedEntry.name ? ` — ${selectedEntry.name}` : ''}`
     : null;
 
-  // MOS is quality we measure — green/red thresholds apply.
-  // ASR / calls / ACD are informational and stay in the neutral ink scale.
-  const avgMosColor =
-    stats.avgMos == null ? INK_FAINT
-    : stats.avgMos >= 4.0 ? GREEN
-    : stats.avgMos >= 3.0 ? INK_SOFT
-    : RED;
-  const avgMosKeyline =
-    stats.avgMos == null ? '#c6d2e4'
-    : stats.avgMos >= 4.0 ? '#16a34a'
-    : stats.avgMos >= 3.0 ? '#c6d2e4'
-    : '#dc2626';
+  // Voice quality is the share of GRADED calls that sounded good or better
+  // (quality.ts grade bands). ASR / calls / ACD are informational and stay
+  // in the neutral ink scale.
+  const goodShare = stats.quality.goodSharePct;
+  const goodShareTone = goodShareColor(goodShare);
+  const goodShareKeyline = goodShare == null ? '#c6d2e4' : goodShareTone;
 
   if (isLoading) {
     return (
@@ -2049,12 +2069,26 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
             </div>
             <div className="rcf-stat-label">ASR · answered</div>
           </div>
-          <div className="rcf-stat" style={{ borderLeftColor: avgMosKeyline }}>
-            <div className="rcf-stat-value" style={{ color: avgMosColor }}>
-              {stats.avgMos != null ? stats.avgMos.toFixed(1) : '—'}
+          <div
+            className="rcf-stat"
+            style={{ borderLeftColor: goodShareKeyline }}
+            title={
+              stats.quality.graded > 0
+                ? `${stats.quality.goodOrBetter} of ${stats.quality.graded} graded calls sounded good or better. Calls that weren’t answered, lasted under 5 seconds or carried too little sound aren’t graded.`
+                : 'No graded calls yet — calls that weren’t answered, lasted under 5 seconds or carried too little sound aren’t graded.'
+            }
+          >
+            <div className="rcf-stat-value" style={{ color: goodShare != null ? goodShareTone : INK_FAINT }}>
+              {goodShare != null ? `${Math.floor(goodShare)}%` : '—'}
             </div>
-            <div className="rcf-stat-label">MOS · voice quality</div>
+            <div className="rcf-stat-label">Sounded good or better</div>
           </div>
+          {stats.quality.oneWay > 0 && (
+            <div className="rcf-stat" style={{ borderLeftColor: RED }} title="Calls where no sound came through from one side">
+              <div className="rcf-stat-value" style={{ color: RED }}>{stats.quality.oneWay.toLocaleString()}</div>
+              <div className="rcf-stat-label">One-way audio</div>
+            </div>
+          )}
           <div className="rcf-stat rcf-stat-dim">
             <div className="rcf-stat-value">{stats.total.toLocaleString()}</div>
             <div className="rcf-stat-label">Calls · period</div>
@@ -2152,7 +2186,7 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
             <tbody>
               {calls.map((cdr) => {
                 const status = callStatusInfo(cdr);
-                const quality = mosLabel(cdr.mos);
+                const quality = callQualityLabel(cdr);
                 return (
                   <tr key={cdr.uuid} className="rcf-row">
                     {/* Time */}
@@ -2204,16 +2238,16 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                       </span>
                     </td>
 
-                    {/* Quality dot */}
+                    {/* Quality dot — call grade (worse direction), or "Not rated" + why */}
                     <td style={{ padding: '12px 14px' }}>
-                      {cdr.mos != null ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {quality.text != null ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={quality.reason ?? undefined}>
                           <span
                             style={{
                               width: 8,
                               height: 8,
                               borderRadius: '50%',
-                              background: quality.dot,
+                              background: quality.color,
                               flexShrink: 0,
                               display: 'inline-block',
                             }}
@@ -2223,7 +2257,12 @@ function CallActivityTab({ customerId }: CallActivityTabProps) {
                           </span>
                         </div>
                       ) : (
-                        <span style={{ fontSize: '0.72rem', color: '#b6c2d4' }}>—</span>
+                        <span
+                          style={{ fontSize: '0.72rem', color: INK_FAINT, whiteSpace: 'nowrap' }}
+                          title={quality.reason ?? undefined}
+                        >
+                          Not rated{quality.short ? ` · ${quality.short}` : ''}
+                        </span>
                       )}
                     </td>
                   </tr>

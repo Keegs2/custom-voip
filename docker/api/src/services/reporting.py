@@ -26,6 +26,8 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Iterable, Optional
 
+from services import call_quality as cq
+
 from utils.phone import normalize_e164
 
 #: Longest report window (inclusive local days).
@@ -227,17 +229,17 @@ GRADE_LABELS = {"great": "Great", "good": "Good", "fair": "Fair", "poor": "Poor"
 
 
 def grade_for_mos(mos: Any) -> str:
-    """MOS -> great (>=4.0) / good (>=3.6) / fair (>=3.1) / poor / none."""
-    if mos is None:
-        return "none"
-    m = Decimal(str(mos))
-    if m >= Decimal("4.0"):
-        return "great"
-    if m >= Decimal("3.6"):
-        return "good"
-    if m >= Decimal("3.1"):
-        return "fair"
-    return "poor"
+    """Stored 2-dp MOS -> great / good / fair / poor, or "none" (not graded).
+
+    Delegates to services/call_quality.grade_for_mos — the ONE grade
+    definition (docs/CALL_QUALITY_ACCURACY_PLAN.md §D, G.107/G.109 R bands
+    90/80/70): great >= 4.34, good >= 4.02, fair >= 3.60, poor < 3.60. A
+    one-way-audio call (quality_status 'no_rtp') is graded poor with no MOS;
+    per-call report rows therefore take the stored grade word
+    (cdrs.call_quality_grade), not this function. Only answered calls of 5 s
+    or more with measurable audio are graded.
+    """
+    return cq.grade_for_mos(mos) or "none"
 
 
 def _q(value: Any, places: str) -> float:

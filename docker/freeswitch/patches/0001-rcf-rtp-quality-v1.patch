@@ -1,0 +1,239 @@
+diff --git a/src/include/switch_types.h b/src/include/switch_types.h
+index cd47eb0..939f2b4 100644
+--- a/src/include/switch_types.h
++++ b/src/include/switch_types.h
+@@ -725,6 +725,17 @@ typedef struct {
+ 	double R;
+ 	double mos;
+ 	struct error_period *error_log;
++	/* ---- RCF quality patch v1 (docker/freeswitch/patches/0001) — additive ---- */
++	switch_size_t seq_expected;      /* RFC 3550 A.1: sum over SSRC epochs of (ext_highest_seq - base_seq + 1) */
++	switch_size_t seq_received;      /* packets counted by the tracker (in-order + late; exact dup of highest NOT counted) */
++	switch_size_t seq_lost;          /* sum over epochs of max(0, expected - received). NEVER reset. */
++	switch_size_t seq_loss_events;   /* forward sequence gaps (udelta > 1) = loss bursts */
++	switch_size_t seq_reordered;     /* late (seq behind highest, within 100) + duplicates of highest */
++	switch_size_t seq_epochs;        /* 1 + SSRC changes + sequence restarts (jump >= 3000) */
++	double rfc3550_jitter_sum_ms;    /* sum of J (ms) over post-warmup samples */
++	switch_size_t rfc3550_jitter_n;  /* number of post-warmup samples */
++	double rfc3550_jitter_max_ms;    /* max J (ms) over post-warmup samples */
++	uint8_t rfc3550_kernel_clock;    /* 1 = arrivals timed by SIOCGSTAMP (set in qt_jitter from qt_kernel_ts) */
+ } switch_rtp_numbers_t;
+ 
+ typedef struct {
+diff --git a/src/switch_core_media.c b/src/switch_core_media.c
+index 51a4d32..3beac27 100644
+--- a/src/switch_core_media.c
++++ b/src/switch_core_media.c
+@@ -1882,6 +1882,22 @@ static void set_stats(switch_core_session_t *session, switch_media_type_t type,
+ 		add_stat_double(stats->inbound.R, "in_quality_percentage");
+ 		add_stat_double(stats->inbound.mos, "in_mos");
+ 
++		/* ---- RCF quality patch v1 (docker/freeswitch/patches/0001) — additive, AUDIO only ---- */
++		if (type == SWITCH_MEDIA_TYPE_AUDIO) {
++			switch_channel_set_variable(channel, "rtp_audio_in_qpatch", "1");
++			add_stat(stats->inbound.seq_expected,    "in_seq_expected");
++			add_stat(stats->inbound.seq_received,    "in_seq_received");
++			add_stat(stats->inbound.seq_lost,        "in_seq_lost");
++			add_stat(stats->inbound.seq_loss_events, "in_seq_loss_events");
++			add_stat(stats->inbound.seq_reordered,   "in_seq_reordered");
++			add_stat(stats->inbound.seq_epochs,      "in_seq_epochs");
++			if (stats->inbound.rfc3550_jitter_n > 0) {
++				add_stat_double(stats->inbound.rfc3550_jitter_sum_ms / (double)stats->inbound.rfc3550_jitter_n, "in_rfc3550_jitter_avg_ms");
++				add_stat_double(stats->inbound.rfc3550_jitter_max_ms, "in_rfc3550_jitter_max_ms");
++			}
++			switch_channel_set_variable(channel, "rtp_audio_in_rfc3550_clock", stats->inbound.rfc3550_kernel_clock ? "kernel" : "read");
++		}
++
+ 
+ 		add_stat(stats->outbound.raw_bytes, "out_raw_bytes");
+ 		add_stat(stats->outbound.media_bytes, "out_media_bytes");
+diff --git a/src/switch_rtp.c b/src/switch_rtp.c
+index d92b230..8363be6 100644
+--- a/src/switch_rtp.c
++++ b/src/switch_rtp.c
+@@ -49,6 +49,11 @@
+ #include <srtp_priv.h>
+ #include <switch_ssl.h>
+ #include <switch_jitterbuffer.h>
++/* RCF quality patch v1: kernel RX timestamp of the last datagram read (SIOCGSTAMP). */
++#if defined(__linux__)
++#include <sys/ioctl.h>
++#include <linux/sockios.h>
++#endif
+ 
+ //#define DEBUG_TS_ROLLOVER
+ #ifdef DEBUG_TS_ROLLOVER
+@@ -491,6 +496,20 @@ struct switch_rtp {
+ 	uint32_t last_max_vb_frames;
+ 	int skip_timer;
+ 	uint32_t prev_nacks_inflight;
++	/* ---- RCF quality patch v1 — tracker state for the current SSRC epoch ---- */
++	uint8_t  qt_init;               /* an epoch is open */
++	uint32_t qt_ssrc;
++	uint16_t qt_base_seq;
++	uint16_t qt_max_seq;
++	uint32_t qt_cycles;             /* 65536 * wraps */
++	uint64_t qt_ep_received;
++	uint64_t qt_cl_expected, qt_cl_received, qt_cl_lost;   /* closed-epoch totals */
++	uint8_t  qt_have_prev;
++	int64_t  qt_prev_arrival_us;
++	uint32_t qt_prev_ts;
++	double   qt_jitter_us;          /* RFC 3550 J, microseconds */
++	uint32_t qt_ep_jitter_samples;
++	uint8_t  qt_kernel_ts;          /* 1 = last arrival came from SIOCGSTAMP */
+ };
+ 
+ struct switch_rtcp_report_block {
+@@ -1796,6 +1815,129 @@ static void check_jitter(switch_rtp_t *rtp_session)
+ 	}
+ }
+ 
++/* RCF-QPATCH-TRACKER-BEGIN
++ * ---- RCF quality patch v1 (docker/freeswitch/patches/0001-rcf-rtp-quality-v1.patch) ----
++ * RFC 3550 A.1 sequence accounting + RFC 3550 6.4.1 interarrival jitter for the inbound
++ * AUDIO stream. Pure bookkeeping into stats.inbound.seq_* / rfc3550_*: never alters the
++ * packet, flags, flaws, R, mos, loss[] or any pre-existing stat. Exported by set_stats()
++ * (switch_core_media.c) as rtp_audio_in_seq_* / rtp_audio_in_rfc3550_*.
++ * Contract: docs/CALL_QUALITY_ACCURACY_PLAN.md section A (custom-voip repo). */
++#define QT_MAX_DROPOUT   3000
++#define QT_MAX_MISORDER  100
++#define QT_JITTER_WARMUP 50     /* ~1 s at 20 ms: J starts at 0 and media start is noisy */
++
++/* Kernel receive timestamp of the last packet read from sock_input (Linux SIOCGSTAMP);
++ * falls back to switch_micro_time_now(). Arrival must be wire time, not read time:
++ * FS reads are timer-paced (rtp_common_read), so read time is quantized to ptime.
++ * Must be called right after the recvfrom() that returned the packet being tracked. */
++static int64_t qt_arrival_us(switch_rtp_t *rtp_session)
++{
++#if defined(__linux__) && defined(SIOCGSTAMP)
++	switch_os_socket_t fd = SWITCH_SOCK_INVALID;
++	struct timeval tv;
++	if (rtp_session->sock_input && switch_os_sock_get(&fd, rtp_session->sock_input) == SWITCH_STATUS_SUCCESS && fd != SWITCH_SOCK_INVALID
++		&& ioctl(fd, SIOCGSTAMP, &tv) == 0) {
++		rtp_session->qt_kernel_ts = 1;
++		return (int64_t)tv.tv_sec * 1000000 + tv.tv_usec;
++	}
++#endif
++	rtp_session->qt_kernel_ts = 0;
++	return (int64_t)switch_micro_time_now();
++}
++
++static void qt_epoch_totals(switch_rtp_t *rtp_session)
++{
++	int64_t ep_expected = (int64_t)rtp_session->qt_cycles + rtp_session->qt_max_seq - rtp_session->qt_base_seq + 1;
++	int64_t ep_lost = ep_expected - (int64_t)rtp_session->qt_ep_received;
++	if (ep_lost < 0) ep_lost = 0;
++	rtp_session->stats.inbound.seq_expected = (switch_size_t)(rtp_session->qt_cl_expected + (uint64_t)ep_expected);
++	rtp_session->stats.inbound.seq_received = (switch_size_t)(rtp_session->qt_cl_received + rtp_session->qt_ep_received);
++	rtp_session->stats.inbound.seq_lost     = (switch_size_t)(rtp_session->qt_cl_lost + (uint64_t)ep_lost);
++}
++
++static void qt_start_epoch(switch_rtp_t *rtp_session, uint16_t seq, uint32_t ssrc)
++{
++	if (rtp_session->qt_init) {            /* freeze the running epoch into the closed totals */
++		rtp_session->qt_cl_expected = rtp_session->stats.inbound.seq_expected;
++		rtp_session->qt_cl_received = rtp_session->stats.inbound.seq_received;
++		rtp_session->qt_cl_lost     = rtp_session->stats.inbound.seq_lost;
++	}
++	rtp_session->qt_init = 1;
++	rtp_session->qt_ssrc = ssrc;
++	rtp_session->qt_base_seq = rtp_session->qt_max_seq = seq;
++	rtp_session->qt_cycles = 0;
++	rtp_session->qt_ep_received = 1;
++	rtp_session->qt_have_prev = 0;
++	rtp_session->qt_jitter_us = 0;
++	rtp_session->qt_ep_jitter_samples = 0;
++	rtp_session->stats.inbound.seq_epochs++;
++	qt_epoch_totals(rtp_session);
++}
++
++static void qt_jitter(switch_rtp_t *rtp_session, uint32_t ts, uint8_t pt)
++{
++	int64_t now;
++	uint8_t prev_kernel;
++	if (rtp_session->samples_per_second != 8000) return;   /* 8 kHz RTP clock only (PCMU/PCMA/G729) */
++	if (pt == rtp_session->recv_te) return;                 /* RFC 2833 ts = event start, not a media clock */
++	prev_kernel = rtp_session->qt_kernel_ts;
++	now = qt_arrival_us(rtp_session);
++	rtp_session->stats.inbound.rfc3550_kernel_clock = rtp_session->qt_kernel_ts;
++	if (rtp_session->qt_have_prev && prev_kernel != rtp_session->qt_kernel_ts) {
++		rtp_session->qt_have_prev = 0;                      /* never difference two different clocks */
++	}
++	if (rtp_session->qt_have_prev) {
++		int64_t d_arr = now - rtp_session->qt_prev_arrival_us;
++		int64_t d_ts  = (int64_t)(int32_t)(ts - rtp_session->qt_prev_ts) * 125;   /* 1e6/8000 us per tick */
++		double  D     = (double)(d_arr - d_ts);
++		if (D < 0) D = -D;
++		rtp_session->qt_jitter_us += (D - rtp_session->qt_jitter_us) / 16.0;      /* RFC 3550 6.4.1 */
++		if (++rtp_session->qt_ep_jitter_samples > QT_JITTER_WARMUP) {
++			double j_ms = rtp_session->qt_jitter_us / 1000.0;
++			rtp_session->stats.inbound.rfc3550_jitter_sum_ms += j_ms;
++			rtp_session->stats.inbound.rfc3550_jitter_n++;
++			if (j_ms > rtp_session->stats.inbound.rfc3550_jitter_max_ms) rtp_session->stats.inbound.rfc3550_jitter_max_ms = j_ms;
++		}
++	}
++	rtp_session->qt_prev_arrival_us = now;
++	rtp_session->qt_prev_ts = ts;
++	rtp_session->qt_have_prev = 1;
++}
++
++/* Called once per RTP packet read off the audio socket (any PT of the stream: audio, CN, RFC 2833).
++ * Pure bookkeeping — never alters the packet, flags, flaws, mos or any existing stat. */
++static void qt_track(switch_rtp_t *rtp_session, uint16_t seq, uint32_t ts, uint32_t ssrc, uint8_t pt)
++{
++	uint16_t udelta;
++	if (rtp_session->flags[SWITCH_RTP_FLAG_VIDEO] || rtp_session->flags[SWITCH_RTP_FLAG_TEXT] ||
++		rtp_session->flags[SWITCH_RTP_FLAG_UDPTL]) return;
++	if (!rtp_session->qt_init || ssrc != rtp_session->qt_ssrc) {        /* new source = new epoch, not loss */
++		qt_start_epoch(rtp_session, seq, ssrc);
++		qt_jitter(rtp_session, ts, pt);
++		return;
++	}
++	udelta = (uint16_t)(seq - rtp_session->qt_max_seq);
++	if (udelta == 0) {                                                  /* duplicate of highest */
++		rtp_session->stats.inbound.seq_reordered++;
++		return;
++	} else if (udelta < QT_MAX_DROPOUT) {                               /* in order, maybe after a gap */
++		if (seq < rtp_session->qt_max_seq) rtp_session->qt_cycles += 65536;
++		if (udelta > 1) rtp_session->stats.inbound.seq_loss_events++;
++		rtp_session->qt_max_seq = seq;
++		rtp_session->qt_ep_received++;
++		qt_jitter(rtp_session, ts, pt);
++	} else if (udelta <= (uint16_t)(65536 - QT_MAX_MISORDER)) {         /* sender restart / huge jump */
++		qt_start_epoch(rtp_session, seq, ssrc);
++		qt_jitter(rtp_session, ts, pt);
++		return;
++	} else {                                                            /* late: fills an earlier gap */
++		rtp_session->qt_ep_received++;
++		rtp_session->stats.inbound.seq_reordered++;
++	}
++	qt_epoch_totals(rtp_session);
++}
++/* RCF-QPATCH-TRACKER-END */
++
+ static void rtcp_generate_sender_info(switch_rtp_t *rtp_session, struct switch_rtcp_sender_info *sr){
+ 	switch_core_session_t *session = switch_core_memory_pool_get_data(rtp_session->pool, "__session");
+ 	switch_time_t now;
+@@ -5771,6 +5913,12 @@ static switch_size_t do_flush(switch_rtp_t *rtp_session, int force, switch_size_
+ 					rtp_session->stats.inbound.raw_bytes += bytes;
+ 					rtp_session->stats.inbound.flush_packet_count++;
+ 					rtp_session->stats.inbound.packet_count++;
++					/* RCF quality patch v1: flushed packets DID arrive (not loss). Muxed RTCP (PT 64/72-79, as read_rtp_packet classifies it) is not RTP. */
++					if (bytes > rtp_header_len && rtp_session->recv_msg.header.version == 2 &&
++						!(rtp_session->flags[SWITCH_RTP_FLAG_RTCP_MUX] && (rtp_session->recv_msg.header.pt == 64 ||
++						  (rtp_session->recv_msg.header.pt >= 72 && rtp_session->recv_msg.header.pt <= 79)))) {
++						qt_track(rtp_session, ntohs(rtp_session->recv_msg.header.seq), ntohl(rtp_session->recv_msg.header.ts), ntohl(rtp_session->recv_msg.header.ssrc), rtp_session->recv_msg.header.pt);
++					}
+ 				}
+ 			} else {
+ 				break;
+@@ -6391,6 +6539,9 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t
+ 		}
+ 
+ 		rtp_session->stats.inbound.packet_count++;
++
++		/* RCF quality patch v1: sequence/jitter tracker (bookkeeping only; after SRTP unprotect, outside the PROXY_MEDIA guard) */
++		if (rtp_session->has_rtp && *bytes > rtp_header_len) qt_track(rtp_session, ntohs(rtp_session->last_rtp_hdr.seq), ntohl(rtp_session->last_rtp_hdr.ts), ntohl(rtp_session->last_rtp_hdr.ssrc), rtp_session->last_rtp_hdr.pt);
+ 	}
+ 
+ 	if (!rtp_session->flags[SWITCH_RTP_FLAG_VIDEO] &&

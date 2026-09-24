@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Call-quality lab UAC (plan G.3). INVITE with PCMU + telephone-event SDP
+  straight to lab-fs:5080, wait for 200, ACK, start the lab RTP sender
+  (scripts/rtp_send.py via start_rtp.sh) towards the FS RTP address from the
+  SDP answer, hold for -d ms, BYE.
+
+  Keys (all REQUIRED on the sipp command line):
+    -key rtpdur <seconds>   media seconds to send (a bit less than -d)
+    -key mode   <mode>      normal | wrap | dtmf | ssrc | none  (start_rtp.sh)
+  -s 7000 = bridge to the UAS (A-in and B-in measured), -s 9196 = echo.
+-->
+<scenario name="RCF quality lab UAC (stream)">
+
+  <send retrans="500">
+    <![CDATA[
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: "lab" <sip:lab@[local_ip]:[local_port]>;tag=[pid]LabUac[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>
+      Call-ID: [call_id]
+      CSeq: 1 INVITE
+      Contact: <sip:lab@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=lab 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0 101
+      a=rtpmap:0 PCMU/8000
+      a=rtpmap:101 telephone-event/8000
+      a=fmtp:101 0-16
+      a=ptime:20
+      a=sendrecv
+
+    ]]>
+  </send>
+
+  <recv response="100" optional="true"/>
+  <recv response="180" optional="true"/>
+  <recv response="183" optional="true"/>
+
+  <recv response="200" rtd="true" rrs="true">
+    <action>
+      <ereg regexp="c=IN IP4 ([0-9.]+)" search_in="body" check_it="true" assign_to="c_line,rip"/>
+      <ereg regexp="m=audio ([0-9]+)" search_in="body" check_it="true" assign_to="m_line,rport"/>
+      <log message="answer [call_id] c=[$c_line] m=[$m_line]"/>
+    </action>
+  </recv>
+
+  <send>
+    <![CDATA[
+      ACK [next_url] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      [routes]
+      From: "lab" <sip:lab@[local_ip]:[local_port]>;tag=[pid]LabUac[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 1 ACK
+      Contact: <sip:lab@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <nop>
+    <action>
+      <exec command="sh /lab/scripts/start_rtp.sh uac [call_id] [$rip] [$rport] [rtpdur] [mode]"/>
+    </action>
+  </nop>
+
+  <pause/>
+
+  <send retrans="500">
+    <![CDATA[
+      BYE [next_url] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      [routes]
+      From: "lab" <sip:lab@[local_ip]:[local_port]>;tag=[pid]LabUac[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 2 BYE
+      Contact: <sip:lab@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv response="200" crlf="true"/>
+
+  <ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200"/>
+  <CallLengthRepartition value="10, 50, 100, 500, 1000, 5000, 10000"/>
+</scenario>

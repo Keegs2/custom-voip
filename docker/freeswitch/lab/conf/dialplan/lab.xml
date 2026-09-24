@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lab dialplan (context "public", both lab profiles).
+    9196 = answer + echo (A-leg only; FS reflects the caller's audio)
+    7000 = bridge to the SIPp UAS via lab-ext, carrying the SAME per-leg
+           B-row vars the RCF carrier loop sets (cdr_leg=B, cdr_carrier_leg,
+           cdr_leg_attempt) so the B-leg CDR has production shape, plus
+           lab_a_uuid so eval_cdrs.py pairs A and B deterministically.
+    anything else = 404.
+-->
+<include>
+  <context name="public">
+    <extension name="lab_echo_9196">
+      <condition field="destination_number" expression="^9196$">
+        <action application="answer"/>
+        <action application="echo"/>
+      </condition>
+    </extension>
+    <extension name="lab_bridge_7000">
+      <condition field="destination_number" expression="^7000$">
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="continue_on_fail=false"/>
+        <action application="set" data="call_timeout=60"/>
+        <action application="bridge" data="[cdr_leg=B,cdr_carrier_leg=true,cdr_leg_attempt=1,lab_a_uuid=${uuid}]sofia/lab-ext/7000@$${lab_uas_ip}:5060"/>
+      </condition>
+    </extension>
+    <extension name="lab_reject">
+      <condition field="destination_number" expression="^.*$">
+        <action application="respond" data="404"/>
+      </condition>
+    </extension>
+  </context>
+</include>

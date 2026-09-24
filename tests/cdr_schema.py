@@ -50,6 +50,10 @@ CDR_COLUMN_MIGRATIONS = (
     "23_onnet_cdr_columns.sql",   # origin/terminating customer, on_net, on_net_hops
     "47_cdr_stir_outcome.sql",    # stir_outcome, stir_eff_actual
     "48_cdr_call_legs.sql",       # leg, call_id, leg_attempt (A/B leg split)
+    # quality columns + cq_* / cdr_refresh_call_quality. Its only non-cdrs
+    # objects are CREATE OR REPLACE FUNCTIONs (+ role-guarded grants), so it
+    # is as replay-safe as the column-only files above. Requires 48.
+    "50_cdr_quality_accuracy.sql",
 )
 
 

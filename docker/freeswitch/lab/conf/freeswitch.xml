@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<!--
+  Call-quality acceptance lab: minimal, self-contained FreeSWITCH config
+  (docs/CALL_QUALITY_ACCURACY_PLAN.md section G.3, docker/freeswitch/lab/README.md).
+
+  NOT a production config. It exists so the patched image can be exercised
+  with SIPp + netem on an isolated box (west-loadtest) with no DB, no API, no
+  xml_curl, no Kamailio:
+    - one "lab-int" profile on 5080 (A-leg ingress, mirrors the RTP params of
+      conf/sofia/internal.xml) and one "lab-ext" profile on 5090 (B-leg egress,
+      mirrors conf/sofia/external.xml);
+    - dialplan 9196 = answer + echo, 7000 = bridge to the SIPp UAS;
+    - switch.conf.xml and json_cdr.conf.xml are the REPO copies, staged into
+      autoload_configs/ by run_matrix.sh (json_cdr url -> http://127.0.0.1:9/
+      so every CDR lands on disk via log-http-and-disk=true).
+-->
+<document type="freeswitch/xml">
+  <X-PRE-PROCESS cmd="set" data="sounds_dir=/usr/share/freeswitch/sounds"/>
+  <X-PRE-PROCESS cmd="set" data="domain=lab.local"/>
+  <X-PRE-PROCESS cmd="set" data="domain_name=$${domain}"/>
+  <X-PRE-PROCESS cmd="set" data="lab_uas_ip=172.31.77.30"/>
+  <X-PRE-PROCESS cmd="exec-set" data="lab_uas_ip=echo ${LAB_UAS_IP:-172.31.77.30}"/>
+  <!-- the repo json_cdr.conf.xml references these; the lab url does not use them -->
+  <X-PRE-PROCESS cmd="set" data="api_host=127.0.0.1"/>
+  <X-PRE-PROCESS cmd="set" data="api_port=9"/>
+  <X-PRE-PROCESS cmd="set" data="esl_password=ClueCon"/>
+  <X-PRE-PROCESS cmd="exec-set" data="esl_password=echo ${ESL_PASSWORD:-ClueCon}"/>
+
+  <section name="configuration" description="Various Configuration">
+    <X-PRE-PROCESS cmd="include" data="autoload_configs/*.xml"/>
+  </section>
+
+  <section name="dialplan" description="Regex/XML Dialplan">
+    <X-PRE-PROCESS cmd="include" data="dialplan/*.xml"/>
+  </section>
+
+  <section name="directory" description="User Directory">
+    <domain name="$${domain}"/>
+  </section>
+</document>

@@ -135,8 +135,8 @@ function RcfCallActivity() {
         items={[
           <>Recent calls with time, caller, destination, duration, and outcome.</>,
           <><strong style={{ color: C.text }}>ASR%</strong> — answer-seizure ratio, the share of calls that were answered.</>,
-          <><strong style={{ color: C.text }}>MOS</strong> — mean opinion score, a 1–5 voice-quality rating measured per call (4.0+ is excellent).</>,
-          <>A 7-day performance graph plotting MOS and ASR together, so quality dips are easy to spot.</>,
+          <><strong style={{ color: C.text }}>Call quality</strong> — how the call sounded in both directions, graded Great, Good, Fair or Poor from measured packet loss (a perfect G.711 call scores about 4.4 on the 1–5 MOS scale). Calls too short to measure, or with no audio from one side, are shown as “Not rated” or “One-way” instead of a score.</>,
+          <>A 7-day performance graph plotting call quality and ASR together, so quality dips are easy to spot.</>,
           <>Search and filtering by number or date to isolate a single line.</>,
         ]}
       />

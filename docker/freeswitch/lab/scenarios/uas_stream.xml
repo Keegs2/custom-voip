@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Call-quality lab UAS (plan G.3): the "callee". Answers FS's B-leg INVITE
+  (from lab-fs lab-ext:5090) and starts the lab RTP sender towards the FS
+  B-leg RTP address from the SDP offer, so FS measures callee->platform
+  audio (B-in). Waits for BYE.
+
+  Keys (REQUIRED): -key rtpdur <seconds>  -key mode <normal|wrap|dtmf|ssrc|none>
+-->
+<scenario name="RCF quality lab UAS (stream)">
+
+  <recv request="INVITE" crlf="true">
+    <action>
+      <ereg regexp="c=IN IP4 ([0-9.]+)" search_in="body" check_it="true" assign_to="c_line,rip"/>
+      <ereg regexp="m=audio ([0-9]+)" search_in="body" check_it="true" assign_to="m_line,rport"/>
+      <log message="offer [call_id] c=[$c_line] m=[$m_line]"/>
+    </action>
+  </recv>
+
+  <send>
+    <![CDATA[
+      SIP/2.0 180 Ringing
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]LabUas[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:lab@[local_ip]:[local_port];transport=[transport]>
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <send retrans="500">
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]LabUas[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:lab@[local_ip]:[local_port];transport=[transport]>
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=lab 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0 101
+      a=rtpmap:0 PCMU/8000
+      a=rtpmap:101 telephone-event/8000
+      a=fmtp:101 0-16
+      a=ptime:20
+      a=sendrecv
+
+    ]]>
+  </send>
+
+  <recv request="ACK" crlf="true"/>
+
+  <nop>
+    <action>
+      <exec command="sh /lab/scripts/start_rtp.sh uas [call_id] [$rip] [$rport] [rtpdur] [mode]"/>
+    </action>
+  </nop>
+
+  <recv request="BYE"/>
+
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:lab@[local_ip]:[local_port];transport=[transport]>
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <!-- keep the call context briefly for a retransmitted BYE -->
+  <pause milliseconds="2000"/>
+</scenario>

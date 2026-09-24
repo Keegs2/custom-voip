@@ -75,3 +75,18 @@ Tenant/report minutes = **talk time** computed from the timestamps
 ring) and never `billable_ms` (`rate_cdr()` can overwrite it with increments),
 rounded to whole minutes exactly as before (per call ≥1 if answered; totals
 rounded once).
+
+## Quality (migration 50, 2026-09 — `docs/CALL_QUALITY_ACCURACY_PLAN.md` §C)
+
+B rows feed the call-level quality columns via `cdr_refresh_call_quality(call_id,
+anchor)`. Each leg row carries its OWN per-leg quality (`quality_status`,
+`quality_grade`, `mos`, …: A row = caller→platform audio, B row = callee→platform
+audio). The A row additionally carries `call_quality_status` / `call_quality_grade` /
+`call_mos` / `call_quality_leg` = the WORSE direction of the A row and the ANSWERED
+carrier B row (`call_id` = A uuid, `answer_time` set, highest `leg_attempt`); failed
+attempts never count. Both the A ingest and the B ingest run the refresh as their own
+statement after their INSERT committed, so the result is correct whichever CDR
+arrives first (and idempotent on re-ingest). No B row (on-net, trunk/API terminals,
+`CDR_B_LEG_ROWS` off) → call quality = A quality. `call_*` are never set on B rows.
+B rows may use the pre-50 (60-param) INSERT tier (they keep `leg`); never below it.
+

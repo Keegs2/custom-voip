@@ -6,8 +6,18 @@
  * Layout (concise but deep — grouped, labeled, no walls of raw key/values):
  *   1. Header — From → To, direction/product/status pills, UUID (mono, small)
  *      with a copy button.
- *   2. Hero quality tiles — MOS / R-Factor / Quality % / Loss % / Jitter,
- *      status-colored.
+ *   2. Call quality (docs/CALL_QUALITY_ACCURACY_PLAN.md §C.3 / §E.4) — a
+ *      header "Call quality: <grade> (worse direction)" from
+ *      `call_quality_grade`, then TWO columns from `quality_by_direction`:
+ *      "Caller's audio (what the callee heard)" = caller_audio (A row) and
+ *      "Callee's audio (what the caller heard)" = callee_audio (answered
+ *      carrier B row, null when none). Each shows grade pill, MOS, R, true
+ *      loss % (+ lost packets), RFC 3550 jitter avg/max — or, when the
+ *      direction wasn't graded, the reason (plain language for customers,
+ *      technical wording for staff). Staff also get per-direction
+ *      diagnostics (source, FS MOS, expected/reordered packets, SSRC
+ *      changes, burst ratio). Rows without `quality_by_direction` (carrier B
+ *      rows, an API that predates it) fall back to the row's own fields.
  *   3. Call Info — times, duration vs billable, zone/SBC, carrier, codecs,
  *      hangup cause + SIP code, SIP identities. STAFF also get the CDR A/B
  *      leg-split identity: Leg (A / B / legacy), Call ID (copyable) and, on
@@ -16,8 +26,12 @@
  *      that sets the list to Rows=All legs + call_id=<call_id ?? uuid>.
  *   4. STIR / SHAKEN — the shared <AttestationChain/> (handles its own
  *      404-for-old-rows case).
- *   5. RTP Detail — collapsible (default closed): packet/byte counters both
- *      directions, jitter floor/peak/avg, burst/loss rates, flaw total.
+ *   5. RTP Detail — STAFF ONLY, collapsible (default closed): packet/byte
+ *      counters both directions, and a "FreeSWITCH raw" block with FS's own
+ *      values kept for traceability (do_mos MOS, quality %, legacy peak
+ *      jitter std, autoflush/CNG skip counter, flaws, loss/burst rates).
+ *      Those raw values are NOT the quality score and are never shown to
+ *      customers.
  *   6. Billing — STAFF ONLY: rate, cost, margin (+ the admin Rate CDR write).
  *
  * Data: seeds from the table row for instant paint, then fetches the full
@@ -37,11 +51,19 @@ import { fmt } from '../../utils/format';
 import { carrierLabel, EMPTY } from './callsFormat';
 import {
   MONO, INK_FAINT,
-  mosColor, rFactorColor, packetLossColor, jitterColor, qualityPctColor,
+  gradeColor, gradeLabel, mosColor, rFactorColor, packetLossColor, jitterColor,
+  qualityStatusReason,
   fmtDurationShort, fmtBytes,
 } from './quality';
+import type { ReasonAudience } from './quality';
+import { GradePill } from './CallsTable';
 import { fmtMinutes, hasExactDuration } from '../../utils/callDuration';
-import type { Cdr } from '../../types/cdr';
+import type { Cdr, LegQuality } from '../../types/cdr';
+
+// Dev-only grade-definition self-test (dead-code-eliminated in production).
+if (import.meta.env.DEV) {
+  void import('./quality.assert');
+}
 
 /** Minute-precision timestamp — tenant rows are floored to the minute. */
 function fmtDateMinute(iso: string | null | undefined): string {
@@ -107,19 +129,130 @@ function InfoItem({ label, value, mono, wide, accent }: InfoItemProps) {
   );
 }
 
-interface HeroTileProps {
-  label: string;
-  value: string;
-  sub?: string;
-  color: string;
+/* ── Quality by direction ────────────────────────────────────────────── */
+
+/** Build a direction block from a row's own columns (B rows / older API). */
+function rowLegQuality(d: Cdr): LegQuality {
+  return {
+    quality_status: d.quality_status ?? null,
+    quality_grade: d.quality_grade ?? null,
+    mos: d.mos ?? null,
+    r_factor: d.r_factor ?? null,
+    packet_loss_pct: d.packet_loss_pct ?? null,
+    packet_loss_count: d.packet_loss_count ?? null,
+    jitter_avg_ms: d.jitter_avg_ms ?? null,
+    jitter_max_ms: d.jitter_max_ms ?? null,
+    burst_ratio: d.burst_ratio ?? null,
+    inbound_media_ratio: d.inbound_media_ratio ?? null,
+    uuid: d.uuid,
+    quality_source: d.quality_source,
+    packets_expected: d.packets_expected,
+    packets_reordered: d.packets_reordered,
+    ssrc_changes: d.ssrc_changes,
+    fs_mos: d.fs_mos,
+  };
 }
 
-function HeroTile({ label, value, sub, color }: HeroTileProps) {
+function fmtNum(v: number | null | undefined, dp: number, unit = ''): string | null {
+  return v != null ? `${v.toFixed(dp)}${unit}` : null;
+}
+
+interface DirectionPanelProps {
+  title: string;
+  subtitle: string;
+  /** null = this direction has no row (e.g. no carrier leg). */
+  leg: LegQuality | null;
+  /** Shown when `leg` is null. */
+  missingNote: string;
+  isStaff: boolean;
+}
+
+function DirectionPanel({ title, subtitle, leg, missingNote, isStaff }: DirectionPanelProps) {
+  const audience: ReasonAudience = isStaff ? 'staff' : 'customer';
+  const rated = leg?.quality_status === 'rated';
+  const reason = leg ? qualityStatusReason(leg.quality_status, audience) : null;
+
   return (
-    <div className="dl-tile" style={{ flex: '1 1 110px', padding: '12px 14px' }}>
-      <div className="dl-tile-label">{label}</div>
-      <div className="dl-tile-value" style={{ color, fontSize: '1.4rem' }}>{value}</div>
-      {sub && <div className="dl-tile-hint">{sub}</div>}
+    <div className="dl-tile" style={{ flex: '1 1 280px', padding: '12px 14px', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="dl-tile-label">{title}</div>
+          <div className="dl-tile-hint" style={{ marginTop: 2 }}>{subtitle}</div>
+        </div>
+        {leg && (
+          <GradePill grade={leg.quality_grade} status={leg.quality_status} isStaff={isStaff} />
+        )}
+      </div>
+
+      {!leg && (
+        <p style={{ margin: '10px 0 0', fontSize: '0.78rem', color: 'var(--rcf-ink-dim)' }}>{missingNote}</p>
+      )}
+
+      {leg && reason && (
+        <p
+          role="note"
+          style={{
+            margin: '10px 0 0',
+            fontSize: '0.78rem',
+            fontWeight: leg.quality_status === 'no_rtp' ? 700 : 500,
+            color: leg.quality_status === 'no_rtp' ? gradeColor('poor') : 'var(--rcf-ink-dim)',
+          }}
+        >
+          {reason}
+        </p>
+      )}
+
+      {leg && rated && (
+        <div className="dlx-info-grid" style={{ marginTop: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+          <InfoItem label="MOS" value={fmtNum(leg.mos, 2)} mono accent={mosColor(leg.mos)} />
+          <InfoItem label="R-Factor" value={fmtNum(leg.r_factor, 1)} mono accent={rFactorColor(leg.r_factor)} />
+          <InfoItem
+            label="Packet loss"
+            value={
+              leg.packet_loss_pct != null
+                ? `${leg.packet_loss_pct.toFixed(2)}%${leg.packet_loss_count != null ? ` · ${leg.packet_loss_count.toLocaleString()} lost` : ''}`
+                : null
+            }
+            mono
+            accent={packetLossColor(leg.packet_loss_pct)}
+          />
+          <InfoItem
+            label="Jitter avg / max"
+            value={
+              leg.jitter_avg_ms != null || leg.jitter_max_ms != null
+                ? `${leg.jitter_avg_ms?.toFixed(1) ?? '—'} / ${leg.jitter_max_ms?.toFixed(1) ?? '—'} ms`
+                : 'not measured'
+            }
+            mono
+            accent={leg.jitter_avg_ms != null ? jitterColor(leg.jitter_avg_ms) : undefined}
+          />
+        </div>
+      )}
+
+      {leg && isStaff && (
+        <div
+          className="dlx-info-grid"
+          style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--rcf-line)', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}
+        >
+          <InfoItem label="Status" value={leg.quality_status ?? 'NULL (pre-backfill)'} mono />
+          <InfoItem label="Source" value={leg.quality_source ?? null} mono />
+          <InfoItem label="Inbound media ratio" value={fmtNum(leg.inbound_media_ratio, 3)} mono />
+          <InfoItem label="Burst ratio" value={fmtNum(leg.burst_ratio, 3)} mono />
+          <InfoItem label="Packets expected" value={leg.packets_expected?.toLocaleString() ?? null} mono />
+          <InfoItem label="Packets reordered" value={leg.packets_reordered?.toLocaleString() ?? null} mono />
+          <InfoItem label="SSRC changes" value={leg.ssrc_changes?.toLocaleString() ?? null} mono />
+          <InfoItem label="FS MOS (raw)" value={fmtNum(leg.fs_mos, 2)} mono />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RawGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="dlx4-subhead" style={{ color: INK_FAINT }}>{title}</p>
+      <div className="dlx-info-grid" style={{ gridTemplateColumns: '1fr' }}>{children}</div>
     </div>
   );
 }
@@ -189,13 +322,23 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
   // so the two can never drift. EMPTY folds to InfoItem's own em dash.
   const carrier = carrierLabel(d);
 
-  const hasQuality =
-    d.mos != null || d.r_factor != null || d.quality_pct != null ||
-    d.packet_loss_pct != null || d.jitter_avg_ms != null;
+  // Quality by direction. A rows from the current API carry
+  // `quality_by_direction`; B rows (null) and older payloads (undefined)
+  // fall back to the row's own leg columns in the matching column.
+  const isBRow = d.leg === 'B';
+  const byDir = d.quality_by_direction;
+  const callerAudio: LegQuality | null = byDir ? byDir.caller_audio : isBRow ? null : rowLegQuality(d);
+  const calleeAudio: LegQuality | null = byDir ? byDir.callee_audio : isBRow ? rowLegQuality(d) : null;
+  const audience: ReasonAudience = isStaff ? 'staff' : 'customer';
+  const callGradeReason = qualityStatusReason(d.call_quality_status, audience);
+
+  // Staff-only RTP / FreeSWITCH-raw section.
   const hasRtp =
-    d.rtp_audio_in_raw_bytes != null || d.rtp_audio_out_raw_bytes != null ||
-    d.rtp_audio_in_packet_count != null || d.rtp_audio_out_packet_count != null ||
-    d.jitter_avg_ms != null || d.flaw_total != null;
+    isStaff && (
+      d.rtp_audio_in_raw_bytes != null || d.rtp_audio_out_raw_bytes != null ||
+      d.rtp_audio_in_packet_count != null || d.rtp_audio_out_packet_count != null ||
+      d.flaw_total != null || d.fs_mos != null || d.rtp_audio_in_skip_packet_count != null
+    );
 
   async function copyText(value: string, what: string) {
     try {
@@ -278,38 +421,57 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
 
         {/* ── Body ───────────────────────────────────────────────── */}
         <div className="dlx4-modal-body">
-          {/* Hero quality tiles */}
-          {hasQuality && (
-            <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-              <HeroTile
-                label="MOS"
-                value={d.mos != null ? d.mos.toFixed(2) : '—'}
-                sub={d.mos != null ? (d.mos >= 4.0 ? 'Excellent' : d.mos >= 3.5 ? 'Good' : 'Poor') : undefined}
-                color={mosColor(d.mos)}
+          {/* Call quality — worse direction header + both directions */}
+          <section aria-label="Call quality" style={{ marginBottom: 20 }}>
+            {!isBRow && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                <span className="dlx4-subhead" style={{ margin: 0 }}>
+                  Call quality:{' '}
+                  <span style={{ color: gradeColor(d.call_quality_grade) }}>
+                    {d.call_quality_grade
+                      ? gradeLabel(d.call_quality_grade, d.call_quality_status)
+                      : 'Not graded'}
+                  </span>
+                  {d.call_quality_grade && (
+                    <span style={{ color: 'var(--rcf-ink-dim)', fontWeight: 500 }}> (worse direction)</span>
+                  )}
+                </span>
+                {d.call_mos != null && (
+                  <span className="dlx4-mono" style={{ fontSize: '0.78rem', color: mosColor(d.call_mos) }}>
+                    MOS {d.call_mos.toFixed(2)}
+                  </span>
+                )}
+                {!d.call_quality_grade && callGradeReason && (
+                  <span style={{ fontSize: '0.78rem', color: 'var(--rcf-ink-dim)' }}>{callGradeReason}</span>
+                )}
+                {isStaff && d.call_quality_leg && (
+                  <span className="dl-tag dl-tag-slate" title="Which direction set the call grade">
+                    set by {d.call_quality_leg === 'A' ? 'caller audio (A)' : 'callee audio (B)'}
+                  </span>
+                )}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <DirectionPanel
+                title="Caller’s audio"
+                subtitle="what the callee heard"
+                leg={callerAudio}
+                missingNote={isBRow ? 'Open the call row to see the caller’s audio.' : 'Not measured for this call.'}
+                isStaff={isStaff}
               />
-              <HeroTile
-                label="R-Factor"
-                value={d.r_factor != null ? d.r_factor.toFixed(1) : '—'}
-                sub={d.r_factor != null ? (d.r_factor >= 80 ? 'Good' : d.r_factor >= 60 ? 'Fair' : 'Poor') : undefined}
-                color={rFactorColor(d.r_factor)}
-              />
-              <HeroTile
-                label="Quality"
-                value={d.quality_pct != null ? `${d.quality_pct.toFixed(1)}%` : '—'}
-                color={qualityPctColor(d.quality_pct)}
-              />
-              <HeroTile
-                label="Packet Loss"
-                value={d.packet_loss_pct != null ? `${d.packet_loss_pct.toFixed(2)}%` : '—'}
-                color={packetLossColor(d.packet_loss_pct)}
-              />
-              <HeroTile
-                label="Jitter (est)"
-                value={d.jitter_avg_ms != null ? `${d.jitter_avg_ms.toFixed(1)}ms` : '—'}
-                color={jitterColor(d.jitter_avg_ms)}
+              <DirectionPanel
+                title="Callee’s audio"
+                subtitle="what the caller heard"
+                leg={calleeAudio}
+                missingNote={
+                  isStaff
+                    ? 'No answered carrier leg (on-net, trunk/API, or B row not ingested yet).'
+                    : 'Not measured separately for this call.'
+                }
+                isStaff={isStaff}
               />
             </div>
-          )}
+          </section>
 
           {/* Call Info */}
           <SectionTitle>Call Info</SectionTitle>
@@ -442,7 +604,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
                 }}
               >
                 {/* span (not SectionTitle's <p>) — buttons allow phrasing content only */}
-                <span className="dlx4-subhead" style={{ display: 'block', margin: 0 }}>RTP Detail</span>
+                <span className="dlx4-subhead" style={{ display: 'block', margin: 0 }}>RTP Detail &amp; FreeSWITCH raw</span>
                 <span
                   aria-hidden="true"
                   style={{
@@ -459,59 +621,45 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
 
               {rtpOpen && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 18, marginTop: 12 }}>
-                  {/* Packet/byte volume counters are staff-only: they scale
-                      1:1 with talk time (an exact-duration proxy), so the
-                      API withholds them from tenants. */}
-                  {isStaff && (
-                  <>
-                  <div>
-                    <p className="dlx4-subhead" style={{ color: INK_FAINT }}>Audio In (from carrier)</p>
-                    <div className="dlx-info-grid" style={{ gridTemplateColumns: '1fr' }}>
-                      <InfoItem label="Packets" value={d.rtp_audio_in_packet_count?.toLocaleString() ?? null} mono />
-                      <InfoItem label="Raw / Media Bytes" value={`${fmtBytes(d.rtp_audio_in_raw_bytes)} / ${fmtBytes(d.rtp_audio_in_media_bytes)}`} mono />
-                      {d.packet_loss_count != null && (
-                        <InfoItem label="Skipped (autoflush)" value={d.packet_loss_count.toLocaleString()} mono />
-                      )}
-                      {d.packet_total_count != null && (
-                        <InfoItem label="Packets Total" value={d.packet_total_count.toLocaleString()} mono />
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <p className="dlx4-subhead" style={{ color: INK_FAINT }}>Audio Out (to carrier)</p>
-                    <div className="dlx-info-grid" style={{ gridTemplateColumns: '1fr' }}>
-                      <InfoItem label="Packets" value={d.rtp_audio_out_packet_count?.toLocaleString() ?? null} mono />
-                      <InfoItem label="Raw / Media Bytes" value={`${fmtBytes(d.rtp_audio_out_raw_bytes)} / ${fmtBytes(d.rtp_audio_out_media_bytes)}`} mono />
-                    </div>
-                  </div>
-                  </>
-                  )}
-                  <div>
-                    <p className="dlx4-subhead" style={{ color: INK_FAINT }}>Jitter &amp; Flaws</p>
-                    <div className="dlx-info-grid" style={{ gridTemplateColumns: '1fr' }}>
-                      <InfoItem
-                        label="Floor / Peak / Avg"
-                        value={
-                          d.jitter_min_ms != null || d.jitter_max_ms != null || d.jitter_avg_ms != null
-                            ? `${d.jitter_min_ms?.toFixed(2) ?? '—'} / ${d.jitter_max_ms?.toFixed(2) ?? '—'} / ${d.jitter_avg_ms?.toFixed(2) ?? '—'} ms`
-                            : null
-                        }
-                        mono
-                      />
-                      {d.rtp_audio_in_mean_interval != null && (
-                        <InfoItem label="Mean Packet Interval" value={`${d.rtp_audio_in_mean_interval.toFixed(2)}ms`} mono />
-                      )}
-                      {d.rtp_audio_in_jitter_burst_rate != null && (
-                        <InfoItem label="Jitter Burst Rate" value={d.rtp_audio_in_jitter_burst_rate.toFixed(4)} mono />
-                      )}
-                      {d.rtp_audio_in_jitter_loss_rate != null && (
-                        <InfoItem label="Jitter Loss Rate" value={d.rtp_audio_in_jitter_loss_rate.toFixed(4)} mono />
-                      )}
-                      {d.flaw_total != null && (
-                        <InfoItem label="Flaw Total" value={d.flaw_total.toLocaleString()} mono />
-                      )}
-                    </div>
-                  </div>
+                  {/* Packet/byte volume counters scale 1:1 with talk time (an
+                      exact-duration proxy) — this whole section is staff-only. */}
+                  <RawGroup title="Audio In (from carrier)">
+                    <InfoItem label="Packets" value={d.rtp_audio_in_packet_count?.toLocaleString() ?? null} mono />
+                    <InfoItem label="Raw / Media Bytes" value={`${fmtBytes(d.rtp_audio_in_raw_bytes)} / ${fmtBytes(d.rtp_audio_in_media_bytes)}`} mono />
+                    {d.packet_total_count != null && (
+                      <InfoItem label="Packets Total" value={d.packet_total_count.toLocaleString()} mono />
+                    )}
+                    {d.loss_bursts != null && (
+                      <InfoItem label="Loss bursts" value={d.loss_bursts.toLocaleString()} mono />
+                    )}
+                  </RawGroup>
+                  <RawGroup title="Audio Out (to carrier)">
+                    <InfoItem label="Packets" value={d.rtp_audio_out_packet_count?.toLocaleString() ?? null} mono />
+                    <InfoItem label="Raw / Media Bytes" value={`${fmtBytes(d.rtp_audio_out_raw_bytes)} / ${fmtBytes(d.rtp_audio_out_media_bytes)}`} mono />
+                  </RawGroup>
+                  {/* FS's own values — traceability only, NOT the quality score. */}
+                  <RawGroup title="FreeSWITCH raw (this row)">
+                    <InfoItem label="FS MOS (do_mos)" value={fmtNum(d.fs_mos, 2)} mono />
+                    <InfoItem label="FS quality %" value={fmtNum(d.fs_quality_pct, 1, '%')} mono />
+                    <InfoItem label="FS legacy peak jitter std (ms)" value={fmtNum(d.fs_jitter_max_std_ms, 2)} mono />
+                    <InfoItem
+                      label="Skipped (autoflush/CNG)"
+                      value={d.rtp_audio_in_skip_packet_count?.toLocaleString() ?? null}
+                      mono
+                    />
+                    {d.flaw_total != null && (
+                      <InfoItem label="Flaw Total" value={d.flaw_total.toLocaleString()} mono />
+                    )}
+                    {d.rtp_audio_in_mean_interval != null && (
+                      <InfoItem label="Mean Packet Interval" value={`${d.rtp_audio_in_mean_interval.toFixed(2)}ms`} mono />
+                    )}
+                    {d.rtp_audio_in_jitter_burst_rate != null && (
+                      <InfoItem label="Jitter Burst Rate" value={d.rtp_audio_in_jitter_burst_rate.toFixed(4)} mono />
+                    )}
+                    {d.rtp_audio_in_jitter_loss_rate != null && (
+                      <InfoItem label="Jitter Loss Rate" value={d.rtp_audio_in_jitter_loss_rate.toFixed(4)} mono />
+                    )}
+                  </RawGroup>
                 </div>
               )}
             </div>

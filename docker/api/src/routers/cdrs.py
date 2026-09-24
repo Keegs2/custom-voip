@@ -7,6 +7,7 @@ from auth.dependencies import get_support_read_filter, require_admin
 import config
 from services import stir_outcome as stir_oc
 from services import tenant_redaction as tr
+from services import call_quality as cq
 import asyncpg
 import logging
 import math
@@ -73,78 +74,48 @@ def _variance_to_jitter_ms(variance: float | None) -> float | None:
 
     FreeSWITCH's rtp_audio_in_jitter_min_variance / _max_variance are the
     population VARIANCE of packet inter-arrival diffs in ms^2 (switch_rtp.c
-    check_jitter()), NOT milliseconds.  sqrt() yields the honest running
-    jitter in real ms.  None / NaN / negative -> None.
+    check_jitter()), NOT milliseconds. Since migration 50 this is only the
+    traceability column fs_jitter_max_std_ms (computed in
+    services/call_quality.py); it is NOT jitter_avg/max_ms any more.
+    None / NaN / negative -> None.
     """
     if variance is None or variance != variance or variance < 0:
         return None
     return round(min(math.sqrt(variance), _NUMERIC_8_3_MAX), 3)
 
 
-def _extract_quality_metrics(variables: dict) -> dict:
-    """Extract + sanitize the RTP quality/byte-counter metrics for a CDR.
+def _extract_quality_metrics(variables: dict, *, answered: bool,
+                             billable_ms: int) -> dict:
+    """Extract + sanitize the RTP quality/byte-counter metrics for ONE leg.
 
-    Pure function of the FreeSWITCH variables dict.  Every value is parsed
-    defensively and clamped to its column bounds, so the resulting dict can
-    always be bound to the cdrs INSERT without overflow.
+    Pure function of the FreeSWITCH variables dict plus the leg's answered
+    state and billable ms (the rating rule needs both — the caller computes
+    them first). Returns every cdrs quality column the INSERT binds:
 
-    Jitter: jitter_min_ms / jitter_max_ms = sqrt of FS's running min/max
-    inter-arrival variance -- the calmest ("floor") and worst ("peak")
-    running jitter in real ms.  FS never exports a mean-based per-call
-    jitter, so jitter_avg_ms = sqrt((min_var + max_var) / 2), the RMS
-    mid-band of the two extremes -- an honest single-number ESTIMATE, not a
-    true mean.
+      * the raw FS counters, written UNCHANGED whenever present
+        (flaw_total, packet_total_count, byte/packet counts, jitter
+        burst/loss rate, mean interval);
+      * every docs/CALL_QUALITY_ACCURACY_PLAN.md §B.3 column computed by
+        services/call_quality.assess_leg(): honest E-model mos / r_factor,
+        true loss %, lost packets, RFC 3550 jitter (patched FS only; NULL on
+        legacy images — never fabricated), quality_status / grade / source,
+        the fs_* traceability copies, the patched sequence counters,
+        burst_ratio, inbound_media_ratio. quality_pct and jitter_min_ms are
+        deprecated and always None; the autoflush/CNG skip counter lands in
+        rtp_audio_in_skip_packet_count, NEVER in packet_loss_count.
+
+    Every value is parsed defensively and clamped to its column bounds, so
+    the dict can always be bound to the INSERT without overflow. A caller
+    that catches an exception here must use cq.empty_assessment() (status
+    no_data, never NULL).
     """
-    mos = _clamped_float(variables.get("rtp_audio_in_mos"), 0.0, 9.99, 2)
-    quality_pct = _clamped_float(
-        variables.get("rtp_audio_in_quality_percentage"), 0.0, 100.0, 2)
-
-    jitter_min_var = _safe_float(variables.get("rtp_audio_in_jitter_min_variance"))
-    jitter_max_var = _safe_float(variables.get("rtp_audio_in_jitter_max_variance"))
-    jitter_min_ms = _variance_to_jitter_ms(jitter_min_var)
-    jitter_max_ms = _variance_to_jitter_ms(jitter_max_var)
-    if jitter_min_var is not None and jitter_max_var is not None:
-        jitter_avg_ms = _variance_to_jitter_ms((jitter_min_var + jitter_max_var) / 2)
-    elif jitter_max_ms is not None:
-        jitter_avg_ms = jitter_max_ms
-    else:
-        jitter_avg_ms = jitter_min_ms  # None if both are None
-
-    # rtp_audio_in_mean_interval is the mean packet interval (always ~ptime,
-    # e.g. 20ms) -- kept as its own column, it is NOT jitter.
-    rtp_mean_interval = _clamped_float(
-        variables.get("rtp_audio_in_mean_interval"), 0.0, _NUMERIC_8_3_MAX)
-
-    # packet_loss_count keeps FS's skip_packet_count: autoflush DISCARDS
-    # (rtp-autoflush-during-bridge), not network loss.
-    packet_loss_count = _clamped_int(variables.get("rtp_audio_in_skip_packet_count"))
-    packet_total_count = _clamped_int(variables.get("rtp_audio_in_media_packet_count"))
-    rtp_audio_in_packet_count = _clamped_int(variables.get("rtp_audio_in_packet_count"))
-    rtp_audio_out_packet_count = _clamped_int(variables.get("rtp_audio_out_packet_count"))
-    flaw_total = _clamped_int(variables.get("rtp_audio_in_flaw_total"))
-
-    # packet_loss_pct: the real NETWORK loss indicator is flaw_total
-    # (sequence-gap based), not the autoflush skip count that used to be
-    # (mis)used here.
-    packet_loss_pct = None
-    total_in = rtp_audio_in_packet_count or packet_total_count
-    if flaw_total is not None and total_in:
-        packet_loss_pct = _clamped_float(flaw_total / total_in * 100.0, 0.0, 100.0, 2)
-
-    r_factor = _clamped_float(_compute_r_factor(mos), 0.0, 999.99, 2)
-
-    return {
-        "mos": mos,
-        "quality_pct": quality_pct,
-        "jitter_min_ms": jitter_min_ms,
-        "jitter_max_ms": jitter_max_ms,
-        "jitter_avg_ms": jitter_avg_ms,
-        "rtp_mean_interval": rtp_mean_interval,
-        "packet_loss_count": packet_loss_count,
-        "packet_total_count": packet_total_count,
-        "packet_loss_pct": packet_loss_pct,
-        "flaw_total": flaw_total,
-        "r_factor": r_factor,
+    out = {
+        # rtp_audio_in_mean_interval is the mean packet interval (~ptime) --
+        # its own column, NOT jitter.
+        "rtp_mean_interval": _clamped_float(
+            variables.get("rtp_audio_in_mean_interval"), 0.0, _NUMERIC_8_3_MAX),
+        "packet_total_count": _clamped_int(variables.get("rtp_audio_in_media_packet_count")),
+        "flaw_total": _clamped_int(variables.get("rtp_audio_in_flaw_total")),
         "rtp_audio_in_raw_bytes": _clamped_int(
             variables.get("rtp_audio_in_raw_bytes"), 0, _INT64_MAX),
         "rtp_audio_in_media_bytes": _clamped_int(
@@ -153,32 +124,21 @@ def _extract_quality_metrics(variables: dict) -> dict:
             variables.get("rtp_audio_out_raw_bytes"), 0, _INT64_MAX),
         "rtp_audio_out_media_bytes": _clamped_int(
             variables.get("rtp_audio_out_media_bytes"), 0, _INT64_MAX),
-        "rtp_audio_in_packet_count": rtp_audio_in_packet_count,
-        "rtp_audio_out_packet_count": rtp_audio_out_packet_count,
+        "rtp_audio_in_packet_count": _clamped_int(variables.get("rtp_audio_in_packet_count")),
+        "rtp_audio_out_packet_count": _clamped_int(variables.get("rtp_audio_out_packet_count")),
         "rtp_jitter_burst_rate": _clamped_float(
             variables.get("rtp_audio_in_jitter_burst_rate"), 0.0, _NUMERIC_8_4_MAX, 4),
         "rtp_jitter_loss_rate": _clamped_float(
             variables.get("rtp_audio_in_jitter_loss_rate"), 0.0, _NUMERIC_8_4_MAX, 4),
     }
+    out.update(cq.assess_leg(variables, answered=answered, billable_ms=billable_ms))
+    return out
 
 
-def _compute_r_factor(mos: float | None) -> float | None:
-    """Compute R-factor from MOS using piecewise linear approximation.
-
-    - MOS >= 4.5 -> R = 93
-    - MOS >= 4.0 -> R = 80 + (MOS - 4.0) * 26
-    - MOS >= 3.0 -> R = 60 + (MOS - 3.0) * 20
-    - MOS <  3.0 -> R = MOS * 20
-    """
-    if mos is None:
-        return None
-    if mos >= 4.5:
-        return 93.0
-    if mos >= 4.0:
-        return 80.0 + (mos - 4.0) * 26.0
-    if mos >= 3.0:
-        return 60.0 + (mos - 3.0) * 20.0
-    return mos * 20.0
+def _empty_quality_metrics(variables: dict) -> dict:
+    """The contract's extraction-failure shape: the whole quality set NULL,
+    quality_status 'no_data' (never NULL), quality_source still set."""
+    return cq.empty_assessment(variables)
 
 
 def _epoch_to_timestamp(epoch_str):
@@ -636,30 +596,51 @@ async def _store_call_attestation(call_uuid: str, customer_id: int, variables: d
 # explicit ::type cast so asyncpg never needs to infer PostgreSQL types
 # (AmbiguousParameterError when values are None; PgBouncer transaction mode).
 #
-# DEPLOY-ORDER RESILIENCE — THREE TIERS, each a STRICT TAIL TRUNCATION of the
+# DEPLOY-ORDER RESILIENCE — FOUR TIERS, each a STRICT TAIL TRUNCATION of the
 # one before (nothing is ever renumbered; $1..$55 bind exactly as they always
 # have):
-#   full    (60 params) ... stir_outcome, stir_eff_actual ($56/$57, migration
+#   full    (73 params) ... stir_outcome, stir_eff_actual ($56/$57, migration
 #                           47), leg, call_id, leg_attempt ($58/$59/$60,
-#                           migration 48)
-#   pre-48  (57 params) — the 48 tail omitted
+#                           migration 48), the quality set $61..$73
+#                           (migration 50: quality_status ... inbound_media_ratio)
+#   pre-50  (60 params) — the 50 tail omitted
+#   pre-48  (57 params) — the 48 tail omitted too
 #   pre-47  (55 params) — the 47 tail omitted too
 # If the API build reaches production before a migration is applied, the
 # full INSERT raises UndefinedColumnError; `_execute_cdr_insert` then retries
 # with the matching shorter statement so the A-leg (billable) row still lands
 # (only the missing columns are lost) and logs at ERROR, rate-limited. The
 # startup guard (db/schema_check.py) and GET /health/detailed name the
-# remedy. B-leg rows NEVER fall back: a B row without `leg` would be
-# indistinguishable from a call row and double-count — it is dropped instead.
+# remedy. B-leg rows may use the pre-50 tier (they still carry `leg`) but
+# NEVER fall below it: a B row without `leg` would be indistinguishable from a
+# call row and double-count — it is dropped instead.
 # ---------------------------------------------------------------------------
-def _cdr_insert_sql(with_stir_outcome: bool, with_call_legs: bool = False) -> str:
+#: Migration-50 INSERT tail ($61..$73), in bind order (plan §B.5).
+_QUALITY_COLUMNS = (
+    "quality_status", "quality_grade", "quality_source",
+    "fs_mos", "fs_quality_pct", "fs_jitter_max_std_ms",
+    "rtp_audio_in_skip_packet_count",
+    "packets_expected", "loss_bursts", "packets_reordered", "ssrc_changes",
+    "burst_ratio", "inbound_media_ratio",
+)
+
+
+def _cdr_insert_sql(with_stir_outcome: bool, with_call_legs: bool = False,
+                    with_quality: bool = False) -> str:
     if with_call_legs and not with_stir_outcome:
         raise ValueError("tiers are strict tail truncations: 48 requires 47")
+    if with_quality and not with_call_legs:
+        raise ValueError("tiers are strict tail truncations: 50 requires 48")
     stir_cols = ",\n                stir_outcome, stir_eff_actual" if with_stir_outcome else ""
     stir_vals = ",\n                $56::text,    $57::text" if with_stir_outcome else ""
     leg_cols = ",\n                leg, call_id, leg_attempt" if with_call_legs else ""
     leg_vals = (",\n                $58::varchar, $59::varchar, $60::smallint"
                 if with_call_legs else "")
+    q_cols = (",\n                " + ", ".join(_QUALITY_COLUMNS)) if with_quality else ""
+    q_vals = (",\n                $61::varchar, $62::varchar, $63::varchar,"
+              " $64::numeric, $65::numeric, $66::numeric, $67::int,"
+              " $68::int, $69::int, $70::int, $71::smallint,"
+              " $72::numeric, $73::numeric") if with_quality else ""
     return f"""
             INSERT INTO cdrs (
                 uuid, customer_id, product_type, trunk_id, direction,
@@ -683,7 +664,7 @@ def _cdr_insert_sql(with_stir_outcome: bool, with_call_legs: bool = False) -> st
                 sip_user_agent, network_addr, bridge_uuid,
                 sbc_id,
                 origin_customer_id, terminating_customer_id, on_net, on_net_hops,
-                inbound_carrier, inbound_carrier_pop{stir_cols}{leg_cols}
+                inbound_carrier, inbound_carrier_pop{stir_cols}{leg_cols}{q_cols}
             )
             SELECT
                 $1::varchar,  $2::int,       $3::varchar,  $4::int,       $5::varchar,
@@ -707,17 +688,19 @@ def _cdr_insert_sql(with_stir_outcome: bool, with_call_legs: bool = False) -> st
                 $46::varchar, $47::varchar, $48::varchar,
                 $49::varchar,
                 $50::int,     $51::int,      $52::bool,     $53::smallint,
-                $54::varchar, $55::varchar{stir_vals}{leg_vals}
+                $54::varchar, $55::varchar{stir_vals}{leg_vals}{q_vals}
             WHERE NOT EXISTS (
                 SELECT 1 FROM cdrs WHERE uuid = $1::varchar
             )
             """
 
 
-_CDR_INSERT_SQL = _cdr_insert_sql(with_stir_outcome=True, with_call_legs=True)  # $1..$60
+_CDR_INSERT_SQL = _cdr_insert_sql(True, True, True)                             # $1..$73
+_CDR_INSERT_SQL_PRE50 = _cdr_insert_sql(with_stir_outcome=True, with_call_legs=True)  # $1..$60
 _CDR_INSERT_SQL_PRE48 = _cdr_insert_sql(with_stir_outcome=True)                 # $1..$57
 _CDR_INSERT_SQL_PRE47 = _cdr_insert_sql(with_stir_outcome=False)                # $1..$55
-_CDR_INSERT_PARAM_COUNT = 60
+_CDR_INSERT_PARAM_COUNT = 73
+_CDR_INSERT_PRE50_PARAM_COUNT = 60
 _CDR_INSERT_PRE48_PARAM_COUNT = 57
 _CDR_INSERT_PRE47_PARAM_COUNT = 55
 _STIR_OUTCOME_COLUMNS = ("stir_outcome", "stir_eff_actual")
@@ -731,6 +714,8 @@ _pre47_last_logged_mono = 0.0
 _pre47_fallback_count = 0
 _pre48_last_logged_mono = 0.0
 _pre48_fallback_count = 0
+_pre50_last_logged_mono = 0.0
+_pre50_fallback_count = 0
 
 
 def _is_missing_stir_outcome_column(exc: BaseException) -> bool:
@@ -746,6 +731,13 @@ def _is_missing_call_leg_column(exc: BaseException) -> bool:
     `leg_attempt` and any future column that merely contains the letters."""
     msg = str(exc)
     return any(f'"{col}"' in msg for col in _CALL_LEG_COLUMNS)
+
+
+def _is_missing_quality_column(exc: BaseException) -> bool:
+    """True iff the UndefinedColumnError names a migration-50 INSERT column
+    (quoted form, like the 48 detector)."""
+    msg = str(exc)
+    return any(f'"{col}"' in msg for col in _QUALITY_COLUMNS)
 
 
 def _note_pre47_fallback(call_uuid: str, exc: BaseException) -> None:
@@ -790,38 +782,119 @@ def _note_pre48_fallback(call_uuid: str, exc: BaseException) -> None:
                      call_uuid, _pre48_fallback_count)
 
 
+def _note_pre50_fallback(call_uuid: str, exc: BaseException) -> None:
+    global _pre50_last_logged_mono, _pre50_fallback_count
+    _pre50_fallback_count += 1
+    now = time.monotonic()
+    if now - _pre50_last_logged_mono >= _PRE47_LOG_INTERVAL_SEC:
+        _pre50_last_logged_mono = now
+        logger.error(
+            "CDR ingest: cdrs is missing the migration-50 quality columns (%s) — "
+            "inserting uuid=%s WITHOUT quality_status/quality_grade/quality_source/"
+            "fs_*/sequence counters (%d fallback(s) so far in this worker). The API "
+            "build is ahead of the database; apply on the East primary: "
+            "sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f "
+            "/opt/revup/docker/postgres/init/50_cdr_quality_accuracy.sql "
+            "(next reminder in %ds)",
+            exc, call_uuid, _pre50_fallback_count, int(_PRE47_LOG_INTERVAL_SEC),
+        )
+    else:
+        logger.debug("CDR ingest: pre-50 fallback INSERT for uuid=%s (%d so far)",
+                     call_uuid, _pre50_fallback_count)
+
+
+#: param count -> statement, for the tier walk below.
+_CDR_INSERT_TIERS = {
+    _CDR_INSERT_PARAM_COUNT: _CDR_INSERT_SQL,
+    _CDR_INSERT_PRE50_PARAM_COUNT: _CDR_INSERT_SQL_PRE50,
+    _CDR_INSERT_PRE48_PARAM_COUNT: _CDR_INSERT_SQL_PRE48,
+    _CDR_INSERT_PRE47_PARAM_COUNT: _CDR_INSERT_SQL_PRE47,
+}
+
+
 async def _execute_cdr_insert(call_uuid: str, params: tuple, *,
                               allow_fallback: bool = True) -> str:
-    """Run the 60-param CDR INSERT, falling back tier by tier on a missing
-    migration-48 / migration-47 column (see the block comment above).
+    """Run the 73-param CDR INSERT, falling back tier by tier on a missing
+    migration-50 / -48 / -47 column (see the block comment above).
 
-    `allow_fallback=False` (B-leg rows) re-raises instead: a B row that lost
-    its `leg` tail would masquerade as a call row. Any OTHER
+    PostgreSQL names the FIRST missing column of the INSERT list, so the
+    error decides the target tier directly: a 47 column -> 55, a 48 column ->
+    57, a 50 column -> 60. Every tier is a strict tail truncation of `params`.
+
+    `allow_fallback=False` (carrier B-leg rows) may still use the pre-50 tier
+    (the row keeps `leg`), but re-raises instead of dropping below it: a B row
+    that lost its `leg` tail would masquerade as a call row. Any OTHER
     UndefinedColumnError (or any other error) propagates unchanged to
     _process_cdr_body's catch-all, exactly as before.
     """
+    count = _CDR_INSERT_PARAM_COUNT
+    while True:
+        try:
+            return await db.execute(_CDR_INSERT_TIERS[count], *params[:count])
+        except asyncpg.exceptions.UndefinedColumnError as exc:
+            if _is_missing_stir_outcome_column(exc):
+                target, note = _CDR_INSERT_PRE47_PARAM_COUNT, _note_pre47_fallback
+            elif _is_missing_call_leg_column(exc):
+                target, note = _CDR_INSERT_PRE48_PARAM_COUNT, _note_pre48_fallback
+            elif _is_missing_quality_column(exc):
+                target, note = _CDR_INSERT_PRE50_PARAM_COUNT, _note_pre50_fallback
+            else:
+                raise
+            if target >= count:
+                raise          # no progress possible — never loop
+            if not allow_fallback and target < _CDR_INSERT_PRE50_PARAM_COUNT:
+                raise
+            note(call_uuid, exc)
+            count = target
+
+
+# ---------------------------------------------------------------------------
+# Call-level quality refresh (docs/CALL_QUALITY_ACCURACY_PLAN.md §C.2)
+# ---------------------------------------------------------------------------
+_REFRESH_CALL_QUALITY_SQL = (
+    "SELECT cdr_refresh_call_quality($1::varchar, $2::timestamptz) AS n")
+_refresh_last_logged_mono = 0.0
+_refresh_failure_count = 0
+
+
+async def _refresh_call_quality(call_id: Optional[str], anchor: Optional[datetime]) -> None:
+    """Recompute the A row's call_quality_* / call_mos (worse direction).
+
+    Its OWN statement on its own pooled connection (autocommit), run only
+    AFTER this ingest's INSERT committed — whichever of A / B arrives second
+    therefore sees both committed rows (plan §C.2 ordering proof). Idempotent.
+    NEVER raises and never affects the ingest result / 200 contract: a
+    missing function (migration 50 absent) is logged at ERROR, any other DB
+    error at WARNING — both rate-limited — and ignored.
+    """
+    global _refresh_last_logged_mono, _refresh_failure_count
+    if not call_id or anchor is None:
+        return
     try:
-        return await db.execute(_CDR_INSERT_SQL, *params)
-    except asyncpg.exceptions.UndefinedColumnError as exc:
-        if not allow_fallback:
-            raise
-        if _is_missing_stir_outcome_column(exc):
-            # 47 absent -> the 48 tail cannot be kept either (strict tails).
-            _note_pre47_fallback(call_uuid, exc)
-            return await db.execute(_CDR_INSERT_SQL_PRE47,
-                                    *params[:_CDR_INSERT_PRE47_PARAM_COUNT])
-        if not _is_missing_call_leg_column(exc):
-            raise
-        _note_pre48_fallback(call_uuid, exc)
-    try:
-        return await db.execute(_CDR_INSERT_SQL_PRE48,
-                                *params[:_CDR_INSERT_PRE48_PARAM_COUNT])
-    except asyncpg.exceptions.UndefinedColumnError as exc:
-        if not _is_missing_stir_outcome_column(exc):
-            raise
-        _note_pre47_fallback(call_uuid, exc)
-        return await db.execute(_CDR_INSERT_SQL_PRE47,
-                                *params[:_CDR_INSERT_PRE47_PARAM_COUNT])
+        await db.fetch_one(_REFRESH_CALL_QUALITY_SQL, str(call_id)[:64], anchor)
+    except Exception as exc:  # noqa: BLE001 — must never break ingest
+        _refresh_failure_count += 1
+        now = time.monotonic()
+        if now - _refresh_last_logged_mono >= _PRE47_LOG_INTERVAL_SEC:
+            _refresh_last_logged_mono = now
+            if isinstance(exc, asyncpg.exceptions.UndefinedFunctionError):
+                logger.error(
+                    "CDR ingest: cdr_refresh_call_quality() is missing — call-level "
+                    "quality (call_quality_*) is NOT being written (%d failure(s) so "
+                    "far in this worker). Apply on the East primary: sudo -u postgres "
+                    "psql -d voip -v ON_ERROR_STOP=on -f "
+                    "/opt/revup/docker/postgres/init/50_cdr_quality_accuracy.sql",
+                    _refresh_failure_count)
+            else:
+                # WARNING, not ERROR: transient (DB blip / lock timeout); the
+                # next ingest of either leg, or a backfill re-run, repairs it.
+                logger.warning(
+                    "CDR ingest: call-quality refresh failed for call_id=%s (%s: %s; "
+                    "%d failure(s) so far in this worker) — the CDR itself is stored",
+                    call_id, type(exc).__name__, exc, _refresh_failure_count)
+        else:
+            logger.debug("CDR ingest: call-quality refresh failed for call_id=%s (%s)",
+                         call_id, type(exc).__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -1131,17 +1204,20 @@ async def _process_cdr_body(body: dict) -> dict:
         destination_prefix = str(destination[:6]) if destination else None
 
         # ---- RTP quality metrics ------------------------------------------
-        # Parsed + clamped in _extract_quality_metrics (jitter variance ms^2
-        # -> std-dev ms, flaw-based loss %, column-bound clamps).  A failure
-        # here must NEVER abort the INSERT -- the billing row outranks the
-        # quality metrics -- so any unexpected error NULLs the whole set.
+        # Parsed + clamped in _extract_quality_metrics -> services/call_quality
+        # (E-model MOS/R, true loss, rating rule; docs/CALL_QUALITY_ACCURACY_PLAN.md
+        # §B). Runs AFTER answer_time / billable_ms (the rating rule needs
+        # both). A failure here must NEVER abort the INSERT -- the billing row
+        # outranks the quality metrics -- so any unexpected error NULLs the
+        # whole set (quality_status 'no_data', never NULL).
         try:
-            qm = _extract_quality_metrics(variables)
+            qm = _extract_quality_metrics(variables, answered=answer_time is not None,
+                                          billable_ms=billable_ms)
         except Exception:
             logger.exception(
                 "CDR ingest: quality metric extraction failed for uuid=%s; "
                 "inserting CDR without quality metrics", call_uuid)
-            qm = {}
+            qm = _empty_quality_metrics(variables)
         mos = qm.get("mos")
         quality_pct = qm.get("quality_pct")
         jitter_min_ms = qm.get("jitter_min_ms")
@@ -1161,6 +1237,8 @@ async def _process_cdr_body(body: dict) -> dict:
         rtp_audio_out_packet_count = qm.get("rtp_audio_out_packet_count")
         rtp_jitter_burst_rate = qm.get("rtp_jitter_burst_rate")
         rtp_jitter_loss_rate = qm.get("rtp_jitter_loss_rate")
+        # migration-50 columns ($61..$73) — _QUALITY_COLUMNS order
+        quality_tail = tuple(qm.get(col) for col in _QUALITY_COLUMNS)
         read_codec = variables.get("read_codec")
         if read_codec is not None:
             read_codec = str(read_codec)
@@ -1270,6 +1348,7 @@ async def _process_cdr_body(body: dict) -> dict:
             "packet_loss_count": packet_loss_count, "packet_total_count": packet_total_count,
             "packet_loss_pct": packet_loss_pct, "flaw_total": flaw_total,
             "r_factor": r_factor,
+            **{col: qm.get(col) for col in _QUALITY_COLUMNS},
             "rtp_in_raw_bytes": rtp_audio_in_raw_bytes,
             "rtp_in_media_bytes": rtp_audio_in_media_bytes,
             "rtp_out_raw_bytes": rtp_audio_out_raw_bytes,
@@ -1377,13 +1456,21 @@ async def _process_cdr_body(body: dict) -> dict:
             leg,                    # $58 leg ('A' | 'B')
             call_id,                # $59 call_id (A-leg uuid)
             leg_attempt,            # $60 leg_attempt (int | None; B-legs only)
+            # ---- migration 50 — MUST stay the last thirteen (see _cdr_insert_sql)
+            *quality_tail,          # $61..$73 quality_status ... inbound_media_ratio
         )
+        assert len(params) == _CDR_INSERT_PARAM_COUNT
 
         if b_ctx is not None:
             return await _insert_b_leg_row(str(call_uuid), params, variables,
                                            carrier_leg, answer_time is not None)
 
         result = await _execute_cdr_insert(str(call_uuid), params)
+
+        # ---- Call-level quality (worse direction; plan §C) ----------------
+        # Own statement AFTER the INSERT committed, inserted OR duplicate
+        # (a re-ingest re-runs the idempotent combine). Never raises.
+        await _refresh_call_quality(call_id, start_time)
 
         # ---- STIR/SHAKEN attestation (companion table, failure-isolated) --
         # A-LEG ONLY (a B row would UPSERT a second attestation per call and
@@ -1415,8 +1502,9 @@ async def _insert_b_leg_row(b_uuid: str, params: tuple, variables: dict,
     """INSERT a carrier B-leg row (leg='B'), then — only if this leg ANSWERED
     — apply its STIR outcome to the A-leg. No call_attestations write.
 
-    NO tiered fallback: without migration 48 the row could not carry
-    `leg='B'` and would double-count as a call, so it is dropped (logged).
+    Tiered fallback only down to the pre-50 (60-param) statement: without
+    migration 48 the row could not carry `leg='B'` and would double-count as
+    a call, so it is dropped (logged) instead.
     Dedup is the same `NOT EXISTS (uuid)` guard as A-legs (the B channel has
     its own uuid). Status stays `b_leg` so /ingest/bulk tallies it apart.
     """
@@ -1431,6 +1519,10 @@ async def _insert_b_leg_row(b_uuid: str, params: tuple, variables: dict,
             b_uuid, a_uuid, exc)
         return {"status": "b_leg", "detail": "dropped: schema behind (migration 48)",
                 "uuid": b_uuid, "a_leg_uuid": a_uuid}
+    # Call-level quality: this B row may be the second of the pair to commit
+    # (plan §C.2) — refresh its A row. Own statement, after the INSERT
+    # committed (inserted or duplicate). Never raises.
+    await _refresh_call_quality(a_uuid, params[8])
     stir = await _b_leg_stir_update(a_uuid, b_uuid, variables, carrier_leg, answered)
     if result and "INSERT 0 0" in result:
         logger.info("CDR ingest: duplicate B-leg skipped uuid=%s", b_uuid)
@@ -1652,6 +1744,101 @@ _STIR_OUTCOME_LATERAL = (
     "LEFT JOIN LATERAL (SELECT c.stir_outcome, c.stir_eff_actual FROM cdrs c "
     "WHERE c.uuid = ca.call_id ORDER BY c.start_time DESC LIMIT 1) oc ON true"
 )
+
+
+#: Staff-only migration-50 quality columns (plan §B.3). Tenants get the
+#: allowlisted subset via services/tenant_redaction.py.
+_STAFF_QUALITY_COLUMNS_SQL = (
+    "quality_status, quality_grade, quality_source, "
+    "fs_mos, fs_quality_pct, fs_jitter_max_std_ms, rtp_audio_in_skip_packet_count, "
+    "packets_expected, loss_bursts, packets_reordered, ssrc_changes, "
+    "burst_ratio, inbound_media_ratio, "
+    "call_quality_status, call_quality_grade, call_mos, call_quality_leg"
+)
+
+#: Decimal quality columns floated in every staff CDR shape (JSON-friendly).
+_QUALITY_FLOAT_KEYS = (
+    "mos", "quality_pct", "jitter_min_ms", "jitter_max_ms", "jitter_avg_ms",
+    "packet_loss_pct", "r_factor",
+    "rtp_audio_in_jitter_burst_rate", "rtp_audio_in_jitter_loss_rate",
+    "rtp_audio_in_mean_interval",
+    "call_mos", "burst_ratio", "inbound_media_ratio",
+    "fs_mos", "fs_quality_pct", "fs_jitter_max_std_ms",
+)
+
+
+def _float_quality_keys(cdr: dict) -> dict:
+    for key in _QUALITY_FLOAT_KEYS:
+        if cdr.get(key) is not None:
+            cdr[key] = float(cdr[key])
+    return cdr
+
+
+#: Per-direction block keys (plan §C.3). Tenant = exactly these; staff adds
+#: _DIRECTION_STAFF_EXTRA_KEYS.
+_DIRECTION_KEYS = tr.TENANT_QUALITY_DIRECTION_KEYS
+_DIRECTION_STAFF_EXTRA_KEYS = ("uuid", "quality_source", "packets_expected",
+                               "packets_reordered", "ssrc_changes", "fs_mos")
+
+#: The answered carrier B row of a call (plan §C.1: call_id = A uuid,
+#: answer_time set, highest leg_attempt) — same selection as
+#: cdr_refresh_call_quality(). Bounded to the A row's time range so only its
+#: chunk(s) are scanned.
+_CALLEE_LEG_SQL = """
+    SELECT {cols} FROM cdrs
+     WHERE call_id = $1::varchar AND leg = 'B' AND answer_time IS NOT NULL
+       AND start_time >= $2::timestamptz AND start_time <= $3::timestamptz
+       {tenant}
+     ORDER BY leg_attempt DESC NULLS LAST, start_time DESC
+     LIMIT 1
+"""
+
+
+def _direction_block(row: Optional[dict], *, staff: bool) -> Optional[dict]:
+    """One direction's quality dict, built ONLY from the allowlisted keys
+    (tenant) or allowlist + staff extras — never a raw row."""
+    if row is None:
+        return None
+    keys = _DIRECTION_KEYS + (_DIRECTION_STAFF_EXTRA_KEYS if staff else ())
+    out = {k: row.get(k) for k in keys}
+    return _float_quality_keys(out)
+
+
+async def _quality_by_direction(a_row: dict, *, staff: bool,
+                                customer_filter: Optional[int] = None) -> Optional[dict]:
+    """`quality_by_direction` for GET /v1/cdrs/{uuid} (plan §C.3).
+
+    caller_audio = the A row (what FS received from the caller = what the
+    callee heard); callee_audio = the answered carrier B row (what the caller
+    heard), or None. B rows themselves -> None. A failed B lookup degrades to
+    callee_audio None rather than failing the whole detail response.
+    """
+    if a_row.get("leg") == "B":
+        return None
+    if not staff:
+        a_row = tr.neutralize_legacy_quality(a_row)
+    caller = _direction_block(a_row, staff=staff)
+    callee = None
+    start, end = a_row.get("start_time"), a_row.get("end_time")
+    uuid = a_row.get("uuid")
+    if uuid and start is not None:
+        keys = _DIRECTION_KEYS + (_DIRECTION_STAFF_EXTRA_KEYS if staff
+                                  else (tr.LEGACY_ROW_FLAG_SQL,))
+        args: list = [str(uuid), start, (end or start) + timedelta(minutes=1)]
+        tenant_sql = ""
+        if customer_filter is not None:
+            tenant_sql = "AND customer_id = $4::int"
+            args.append(customer_filter)
+        try:
+            b_row = await db.fetch_one(
+                _CALLEE_LEG_SQL.format(cols=", ".join(keys), tenant=tenant_sql), *args)
+        except Exception:  # noqa: BLE001 — detail view must not 500 on this
+            logger.exception("CDR detail: callee-direction lookup failed for %s", uuid)
+            b_row = None
+        if b_row is not None:
+            b = dict(b_row) if staff else tr.neutralize_legacy_quality(b_row)
+            callee = _direction_block(b, staff=staff)
+    return {"caller_audio": caller, "callee_audio": callee}
 
 
 def _serialize_cdr_row(row) -> dict:
@@ -1920,6 +2107,7 @@ async def query_cdrs(
                inbound_carrier, inbound_carrier_pop, on_net,
                freeswitch_node,
                stir_outcome, stir_eff_actual,
+               {_STAFF_QUALITY_COLUMNS_SQL},
                {_STAFF_LEG_COLUMNS_SQL},
                {_STIR_INTENT_SUBSELECT}
         FROM cdrs
@@ -1934,6 +2122,7 @@ async def query_cdrs(
     cdrs = []
     for r in results:
         cdr = _serialize_cdr_row(r)
+        _float_quality_keys(cdr)
         cdrs.append(cdr)
 
     return {"cdrs": cdrs, "count": len(cdrs), "total": total,
@@ -2150,7 +2339,10 @@ async def get_cdr(
         )
         if not row:
             raise HTTPException(status_code=404, detail="CDR not found")
-        return tr.redact_cdr_row(row)
+        out = tr.redact_cdr_row(row)
+        out["quality_by_direction"] = await _quality_by_direction(
+            dict(row), staff=False, customer_filter=customer_filter)
+        return out
 
     query = f"""
         SELECT uuid, customer_id, product_type, trunk_id, direction,
@@ -2175,6 +2367,7 @@ async def get_cdr(
                network_addr, bridge_uuid, sbc_id,
                inbound_carrier, inbound_carrier_pop, on_net,
                stir_outcome, stir_eff_actual,
+               {_STAFF_QUALITY_COLUMNS_SQL},
                {_STAFF_LEG_COLUMNS_SQL},
                {_STIR_INTENT_SUBSELECT}
         FROM cdrs WHERE uuid = $1
@@ -2185,13 +2378,11 @@ async def get_cdr(
 
     cdr = _serialize_cdr_row(result)
     # Convert Decimal types to float for JSON serialization
-    for key in ("mos", "quality_pct", "jitter_min_ms", "jitter_max_ms",
-                "jitter_avg_ms", "packet_loss_pct", "r_factor",
-                "rtp_audio_in_jitter_burst_rate", "rtp_audio_in_jitter_loss_rate",
-                "rtp_audio_in_mean_interval", "rate_per_min", "total_cost",
-                "carrier_cost", "margin"):
+    for key in ("rate_per_min", "total_cost", "carrier_cost", "margin"):
         if cdr.get(key) is not None:
             cdr[key] = float(cdr[key])
+    _float_quality_keys(cdr)
+    cdr["quality_by_direction"] = await _quality_by_direction(dict(result), staff=True)
     return cdr
 
 

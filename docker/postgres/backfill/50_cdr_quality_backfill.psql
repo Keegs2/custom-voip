@@ -1,0 +1,178 @@
+-- ==========================================================================
+-- 50_cdr_quality_backfill.psql — history recompute for migration 50
+-- (docs/CALL_QUALITY_ACCURACY_PLAN.md §B.6 / §H).
+--
+-- A psql SCRIPT (\gset / \if / \gexec). Deliberately OUTSIDE init/ so initdb
+-- never runs it (a fresh database has no history). Autocommit: every UPDATE
+-- is its own transaction, one per TimescaleDB chunk. NEVER run it with
+-- -1 / --single-transaction / inside BEGIN.
+--
+-- WHAT IT DOES — rows the pre-50 API wrote (quality_source IS NULL) get the
+-- SAME legacy E-model the live API applies to unpatched FS images:
+--   * fs_mos / fs_quality_pct / fs_jitter_max_std_ms / rtp_audio_in_skip_packet_count
+--     := the OLD mos / quality_pct / jitter_max_ms / packet_loss_count
+--     (SET right-hand sides read the OLD row, so the copies precede the
+--     overwrite);
+--   * quality_status := cq_leg_status(answered, billable_ms, in_packets, 20),
+--     'rated' -> 'no_data' when rtp_audio_in_jitter_loss_rate is NULL;
+--   * rated rows: packet_loss_pct / packet_loss_count / r_factor / mos /
+--     quality_grade / burst_ratio=1 from the stored loss_rate (a 0..1 FRACTION;
+--     a stored value > 1 is treated as a percent, exactly as the live API's
+--     guard does); no_rtp -> grade poor, MOS NULL;
+--   * inbound_media_ratio for rated/no_rtp/low_sample (ptime 20);
+--   * quality_pct / jitter_min_ms / jitter_max_ms / jitter_avg_ms := NULL
+--     (fabricated or DTX-poisoned; the old peak survives in fs_jitter_max_std_ms);
+--   * quality_source := 'backfill_v1'; then the call-level combine
+--     cdr_refresh_call_quality() fills call_quality_* / call_mos on A rows.
+--
+-- SAFETY
+--   * IDEMPOTENT by construction: processes exactly `quality_source IS NULL`
+--     (the new API always writes quality_source). A re-run skips processed
+--     rows; re-run it once after every API node is on the new build.
+--   * SNAPSHOT-FIRST, EXACT ROLLBACK: every row it will touch is copied into
+--     cdr_quality_backfill_50_snapshot BEFORE any UPDATE, and the UPDATE is
+--     driven FROM that snapshot (a row the old API writes after the snapshot
+--     is left for the next run), so the rollback below restores every
+--     overwritten value exactly.
+--   * RING-FENCED: reads only stored columns; never touches billing/rating
+--     columns (billable_ms, rate_per_min, total_cost, carrier_cost, margin,
+--     rated_at), timing, attribution or exported_at (Equinox is NOT re-fed).
+--   * TimescaleDB 2.26: UPDATE on compressed chunks is supported (>= 2.11);
+--     the touched batches are decompressed and the 1-day compression policy
+--     recompresses them. max_tuples_decompressed_per_dml_transaction is set to
+--     0 (unlimited) — the 100k default can abort a DML that decompresses a
+--     whole chunk. Chunk-by-chunk keeps each transaction to one chunk.
+--
+-- RUN (East primary only — replicates; after migration 50 AND the new API):
+--   hostname | grep -q '^services$' && sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f /opt/revup/docker/postgres/backfill/50_cdr_quality_backfill.psql
+-- VERIFY:
+--   hostname | grep -q '^services$' && sudo -u postgres psql -d voip -Atc "SELECT count(*) FROM cdrs WHERE quality_source IS NULL"
+--   (-> 0; rows the old API wrote after the snapshot are picked up by a re-run)
+--
+-- EXACT ROLLBACK (restores every overwritten column of every backfilled row):
+--   hostname | grep -q '^services$' && sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -c "SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0; UPDATE cdrs c SET mos=s.mos, quality_pct=s.quality_pct, r_factor=s.r_factor, packet_loss_pct=s.packet_loss_pct, packet_loss_count=s.packet_loss_count, jitter_min_ms=s.jitter_min_ms, jitter_max_ms=s.jitter_max_ms, jitter_avg_ms=s.jitter_avg_ms, quality_source=NULL, quality_status=NULL, quality_grade=NULL, call_quality_status=NULL, call_quality_grade=NULL, call_mos=NULL, call_quality_leg=NULL, fs_mos=NULL, fs_quality_pct=NULL, fs_jitter_max_std_ms=NULL, rtp_audio_in_skip_packet_count=NULL, burst_ratio=NULL, inbound_media_ratio=NULL FROM cdr_quality_backfill_50_snapshot s WHERE c.uuid=s.uuid AND c.start_time=s.start_time AND c.quality_source='backfill_v1'"
+--   (the SET is a harmless placeholder GUC on a cluster without TimescaleDB;
+--   the rollback, like the backfill, is re-runnable). Keep the snapshot table
+--   until the release is accepted; then
+--   `DROP TABLE cdr_quality_backfill_50_snapshot;` (a plain table, not the
+--   hypertable).
+-- ==========================================================================
+
+\set ON_ERROR_STOP on
+\pset pager off
+
+-- ---- 0. Guards ----------------------------------------------------------
+SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = current_schema() AND table_name = 'cdrs'
+       AND column_name = 'quality_source'
+) AS has_q50 \gset
+\if :has_q50
+\else
+\echo 'ABORT: cdrs.quality_source is missing — apply docker/postgres/init/50_cdr_quality_accuracy.sql first.'
+DO $$ BEGIN RAISE EXCEPTION 'migration 50 not applied (cdrs.quality_source missing)'; END $$;
+\endif
+
+SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') AS has_ts \gset
+\if :has_ts
+SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0;
+\set ranges_sql 'SELECT range_start AS lo, range_end AS hi FROM timescaledb_information.chunks WHERE hypertable_schema = current_schema() AND hypertable_name = ''cdrs'' ORDER BY range_start'
+\else
+-- Plain PostgreSQL (test harness): one unbounded range.
+\set ranges_sql 'SELECT ''-infinity''::timestamptz AS lo, ''infinity''::timestamptz AS hi'
+\endif
+SET statement_timeout = 0;
+
+-- ---- 1. Snapshot for exact rollback -------------------------------------
+CREATE TABLE IF NOT EXISTS cdr_quality_backfill_50_snapshot (
+    uuid              varchar(64),
+    start_time        timestamptz,
+    mos               numeric(3,2),
+    quality_pct       numeric(5,2),
+    r_factor          numeric(5,2),
+    packet_loss_pct   numeric(5,2),
+    packet_loss_count int,
+    jitter_min_ms     numeric(8,3),
+    jitter_max_ms     numeric(8,3),
+    jitter_avg_ms     numeric(8,3),
+    PRIMARY KEY (uuid, start_time)
+);
+
+INSERT INTO cdr_quality_backfill_50_snapshot
+       (uuid, start_time, mos, quality_pct, r_factor, packet_loss_pct,
+        packet_loss_count, jitter_min_ms, jitter_max_ms, jitter_avg_ms)
+SELECT uuid, start_time, mos, quality_pct, r_factor, packet_loss_pct,
+       packet_loss_count, jitter_min_ms, jitter_max_ms, jitter_avg_ms
+  FROM cdrs
+ WHERE quality_source IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 2. Per-leg recompute, one UPDATE per chunk (autocommit each) --------
+SELECT format($f$
+WITH s AS (
+  SELECT x.id, x.start_time,
+         CASE WHEN x.st = 'rated' AND x.rtp_audio_in_jitter_loss_rate IS NULL THEN 'no_data' ELSE x.st END AS st,
+         LEAST(GREATEST(CASE WHEN x.rtp_audio_in_jitter_loss_rate > 1
+                             THEN x.rtp_audio_in_jitter_loss_rate::float8
+                             ELSE x.rtp_audio_in_jitter_loss_rate::float8 * 100 END, 0), 100) AS lp,
+         CASE WHEN x.rtp_audio_in_jitter_loss_rate > 1
+              THEN x.rtp_audio_in_jitter_loss_rate / 100
+              ELSE x.rtp_audio_in_jitter_loss_rate END AS lfrac,
+         CASE upper(COALESCE(x.read_codec,'')) WHEN 'G729' THEN 11.0 ELSE 0.0 END AS ie,
+         CASE upper(COALESCE(x.read_codec,'')) WHEN 'G729' THEN 19.0 ELSE 25.1 END AS bpl
+    FROM (SELECT c0.id, c0.start_time, c0.rtp_audio_in_jitter_loss_rate, c0.read_codec,
+                 cq_leg_status(c0.answer_time IS NOT NULL, c0.billable_ms, c0.rtp_audio_in_packet_count, 20) AS st
+            FROM cdrs c0
+            JOIN cdr_quality_backfill_50_snapshot sn
+              ON sn.uuid = c0.uuid AND sn.start_time = c0.start_time
+           WHERE c0.quality_source IS NULL
+             AND c0.start_time >= %1$L AND c0.start_time < %2$L) x
+)
+UPDATE cdrs c SET
+  fs_mos = c.mos, fs_quality_pct = c.quality_pct, fs_jitter_max_std_ms = c.jitter_max_ms,
+  rtp_audio_in_skip_packet_count = c.packet_loss_count,
+  quality_status = s.st,
+  quality_source = 'backfill_v1',
+  burst_ratio       = CASE WHEN s.st = 'rated' THEN 1.000 END,
+  packet_loss_pct   = CASE WHEN s.st = 'rated' THEN round(s.lp::numeric, 2) END,
+  packet_loss_count = CASE WHEN s.st = 'rated' THEN round(s.lfrac * c.rtp_audio_in_packet_count)::int END,
+  r_factor          = CASE WHEN s.st = 'rated' THEN round(cq_r_factor(s.lp, 1, s.ie, s.bpl)::numeric, 2) END,
+  mos               = CASE WHEN s.st = 'rated' THEN round(cq_mos(cq_r_factor(s.lp, 1, s.ie, s.bpl))::numeric, 2) END,
+  quality_grade     = CASE WHEN s.st = 'rated' THEN cq_grade(round(cq_mos(cq_r_factor(s.lp, 1, s.ie, s.bpl))::numeric, 2))
+                           WHEN s.st = 'no_rtp' THEN 'poor' END,
+  inbound_media_ratio = CASE WHEN s.st IN ('rated','no_rtp','low_sample')
+                             THEN LEAST(round(c.rtp_audio_in_packet_count::numeric / (c.billable_ms / 20.0), 3), 999.999) END,
+  quality_pct = NULL, jitter_min_ms = NULL, jitter_max_ms = NULL, jitter_avg_ms = NULL
+FROM s
+WHERE c.id = s.id AND c.start_time = s.start_time
+  AND c.start_time >= %1$L AND c.start_time < %2$L
+$f$, r.lo, r.hi)
+FROM (:ranges_sql) r \gexec
+
+-- ---- 3. Call-level combine, per chunk ------------------------------------
+-- The candidate list is materialised (ORDER BY) before the function runs, so
+-- the per-row UPDATE inside cdr_refresh_call_quality never races the scan of
+-- the chunk it is decompressing.
+SELECT format($f$
+SELECT count(cdr_refresh_call_quality(t.uuid, t.start_time)) AS call_rows_refreshed
+  FROM (SELECT uuid, start_time FROM cdrs
+         WHERE leg IS DISTINCT FROM 'B' AND call_quality_status IS NULL
+           AND quality_source IS NOT NULL
+           AND start_time >= %1$L AND start_time < %2$L
+         ORDER BY start_time) t
+$f$, r.lo, r.hi)
+FROM (:ranges_sql) r \gexec
+
+-- ---- 4. Marker (same data_migrations table as 43) ------------------------
+CREATE TABLE IF NOT EXISTS data_migrations (
+    migration_id TEXT PRIMARY KEY,
+    applied_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    cutoff_time  TIMESTAMPTZ,
+    notes        TEXT
+);
+INSERT INTO data_migrations (migration_id, notes)
+VALUES ('50_cdr_quality_backfill', 'E-model recompute of history from stored loss_rate')
+ON CONFLICT (migration_id) DO UPDATE SET applied_at = now();
+
+-- ---- 5. Report ------------------------------------------------------------
+SELECT quality_source, quality_status, count(*) FROM cdrs GROUP BY 1, 2 ORDER BY 1, 2;

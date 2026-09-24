@@ -1,8 +1,17 @@
 /**
  * CallsKpiStrip — the union KPI strip for the merged Calls & Quality page:
  * the CDR Search aggregates (calls / answered / ASR / duration / money) plus
- * the Call Quality averages (MOS / loss / jitter / R-factor), in one bordered
- * daylight slab (`dlx4-statgrid` — hairline seams, auto-fit reflow).
+ * the call-quality SHARES (graded calls / good-or-better % / poor / one-way
+ * audio / median call MOS), in one bordered daylight slab (`dlx4-statgrid` —
+ * hairline seams, auto-fit reflow).
+ *
+ * QUALITY HONESTY (docs/CALL_QUALITY_ACCURACY_PLAN.md §E.4): no averages of
+ * MOS / loss / jitter / R. Everything reads the CALL grade
+ * (`call_quality_grade` / `call_quality_status` / `call_mos` — the worse of
+ * the two audio directions) through quality.ts::summarizeCallQuality, and only
+ * graded calls count. One-way audio is counted as graded + poor, never as a
+ * score. Carrier B rows carry no call grade, so in the staff All-legs /
+ * Carrier-legs views they simply don't count toward the quality cells.
  *
  * SCOPE HONESTY: with real server pagination, `cdrs` is exactly one page —
  * every aggregate here is deliberately PAGE-SCOPED and the lead cell says so
@@ -25,7 +34,7 @@ import { useMemo } from 'react';
 import { fmtMoneySmart } from '../../utils/format';
 import {
   GOOD, WARN, BAD, AZURE_DEEP,
-  mosColor, packetLossColor, jitterColor, rFactorColor, fmtDurationShort,
+  goodShareColor, mosColor, summarizeCallQuality, fmtDurationShort,
 } from './quality';
 import { fmtAvgCallDuration } from '../../utils/callDuration';
 import { ROWS_MODE_NOTE } from './callsFilters';
@@ -75,10 +84,6 @@ export function CallsKpiStrip({ cdrs, total, isStaff, rowsMode = 'calls' }: Call
     const loaded = cdrs.length;
     let answered = 0;
     const answeredRows: Cdr[] = [];
-    let mosSum = 0; let mosCount = 0;
-    let plSum = 0; let plCount = 0;
-    let jSum = 0; let jCount = 0;
-    let rSum = 0; let rCount = 0;
 
     for (const c of cdrs) {
       // Avg Duration is over ANSWERED calls only — unanswered rows carry
@@ -87,10 +92,6 @@ export function CallsKpiStrip({ cdrs, total, isStaff, rowsMode = 'calls' }: Call
         answered++;
         answeredRows.push(c);
       }
-      if (c.mos != null) { mosSum += c.mos; mosCount++; }
-      if (c.packet_loss_pct != null) { plSum += c.packet_loss_pct; plCount++; }
-      if (c.jitter_avg_ms != null) { jSum += c.jitter_avg_ms; jCount++; }
-      if (c.r_factor != null) { rSum += c.r_factor; rCount++; }
     }
 
     // Money aggregates only mean something when at least one loaded CDR is
@@ -105,10 +106,7 @@ export function CallsKpiStrip({ cdrs, total, isStaff, rowsMode = 'calls' }: Call
       // Staff rows: exact seconds. Tenant rows: mean of whole minutes,
       // 1 decimal ("2.3 min") — the API never sends tenants seconds.
       avgDurLabel: fmtAvgCallDuration(answeredRows, fmtDurationShort),
-      avgMos: mosCount > 0 ? mosSum / mosCount : null,
-      avgLossPct: plCount > 0 ? plSum / plCount : null,
-      avgJitterMs: jCount > 0 ? jSum / jCount : null,
-      avgRFactor: rCount > 0 ? rSum / rCount : null,
+      quality: summarizeCallQuality(cdrs),
       ratedCount,
       totalCost,
       avgCost: ratedCount > 0 ? totalCost / ratedCount : null,
@@ -116,6 +114,7 @@ export function CallsKpiStrip({ cdrs, total, isStaff, rowsMode = 'calls' }: Call
   }, [cdrs]);
 
   const hasRated = stats.ratedCount > 0;
+  const q = stats.quality;
   const asrTone = stats.asr > 50 ? GOOD : stats.asr >= 30 ? WARN : BAD;
 
   const matchingHint =
@@ -140,25 +139,33 @@ export function CallsKpiStrip({ cdrs, total, isStaff, rowsMode = 'calls' }: Call
         hint="answered calls"
       />
       <StatCell
-        label="Avg MOS"
-        value={stats.avgMos != null ? stats.avgMos.toFixed(2) : '—'}
-        tone={stats.avgMos != null ? mosColor(stats.avgMos) : undefined}
+        label="Graded Calls"
+        value={q.graded.toLocaleString()}
+        hint="answered ≥ 5 s, audio measured"
       />
       <StatCell
-        label="Avg Loss"
-        value={stats.avgLossPct != null ? `${stats.avgLossPct.toFixed(2)}%` : '—'}
-        tone={stats.avgLossPct != null ? packetLossColor(stats.avgLossPct) : undefined}
+        label="Good or Better"
+        value={q.goodSharePct != null ? `${q.goodSharePct.toFixed(1)}%` : '—'}
+        tone={q.goodSharePct != null ? goodShareColor(q.goodSharePct) : undefined}
+        hint={q.graded > 0 ? `${q.goodOrBetter.toLocaleString()} of ${q.graded.toLocaleString()} graded` : 'no graded calls'}
       />
       <StatCell
-        label="Avg Jitter"
-        value={stats.avgJitterMs != null ? `${stats.avgJitterMs.toFixed(1)}ms` : '—'}
-        tone={stats.avgJitterMs != null ? jitterColor(stats.avgJitterMs) : undefined}
-        hint="RMS estimate"
+        label="Poor Calls"
+        value={q.graded > 0 ? q.poor.toLocaleString() : '—'}
+        tone={q.poor > 0 ? BAD : q.graded > 0 ? GOOD : undefined}
+        hint="incl. one-way audio"
       />
       <StatCell
-        label="Avg R-Factor"
-        value={stats.avgRFactor != null ? stats.avgRFactor.toFixed(1) : '—'}
-        tone={stats.avgRFactor != null ? rFactorColor(stats.avgRFactor) : undefined}
+        label="One-way Audio"
+        value={q.graded > 0 ? q.oneWay.toLocaleString() : '—'}
+        tone={q.oneWay > 0 ? BAD : undefined}
+        hint="no sound from one side"
+      />
+      <StatCell
+        label="Median Call MOS"
+        value={q.medianMos != null ? q.medianMos.toFixed(2) : '—'}
+        tone={q.medianMos != null ? mosColor(q.medianMos) : undefined}
+        hint="worse direction · G.711 max 4.41"
       />
       {isStaff && (
         <StatCell

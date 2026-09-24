@@ -53,7 +53,16 @@ REMEDY_47 = ("sudo -u postgres psql -d voip -f "
              "/opt/revup/docker/postgres/init/47_cdr_stir_outcome.sql")
 REMEDY_48 = ("sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f "
              "/opt/revup/docker/postgres/init/48_cdr_call_legs.sql")
-ALL_COLS = ["stir_outcome", "stir_eff_actual", "leg", "call_id", "leg_attempt"]
+REMEDY_50 = ("sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f "
+             "/opt/revup/docker/postgres/init/50_cdr_quality_accuracy.sql")
+COLS_47_48 = ["stir_outcome", "stir_eff_actual", "leg", "call_id", "leg_attempt"]
+COLS_50 = ["quality_status", "quality_grade", "quality_source",
+           "fs_mos", "fs_quality_pct", "fs_jitter_max_std_ms",
+           "rtp_audio_in_skip_packet_count",
+           "packets_expected", "loss_bursts", "packets_reordered", "ssrc_changes",
+           "burst_ratio", "inbound_media_ratio",
+           "call_quality_status", "call_quality_grade", "call_mos", "call_quality_leg"]
+ALL_COLS = COLS_47_48 + COLS_50
 
 
 def _a_leg_vars(uuid, **overrides):
@@ -81,6 +90,10 @@ def _reset_fallback_rate_limit():
     cdrs._pre47_fallback_count = 0
     cdrs._pre48_last_logged_mono = 0.0
     cdrs._pre48_fallback_count = 0
+    cdrs._pre50_last_logged_mono = 0.0
+    cdrs._pre50_fallback_count = 0
+    cdrs._refresh_last_logged_mono = 0.0
+    cdrs._refresh_failure_count = 0
 
 
 # ===========================================================================
@@ -93,7 +106,20 @@ def test_remedy_command_is_exact():
     assert schema_check.remedies_for(["stir_eff_actual"]) == [REMEDY_47]
     assert schema_check.remedies_for([]) == []
     assert schema_check.remedies_for(["leg", "call_id"]) == [REMEDY_48]
-    assert schema_check.remedies_for(ALL_COLS) == [REMEDY_47, REMEDY_48]
+    assert schema_check.remedies_for(COLS_47_48) == [REMEDY_47, REMEDY_48]
+    assert schema_check.remedies_for(["call_mos", "quality_status"]) == [REMEDY_50]
+    assert schema_check.remedies_for(ALL_COLS) == [REMEDY_47, REMEDY_48, REMEDY_50]
+
+
+def test_required_columns_cover_the_whole_insert_tail_and_call_columns():
+    """REQUIRED_CDR_COLUMNS = every INSERT column beyond 05 (47 + 48 + the 13
+    migration-50 binds) + the 4 call-level columns the read endpoints SELECT."""
+    names = [c for c, _ in schema_check.REQUIRED_CDR_COLUMNS]
+    assert names == ALL_COLS
+    assert list(cdrs._QUALITY_COLUMNS) == COLS_50[:13]
+    for col, mig in schema_check.REQUIRED_CDR_COLUMNS:
+        if col in COLS_50:
+            assert mig == "50_cdr_quality_accuracy.sql"
 
 
 def test_check_reports_missing_columns_with_fake_pool(monkeypatch):
@@ -186,7 +212,7 @@ def test_ingest_falls_back_to_pre47_insert_with_fake_db(monkeypatch, caplog):
     assert len(fake.cdr_inserts) == 2
     full_sql, full_p = fake.cdr_inserts[0]
     pre_sql, pre_p = fake.cdr_inserts[1]
-    assert len(full_p) == 60 and "stir_outcome" in full_sql
+    assert len(full_p) == 73 and "stir_outcome" in full_sql
     assert len(pre_p) == 55 and "stir_outcome" not in pre_sql and "stir_eff_actual" not in pre_sql
     assert max(int(x) for x in re.findall(r"\$(\d+)", pre_sql)) == 55
     assert pre_p == full_p[:55]                         # nothing renumbered
@@ -412,7 +438,7 @@ def test_pg_schema_check_reports_both_columns_missing(guard_db, caplog):
         r = _run(schema_check.run_startup_check())
     assert r["status"] == "missing"
     assert r["missing"] == ALL_COLS
-    assert r["remedy"] == [REMEDY_47, REMEDY_48]
+    assert r["remedy"] == [REMEDY_47, REMEDY_48, REMEDY_50]
     crit = [rec for rec in caplog.records if rec.levelno == logging.CRITICAL]
     assert len(crit) == 1 and REMEDY_47 in crit[0].getMessage()
 
@@ -532,28 +558,80 @@ def test_pg_pre48_tier_lands_a_leg_and_drops_b_row(guard_db, client, caplog):
     assert len(errs) == 1 and "48_cdr_call_legs.sql" in errs[0].getMessage()
 
 
-def test_pg_after_applying_48_full_60_param_insert(guard_db, client):
+def test_pg_after_applying_48_pre50_tier_lands_a_and_b(guard_db, client, caplog):
+    """48 applied, 50 NOT: the A-leg lands through the 60-param (pre-50) tier
+    with leg/call_id, a carrier B row lands too (it keeps `leg` on that
+    tier), the missing refresh function is logged, never fatal."""
+    _reset_fallback_rate_limit()
+
     async def go():
         async with guard_db["owner"].acquire() as conn:
             await apply_cdr_column_migrations(conn, names=("48_cdr_call_legs.sql",))
         r = await client.get("/health/detailed")
-        assert r.json()["components"]["schema"] == "healthy"
-        assert (await schema_check.check_cdr_schema())["status"] == "ok"
-        r = await client.post("/v1/cdrs/ingest", json={
-            "variables": _a_leg_vars("guard-a-60")})
-        assert r.json()["status"] == "ok", r.text
+        assert r.json()["components"]["schema"].startswith(
+            "degraded: cdrs is missing column(s) quality_status, quality_grade")
+        assert REMEDY_50 in r.json()["components"]["schema"]
+        with caplog.at_level(logging.DEBUG, logger="routers.cdrs"):
+            r = await client.post("/v1/cdrs/ingest", json={
+                "variables": _a_leg_vars("guard-a-60")})
+            assert r.json()["status"] == "ok", r.text
+            b = {"variables": _a_leg_vars(
+                    "guard-b-60", originating_leg_uuid="guard-a-60", direction="outbound",
+                    cdr_leg="B", cdr_carrier_leg="true", cdr_call_id="guard-a-60",
+                    cdr_leg_attempt="1", cdr_customer_id="20", cdr_product_type="rcf"),
+                 "callflow": [{"caller_profile": {
+                     "uuid": "guard-b-60", "destination_number": "+17744045256",
+                     "originator": {"originator_caller_profiles": [{"uuid": "guard-a-60"}]}}}]}
+            r = await client.post("/v1/cdrs/ingest", json=b)
+            assert r.status_code == 200 and r.json()["detail"] == "inserted", r.text
         row = await db.fetch_one(
             "SELECT leg, call_id, leg_attempt FROM cdrs WHERE uuid = $1", "guard-a-60")
         assert (row["leg"], row["call_id"], row["leg_attempt"]) == ("A", "guard-a-60", None)
+        row = await db.fetch_one(
+            "SELECT leg, call_id, leg_attempt FROM cdrs WHERE uuid = $1", "guard-b-60")
+        assert (row["leg"], row["call_id"], row["leg_attempt"]) == ("B", "guard-a-60", 1)
         # rows written by the earlier tiers stay legacy-shaped (leg NULL)
         row = await db.fetch_one("SELECT leg FROM cdrs WHERE uuid = $1", "guard-a-48")
         assert row["leg"] is None
 
     _run(go())
+    errs = [rec.getMessage() for rec in caplog.records if rec.levelno == logging.ERROR]
+    assert sum("migration-50" in m for m in errs) == 1
+    assert any("cdr_refresh_call_quality() is missing" in m for m in errs)
+
+
+def test_pg_after_applying_50_full_73_param_insert_and_refresh(guard_db, client):
+    async def go():
+        async with guard_db["owner"].acquire() as conn:
+            await apply_cdr_column_migrations(conn, names=("50_cdr_quality_accuracy.sql",))
+        r = await client.get("/health/detailed")
+        assert r.json()["components"]["schema"] == "healthy"
+        assert (await schema_check.check_cdr_schema())["status"] == "ok"
+        r = await client.post("/v1/cdrs/ingest", json={
+            "variables": _a_leg_vars("guard-a-73", rtp_audio_in_packet_count="1250",
+                                     rtp_audio_in_jitter_loss_rate="0.0",
+                                     rtp_audio_in_mos="4.50",
+                                     rtp_audio_in_skip_packet_count="9")})
+        assert r.json()["status"] == "ok", r.text
+        row = await db.fetch_one(
+            "SELECT leg, quality_status, quality_grade, quality_source, mos, fs_mos, "
+            "packet_loss_count, rtp_audio_in_skip_packet_count, call_quality_status, "
+            "call_quality_grade, call_mos, call_quality_leg FROM cdrs WHERE uuid = $1",
+            "guard-a-73")
+        assert row["leg"] == "A"
+        assert (row["quality_status"], row["quality_grade"], row["quality_source"]) == (
+            "rated", "great", "fs_legacy")
+        assert float(row["mos"]) == 4.41 and float(row["fs_mos"]) == 4.50
+        assert row["packet_loss_count"] == 0 and row["rtp_audio_in_skip_packet_count"] == 9
+        # the refresh ran after the INSERT (A-only call -> call = A)
+        assert (row["call_quality_status"], row["call_quality_grade"],
+                float(row["call_mos"]), row["call_quality_leg"]) == ("rated", "great", 4.41, "A")
+
+    _run(go())
 
 
 def test_fake_db_pre48_tier_is_strict_tail_truncation(monkeypatch, caplog):
-    """Missing 48 only: full(60) -> pre-48(57); the 57 params are exactly the
+    """Missing 48 only: full(73) -> pre-48(57); the 57 params are exactly the
     first 57 of the full tuple and the SQL tops out at $57."""
     calls = []
 
@@ -571,7 +649,7 @@ def test_fake_db_pre48_tier_is_strict_tail_truncation(monkeypatch, caplog):
     ins = [(s, p) for s, p in calls if "INSERT INTO cdrs" in s]
     assert len(ins) == 2
     (full_sql, full_p), (pre_sql, pre_p) = ins
-    assert len(full_p) == 60 and len(pre_p) == 57 and pre_p == full_p[:57]
+    assert len(full_p) == 73 and len(pre_p) == 57 and pre_p == full_p[:57]
     assert "stir_outcome" in pre_sql and "leg_attempt" not in pre_sql
     assert max(int(x) for x in re.findall(r"\$(\d+)", pre_sql)) == 57
 
@@ -593,7 +671,7 @@ def test_fake_db_neither_47_nor_48_falls_to_55(monkeypatch):
     r = asyncio.run(cdrs._process_cdr_body({"variables": _a_leg_vars("fake-55")}))
     assert r["status"] == "ok"
     ins = [p for s, p in calls if "INSERT INTO cdrs" in s]
-    assert [len(p) for p in ins] == [60, 55]
+    assert [len(p) for p in ins] == [73, 55]
 
 
 def test_fake_db_pre48_then_pre47(monkeypatch):
@@ -615,13 +693,82 @@ def test_fake_db_pre48_then_pre47(monkeypatch):
     _reset_fallback_rate_limit()
     r = asyncio.run(cdrs._process_cdr_body({"variables": _a_leg_vars("fake-3t")}))
     assert r["status"] == "ok"
-    assert [len(p) for s, p in calls if "INSERT INTO cdrs" in s] == [60, 57, 55]
+    assert [len(p) for s, p in calls if "INSERT INTO cdrs" in s] == [73, 57, 55]
 
 
 def test_insert_tiers_are_strict_tail_truncations():
-    full, pre48, pre47 = cdrs._CDR_INSERT_SQL, cdrs._CDR_INSERT_SQL_PRE48, cdrs._CDR_INSERT_SQL_PRE47
+    full, pre50 = cdrs._CDR_INSERT_SQL, cdrs._CDR_INSERT_SQL_PRE50
+    pre48, pre47 = cdrs._CDR_INSERT_SQL_PRE48, cdrs._CDR_INSERT_SQL_PRE47
     top = lambda q: max(int(x) for x in re.findall(r"\$(\d+)", q))  # noqa: E731
-    assert (top(full), top(pre48), top(pre47)) == (60, 57, 55)
+    assert (top(full), top(pre50), top(pre48), top(pre47)) == (73, 60, 57, 55)
     assert "$58::varchar, $59::varchar, $60::smallint" in full
+    assert "$58::varchar, $59::varchar, $60::smallint" in pre50
+    assert "quality_status" in full and "quality_status" not in pre50
+    # the 13 migration-50 binds, in contract order, each explicitly cast
+    tail = re.findall(r"\$(6[1-9]|7[0-3])::(\w+)", full)
+    assert [(int(n), t) for n, t in tail] == [
+        (61, "varchar"), (62, "varchar"), (63, "varchar"), (64, "numeric"),
+        (65, "numeric"), (66, "numeric"), (67, "int"), (68, "int"), (69, "int"),
+        (70, "int"), (71, "smallint"), (72, "numeric"), (73, "numeric")]
     with pytest.raises(ValueError):
         cdrs._cdr_insert_sql(with_stir_outcome=False, with_call_legs=True)
+    with pytest.raises(ValueError):
+        cdrs._cdr_insert_sql(True, False, True)
+
+
+def test_fake_db_pre50_tier_is_strict_tail_truncation(monkeypatch, caplog):
+    """Missing 50 only: full(73) -> pre-50(60); the 60 params are exactly the
+    first 60, ERROR names migration 50 once per interval, the refresh call
+    that follows can never break ingest."""
+    calls = []
+
+    async def fake(sql, *params):
+        calls.append((sql, params))
+        if "INSERT INTO cdrs" in sql and "quality_status" in sql:
+            raise asyncpg.exceptions.UndefinedColumnError(
+                'column "quality_status" of relation "cdrs" does not exist')
+        return "INSERT 0 1"
+
+    async def fake_fetch_one(sql, *args):
+        raise asyncpg.exceptions.UndefinedFunctionError(
+            "function cdr_refresh_call_quality(character varying, timestamp with time zone) does not exist")
+
+    monkeypatch.setattr(db, "execute", fake)
+    monkeypatch.setattr(db, "fetch_one", fake_fetch_one)
+    _reset_fallback_rate_limit()
+    with caplog.at_level(logging.DEBUG, logger="routers.cdrs"):
+        r = asyncio.run(cdrs._process_cdr_body({"variables": _a_leg_vars("fake-50")}))
+        r2 = asyncio.run(cdrs._process_cdr_body({"variables": _a_leg_vars("fake-50b")}))
+    assert r["status"] == "ok" and r2["status"] == "ok"
+    ins = [(s, p) for s, p in calls if "INSERT INTO cdrs" in s]
+    assert [len(p) for _, p in ins] == [73, 60, 73, 60]
+    assert ins[1][1] == ins[0][1][:60]
+    assert max(int(x) for x in re.findall(r"\$(\d+)", ins[1][0])) == 60
+    errs = [rec.getMessage() for rec in caplog.records if rec.levelno == logging.ERROR]
+    assert sum("migration-50" in m for m in errs) == 1
+    assert sum("cdr_refresh_call_quality() is missing" in m for m in errs) == 1
+    assert any("50_cdr_quality_accuracy.sql" in m for m in errs)
+
+
+def test_fake_db_b_leg_uses_pre50_but_never_below(monkeypatch):
+    """Carrier B rows keep `leg` on the pre-50 tier (allowed) but are never
+    written by the 57/55 tiers (dropped instead)."""
+    async def fake_50(sql, *params):
+        if "INSERT INTO cdrs" in sql and "quality_status" in sql:
+            raise asyncpg.exceptions.UndefinedColumnError(
+                'column "quality_status" of relation "cdrs" does not exist')
+        return "INSERT 0 1"
+
+    monkeypatch.setattr(db, "execute", fake_50)
+    params = tuple(range(73))
+    assert asyncio.run(cdrs._execute_cdr_insert("b", params, allow_fallback=False)) == "INSERT 0 1"
+
+    async def fake_48(sql, *params):
+        if "INSERT INTO cdrs" in sql and "leg_attempt" in sql:
+            raise asyncpg.exceptions.UndefinedColumnError(
+                'column "leg" of relation "cdrs" does not exist')
+        return "INSERT 0 1"
+
+    monkeypatch.setattr(db, "execute", fake_48)
+    with pytest.raises(asyncpg.exceptions.UndefinedColumnError):
+        asyncio.run(cdrs._execute_cdr_insert("b", params, allow_fallback=False))

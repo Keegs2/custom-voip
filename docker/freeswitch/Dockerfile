@@ -133,6 +133,21 @@ RUN PKG_CONFIG_PATH=/usr/lib/pkgconfig cmake . -DCMAKE_INSTALL_PREFIX=/usr \
     && make -j$(nproc) \
     && make install
 
+# RCF quality patch set (docs/CALL_QUALITY_ACCURACY_PLAN.md section A). Applied to the
+# pinned checkout above; placed after the library builds so a patch edit only
+# invalidates the FreeSWITCH compile, not libks/sofia-sip/spandsp. Additive only:
+# RFC 3550 sequence-loss tracker + RFC 3550 interarrival jitter, exported as NEW
+# rtp_audio_in_seq_* / rtp_audio_in_rfc3550_* / rtp_audio_in_qpatch channel vars.
+# No existing channel var or FS behaviour changes.
+# 0001-rcf-rtp-quality-v1.patch is valid ONLY for FREESWITCH_REF 0a54a48. On a ref
+# bump, regenerate it against the new commit and re-verify it (lab:
+# docker/freeswitch/lab/README.md, plan section G.3). Build context is
+# ./docker/freeswitch (docker-compose.media.yml `build:`), so patches/ sits beside
+# this Dockerfile. `git apply --check` fails the build loudly if the ref moves, and
+# `|| exit 1` makes ANY failing patch fail the build (not just the last one).
+COPY patches/ /usr/src/fs-patches/
+RUN cd /usr/src/freeswitch && for p in /usr/src/fs-patches/*.patch; do git apply --check "$p" && git apply "$p" && echo "applied $p" || exit 1; done
+
 # Configure FreeSWITCH modules
 WORKDIR /usr/src/freeswitch
 

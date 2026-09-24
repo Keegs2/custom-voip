@@ -110,6 +110,7 @@ Context: public (all calls enter public dialplan context)
 - `sip-min-session-expires=90` (minimum per RFC 4028)
 
 **Media:**
+- `rtcp-audio-interval-msec=5000` -- Drives ONLY `rtcp_stats()` + the RTCP SR/RR FS sends. It does NOT gate quality measurement: `check_jitter()`/`do_mos()` and the quality patch v1 tracker run on the RTP read path regardless of RTCP (the old comment claiming otherwise was wrong and was rewritten 2026-09).
 - `rtp-keepalive-sec=15` -- Sends comfort packets every 15s to keep GCE NAT pinholes open (30s idle timeout)
 - `suppress-cng=false` -- Generates Comfort Noise (RFC 3389) during silence for NAT keepalive + user experience
 - `rtp-timeout-sec=60` -- Hang up if no RTP for 60s
@@ -146,6 +147,7 @@ Context: public
 - `aggressive-nat-detection=false` and `NDLB-force-rport=false` -- Not needed; ext-ip handles addressing. The **internal** profile sets BOTH of these to `true` (for local Zoiper softphone testing where real NAT exists); the external profile leaves them `false`.
 - Session timers enabled with same values as internal (minimum-session-expires=90)
 - Homer capture is GLOBAL only (`capture_id=200` for both profiles, set in `sofia.conf.xml`); there is no per-profile capture_id.
+- `rtcp-audio-interval-msec=5000` mirrors internal (RTCP reports only). B-leg quality DOES reach the CDR: `log-b-leg=true` posts each carrier B-leg's own `rtp_audio_in_*` (callee->platform) into a `leg='B'` row, which feeds the A row's `call_quality_*` (worse direction). Removing this param would not affect any quality stat.
 - No gateways defined -- bridges use `sofia/external/dest@proxy` syntax
 - `local-network-acl=loopback.auto` -- Same fix as internal. Without this, 172.28.0.1 (Kamailio) gets sip-ip in Contact instead of ext-sip-ip.
 
@@ -276,6 +278,16 @@ hit the legacy STIR-outcome path — plan §4.7 trap 1).
   module is a use-after-unload hazard FS does not guard against; run it at low
   traffic with a healthy API (`show calls count` first). A container restart
   instead drops EVERY live call — never use it for this.
+
+## RTP quality variables in the CDR (quality patch v1)
+
+The json_cdr body carries ALL channel variables, so the patched image's new
+`rtp_audio_in_qpatch` / `rtp_audio_in_seq_*` / `rtp_audio_in_rfc3550_*` variables reach the
+API with no config change here (do NOT enable the `channel-vars` whitelist: it would drop
+them along with the `cdr_*` vars). Variable table, semantics and the rebuild rule:
+`docker/freeswitch/CLAUDE.md` "Quality patch v1"; contract `docs/CALL_QUALITY_ACCURACY_PLAN.md`
+A.5. The lab (`docker/freeswitch/lab/`) runs this same json_cdr.conf.xml with only the `url`
+rewritten to `http://127.0.0.1:9/` so every CDR lands on disk (`log-http-and-disk=true`).
 
 ## Dialplan Structure (`conf/dialplan/public.xml`)
 

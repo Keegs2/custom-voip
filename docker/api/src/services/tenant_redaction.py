@@ -80,12 +80,21 @@ TENANT_CDR_SELECT_COLUMNS: tuple[str, ...] = (
     "caller_id", "destination", "start_time", "answer_time", "end_time",
     "hangup_cause", "sip_code", "hangup_cause_q850", "sip_hangup_disposition",
     "sip_from_user", "sip_to_user",
-    # Voice quality (customer-meaningful; no duration proxy)
+    # Voice quality (customer-meaningful; no duration proxy). Since
+    # migration 50 (docs/CALL_QUALITY_ACCURACY_PLAN.md §E.3) these carry
+    # honest values: E-model mos / r_factor, TRUE loss % and lost packets,
+    # RFC 3550 jitter — NULL on ungraded calls. quality_pct / jitter_min_ms
+    # are deprecated (always NULL). The FS autoflush/CNG skip counter is the
+    # staff-only rtp_audio_in_skip_packet_count, never a "loss" key here.
     "mos", "quality_pct", "r_factor",
     "jitter_min_ms", "jitter_max_ms", "jitter_avg_ms",
     "packet_loss_count", "packet_loss_pct", "flaw_total",
     "rtp_audio_in_jitter_burst_rate", "rtp_audio_in_jitter_loss_rate",
     "rtp_audio_in_mean_interval",
+    # Migration 50 — grades + honest model inputs (deliberately allowlisted)
+    "quality_status", "quality_grade",
+    "call_quality_status", "call_quality_grade", "call_mos",
+    "burst_ratio", "loss_bursts", "inbound_media_ratio",
     "read_codec", "write_codec", "read_rate", "write_rate",
     # STIR/SHAKEN badge inputs (actual outcome)
     "stir_outcome", "stir_eff_actual",
@@ -96,6 +105,9 @@ TENANT_CDR_FIELDS: frozenset[str] = frozenset(
     set(TENANT_CDR_SELECT_COLUMNS)
     | {
         "duration_minutes",
+        # derived per-direction quality (plan §C.3), built by the CDR detail
+        # endpoint from TENANT_QUALITY_DIRECTION_KEYS only
+        "quality_by_direction",
         # stir_oc.badge_fields() output
         "stir_attestation", "stir_eff_actual", "stir_outcome",
         "stir_badge", "stir_badge_source",
@@ -129,16 +141,42 @@ FORBIDDEN_TENANT_CDR_KEYS: frozenset[str] = frozenset({
     # listed: the retired /v1/calls/{id} shape legitimately echoes the
     # caller's own `call_id`; the CDR allowlist excludes the column anyway.)
     "leg", "leg_attempt",
+    # call-quality internals (migration 50) — staff only.
+    # packets_expected is a 1:1 duration proxy (like packet_total_count);
+    # the skip counter is FS autoflush/CNG discards — never shown as "loss".
+    "packets_expected", "rtp_audio_in_skip_packet_count", "packets_reordered",
+    "ssrc_changes", "fs_mos", "fs_quality_pct", "fs_jitter_max_std_ms",
+    "quality_source", "call_quality_leg",
+    # derived helper selected for the pre-backfill guard (never returned)
+    "quality_legacy_row",
 })
+
+#: Keys of each `quality_by_direction` block a TENANT receives (plan §C.3).
+#: Every one is also a tenant-allowlisted column.
+TENANT_QUALITY_DIRECTION_KEYS: tuple[str, ...] = (
+    "quality_status", "quality_grade", "mos", "r_factor",
+    "packet_loss_pct", "packet_loss_count", "jitter_avg_ms", "jitter_max_ms",
+    "burst_ratio", "inbound_media_ratio",
+)
+
+#: Pre-migration-50 rows (quality_source IS NULL — written by the old API and
+#: not yet backfilled) still hold the OLD meanings in these two columns: the
+#: autoflush skip counter and flaws/packets. They are nulled for tenants so
+#: that counter can never reach a customer under a "loss" name.
+_LEGACY_MISLEADING_LOSS_KEYS = ("packet_loss_count", "packet_loss_pct")
+LEGACY_ROW_FLAG_SQL = "(quality_source IS NULL) AS quality_legacy_row"
 
 assert not (TENANT_CDR_FIELDS & FORBIDDEN_TENANT_CDR_KEYS), (
     "tenant allowlist overlaps the forbidden set")
+assert set(TENANT_QUALITY_DIRECTION_KEYS) <= set(TENANT_CDR_SELECT_COLUMNS), (
+    "quality_by_direction keys must be tenant-allowlisted columns")
 
 # Decimal columns that the staff detail endpoint also floats (JSON-friendly).
 _FLOAT_KEYS = (
     "mos", "quality_pct", "jitter_min_ms", "jitter_max_ms", "jitter_avg_ms",
     "packet_loss_pct", "r_factor", "rtp_audio_in_jitter_burst_rate",
     "rtp_audio_in_jitter_loss_rate", "rtp_audio_in_mean_interval",
+    "call_mos", "burst_ratio", "inbound_media_ratio",
 )
 
 
@@ -146,7 +184,19 @@ def tenant_cdr_select_sql() -> str:
     """Comma-joined tenant SELECT list + the derived `talk_ms` (column names
     and the expression are module constants — never user input — so
     interpolating them into SQL is safe)."""
-    return ", ".join(TENANT_CDR_SELECT_COLUMNS) + f", {TALK_MS_SQL} AS talk_ms"
+    return (", ".join(TENANT_CDR_SELECT_COLUMNS) + f", {LEGACY_ROW_FLAG_SQL}"
+            + f", {TALK_MS_SQL} AS talk_ms")
+
+
+def neutralize_legacy_quality(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Tenant rows only: on a pre-migration-50 row (`quality_legacy_row`
+    true) drop the two loss columns that still hold the old, misleading
+    meanings. Returns a new dict; other keys untouched."""
+    out = dict(row)
+    if out.get("quality_legacy_row"):
+        for key in _LEGACY_MISLEADING_LOSS_KEYS:
+            out[key] = None
+    return out
 
 
 def _round_half_up_minutes(ms: int) -> int:
@@ -218,7 +268,7 @@ def redact_cdr_row(row: Mapping[str, Any]) -> dict[str, Any]:
     STIR badge (same serializer as staff), floors answer/end to the minute,
     floats Decimal quality metrics, then drops every non-allowlisted key.
     """
-    src = dict(row)
+    src = neutralize_legacy_quality(row)
     answered = src.get("answer_time") is not None
     out: dict[str, Any] = {
         k: v for k, v in src.items()
