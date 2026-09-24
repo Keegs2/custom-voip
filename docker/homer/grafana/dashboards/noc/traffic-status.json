@@ -1268,8 +1268,8 @@
     {
       "id": 63,
       "type": "stat",
-      "title": "Calls — last 1h",
-      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 60 minutes. Second rung of the now -> 1h -> 24h -> 7d -> 30d ladder: the shift-level number, and the one that should track the sum of the last hour of bars in the chart above.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 60 minutes ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.",
+      "title": "Inbound — last 1h",
+      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 60 minutes. Second rung of the now -> 1h -> 24h -> 7d -> 30d ladder: the shift-level number, and the one that should track the sum of the last hour of bars in the chart above.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 60 minutes ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.\n\n———— MINUTES (second value on this tile) ————\n\nDIFFERENT SOURCE FROM THE CALL COUNT. The 'calls' value is a Kamailio SBC counter read from VictoriaMetrics; the 'minutes' value is summed out of the CDR database (PostgreSQL on the services VM) over the same trailing 60 minutes. Two independent planes with independent failure modes: either value can go blank or stale while the other stays healthy, so a disagreement between them is not by itself evidence of a traffic fault — establish which plane is still reporting before reading anything into the gap.\n\nNOT PROPORTIONAL TO THE CALL COUNT — BY DESIGN. Minutes accrue only on ANSWERED calls (an unanswered call has no talk time), whereas the call count is OFFERED calls and deliberately includes everything that later failed, was abandoned, or was hard-rejected on-net. Minutes-per-call is therefore an answer-rate reading, not a data-quality reading: a low ratio means callers are not getting through — pair it with 'Live ASR (5m)' — and is never on its own a bug in this tile.\n\nMINUTES — A DIFFERENT POPULATION FROM THE CALL COUNT BESIDE IT. DO NOT DIVIDE ONE BY THE OTHER. Minutes are total connected TALK TIME (answer_time -> end_time) summed across answered calls from the CDR database, rounded once to the nearest whole minute. Deliberately NOT `billable_ms`: rate_cdr() overwrites that column in place with a ring-INCLUSIVE duration floored at min_duration and rounded UP to the rate deck's increment, so a single admin rate call would silently change this number's meaning; it is also second-floored at ingest. Deliberately NOT `duration_ms` either, which includes ring time. This matches the talk-time convention already used by 'Voice · ACD — 1h' on the Home board — this tile is that panel's SUM. TALK TIME, NOT BILLED MINUTES: no per-call minimum and no billing increment, so it will not tie out against an Equinox invoice (RCF-V1 billing is estimates-only; the billing minute conversion happens downstream).\n\nScoped to direction='inbound' so it describes the SAME carrier-ingress traffic the call count does — customer-originated SIP-trunk and API Calling egress contribute no minutes here. It is still NOT proportional to the call count: (1) calls are OFFERED, minutes exist only for ANSWERED; (2) a CDR is written only at HANGUP, so calls in progress are already counted but contribute zero minutes until they end — material on the 1h tile, noise at 30d; (3) SIPp load-test ingress and runtime DB-admitted carriers produce CDRs but no Kamailio counter, so minutes inflate during a load test; (4) INVITEs rejected at the SBC before reaching FreeSWITCH are counted but produce no CDR. A low minutes-per-call ratio is an ASR story, not a bug.\n\nMinutes are attributed to the window the call STARTED in, matching the call counter which increments at INVITE. A call that began before this window is excluded entirely — even talk time that fell inside it; a call that began inside contributes ALL its minutes, including talk continuing past the window's end. Calls come from Kamailio via VictoriaMetrics, minutes from Postgres CDRs — different stores, different write paths. CDR retention is 90 days (tighter than VictoriaMetrics' 12 months), never binding at 30d. A BLANK minutes value is a database or query error; zero traffic renders as 0.",
       "gridPos": {
         "h": 4,
         "w": 5,
@@ -1277,8 +1277,8 @@
         "y": 14
       },
       "datasource": {
-        "type": "prometheus",
-        "uid": "voip-metrics-vm"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "targets": [
         {
@@ -1291,6 +1291,17 @@
           "instant": true,
           "range": false,
           "legendFormat": "calls"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '1 hour' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1301,11 +1312,12 @@
           "fields": "",
           "values": false
         },
-        "orientation": "auto",
-        "textMode": "value",
+        "orientation": "vertical",
+        "textMode": "value_and_name",
         "colorMode": "value",
         "graphMode": "none",
-        "justifyMode": "center"
+        "justifyMode": "center",
+        "wideLayout": false
       },
       "fieldConfig": {
         "defaults": {
@@ -1327,14 +1339,39 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "calls"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "minutes"
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 64,
       "type": "stat",
-      "title": "Calls — last 24h",
-      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 24 hours — the day figure. Equals the whole bar chart above plus the in-progress hour the chart floors off, so it reads slightly higher than the visible bars sum to; that difference is expected, not a discrepancy.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 24 hours ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.",
+      "title": "Inbound — last 24h",
+      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 24 hours — the day figure. Equals the whole bar chart above plus the in-progress hour the chart floors off, so it reads slightly higher than the visible bars sum to; that difference is expected, not a discrepancy.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 24 hours ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.\n\n———— MINUTES (second value on this tile) ————\n\nDIFFERENT SOURCE FROM THE CALL COUNT. The 'calls' value is a Kamailio SBC counter read from VictoriaMetrics; the 'minutes' value is summed out of the CDR database (PostgreSQL on the services VM) over the same trailing 24 hours. Two independent planes with independent failure modes: either value can go blank or stale while the other stays healthy, so a disagreement between them is not by itself evidence of a traffic fault — establish which plane is still reporting before reading anything into the gap.\n\nNOT PROPORTIONAL TO THE CALL COUNT — BY DESIGN. Minutes accrue only on ANSWERED calls (an unanswered call has no talk time), whereas the call count is OFFERED calls and deliberately includes everything that later failed, was abandoned, or was hard-rejected on-net. Minutes-per-call is therefore an answer-rate reading, not a data-quality reading: a low ratio means callers are not getting through — pair it with 'Live ASR (5m)' — and is never on its own a bug in this tile.\n\nMINUTES — A DIFFERENT POPULATION FROM THE CALL COUNT BESIDE IT. DO NOT DIVIDE ONE BY THE OTHER. Minutes are total connected TALK TIME (answer_time -> end_time) summed across answered calls from the CDR database, rounded once to the nearest whole minute. Deliberately NOT `billable_ms`: rate_cdr() overwrites that column in place with a ring-INCLUSIVE duration floored at min_duration and rounded UP to the rate deck's increment, so a single admin rate call would silently change this number's meaning; it is also second-floored at ingest. Deliberately NOT `duration_ms` either, which includes ring time. This matches the talk-time convention already used by 'Voice · ACD — 1h' on the Home board — this tile is that panel's SUM. TALK TIME, NOT BILLED MINUTES: no per-call minimum and no billing increment, so it will not tie out against an Equinox invoice (RCF-V1 billing is estimates-only; the billing minute conversion happens downstream).\n\nScoped to direction='inbound' so it describes the SAME carrier-ingress traffic the call count does — customer-originated SIP-trunk and API Calling egress contribute no minutes here. It is still NOT proportional to the call count: (1) calls are OFFERED, minutes exist only for ANSWERED; (2) a CDR is written only at HANGUP, so calls in progress are already counted but contribute zero minutes until they end — material on the 1h tile, noise at 30d; (3) SIPp load-test ingress and runtime DB-admitted carriers produce CDRs but no Kamailio counter, so minutes inflate during a load test; (4) INVITEs rejected at the SBC before reaching FreeSWITCH are counted but produce no CDR. A low minutes-per-call ratio is an ASR story, not a bug.\n\nMinutes are attributed to the window the call STARTED in, matching the call counter which increments at INVITE. A call that began before this window is excluded entirely — even talk time that fell inside it; a call that began inside contributes ALL its minutes, including talk continuing past the window's end. Calls come from Kamailio via VictoriaMetrics, minutes from Postgres CDRs — different stores, different write paths. CDR retention is 90 days (tighter than VictoriaMetrics' 12 months), never binding at 30d. A BLANK minutes value is a database or query error; zero traffic renders as 0.",
       "gridPos": {
         "h": 4,
         "w": 5,
@@ -1342,8 +1379,8 @@
         "y": 14
       },
       "datasource": {
-        "type": "prometheus",
-        "uid": "voip-metrics-vm"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "targets": [
         {
@@ -1356,6 +1393,17 @@
           "instant": true,
           "range": false,
           "legendFormat": "calls"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '24 hours' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1366,11 +1414,12 @@
           "fields": "",
           "values": false
         },
-        "orientation": "auto",
-        "textMode": "value",
+        "orientation": "vertical",
+        "textMode": "value_and_name",
         "colorMode": "value",
         "graphMode": "none",
-        "justifyMode": "center"
+        "justifyMode": "center",
+        "wideLayout": false
       },
       "fieldConfig": {
         "defaults": {
@@ -1392,14 +1441,39 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "calls"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "minutes"
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 65,
       "type": "stat",
-      "title": "Calls — last 7d",
-      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 7 days — the week figure, the one to compare week over week for growth or for a customer-visible outage that the live tiles have already forgotten.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 7 days ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.\n\nHISTORY FLOOR — a short number here can be missing data, not a traffic drop. The metrics store began recording 2026-07-29; VictoriaMetrics retention is 12 months, so retention is not the limit — the age of the metrics plane is. If this window reaches past the start of history, VictoriaMetrics returns only what exists, with no error and no warning, and this tile reads LOW without saying so. The same applies after any rebuild of the services VM or the victoriametrics_data volume, which truncates history to the rebuild date. Confirm with `min(tfirst_over_time(kamailio_trunk_cps[365d]))` on the services VM before reading a low number as a decline.",
+      "title": "Inbound — last 7d",
+      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 7 days — the week figure, the one to compare week over week for growth or for a customer-visible outage that the live tiles have already forgotten.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 7 days ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.\n\nHISTORY FLOOR — a short number here can be missing data, not a traffic drop. The metrics store began recording 2026-07-29; VictoriaMetrics retention is 12 months, so retention is not the limit — the age of the metrics plane is. If this window reaches past the start of history, VictoriaMetrics returns only what exists, with no error and no warning, and this tile reads LOW without saying so. The same applies after any rebuild of the services VM or the victoriametrics_data volume, which truncates history to the rebuild date. Confirm with `min(tfirst_over_time(kamailio_trunk_cps[365d]))` on the services VM before reading a low number as a decline.\n\n———— MINUTES (second value on this tile) ————\n\nDIFFERENT SOURCE FROM THE CALL COUNT. The 'calls' value is a Kamailio SBC counter read from VictoriaMetrics; the 'minutes' value is summed out of the CDR database (PostgreSQL on the services VM) over the same trailing 7 days. Two independent planes with independent failure modes: either value can go blank or stale while the other stays healthy, so a disagreement between them is not by itself evidence of a traffic fault — establish which plane is still reporting before reading anything into the gap.\n\nNOT PROPORTIONAL TO THE CALL COUNT — BY DESIGN. Minutes accrue only on ANSWERED calls (an unanswered call has no talk time), whereas the call count is OFFERED calls and deliberately includes everything that later failed, was abandoned, or was hard-rejected on-net. Minutes-per-call is therefore an answer-rate reading, not a data-quality reading: a low ratio means callers are not getting through — pair it with 'Live ASR (5m)' — and is never on its own a bug in this tile.\n\nMINUTES — A DIFFERENT POPULATION FROM THE CALL COUNT BESIDE IT. DO NOT DIVIDE ONE BY THE OTHER. Minutes are total connected TALK TIME (answer_time -> end_time) summed across answered calls from the CDR database, rounded once to the nearest whole minute. Deliberately NOT `billable_ms`: rate_cdr() overwrites that column in place with a ring-INCLUSIVE duration floored at min_duration and rounded UP to the rate deck's increment, so a single admin rate call would silently change this number's meaning; it is also second-floored at ingest. Deliberately NOT `duration_ms` either, which includes ring time. This matches the talk-time convention already used by 'Voice · ACD — 1h' on the Home board — this tile is that panel's SUM. TALK TIME, NOT BILLED MINUTES: no per-call minimum and no billing increment, so it will not tie out against an Equinox invoice (RCF-V1 billing is estimates-only; the billing minute conversion happens downstream).\n\nScoped to direction='inbound' so it describes the SAME carrier-ingress traffic the call count does — customer-originated SIP-trunk and API Calling egress contribute no minutes here. It is still NOT proportional to the call count: (1) calls are OFFERED, minutes exist only for ANSWERED; (2) a CDR is written only at HANGUP, so calls in progress are already counted but contribute zero minutes until they end — material on the 1h tile, noise at 30d; (3) SIPp load-test ingress and runtime DB-admitted carriers produce CDRs but no Kamailio counter, so minutes inflate during a load test; (4) INVITEs rejected at the SBC before reaching FreeSWITCH are counted but produce no CDR. A low minutes-per-call ratio is an ASR story, not a bug.\n\nMinutes are attributed to the window the call STARTED in, matching the call counter which increments at INVITE. A call that began before this window is excluded entirely — even talk time that fell inside it; a call that began inside contributes ALL its minutes, including talk continuing past the window's end. Calls come from Kamailio via VictoriaMetrics, minutes from Postgres CDRs — different stores, different write paths. CDR retention is 90 days (tighter than VictoriaMetrics' 12 months), never binding at 30d. A BLANK minutes value is a database or query error; zero traffic renders as 0.",
       "gridPos": {
         "h": 4,
         "w": 5,
@@ -1407,8 +1481,8 @@
         "y": 14
       },
       "datasource": {
-        "type": "prometheus",
-        "uid": "voip-metrics-vm"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "targets": [
         {
@@ -1421,6 +1495,17 @@
           "instant": true,
           "range": false,
           "legendFormat": "calls"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '7 days' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1431,11 +1516,12 @@
           "fields": "",
           "values": false
         },
-        "orientation": "auto",
-        "textMode": "value",
+        "orientation": "vertical",
+        "textMode": "value_and_name",
         "colorMode": "value",
         "graphMode": "none",
-        "justifyMode": "center"
+        "justifyMode": "center",
+        "wideLayout": false
       },
       "fieldConfig": {
         "defaults": {
@@ -1457,14 +1543,39 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "calls"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "minutes"
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 66,
       "type": "stat",
-      "title": "Calls — last 30d",
-      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 30 days — the month figure. Rolling 30 days ending now, NOT a calendar month, so it is not a billing period boundary and will not tie out against an invoice.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 30 days ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.\n\nHISTORY FLOOR — a short number here can be missing data, not a traffic drop. The metrics store began recording 2026-07-29; VictoriaMetrics retention is 12 months, so retention is not the limit — the age of the metrics plane is. If this window reaches past the start of history, VictoriaMetrics returns only what exists, with no error and no warning, and this tile reads LOW without saying so. The same applies after any rebuild of the services VM or the victoriametrics_data volume, which truncates history to the rebuild date. Confirm with `min(tfirst_over_time(kamailio_trunk_cps[365d]))` on the services VM before reading a low number as a decline.",
+      "title": "Inbound — last 30d",
+      "description": "Total inbound calls offered by carriers across the whole fleet in the trailing 30 days — the month figure. Rolling 30 days ending now, NOT a calendar month, so it is not a billing period boundary and will not tie out against an invoice.\n\nSame counter the hourly bar chart above plots, so the same boundaries apply: CARRIER INGRESS ONLY — customer-originated SIP-trunk / API Calling traffic (`route[TRUNK_AUTH]` emits no counter), runtime DB-admitted carriers (`carrier_trunks`) and SIPp load-test ingress are all excluded, and `direction=\"outbound\"` is deliberately not added (it is an attempt counter, and an RCF forward's carrier B-leg is the same call already counted inbound). OFFERED, not completed: calls that later fail, are abandoned, or are hard-rejected on-net (603/483) still count — pair with 'Live ASR (5m)' to read completion. This is an offered-call count, NOT a billing figure.\n\nCounted exactly once per call (after `t_precheck_trans()`, after `bw_dedup`, after the `bw_cps` 503 backstop); on-net forwards are counted once at ingress, never per chain hop. Kamailio container restarts reset the counter to 0 — increase() corrects that per-series before the SBCs are summed. Unlike the bar chart this is a TRAILING window ending NOW, not a completed clock bucket, so it includes the in-progress minute and the value creeps continuously rather than stepping. Deliberately uncoloured: this is a VOLUME number, not a health signal — nothing on this tile ever turns amber or red.\n\nVictoriaMetrics retention is 12 months, so the window itself is always covered; but if the metrics plane (or a zone's vmagent) has been reporting for less than this window, the figure is a partial-window undercount, not a traffic drop.\n\nFIXED WINDOW — this tile does NOT follow the dashboard time picker or the Volume window selector; it always counts the trailing 30 days ending right now, INCLUDING the period in progress (which is why it will not equal the sum of the bars below — those stop at the last completed bucket). FLEET-WIDE — it deliberately IGNORES the Zone filter and always counts all three zones, matching the bars below; the Zone picker applies to the per-zone diagnostic panels lower on this board. An SBC restart inside the window loses at most 15s (one scrape) of that one SBC's calls, and under active/standby those calls are usually counted on its peer instead. An empty tile means the metrics plane is not reporting — it does NOT mean zero calls.\n\nHISTORY FLOOR — a short number here can be missing data, not a traffic drop. The metrics store began recording 2026-07-29; VictoriaMetrics retention is 12 months, so retention is not the limit — the age of the metrics plane is. If this window reaches past the start of history, VictoriaMetrics returns only what exists, with no error and no warning, and this tile reads LOW without saying so. The same applies after any rebuild of the services VM or the victoriametrics_data volume, which truncates history to the rebuild date. Confirm with `min(tfirst_over_time(kamailio_trunk_cps[365d]))` on the services VM before reading a low number as a decline.\n\n———— MINUTES (second value on this tile) ————\n\nDIFFERENT SOURCE FROM THE CALL COUNT. The 'calls' value is a Kamailio SBC counter read from VictoriaMetrics; the 'minutes' value is summed out of the CDR database (PostgreSQL on the services VM) over the same trailing 30 days. Two independent planes with independent failure modes: either value can go blank or stale while the other stays healthy, so a disagreement between them is not by itself evidence of a traffic fault — establish which plane is still reporting before reading anything into the gap.\n\nNOT PROPORTIONAL TO THE CALL COUNT — BY DESIGN. Minutes accrue only on ANSWERED calls (an unanswered call has no talk time), whereas the call count is OFFERED calls and deliberately includes everything that later failed, was abandoned, or was hard-rejected on-net. Minutes-per-call is therefore an answer-rate reading, not a data-quality reading: a low ratio means callers are not getting through — pair it with 'Live ASR (5m)' — and is never on its own a bug in this tile.\n\nMINUTES — A DIFFERENT POPULATION FROM THE CALL COUNT BESIDE IT. DO NOT DIVIDE ONE BY THE OTHER. Minutes are total connected TALK TIME (answer_time -> end_time) summed across answered calls from the CDR database, rounded once to the nearest whole minute. Deliberately NOT `billable_ms`: rate_cdr() overwrites that column in place with a ring-INCLUSIVE duration floored at min_duration and rounded UP to the rate deck's increment, so a single admin rate call would silently change this number's meaning; it is also second-floored at ingest. Deliberately NOT `duration_ms` either, which includes ring time. This matches the talk-time convention already used by 'Voice · ACD — 1h' on the Home board — this tile is that panel's SUM. TALK TIME, NOT BILLED MINUTES: no per-call minimum and no billing increment, so it will not tie out against an Equinox invoice (RCF-V1 billing is estimates-only; the billing minute conversion happens downstream).\n\nScoped to direction='inbound' so it describes the SAME carrier-ingress traffic the call count does — customer-originated SIP-trunk and API Calling egress contribute no minutes here. It is still NOT proportional to the call count: (1) calls are OFFERED, minutes exist only for ANSWERED; (2) a CDR is written only at HANGUP, so calls in progress are already counted but contribute zero minutes until they end — material on the 1h tile, noise at 30d; (3) SIPp load-test ingress and runtime DB-admitted carriers produce CDRs but no Kamailio counter, so minutes inflate during a load test; (4) INVITEs rejected at the SBC before reaching FreeSWITCH are counted but produce no CDR. A low minutes-per-call ratio is an ASR story, not a bug.\n\nMinutes are attributed to the window the call STARTED in, matching the call counter which increments at INVITE. A call that began before this window is excluded entirely — even talk time that fell inside it; a call that began inside contributes ALL its minutes, including talk continuing past the window's end. Calls come from Kamailio via VictoriaMetrics, minutes from Postgres CDRs — different stores, different write paths. CDR retention is 90 days (tighter than VictoriaMetrics' 12 months), never binding at 30d. A BLANK minutes value is a database or query error; zero traffic renders as 0.",
       "gridPos": {
         "h": 4,
         "w": 5,
@@ -1472,8 +1583,8 @@
         "y": 14
       },
       "datasource": {
-        "type": "prometheus",
-        "uid": "voip-metrics-vm"
+        "type": "datasource",
+        "uid": "-- Mixed --"
       },
       "targets": [
         {
@@ -1486,6 +1597,17 @@
           "instant": true,
           "range": false,
           "legendFormat": "calls"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - answer_time))), 0) / 60.0) AS minutes FROM cdrs WHERE start_time > now() - interval '30 days' AND direction = 'inbound' AND answer_time IS NOT NULL AND end_time IS NOT NULL;"
         }
       ],
       "options": {
@@ -1496,11 +1618,12 @@
           "fields": "",
           "values": false
         },
-        "orientation": "auto",
-        "textMode": "value",
+        "orientation": "vertical",
+        "textMode": "value_and_name",
         "colorMode": "value",
         "graphMode": "none",
-        "justifyMode": "center"
+        "justifyMode": "center",
+        "wideLayout": false
       },
       "fieldConfig": {
         "defaults": {
@@ -1522,7 +1645,32 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "calls"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "minutes"
+              }
+            ]
+          }
+        ]
       }
     },
     {
