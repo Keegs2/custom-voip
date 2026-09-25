@@ -1,4 +1,4 @@
--- Read-only: reports which hand-applied migrations (22..49) are present on this database.
+-- Read-only: reports which hand-applied migrations (22..49) are present on this database (22..51).
 -- Run on the East primary: sudo -u postgres psql -d voip -f /opt/revup/scripts/db/check_migrations.sql
 -- Init scripts only run on first initdb; every later migration is applied by hand, so check before assuming.
 -- 43 is a one-shot data backfill (jitter units) — if MISSING, read its header before running; never re-run it.
@@ -16,6 +16,8 @@ WITH c AS (SELECT table_name t, column_name col FROM information_schema.columns 
 ('45_orig_trunk_passive_health', EXISTS(SELECT 1 FROM c WHERE t='carrier_trunk_health' AND col='health_source')),
 ('46_sinch_carrier_gateways', CASE WHEN to_regclass('public.carrier_gateways') IS NULL THEN false ELSE (xpath('/row/n/text()', query_to_xml('SELECT count(*) AS n FROM carrier_gateways WHERE gateway_name=''sinch_denver''', false, true, '')))[1]::text::int > 0 END),
 ('47_cdr_stir_outcome', EXISTS(SELECT 1 FROM c WHERE t='cdrs' AND col='stir_outcome')),
-('48_cdr_call_legs (tonight)', EXISTS(SELECT 1 FROM c WHERE t='cdrs' AND col='leg')),
-('49_cdr_call_legs_index_cagg (tonight)', to_regclass('public.idx_cdrs_call_id') IS NOT NULL)
+('48_cdr_call_legs', EXISTS(SELECT 1 FROM c WHERE t='cdrs' AND col='leg')),
+('49_cdr_call_legs_index_cagg', to_regclass('public.idx_cdrs_call_id') IS NOT NULL),
+('50_cdr_quality_accuracy', EXISTS(SELECT 1 FROM c WHERE t='cdrs' AND col='quality_status') AND EXISTS(SELECT 1 FROM pg_proc WHERE proname='cdr_refresh_call_quality')),
+('51_cdr_quality_no_media', EXISTS(SELECT 1 FROM pg_proc WHERE proname='cq_leg_status' AND pronargs=5))
 ) SELECT m AS migration, CASE WHEN ok THEN 'applied' ELSE '*** MISSING ***' END AS status FROM chk;
