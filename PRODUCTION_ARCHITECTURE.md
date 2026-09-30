@@ -1118,7 +1118,7 @@ GKE backend behind the ted LB; code lives in the ted-next repo, plan
 | Admin rail | FLEET: Infrastructure + **Maintenance** · CUSTOMERS: Customers / Users / Onboarding · PLATFORM: Carriers / SIP Trunks / Rates / Tiers / DIDs / STIR |
 | CDRs | Platform CDR views |
 | Bridge | Deny-by-default **76-route** bridge to the revup API — service-account JWT, hash-chained audit log |
-| AuthZ | `crag.noc.read` for reads; step-up (password re-auth) for writes; `crag.admin.dangerous` for the dangerous tier; two-person approval is a deliberate no-op seam (deferred) |
+| AuthZ | `crag.noc.read` for reads; step-up (password re-auth, 5-min window) for fleet writes (ops-agent verbs + Maintenance); customer/platform admin writes through the revup bridge are capability-gated + audited but NOT step-up; `crag.admin.dangerous` for the dangerous tier; two-person approval is a deliberate no-op seam (deferred) |
 
 ### 10.3 ops-agent (`docker/carrier-monitor`, :8710 fleet-wide)
 
