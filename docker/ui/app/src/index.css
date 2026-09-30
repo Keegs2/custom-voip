@@ -3384,6 +3384,506 @@ select.dl-input {
   outline-offset: 2px;
 }
 
+/* ─── Breadcrumb scope context (admin console) — last crumb segment ─── */
+.rcf-crumb-context {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--rcf-ink-soft);
+}
+
+/* ─── Admin pre-selection prompt — quiet, centered, no data behind it ─── */
+.rcf-scope-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 64px 24px;
+  text-align: center;
+}
+
+.rcf-scope-prompt svg {
+  width: 30px;
+  height: 30px;
+  color: #9aa9c0;
+  margin-bottom: 6px;
+}
+
+.rcf-scope-prompt-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--rcf-ink);
+}
+
+.rcf-scope-prompt-sub {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--rcf-ink-dim);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CALL ACTIVITY TAB (pages/rcf/*) — filter row, KPI tiles, range chart,
+   recent-calls table. Same daylight tokens; hand-written @media only.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.rcf-act {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rcf-stack);
+  padding-bottom: 40px;
+}
+
+/* Visually hidden, still read by assistive tech (chart data table, live region) */
+.rcf-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ─── Filter row: DID picker + range segmented control ─── */
+.rcf-act-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding: 12px 18px;
+  /* The DID dropdown hangs below the bar — the panel must not clip it and
+     must stack above the tiles/chart that follow. */
+  position: relative;
+  z-index: 50;
+  overflow: visible;
+}
+
+.rcf-act-bar-scoped { border-color: rgba(47, 125, 246, 0.4); }
+
+.rcf-act-didpick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 380px;
+  min-width: 0;
+}
+
+.rcf-act-bar-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+}
+
+.rcf-act-bar-static {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--rcf-ink);
+}
+
+/* Segmented control — one tinted track, the active segment lifts to white */
+.rcf-seg {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 3px;
+  gap: 2px;
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line);
+  border-radius: 9px;
+}
+
+.rcf-seg-btn {
+  appearance: none;
+  min-width: 48px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--rcf-ink-dim);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease), box-shadow var(--rcf-ease);
+}
+
+.rcf-seg-btn:hover:not(.rcf-seg-btn-active) {
+  color: var(--rcf-azure-deep);
+  background: var(--rcf-tint-hover);
+}
+
+.rcf-seg-btn:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+.rcf-seg-btn-active {
+  background: var(--rcf-card);
+  border-color: #d5deeb;
+  color: var(--rcf-azure-deep);
+  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.08);
+}
+
+@media (max-width: 560px) {
+  .rcf-seg { margin-left: 0; width: 100%; }
+  .rcf-seg-btn { flex: 1; min-width: 0; }
+}
+
+/* ─── KPI tile row — five equal tiles, one height, label → value → line ─── */
+.rcf-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  transition: opacity var(--rcf-ease);
+}
+
+.rcf-kpis-busy { opacity: 0.6; }
+
+@media (max-width: 1000px) {
+  .rcf-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .rcf-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.rcf-kpi {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 112px;
+  padding: 16px 18px 14px;
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.05);
+  overflow: hidden;
+}
+
+/* Toned tiles (quality) carry a 3px top keyline in their status color */
+.rcf-kpi-toned::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--rcf-kpi-tone);
+}
+
+.rcf-kpi-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rcf-kpi-value {
+  margin-top: 10px;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 1.7rem;
+  line-height: 1;
+  letter-spacing: -0.015em;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rcf-kpi-toned .rcf-kpi-value { color: var(--rcf-kpi-tone); }
+.rcf-kpi-muted .rcf-kpi-value { color: #a7b3c8; }
+
+.rcf-kpi-sub {
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--rcf-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.rcf-kpis-loading .rcf-kpi-sub { color: #a7b3c8; }
+
+/* ─── Chart panel ─── */
+.rcf-act-head-sub {
+  flex-basis: 100%;
+  margin-top: -6px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--rcf-ink-dim);
+}
+
+.rcf-act-chart-body {
+  padding: 16px 20px 14px;
+}
+
+.rcf-act-chart { position: relative; }
+
+.rcf-act-frame {
+  position: relative;
+  transition: opacity var(--rcf-ease);
+}
+
+.rcf-act-frame-busy,
+.rcf-act-busy { opacity: 0.55; }
+
+.rcf-act-svg {
+  display: block;
+  overflow: visible;
+  outline: none;
+  cursor: crosshair;
+}
+
+.rcf-act-svg:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+.rcf-act-num { font-variant-numeric: tabular-nums; }
+
+.rcf-act-empty-note {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 64px);
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--rcf-line);
+  font-size: 0.78rem;
+  color: var(--rcf-ink-dim);
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Tooltip — values lead (strong ink), labels follow; line keys, not boxes */
+.rcf-act-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #dfe6f0;
+  border-radius: 9px;
+  box-shadow: 0 12px 28px -8px rgba(14, 23, 38, 0.28);
+  font-size: 0.72rem;
+  color: var(--rcf-ink-soft);
+}
+
+.rcf-act-tip-date {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--rcf-ink-dim);
+  margin-bottom: 4px;
+}
+
+.rcf-act-tip-value {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 6px;
+}
+
+.rcf-act-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rcf-act-tip-row strong {
+  color: var(--rcf-ink);
+  font-weight: 700;
+}
+
+.rcf-act-tip-muted { color: #8b99b0; }
+.rcf-act-tip-alert strong { color: var(--rcf-red); }
+
+.rcf-act-tip-rule {
+  height: 1px;
+  margin: 5px 0;
+  background: var(--rcf-line-soft);
+}
+
+/* Series keys — mirror the marks: box = column, line = line, dashed = dashed */
+.rcf-act-key {
+  display: inline-block;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.rcf-act-key-box {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.rcf-act-key-line {
+  width: 14px;
+  height: 0;
+  border-top: 2px solid;
+}
+
+.rcf-act-key-dash { border-top-style: dashed; }
+
+.rcf-act-key-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rcf-red);
+}
+
+.rcf-act-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 20px;
+  margin-top: 6px;
+}
+
+.rcf-act-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.7rem;
+  color: var(--rcf-ink-dim);
+}
+
+.rcf-act-inline-error {
+  margin-top: 8px;
+  font-size: 0.72rem;
+  color: var(--rcf-red);
+  text-align: center;
+}
+
+/* ─── Section states (loading / error / empty) ─── */
+.rcf-act-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 44px 20px;
+  font-size: 0.84rem;
+  color: var(--rcf-ink-dim);
+  text-align: center;
+}
+
+.rcf-act-state-error {
+  color: var(--rcf-red);
+  background: rgba(220, 38, 38, 0.04);
+}
+
+.rcf-act-chart-loading { min-height: 300px; }
+
+/* ─── Recent calls table ─── */
+.rcf-act-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--rcf-ink-dim);
+  background: var(--rcf-tint);
+  border: 1px solid var(--rcf-line);
+  border-radius: 20px;
+  padding: 2px 9px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.rcf-act-chip-did {
+  color: var(--rcf-azure-deep);
+  background: rgba(47, 125, 246, 0.08);
+  border-color: rgba(47, 125, 246, 0.24);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rcf-act-search {
+  position: relative;
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+
+.rcf-act-search svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  color: #9aa9c0;
+  pointer-events: none;
+}
+
+.rcf-act-search .rcf-input {
+  width: 100%;
+  padding: 7px 12px 7px 30px;
+  font-size: 0.8rem;
+}
+
+.rcf-act-tablewrap {
+  overflow-x: auto;
+  transition: opacity var(--rcf-ease);
+}
+
+.rcf-act-table {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: collapse;
+}
+
+.rcf-act-td {
+  padding: 12px 14px;
+}
+
+.rcf-act-time {
+  white-space: nowrap;
+  font-size: 0.78rem;
+  color: var(--rcf-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.rcf-act-tz { color: #8b99b0; }
+
+.rcf-act-status {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: 20px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+.rcf-act-qdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    DAYLIGHT CONSOLE (shared) — generic `dl-*` primitives for daylight pages
    (TrunksPage, MyAccountPage, and pages to come).

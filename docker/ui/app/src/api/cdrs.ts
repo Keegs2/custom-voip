@@ -1,5 +1,6 @@
 import { apiRequest } from './client';
 import type { Cdr, CdrSearchParams, CdrSearchResult, CdrSummaryResponse } from '../types/cdr';
+import type { CdrActivityParams, CdrActivityResponse } from '../types/cdrActivity';
 
 /**
  * Raw API shape — may use `cdrs` or `items` for the row list depending on
@@ -75,6 +76,22 @@ export async function searchCdrs(params: CdrSearchParams = {}): Promise<CdrSearc
     limit: raw.limit ?? params.limit ?? 50,
     offset: raw.offset ?? params.offset ?? 0,
   };
+}
+
+/**
+ * GET /cdrs/activity — KPI totals + fixed, zero-filled buckets for the RCF
+ * Call Activity tab (see types/cdrActivity.ts). Only declared params are
+ * sent; `customer_id`/`destination` are omitted when unset so tenant and
+ * "All Customers" requests stay server-scoped.
+ */
+export async function getCdrActivity(params: CdrActivityParams): Promise<CdrActivityResponse> {
+  const query = new URLSearchParams();
+  query.set('range', params.range);
+  query.set('tz', params.tz);
+  if (params.customer_id !== undefined) query.set('customer_id', String(params.customer_id));
+  if (params.product_type) query.set('product_type', params.product_type);
+  if (params.destination) query.set('destination', params.destination);
+  return apiRequest<CdrActivityResponse>('GET', `/cdrs/activity?${query.toString()}`);
 }
 
 export async function getCdr(uuid: string): Promise<Cdr> {

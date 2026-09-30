@@ -1205,11 +1205,20 @@ async def request_number(
 
     Admin reviews and approves (via /assign) or the system auto-approves.
     """
+    # Staff never request numbers: admins assign them directly via
+    # /{did}/assign (inventory tool). Previously an admin request reserved the
+    # DID with customer_id NULL — a stranded 'reserved' row no one owned.
+    if user.get("role") in ("admin", "support"):
+        raise HTTPException(
+            status_code=403,
+            detail="Staff cannot request numbers; assign them from the number inventory tool",
+        )
+
     e164 = _canonical_did(did)
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    if customer_id is None and user.get("role") != "admin":
+    if customer_id is None:
         raise HTTPException(
             status_code=400,
             detail="User is not associated with a customer account",
