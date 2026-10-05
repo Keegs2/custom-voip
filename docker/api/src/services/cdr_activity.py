@@ -41,6 +41,13 @@ Windows / buckets (all in the caller's IANA `tz`):
 The scan window is always the sargable `start_time >= lo AND start_time < hi`
 over bind params, so the (customer_id, start_time) / start_time indexes and
 Timescale chunk exclusion apply.
+
+Python (zoneinfo) is the SINGLE source of bucket edges: the bucket-start
+instants are bound as one ascending `timestamptz[]` and SQL only does
+`width_bucket(start_time, edges) - 1` (pure instant comparison — no
+`AT TIME ZONE` / date_trunc, so PostgreSQL's tzdata never decides which
+bucket a call lands in and can never disagree with the labels). The last
+bucket's upper bound is `hi`, enforced by the WHERE.
 """
 from __future__ import annotations
 
@@ -117,7 +124,16 @@ class ActivityWindow:
     lo: datetime                 # inclusive, aware UTC
     hi: datetime                 # exclusive, aware UTC
     bucket_starts: tuple[datetime, ...]   # aware, in `tz`, one per point
-    anchor_date: Optional[date]  # day/week: local date of bucket 0 (None for hour)
+    anchor_date: Optional[date]  # day/week: local date of bucket 0 (None for hour); informational
+
+    def bucket_edges_utc(self) -> list[datetime]:
+        """Bucket-start instants (UTC), strictly ascending — the width_bucket
+        thresholds. bucket_starts[0] may precede `lo` (90d: first week is
+        clipped); every later edge lies inside [lo, hi)."""
+        edges = [s.astimezone(timezone.utc) for s in self.bucket_starts]
+        if any(b <= a for a, b in zip(edges, edges[1:])) or not edges or edges[-1] >= self.hi:
+            raise ValueError(f"bucket edges not strictly ascending within window: {edges!r}")
+        return edges
 
 
 def _local_midnight(d: date, tz: tzinfo) -> datetime:
@@ -161,13 +177,11 @@ def compute_window(range_: str, tz_name: str, now: datetime) -> ActivityWindow:
 # ---------------------------------------------------------------------------
 # SQL
 # ---------------------------------------------------------------------------
-#: Bucket index expressions (0..n-1). Only fixed text; $1 lo, $3 tz, $4 anchor
-#: (local date of bucket 0 — the first day, or the first week's Monday).
-_BUCKET_SQL: dict[str, str] = {
-    "hour": "floor(EXTRACT(EPOCH FROM (start_time - $1::timestamptz)) / 3600)::int",
-    "day": "((start_time AT TIME ZONE $3::text)::date - $4::date)",
-    "week": "(((date_trunc('week', start_time AT TIME ZONE $3::text))::date - $4::date) / 7)",
-}
+#: Bucket index (0..n-1): position of start_time among the Python-computed
+#: bucket-start instants ($3, ascending). width_bucket returns i when
+#: edges[i-1] <= start_time < edges[i] (n past the last edge; 0 below the
+#: first, impossible here since edges[0] <= lo). Only fixed text.
+_BUCKET_SQL = "(width_bucket(start_time, $3::timestamptz[]) - 1)"
 
 _STAFF_ANSWERED_SQL = "(answer_time IS NOT NULL AND COALESCE(duration_ms, 0) > 0)"
 _TENANT_ANSWERED_SQL = f"(answer_time IS NOT NULL AND {tr.TALK_MS_SQL} > 0)"
@@ -187,16 +201,10 @@ def build_activity_query(
     statement_cache_size=0); only fixed fragments are concatenated. Tenant
     SQL never references duration_ms/billable_ms/cost columns at all.
     """
-    args: list[Any] = [window.lo, window.hi]
-    if window.bucket == "hour":
-        # The hour bucket is absolute (anchored on lo); tz/anchor are not
-        # referenced, so they are not bound (asyncpg rejects unused binds).
-        bucket_sql = _BUCKET_SQL["hour"]
-        idx = 3
-    else:
-        bucket_sql = _BUCKET_SQL[window.bucket]
-        args += [window.tz, window.anchor_date]
-        idx = 5
+    # Same edges for hour/day/week: the tz never reaches PostgreSQL.
+    args: list[Any] = [window.lo, window.hi, window.bucket_edges_utc()]
+    bucket_sql = _BUCKET_SQL
+    idx = 4
 
     where = (
         "WHERE start_time >= $1::timestamptz AND start_time < $2::timestamptz"
@@ -290,12 +298,22 @@ def shape_activity(window: ActivityWindow, rows: list[Any], *, staff: bool) -> d
     """DB rows (GROUPING SETS output) -> the response contract, zero-filled."""
     total: Optional[dict] = None
     by_bucket: dict[int, dict] = {}
+    n = len(window.bucket_starts)
     for rec in rows:
         r = dict(rec)
         if r["is_total"]:
             total = r
-        elif r["b"] is not None:
+        elif r["b"] is not None and 0 <= int(r["b"]) < n:
             by_bucket[int(r["b"])] = r
+        else:
+            # Cannot happen while edges[0] <= lo and the WHERE caps at hi —
+            # but if it ever does, the KPI total still counts these calls
+            # while no point shows them: say so instead of dropping silently.
+            logger.warning(
+                "cdr activity: %s call(s) in out-of-range bucket %r (range=%s tz=%s"
+                " n=%d lo=%s hi=%s) — counted in KPIs, missing from points",
+                r.get("calls"), r["b"], window.range, window.tz, n,
+                window.lo.isoformat(), window.hi.isoformat())
 
     kpis = _counts(total)
     if staff:
@@ -338,8 +356,9 @@ def shape_activity(window: ActivityWindow, rows: list[Any], *, staff: bool) -> d
 async def run_activity_query(sql: str, args: list[Any]) -> list[asyncpg.Record]:
     """ONE short READ ONLY transaction with SET LOCAL statement_timeout
     (transaction-scoped => PgBouncer-transaction-pooling safe; same pattern
-    as routers/reports.py `_run`). Timeout -> 503; a tz PostgreSQL does not
-    recognise (zoneinfo/PG tzdata skew) -> 422."""
+    as routers/reports.py `_run`). Timeout -> 503. (The tz never reaches
+    PostgreSQL — buckets are bound instants — so there is no PG-side tz
+    rejection to map any more.)"""
     pool = await db.get_pool()
     try:
         async with pool.acquire() as conn:
@@ -351,9 +370,6 @@ async def run_activity_query(sql: str, args: list[Any]) -> list[asyncpg.Record]:
         logger.warning("cdr activity query cancelled (statement_timeout %sms): %s",
                        ACTIVITY_STATEMENT_TIMEOUT_MS, e)
         raise HTTPException(503, "Call activity is taking too long. Try a shorter range.") from e
-    except asyncpg.exceptions.InvalidParameterValueError as e:
-        logger.info("cdr activity: tz rejected by PostgreSQL: %s", e)
-        raise HTTPException(422, "unknown time zone") from e
 
 
 def utc_now() -> datetime:

@@ -137,21 +137,25 @@ export function tickStep(bucket: ActivityBucket, count: number, plotWidth: numbe
 // ─── Table datetime ──────────────────────────────────────────────────────────
 
 /**
- * Absolute call start in the viewer's local time, seconds included —
- * customers match these against their own records.
+ * Absolute call start, seconds included — customers match these against
+ * their own records. `tz` is the zone the activity panel actually used
+ * (the viewer's, or UTC after a server tz rejection); omitted → the
+ * browser's zone.
  *   → "Sep 30, 2026, 2:14:07 PM"
  */
-export function fmtCallDateTime(iso: string): string {
+export function fmtCallDateTime(iso: string, tz?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
-  return dtf({ month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(d);
+  return dtf({
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: tz,
+  }).format(d);
 }
 
-/** Short zone name for an instant in the viewer's zone ("EDT", "GMT-5"). */
-export function tzAbbrev(iso: string): string {
+/** Short zone name for an instant in `tz` (default: the viewer's zone) — "EDT", "GMT-5", "UTC". */
+export function tzAbbrev(iso: string, tz?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return part(dtf({ timeZoneName: 'short', hour: 'numeric' }).formatToParts(d), 'timeZoneName');
+  return part(dtf({ timeZoneName: 'short', hour: 'numeric', timeZone: tz }).formatToParts(d), 'timeZoneName');
 }
 
 // ─── Numbers ─────────────────────────────────────────────────────────────────

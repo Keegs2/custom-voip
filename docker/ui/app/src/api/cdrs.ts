@@ -1,4 +1,4 @@
-import { apiRequest } from './client';
+import { ApiError, apiRequest } from './client';
 import type { Cdr, CdrSearchParams, CdrSearchResult, CdrSummaryResponse } from '../types/cdr';
 import type { CdrActivityParams, CdrActivityResponse } from '../types/cdrActivity';
 
@@ -92,6 +92,16 @@ export async function getCdrActivity(params: CdrActivityParams): Promise<CdrActi
   if (params.product_type) query.set('product_type', params.product_type);
   if (params.destination) query.set('destination', params.destination);
   return apiRequest<CdrActivityResponse>('GET', `/cdrs/activity?${query.toString()}`);
+}
+
+/**
+ * True when GET /cdrs/activity refused the `tz` param itself — the router's
+ * 422 "unknown time zone" (zone missing from the server's tzdata) or a
+ * FastAPI validation 422 located at `query.tz`. Any other 422 is a real
+ * request bug and must surface, not be papered over with a UTC retry.
+ */
+export function isTimeZoneRejection(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 422 && /time zone|\btz\b/i.test(err.message);
 }
 
 export async function getCdr(uuid: string): Promise<Cdr> {

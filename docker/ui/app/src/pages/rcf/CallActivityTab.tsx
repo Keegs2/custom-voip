@@ -12,18 +12,23 @@
  *     `start`/`end`), server-paginated, so table and chart always agree.
  *     If the activity endpoint is unavailable the table falls back to a
  *     rolling client-computed window rather than going blank.
+ *   - Zone → the browser's IANA zone. If the API rejects it (422 on `tz` —
+ *     e.g. a zone newer than the server's tzdata) the activity fetch retries
+ *     ONCE with UTC and every later fetch goes straight to UTC. All zone
+ *     labels (chart header, ticks, Recent Calls times) read the response's
+ *     `tz`, so they say UTC whenever UTC was what the server bucketed in.
  *
  * Refetches keep the previous frame on screen (dimmed) — no layout jump when
  * the range or DID changes. RcfPage remounts this tab per customer scope
  * (`key`), so a DID picked under one customer never leaks into another.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import { listRcf } from '../../api/rcf';
-import { getCdrActivity, searchCdrs } from '../../api/cdrs';
+import { getCdrActivity, isTimeZoneRejection, searchCdrs } from '../../api/cdrs';
 import type { RcfEntry } from '../../types/rcf';
-import type { ActivityRange } from '../../types/cdrActivity';
+import type { ActivityRange, CdrActivityParams, CdrActivityResponse } from '../../types/cdrActivity';
 import { Spinner } from '../../components/ui/Spinner';
 import { Reveal } from '../../components/fx/Reveal';
 import { DEFAULT_PAGE_SIZE } from './theme';
@@ -57,6 +62,11 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState('');
   const [tz] = useState(browserTimeZone);
+  // Latched by the first tz rejection so later fetches don't re-send a zone
+  // the server can't resolve (one wasted 422 per range/DID change). A ref,
+  // not state: only queryFn reads it, and the zone shown is read back from
+  // the response's `tz`, never from this flag.
+  const tzRejectedRef = useRef(false);
 
   const { data: rcfData } = useQuery({
     queryKey: ['rcf-dids', customerId],
@@ -70,18 +80,31 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
   const activityCustomerId = isAdmin ? customerId : undefined;
   const activity = useQuery({
     queryKey: ['rcf-activity', activityCustomerId ?? 'all', range, tz, selectedDid],
-    queryFn: () =>
-      getCdrActivity({
+    queryFn: async (): Promise<CdrActivityResponse> => {
+      const params: Omit<CdrActivityParams, 'tz'> = {
         range,
-        tz,
         customer_id: activityCustomerId,
         product_type: 'rcf',
         destination: selectedDid ?? undefined,
-      }),
+      };
+      if (!tzRejectedRef.current) {
+        try {
+          return await getCdrActivity({ ...params, tz });
+        } catch (err) {
+          // Only a rejection of the zone itself earns the UTC retry; every
+          // other failure (and a UTC request that still fails) surfaces.
+          if (tz === 'UTC' || !isTimeZoneRejection(err)) throw err;
+          tzRejectedRef.current = true;
+        }
+      }
+      return getCdrActivity({ ...params, tz: 'UTC' });
+    },
     staleTime: 60_000,
     placeholderData: keepPreviousData,
   });
   const activityData = activity.data;
+  // The zone the numbers were actually bucketed in — UTC after a fallback.
+  const shownTz = activityData?.tz || tz;
   const activityFresh = activityData !== undefined && !activity.isPlaceholderData;
 
   // Table window: exactly the activity response's window; a rolling fallback
@@ -183,7 +206,7 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
                 {selectedLabel && <span className="rcf-act-chip rcf-act-chip-did">{selectedLabel}</span>}
                 <span className="rcf-act-head-sub">
                   Calls per {BUCKET_NOUN[activityData?.bucket ?? 'day']} · answered vs missed, with answer rate and
-                  share that sounded good or better · {tz.replace(/_/g, ' ')} time
+                  share that sounded good or better · {shownTz.replace(/_/g, ' ')} time
                 </span>
               </div>
               <div className="rcf-act-chart-body">
@@ -197,7 +220,7 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
                     bucket={activityData.bucket}
                     points={activityData.points}
                     windowEnd={activityData.end}
-                    tz={activityData.tz || tz}
+                    tz={shownTz}
                     rangePhrase={rangePreset(activityData.range).phrase}
                     refreshing={chartRefreshing}
                   />
@@ -231,6 +254,7 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
           rangeTitle={preset.title}
           search={search}
           onSearchChange={setSearch}
+          timeZone={shownTz}
         />
       </Reveal>
     </div>

@@ -19,6 +19,11 @@ Covers:
       - bad tz / range -> 422; route not shadowed by /{cdr_uuid}; legacy
         /cdrs mount; statement_timeout -> 503 without leaking SET LOCAL;
         sargable start_time range (index scan).
+      - Python is the single source of bucket edges (width_bucket over bound
+        instants; no AT TIME ZONE in SQL): calls straddling the US DST
+        transitions land on the local day/week/hour zoneinfo says, for
+        24h/7d/30d/90d in America/New_York, and points always sum to the
+        KPI total. An out-of-range bucket index is logged, never silent.
 
 Run:  python -m pytest -q -p no:cacheprovider tests/test_cdr_activity.py
 """
@@ -128,6 +133,61 @@ def test_pct():
     assert act.pct(5, 5) == 100.0
 
 
+@pytest.mark.parametrize("rng", ["24h", "7d", "30d", "90d"])
+@pytest.mark.parametrize("now", [
+    NOW,
+    datetime(2026, 3, 8, 7, 30, tzinfo=timezone.utc),    # just after spring-forward
+    datetime(2026, 3, 12, 12, tzinfo=timezone.utc),
+    datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc),   # 01:30 EST, 2nd pass
+    datetime(2026, 11, 5, 12, tzinfo=timezone.utc),
+])
+@pytest.mark.parametrize("tz", [NY, "UTC", "Asia/Kolkata", "Australia/Lord_Howe"])
+def test_bucket_edges_are_python_starts_ascending(rng, now, tz):
+    w = act.compute_window(rng, tz, now)
+    edges = w.bucket_edges_utc()
+    assert edges == [s.astimezone(timezone.utc) for s in w.bucket_starts]
+    assert all(a < b for a, b in zip(edges, edges[1:]))
+    assert edges[0] <= w.lo < edges[1] and edges[-1] < w.hi
+    if rng != "90d":
+        assert edges[0] == w.lo                  # only 90d's first week is clipped
+
+
+def test_sql_buckets_by_bound_edges_not_pg_tz():
+    for rng in ("24h", "7d", "90d"):
+        w = act.compute_window(rng, NY, NOW)
+        sql, args = act.build_activity_query(w, staff=True, customer_id=None,
+                                             product_type="rcf", destination=None)
+        assert "width_bucket(start_time, $3::timestamptz[])" in sql
+        assert "AT TIME ZONE" not in sql and "date_trunc" not in sql
+        assert NY not in args                    # the tz never reaches PostgreSQL
+        assert args[:3] == [w.lo, w.hi, w.bucket_edges_utc()]
+        assert args[3:] == ["rcf"]
+
+
+def test_unsorted_edges_rejected():
+    w = act.compute_window("7d", NY, NOW)
+    bad = act.ActivityWindow(w.range, w.bucket, w.tz, w.lo, w.hi,
+                             tuple(reversed(w.bucket_starts)), w.anchor_date)
+    with pytest.raises(ValueError):
+        bad.bucket_edges_utc()
+
+
+def test_out_of_range_bucket_is_logged_not_silent(caplog):
+    w = act.compute_window("7d", NY, NOW)
+    rows = [
+        {"is_total": True, "b": None, "calls": 4, "answered": 0},
+        {"is_total": False, "b": 0, "calls": 1, "answered": 0},
+        {"is_total": False, "b": 7, "calls": 2, "answered": 0},    # n == 7
+        {"is_total": False, "b": -1, "calls": 1, "answered": 0},
+    ]
+    with caplog.at_level("WARNING", logger=act.logger.name):
+        body = act.shape_activity(w, rows, staff=True)
+    assert body["kpis"]["calls"] == 4
+    assert sum(p["calls"] for p in body["points"]) == 1
+    msgs = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(msgs) == 2 and all("out-of-range bucket" in m for m in msgs), msgs
+
+
 # ---------------------------------------------------------------------------
 # 2) Integration: real router over ephemeral PostgreSQL
 # ---------------------------------------------------------------------------
@@ -178,6 +238,30 @@ CDRS = [
 ]
 #: Calls that also carry carrier B-leg rows (must never be counted).
 B_LEG_TAGS = {"a1", "a2", "a4", "b1"}
+
+#: DST-edge calls for a separate customer (all outside every NOW-anchored
+#: window: Nov 2026 is after NOW, Mar 2026 is > 90 days before it).
+#: US 2026: spring-forward Sun 3/8 07:00Z (02:00 EST -> 03:00 EDT, 23h day);
+#: fall-back Sun 11/1 06:00Z (02:00 EDT -> 01:00 EST, 25h day). Both Sundays,
+#: so the following Monday is also an ISO-week edge.
+CID_DST = 303
+DST_STARTS = [
+    datetime(2026, 3, 8, 4, 59, tzinfo=timezone.utc),    # Sat 3/7 23:59 EST
+    datetime(2026, 3, 8, 5, 0, tzinfo=timezone.utc),     # Sun 3/8 00:00 EST
+    datetime(2026, 3, 8, 6, 59, tzinfo=timezone.utc),    # 01:59 EST
+    datetime(2026, 3, 8, 7, 0, tzinfo=timezone.utc),     # 03:00 EDT
+    datetime(2026, 3, 9, 3, 59, tzinfo=timezone.utc),    # Sun 3/8 23:59 EDT
+    datetime(2026, 3, 9, 4, 0, tzinfo=timezone.utc),     # Mon 3/9 00:00 EDT
+    datetime(2026, 10, 31, 3, 59, tzinfo=timezone.utc),  # Fri 10/30 23:59 EDT
+    datetime(2026, 11, 1, 3, 59, tzinfo=timezone.utc),   # Sat 10/31 23:59 EDT
+    datetime(2026, 11, 1, 4, 0, tzinfo=timezone.utc),    # Sun 11/1 00:00 EDT
+    datetime(2026, 11, 1, 5, 30, tzinfo=timezone.utc),   # 01:30 EDT (1st pass)
+    datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc),   # 01:30 EST (2nd pass)
+    datetime(2026, 11, 2, 4, 59, tzinfo=timezone.utc),   # Sun 11/1 23:59 EST
+    datetime(2026, 11, 2, 5, 0, tzinfo=timezone.utc),    # Mon 11/2 00:00 EST
+]
+CDRS += [(f"dst{i}", CID_DST, "rcf", D_B, ts, 5, 30, "rated", "good", 4.2)
+         for i, ts in enumerate(DST_STARTS)]
 
 
 def _uuid(tag):
@@ -520,3 +604,54 @@ def test_tenant_sql_never_reads_duration_or_cost_columns():
     for col in ("duration_ms", "billable_ms", "total_cost", "rate_per_min"):
         assert col not in sql
     assert tr.TALK_MS_SQL in sql
+
+
+# ---------------------------------------------------------------------------
+# 3) DST: Python edges vs. rows actually bucketed by PostgreSQL
+# ---------------------------------------------------------------------------
+def _expected_point_t(ts, rng, tz):
+    """Independent oracle (zoneinfo only): the local bucket label for `ts`."""
+    from zoneinfo import ZoneInfo
+    local = ts.astimezone(ZoneInfo(tz))
+    if rng == "24h":
+        return ts.replace(minute=0, second=0, microsecond=0)   # NY: whole-hour offsets
+    d = local.date()
+    if rng == "90d":
+        d -= timedelta(days=d.weekday())
+    return d
+
+
+_DST_NOWS = {
+    "spring+0": datetime(2026, 3, 9, 4, 30, tzinfo=timezone.utc),   # Mon 3/9 00:30 EDT
+    "spring+4d": datetime(2026, 3, 12, 12, tzinfo=timezone.utc),
+    "fall+0": datetime(2026, 11, 1, 23, 0, tzinfo=timezone.utc),    # Sun 11/1 18:00 EST
+    "fall+4d": datetime(2026, 11, 5, 12, tzinfo=timezone.utc),
+}
+#: 24h only where its window holds the transition (the +4d nows are past it).
+_DST_CASES = [(r, k) for k in _DST_NOWS for r in ("24h", "7d", "30d", "90d")
+              if not (r == "24h" and k.endswith("+4d"))]
+
+
+@pytest.mark.parametrize("rng,now_id", _DST_CASES)
+def test_dst_crossing_buckets_match_zoneinfo(client, tokens, monkeypatch, rng, now_id):
+    now = _DST_NOWS[now_id]
+    monkeypatch.setattr(act, "utc_now", lambda: now)
+    body = _ok(_get(client, tokens, "admin", customer_id=CID_DST, range=rng, tz=NY))
+    w = act.compute_window(rng, NY, now)
+    in_window = [ts for ts in DST_STARTS if w.lo <= ts < w.hi]
+    assert in_window, "fixture should exercise this window"
+    # No silent drops: every call counted in the KPIs shows in some point.
+    assert body["kpis"]["calls"] == len(in_window)
+    assert sum(p["calls"] for p in body["points"]) == len(in_window)
+    expected: dict = {}
+    for ts in in_window:
+        key = _expected_point_t(ts, rng, NY)
+        expected[key] = expected.get(key, 0) + 1
+    got = {}
+    for p in body["points"]:
+        if not p["calls"]:
+            continue
+        t = datetime.fromisoformat(p["t"])
+        key = t.astimezone(timezone.utc) if rng == "24h" else t.date()
+        got[key] = p["calls"]
+    assert got == expected, (rng, now, body["points"])

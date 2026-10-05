@@ -145,6 +145,11 @@ export interface RecentCallsTableProps {
   rangeTitle: string;
   search: string;
   onSearchChange: (value: string) => void;
+  /**
+   * IANA zone the Time column renders in — the zone the activity response
+   * was bucketed in (UTC after a server tz rejection). Undefined → browser zone.
+   */
+  timeZone?: string;
 }
 
 export function RecentCallsTable({
@@ -163,6 +168,7 @@ export function RecentCallsTable({
   rangeTitle,
   search,
   onSearchChange,
+  timeZone,
 }: RecentCallsTableProps) {
   // The search box narrows the page on screen (GET /cdrs has no free-text
   // filter); the DID + range filters are server-side and span every page.
@@ -177,14 +183,15 @@ export function RecentCallsTable({
           c.sip_code?.toString(),
           fmt(c.caller_id),
           fmt(c.destination),
-          fmtCallDateTime(c.start_time),
+          fmtCallDateTime(c.start_time, timeZone),
         ].some((f) => f != null && f.toLowerCase().includes(q)),
       )
     : rows;
 
   // One zone abbreviation for the page → header; two (DST boundary) → per cell.
-  const zones = new Set(visible.map((c) => tzAbbrev(c.start_time)).filter(Boolean));
-  const headerZone = zones.size === 1 ? [...zones][0] : zones.size === 0 ? tzAbbrev(new Date().toISOString()) : null;
+  const zones = new Set(visible.map((c) => tzAbbrev(c.start_time, timeZone)).filter(Boolean));
+  const headerZone =
+    zones.size === 1 ? [...zones][0] : zones.size === 0 ? tzAbbrev(new Date().toISOString(), timeZone) : null;
 
   // Pre-`total` APIs: infer "there is another page" from a full page.
   const knownTotal = total ?? (page - 1) * pageSize + rows.length + (rows.length === pageSize ? 1 : 0);
@@ -257,8 +264,8 @@ export function RecentCallsTable({
                       {/* Time — absolute, local, seconds included */}
                       <td className="rcf-act-td rcf-act-time">
                         <time dateTime={cdr.start_time}>
-                          {fmtCallDateTime(cdr.start_time)}
-                          {!headerZone && <span className="rcf-act-tz"> {tzAbbrev(cdr.start_time)}</span>}
+                          {fmtCallDateTime(cdr.start_time, timeZone)}
+                          {!headerZone && <span className="rcf-act-tz"> {tzAbbrev(cdr.start_time, timeZone)}</span>}
                         </time>
                       </td>
 

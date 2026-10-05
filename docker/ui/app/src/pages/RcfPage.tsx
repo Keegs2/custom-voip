@@ -1911,14 +1911,17 @@ function AvailableNumbersSection({
   onRequest,
   requestingDid,
   canRequest,
+  isStaff,
 }: {
   items: DidInventoryItem[];
   isLoading: boolean;
   isError: boolean;
   onRequest: (item: DidInventoryItem) => void;
   requestingDid: string | null;
-  /** False for staff — admins assign numbers in the inventory tool, never request them here. */
+  /** True only for the tenant `user` role — staff and readonly tenants never request. */
   canRequest: boolean;
+  /** Real role is admin/support — picks the view-only note's wording. */
+  isStaff: boolean;
 }) {
   // ALL hooks unconditionally at top
   const [filters, setFilters] = useState<DidFilterState>({ npa: '', nxx: '', state: '', search: '' });
@@ -1973,7 +1976,9 @@ function AvailableNumbersSection({
       />
       {!canRequest && (
         <p style={{ margin: '0 0 14px', fontSize: '0.8rem', color: INK_DIM }}>
-          View only — staff assign numbers to customers from the number inventory tool.
+          {isStaff
+            ? 'View only — staff assign numbers to customers from the number inventory tool.'
+            : 'View only — your account has read-only access. Ask your account administrator to request numbers.'}
         </p>
       )}
 
@@ -2140,11 +2145,12 @@ function DIDManagementTab({ customerId, filterToCustomer, onSwitchTab }: DIDMana
   // ALL hooks unconditionally at top — React rules-of-hooks
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
-  // Staff never request numbers — they assign them in the inventory tool.
-  // isActualAdmin (not isAdmin): customer-view mode doesn't make an admin a
-  // customer; the API rejects staff requests regardless.
-  const { isActualAdmin, isSupport } = useAuth();
-  const canRequest = !isActualAdmin && !isSupport;
+  // Only the tenant `user` role may request numbers — the API 403s everyone
+  // else. Staff assign numbers in the inventory tool; readonly tenants are
+  // view-only. Keyed on the REAL role (user.role, as canEdit is), so an
+  // admin in customer-view mode — still role 'admin' — never sees Request.
+  const { user, isActualAdmin, isSupport } = useAuth();
+  const canRequest = user?.role === 'user';
 
   // Request modal state
   const [requestTarget, setRequestTarget] = useState<DidInventoryItem | null>(null);
@@ -2291,6 +2297,7 @@ function DIDManagementTab({ customerId, filterToCustomer, onSwitchTab }: DIDMana
           onRequest={handleRequestClick}
           requestingDid={requestMutation.isPending ? (requestMutation.variables ?? null) : null}
           canRequest={canRequest}
+          isStaff={isActualAdmin || isSupport}
         />
       </div>
     </>
