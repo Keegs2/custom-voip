@@ -1,4 +1,4 @@
--- Read-only: reports which hand-applied migrations (22..49) are present on this database (22..51).
+-- Read-only: reports which hand-applied migrations (22..51) are present on this database.
 -- Run on the East primary: sudo -u postgres psql -d voip -f /opt/revup/scripts/db/check_migrations.sql
 -- Init scripts only run on first initdb; every later migration is applied by hand, so check before assuming.
 -- 43 is a one-shot data backfill (jitter units) — if MISSING, read its header before running; never re-run it.
