@@ -130,11 +130,23 @@ When a forwarded/placed destination is a number the platform **owns** (any produ
 
 **On-net terminal is product-agnostic.** Any live product's DID (rcf/trunk; api only if `API_CALLING_ENABLED`) can be the terminal of an on-net (internal) call — a forward that lands on a platform-owned number is delivered into that number's own handler (RCF bridge, API voice app, or trunk-to-PBX) instead of hairpinning through the carrier. This is a routing/billing optimization only; it does NOT change what any customer sees in the UI, and RCF customers still never see UCaaS. See On-Net Routing above and `docs/ONNET_ROUTING_DESIGN.md`.
 
+## Platform changes (2026-09-22 → 09-25) — where to look
+
+- **CDR A/B leg split (LIVE):** one `leg='A'` row per call + one `leg='B'` row per carrier bridge attempt; every call-counting query uses `leg IS DISTINCT FROM 'B'`. Contract `docs/CDR_LEG_SPLIT_CONTRACT.md`, plan `docs/CDR_BILLING_REMEDIATION_PLAN.md`, migrations 48/49. Equinox export is billing-first (derived `answered`/`billed_seconds`/`ring_ms`/`leg`/`call_id`); Equinox builds against whatever we send.
+- **Tenant redaction:** customers never receive rates, costs, billable seconds, exact durations, routing internals or `traffic_grade` (`docker/api/src/services/tenant_redaction.py`; minutes = rounded talk time).
+- **Customer Reporting page** (`/reporting`, above Guides): `docs/CUSTOMER_REPORTING_DESIGN.md`.
+- **Call quality (migrations 50/51):** our own ITU-T G.107 MOS from true loss (patched FS vars), per-leg rating rule, call quality = worse direction, `no_rtp` = true one-way audio vs `no_media` = no audio either way. `docs/CALL_QUALITY_ACCURACY_PLAN.md`. Dashboards only — **no pager/alerting on quality (owner decision).**
+- **Troubleshooting ladders:** A/B legs linked deterministically (X-CID from fetched INVITEs + bounded ClickHouse lookup + CDR B rows) — one row + one ladder per call (`routers/homer_correlation.py`).
+- **Session timers:** the ~108 s cut of Sinch-originated calls is fixed (see "Session Timer Normalization").
+- **NOC:** concurrent-call live + high-water mark (exporter peak gauges, 15 s rules).
+- **API Calling retired** (see Account Types); payments demo removed.
+
 ## Testing
 
 - **Type-check before push:** `tsc --noEmit` — unused imports break Docker build
 - **Do not push until tested** — user confirms locally first
-- **Live call test DID:** +16174544217 → forwards to +17744045256
+- **Live call test DID:** +16174544217 (RCF). Its `forward_to` is changed for testing — check `rcf_numbers` before relying on a target (was +17744045256; forwarding to +18004444444 via Sinch Denver-TF on 2026-09-24).
+- **Sinch test TNs (origination):** 5305480845 (Denver), 5305480846 (Chicago) — use them for anything that depends on Sinch session timers/refreshes.
 
 ## Multi-VM SIP Architecture — Hard-Won Lessons
 
@@ -207,12 +219,12 @@ Bandwidth sometimes sends `Session-Expires: 30` in 200 OK (below RFC 4028 minimu
 
 ### Sinch Carrier Behaviors
 
-- **ORIGINATION ONLY.** Sinch is the second origination carrier. All outbound/termination stays Bandwidth — Sinch is never a TO_CARRIER destination, is not part of X-Carrier outbound selection, and is not in the 5xx carrier failover chain.
+- **Origination + BACKUP termination.** Sinch is the second origination carrier (Denver/Chicago below). Termination is Bandwidth first; Sinch termination trunks exist only as lower-priority backups in `carrier_trunks` (migration 44): Atlanta-LD 206.146.98.26 (priority 30, `traffic_class=ld`, dispatcher group 8) and Denver-TF 206.146.100.26 (priority 40, 8YY only, group 9). Order per zone = `COALESCE(priority_<zone>, priority)`, changed in TED with no redeploy.
 - **PoPs / trunk groups:** Denver 206.146.100.24 (Trunk Group `DNVTCOZIGR2_3278`, test TN 5305480845), Chicago 206.146.101.39 (Trunk Group `CHCGIL24GR4_7412`, test TN 5305480846). Env-overridable via `SINCH_DENVER_IP`/`SINCH_CHICAGO_IP` (defaults baked in — deploy is git pull + rebuild, no .env edits).
 - **Round-robin to all 3 zone NLB VIPs** (like Bandwidth). Each zone's SBCs trust both Sinch IPs statically (flag 5) and probe them via dispatcher groups 6 (Denver) / 7 (Chicago) for OPTIONS keepalive + carrier-monitor up/down reporting.
 - **Dedup + CPS are carrier-generic:** Sinch shares the same `bw_dedup` (From::To key — deliberately source-independent) and per-source-IP `bw_cps` backstop (BW_CPS_LIMIT) as Bandwidth. No Sinch-specific rate plumbing.
 - **CDR attribution:** Kamailio stamps spoof-proofed `X-Inbound-Carrier`/`X-Inbound-PoP` on carrier ingress (strips wire-supplied copies first); FS records them as `inbound_carrier`/`inbound_carrier_pop` channel vars (defaults `bandwidth`/`""` when absent) which flow into CDRs. TO_CARRIER strips both headers before any B-leg reaches Bandwidth.
-- **Egress of Sinch-originated calls:** X-Inbound-TC is set to `tc4` for Sinch sources — the forwarded leg terminates via Bandwidth's default trunk config (there is no Sinch outbound trunk).
+- **Egress of Sinch-originated calls:** X-Inbound-TC is set to `tc4` for Sinch sources — the forwarded leg terminates per the `carrier_trunks` priority order (Bandwidth first; Sinch LD/TF only as backups).
 - **Runtime-added carriers (no redeploy):** carriers beyond the static list can be admitted via the `carrier_trunks` table (managed in TED; sibling migration 40). Kamailio's `route[CARRIER_TRUST]` authenticates unknown source IPs per-INVITE (after the same pike/scanner gates as customer trunk auth), applies the row's per-carrier/PoP CPS limit (`carrier_cps` htable), and stamps attribution from the row. Fail-closed: DB down = DB-only carriers rejected; static carriers (Bandwidth, Sinch) unaffected. See `docker/kamailio/CLAUDE.md`.
 
 ### FreeSWITCH Media Handling
@@ -251,7 +263,7 @@ Each zone's 2 SBCs run as a TRUE active/standby HA pair — NOT active/active. D
 
 Each GCP zone is a complete, independent VoIP stack. Calls NEVER cross zones for SIP/RTP.
 
-- Each zone has: 2 SBCs + 1 FreeSWITCH + 1 Redis + regional NLB
+- Each zone has: 2 SBCs (active/standby) + 2 FreeSWITCH (FS-1 active, FS-2 hot standby; Kamailio dispatcher priority) + Redis + regional NLB
 - Services VM (API, DB, Homer) is only in East. Other zones use PG replicas.
 - Cross-zone: only PG replication traffic and HEP capture (UDP, fire-and-forget).
 - DNS geo-routing (Cloud DNS routing policies) directs Bandwidth to the nearest zone's NLB VIP. NOT global NLB — GCP global passthrough NLB doesn't exist for UDP.
@@ -276,6 +288,11 @@ GCE has a 30-second UDP idle timeout on NAT pinholes. Without keepalive:
 10. **Lua package path in mod_lua:** mod_lua adds the script directory as a package searcher, which breaks `require("redis")`. All scripts must prepend explicit luarocks paths and use `loadfile()` for local modules.
 11. **CDR ingest always returns 200:** The `/v1/cdrs/ingest` endpoint must ALWAYS return 200 to prevent FreeSWITCH mod_json_cdr retry storms. Handle errors internally.
 12. **asyncpg explicit type casts:** All CDR INSERT parameters need explicit `::type` casts for asyncpg/PgBouncer compatibility.
+13. **FreeSWITCH build is PINNED + PATCHED.** `docker/freeswitch/Dockerfile` fetches FreeSWITCH `0a54a48` and its libraries at exact SHAs, then applies `patches/0001-rcf-rtp-quality-v1.patch` (RFC 3550 loss/jitter vars). Never go back to cloning upstream HEAD (an unpinned rebuild of east-fs-2 on 2026-09-23 produced 1.11.4-dev while the fleet ran 1.11.2-dev). `build freeswitch` recompiles (~5 min/node); when only the sidecar changed, rebuild `ops-agent` only. Upgrade = bump the ARGs, rebuild one FS-2, test, roll.
+14. **Media-stack deploys:** Lua scripts + conf are bind-mounted — `git pull` alone takes effect on the next call (no restart). A full media restart is `sudo docker compose -f docker-compose.media.yml down; sudo killall -9 freeswitch; sudo docker compose -f docker-compose.media.yml up -d` (never `up -d` alone after the FreeSWITCH service definition changed — it recreates FS).
+15. **Kamailio rebuild must reuse the SAME compose files** (the STIR key overlay): `F=$(sudo docker inspect voip-kamailio --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' | sed 's/,/ -f /g') && sudo docker compose -f $F up -d --build kamailio`. Gate: `sleep 20; sudo docker exec voip-kamailio kamailio -c -f /etc/kamailio/kamailio.cfg` — without the sleep it races entrypoint.sh's sequential `sed -i` rendering and reports a bogus `parse error … line 380, column 1-27` (the unrendered `__STIR_SHAKEN_SIGN_DEFINE__`). Standby SBC first; each primary rebuild = one ~10-12 s NLB flip.
+16. **Migrations are hand-applied** after first initdb. Before any deploy run `sudo -u postgres psql -d voip -f /opt/revup/scripts/db/check_migrations.sql` (22..51). Never re-run 43 (one-shot data backfill); if 40 or 44 is re-applied, re-apply 45 (all three replace `carrier_trunk_health`).
+17. **FS node names:** FS-1 VMs report `freeswitch_node` / `reporting_instance` = `<zone>-fs-1` (`FS_NODE_ID` in .env; `east-fs-1` on fs-media-v2); FS-2 = `<zone>-fs-2`. Dashboards match old|new names. Carrier B-leg CDR rows still say `<zone>-fs` (known follow-up).
 
 ## Environment Variable Reference (Multi-VM)
 
@@ -322,7 +339,7 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 
 ## GCP Production Topology (3 zones — East / West / Central, all LIVE 2026-07-23)
 
-GCP Project: `rugged-night-193017`. All 3 zones carry carrier traffic. Each zone = 2 Kamailio SBCs + 1 FreeSWITCH + 1 local PG replica; the PG **primary + API + UI + Homer stay East-only**. Inbound: Bandwidth points at all 3 regional NLB VIPs (currently **distributing** across them). Outbound: per-zone nearest Bandwidth PoP.
+GCP Project: `rugged-night-193017`. All 3 zones carry carrier traffic. Each zone = 2 Kamailio SBCs + 2 FreeSWITCH (FS-1 active / FS-2 hot standby) + 1 local PG replica; the PG **primary + API + UI + Homer stay East-only**. Inbound: Bandwidth points at all 3 regional NLB VIPs (currently **distributing** across them). Outbound: per-zone nearest Bandwidth PoP.
 
 ### East — us-east1-b (holds the PG primary + API + UI + Homer)
 | VM Name | Role | Machine Type | Internal IP | External IP | Subnet | Tags |
@@ -330,7 +347,8 @@ GCP Project: `rugged-night-193017`. All 3 zones carry carrier traffic. Each zone
 | `poc-custom-voip` | SBC-1 | n2-standard-4 | 10.142.0.100 | 34.74.71.32 | default | bypass-vpn, custom-voip, lb-health-check, voip-sbc |
 | `kam-g2` | SBC-2 | e2-standard-4 | 10.142.0.101 | 35.243.136.35 | default | bypass-vpn, lb-health-check, voip-sbc |
 | `fs-media-v2` | FreeSWITCH | e2-standard-8 | 192.168.10.2 | 34.139.119.135 | voip-media (192.168.10.0/24) | bypass-vpn, voip-media |
-| `services` | Services (PG **primary** + API + UI + Homer + PgBouncer) | e2-standard-4 | 10.142.0.103 | 34.26.57.37 | default | lb-health-check, voip-services |
+| `east-fs-2` | FreeSWITCH FS-2 (hot standby) | e2-standard-8 | 192.168.10.3 | 35.196.226.123 | voip-media (192.168.10.0/24) | bypass-vpn, voip-media |
+| `services` | Services (PG **primary** + API + UI + Homer + PgBouncer) | e2-highmem-4 (32 GB) | 10.142.0.103 | 34.26.57.37 | default | lb-health-check, voip-services |
 | `east-db-standby` | PG hot standby (HA, us-east1-**c**) | e2-standard-4 | 10.142.0.87 | — | default | bypass-vpn, voip-db-standby |
 
 East NLB VIP `34.24.133.82` (`sbc-vip-udp`/`-tcp`, 5060) · instance group `sbc-group`. Egress PoP: **Dallas** (67.231.2.12).
@@ -341,6 +359,7 @@ East NLB VIP `34.24.133.82` (`sbc-vip-udp`/`-tcp`, 5060) · instance group `sbc-
 | `west-sbc-1` | SBC-1 | e2-standard-4 | 10.138.0.100 | 8.229.41.59 | default | bypass-vpn, lb-health-check, voip-sbc |
 | `west-sbc-2` | SBC-2 | e2-standard-4 | 10.138.0.101 | 136.117.230.166 | default | bypass-vpn, lb-health-check, voip-sbc |
 | `west-fs` | FreeSWITCH | e2-standard-8 | 192.168.20.2 | 8.229.177.165 | voip-media-west (192.168.20.0/24) | bypass-vpn, voip-media |
+| `west-fs-2` | FreeSWITCH FS-2 (hot standby) | e2-standard-8 | 192.168.20.3 | 35.197.95.171 | voip-media-west (192.168.20.0/24) | bypass-vpn, voip-media |
 | `west-db` | PG replica + PgBouncer | e2-standard-4 | 10.138.0.2 | 136.118.180.103 | default | bypass-vpn, voip-db-standby |
 | `west-loadtest` | SIPp load-gen (banked harness) | e2-standard-4 | 10.138.0.3 | 104.198.3.25 | default | bypass-vpn, voip-loadtest |
 
@@ -352,7 +371,8 @@ West NLB VIP `35.252.214.40` (`west-sbc-vip-udp`/`-tcp`) · backend service `wes
 | `central-sbc-1` | SBC-1 | e2-standard-4 | 10.128.0.100 | 34.41.188.100 | default | bypass-vpn, lb-health-check, voip-sbc |
 | `central-sbc-2` | SBC-2 | e2-standard-4 | 10.128.0.101 | 35.184.151.64 | default | bypass-vpn, lb-health-check, voip-sbc |
 | `central-fs` | FreeSWITCH | e2-standard-8 | 192.168.30.2 | 35.253.103.114 | voip-media-central (192.168.30.0/24) | bypass-vpn, voip-media |
-| `central-db` | PG replica + PgBouncer | e2-standard-4 | 10.128.0.2 | 136.112.210.141 | default | bypass-vpn, voip-db-standby |
+| `central-fs-2` | FreeSWITCH FS-2 (hot standby) | e2-standard-8 | 192.168.30.3 | 34.63.100.161 | voip-media-central (192.168.30.0/24) | bypass-vpn, voip-media |
+| `central-db` | PG replica + PgBouncer | e2-standard-4 | 10.128.0.2 | 34.69.170.41 (ephemeral) | default | bypass-vpn, voip-db-standby |
 
 Central NLB VIP `35.253.133.230` (`central-sbc-vip-tcp`/`-udp`) · backend service `central-sbc-backend` + `central-sbc-group`. Egress PoP: **Dallas** (67.231.2.12, the default).
 
