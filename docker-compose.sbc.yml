@@ -82,6 +82,12 @@ services:
       # container, so the gate silently stayed off (entrypoint logged
       # E164_EGRESS=off with E164_EGRESS=on in .env). Accepts on/true/1.
       - E164_EGRESS=${E164_EGRESS:-off}
+      # Toll-free ingress enforcement (DEFAULT ON): carrier ingress only —
+      # TF origination trunks accept ONLY 8YY R-URIs, every other carrier
+      # accepts NO 8YY R-URIs (404). Set TF_INGRESS_ENFORCE=off in .env to
+      # compile it out (byte-identical pre-TF logic). See kamailio.cfg
+      # route[TF_INGRESS_CHECK].
+      - TF_INGRESS_ENFORCE=${TF_INGRESS_ENFORCE:-on}
       # UDP MTU / oversized-INVITE UDP->TCP fallback (core udp_mtu +
       # udp_mtu_try_proto=TCP). DEFAULT 0 = OFF (dark). The param is GLOBAL
       # (also affects FS- and PBX-bound UDP sends) and Bandwidth TCP support is
@@ -142,6 +148,12 @@ services:
       # with NO .env edits. Denver=DNVTCOZIGR2_3278, Chicago=CHCGIL24GR4_7412.
       - SINCH_DENVER_IP=${SINCH_DENVER_IP:-206.146.100.24}
       - SINCH_CHICAGO_IP=${SINCH_CHICAGO_IP:-206.146.101.39}
+      # Sinch TOLL-FREE ORIGINATION signaling IPs (8XX-T trunks, all zones —
+      # static inbound trust + attribution + toll-free-only ingress; no
+      # dispatcher group). Defaults are production: NO .env edits needed.
+      # Atlanta=ATLNGAQSGR2_7284 (atlanta-tf-orig), Denver=DNVTCOZIGR2_3327 (denver-tf-orig).
+      - SINCH_TF_ATL_IP=${SINCH_TF_ATL_IP:-206.146.98.25}
+      - SINCH_TF_DEN_IP=${SINCH_TF_DEN_IP:-206.146.100.25}
       # Sinch TERMINATION signaling IPs (all zones — dispatcher keepalive
       # groups 8-9 ONLY; egress selection is table-driven via carrier_trunks
       # + X-Carrier-IP, no kamailio.cfg define). Defaults are the production
