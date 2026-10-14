@@ -105,3 +105,63 @@ print("OK")
     result = subprocess.run(
         [LUA, str(script)], capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, f"stderr:\n{result.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# Cross-component coupling (strict-TF 2026-10): the Kamailio SBC's toll-free
+# INGRESS classifier (kamailio.cfg route[TF_CLASSIFY], TF_INGRESS_ENFORCE)
+# and the FreeSWITCH EGRESS classifier must agree on the 8YY NPA set — a
+# mismatch admits a TF call on one side that the other misroutes/rejects.
+# ---------------------------------------------------------------------------
+import re  # noqa: E402
+
+INBOUND_ROUTER = REPO / "docker" / "freeswitch" / "scripts" / "inbound_router.lua"
+KAMAILIO_CFG = REPO / "docker" / "kamailio" / "kamailio.cfg"
+
+
+def _lua_npa_table(text, name):
+    m = re.search(name + r"\s*=\s*\{(.*?)\}", text, re.S)
+    assert m, f"{name} table not found"
+    return set(re.findall(r'\["(\d{3})"\]\s*=\s*true', m.group(1)))
+
+
+def _kamailio_tf_regex():
+    text = KAMAILIO_CFG.read_text()
+    m = re.search(r"route\[TF_CLASSIFY\]\s*\{(.*?)\n\}", text, re.S)
+    assert m, "route[TF_CLASSIFY] not found in kamailio.cfg"
+    body = m.group(1)
+    r = re.search(r'=~\s*"([^"]+)"', body)
+    assert r, "TF_CLASSIFY regex not found"
+    return r.group(1)
+
+
+def test_tollfree_npa_sets_in_sync():
+    want = set(TOLLFREE_NPAS)
+    assert _lua_npa_table(NUMBER_UTILS.read_text(), "TOLLFREE_NPAS") == want
+    assert _lua_npa_table(INBOUND_ROUTER.read_text(), "TOLLFREE_NPAS_FALLBACK") == want
+    rx = _kamailio_tf_regex()
+    alt = re.search(r"8\(([0-9|]+)\)", rx)
+    assert alt, rx
+    assert {"8" + x for x in alt.group(1).split("|")} == want
+
+
+def _kamailio_classify(ruser):
+    """Python emulation of route[TF_CLASSIFY]: the POSIX ERE applied to the
+    raw R-URI user (the pattern uses only ERE constructs Python `re` shares)."""
+    return "tollfree" if re.search(_kamailio_tf_regex(), ruser) else "ld"
+
+
+def test_kamailio_tf_regex_matches_lua_vectors():
+    # Every unformatted string vector (an R-URI user is never formatted;
+    # the Lua side's digit-collapse of '(800) 555-1234' is strictly wider).
+    for expr, expected in _vectors():
+        if not (expr.startswith('"') and expr.endswith('"')):
+            continue  # numeric scalar / nil — not R-URI user shapes
+        s = expr[1:-1]
+        if not re.fullmatch(r"\+?\d*", s):
+            continue  # formatted input
+        assert _kamailio_classify(s) == expected, (s, expected)
+    # user-part parameters (tel-style ;npdi / ;rn=) are tolerated
+    assert _kamailio_classify("+18005551234;npdi") == "tollfree"
+    assert _kamailio_classify("8885551234;rn=+18885550000") == "tollfree"
+    assert _kamailio_classify("+17744045256;npdi") == "ld"

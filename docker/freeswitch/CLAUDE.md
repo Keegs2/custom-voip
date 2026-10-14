@@ -156,6 +156,8 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 10. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
 
+11. **Termination traffic-class filter (strict toll-free, 2026-10)**: `inbound_router.lua` filters the cached `carrier_trunks` termination list per call by `classify_destination(forward_to)` (NANP 8YY by NPA → `tollfree`, else `ld`). `ld` → trunks of class `any` or `ld` (none → full list, never strand LD). `tollfree` → ONLY `tollfree` trunks (Sinch OSAO denver-tf); `any`/`ld` (Bandwidth, Sinch atlanta-ld) are never eligible, and with no enabled `tollfree` trunk the call FAILS CLOSED: ERR log, `term_class_blocked=tollfree` (CDR variables), `NO_ROUTE_DESTINATION` (SIP 404) + `lua_routed=true`. The 4-trunk attempt cap applies AFTER the filter (cache bounded at 16 rows), so a 5th outbound row can never truncate the only tollfree trunk. The LEGACY fail-open loop (DB blip / zero rows) is class-blind and can still send 8YY via Bandwidth — deliberate. Prod has no `any` rows (owner relabels them `ld`, migration 52 header). The NPA set must match Kamailio `route[TF_CLASSIFY]` (`TF_INGRESS_ENFORCE`) — pinned by `tests/test_classify_destination.py`; behavior pinned by `tests/lua/onnet_router_harness.lua` [13a-f].
+
 ## Volumes (docker-compose.media.yml)
 
 - `./docker/freeswitch/conf` mounted to `/usr/local/freeswitch/conf` (config hot-reload)

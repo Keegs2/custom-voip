@@ -435,7 +435,9 @@ end
 -- traffic_class (migration 44: any|ld|tollfree) restricts which
 -- destination classes a trunk may carry; the ONE cached list is
 -- filtered PER CALL against classify_destination(forward_to) at
--- attempt-build time (never split into per-class caches).
+-- attempt-build time (never split into per-class caches). 8YY
+-- destinations are STRICT (only 'tollfree' trunks) and FAIL CLOSED when
+-- none is enabled; see the filter at the bridge.
 --
 -- Results are cached PROCESS-WIDE in a FreeSWITCH global variable
 -- (freeswitch.get/setGlobalVariable — the exact SBC-health-cache
@@ -456,8 +458,13 @@ end
 -- the CDR variables (same plain-channel-var path as inbound_carrier).
 local TERM_TRUNKS_TTL = 60
 -- Cap at 4 trunks (x 2 SBCs = 8 bridge attempts) to bound worst-case
--- PDD across a fully-failing attempt sweep.
+-- PDD across a fully-failing attempt sweep. Applied AFTER the per-call
+-- traffic-class filter (strict-TF 2026-10): capping the raw list first
+-- could truncate the only 'tollfree' trunk once >4 outbound rows exist,
+-- and 8YY now FAILS CLOSED without one. The cached list itself is bounded
+-- separately (TERM_TRUNKS_CACHE_MAX) so the global-var payload stays small.
 local TERM_TRUNKS_MAX = 4
+local TERM_TRUNKS_CACHE_MAX = 16
 
 -- Deployment zone selects the per-zone priority override column
 -- (priority_east/west/central). Validated against the closed set;
@@ -524,6 +531,9 @@ end
 -- the inline fallback is the identical algorithm (same pattern as
 -- normalize_did/to_10digit above: number_utils failing to load must not
 -- change routing behavior).
+-- KEEP IN SYNC: number_utils.TOLLFREE_NPAS and the Kamailio SBC's
+-- toll-free ingress classifier (kamailio.cfg route[TF_CLASSIFY] regex,
+-- TF_INGRESS_ENFORCE) use this SAME NPA set.
 local TOLLFREE_NPAS_FALLBACK = {
     ["800"] = true, ["833"] = true, ["844"] = true, ["855"] = true,
     ["866"] = true, ["877"] = true, ["888"] = true,
@@ -626,7 +636,8 @@ local function get_termination_trunks(zone)
     end
 
     -- Validate + serialize. Rows with an empty carrier or non-IPv4 term_ip
-    -- are dropped (WARN); rows beyond TERM_TRUNKS_MAX are ignored (WARN).
+    -- are dropped (WARN); rows beyond TERM_TRUNKS_CACHE_MAX are ignored
+    -- (WARN). The 4-trunk attempt cap is applied per call, post-filter.
     local parts = {}
     local capped = false
     for _, row in ipairs(rows) do
@@ -637,11 +648,11 @@ local function get_termination_trunks(zone)
             freeswitch.consoleLog("WARNING", string.format(
                 "[inbound_router] carrier_trunks row carrier=%s pop=%s term_ip=%s is unusable — skipped\n",
                 tostring(row.carrier), tostring(row.pop), ip))
-        elseif #parts >= TERM_TRUNKS_MAX then
+        elseif #parts >= TERM_TRUNKS_CACHE_MAX then
             if not capped then
                 freeswitch.consoleLog("WARNING", string.format(
-                    "[inbound_router] carrier_trunks returned more than %d outbound rows for zone %s — extra rows ignored (8-attempt cap)\n",
-                    TERM_TRUNKS_MAX, zone))
+                    "[inbound_router] carrier_trunks returned more than %d outbound rows for zone %s — extra rows ignored (cache cap)\n",
+                    TERM_TRUNKS_CACHE_MAX, zone))
                 capped = true
             end
         else
@@ -1589,7 +1600,8 @@ local function terminate_rcf(dest, ctx)
     -- per call by traffic_class (any/ld/tollfree vs classify_destination,
     -- see the filter below) and built TRUNK-MAJOR: both SBCs are tried on
     -- trunk 1 before moving to trunk 2, preserving today's shape. With the
-    -- 2-row Bandwidth seeds ('any' class — never filtered out) this is
+    -- 2-row Bandwidth seeds ('any'/'ld' class — eligible for every non-8YY
+    -- call, NEVER for 8YY, which is tollfree-trunk-only) this is
     -- exactly the historical order (east/central shown; west swaps the PoPs):
     --   1. SBC-1 + bandwidth-dallas
     --   2. SBC-2 + bandwidth-dallas
@@ -1634,29 +1646,71 @@ local function terminate_rcf(dest, ctx)
         -- PSTN: table-driven SBC + carrier failover loop (carrier_trunks)
         set_var("term_trunks_source", "db")
 
-        -- Traffic-class filter (migration 44): keep trunks whose
-        -- traffic_class is 'any' or matches this destination's class
-        -- ('tollfree' = NANP 8YY, else 'ld'). Filtered PER CALL on the one
-        -- cached list; ordering is untouched. CONTRACT: a class-restricted
-        -- trunk (Sinch OSAO tollfree-only / INT ld-only) must never receive
-        -- a call outside its class. If the filter would empty the list
-        -- entirely (operator misconfig: no 'any' trunk and no class match),
-        -- fall back to the FULL list — never strand a call.
+        -- Traffic-class filter (migration 44, strict-TF 2026-10). Filtered
+        -- PER CALL on the one cached list; ordering is untouched.
+        -- CONTRACT by destination class (classify_destination: 'tollfree'
+        -- = NANP 8YY, else 'ld'):
+        --   * 'ld'       -> trunks of class 'any' or 'ld'. If none, fall back
+        --                   to the FULL list (operator misconfig — never
+        --                   strand an LD call; unchanged pre-TF behavior).
+        --   * 'tollfree' -> STRICT: ONLY class 'tollfree' trunks (Sinch
+        --                   OSAO). 'any' AND 'ld' trunks are never eligible
+        --                   (prod has no 'any' rows — Bandwidth and the Sinch
+        --                   orig rows are relabeled 'ld'; an 'any' row added
+        --                   later stays eligible for 'ld' only). If no
+        --                   'tollfree' trunk is enabled the call FAILS CLOSED:
+        --                   ERR log, term_class_blocked=tollfree breadcrumb
+        --                   (CDR variables), hard_reject NO_ROUTE_DESTINATION
+        --                   (SIP 404 — terminal, no carrier retry storm) with
+        --                   lua_routed=true. Pushing 8YY onto Bandwidth or the
+        --                   LD-only Sinch atlanta-ld trunk is a contract
+        --                   violation, so there is NO fallback here.
+        -- NOTE: the LEGACY FALLBACK loop below (DB blip / zero rows /
+        -- unparsable cache) has no class awareness and CAN still route 8YY
+        -- via Bandwidth — that is the fail-open contract, deliberately left
+        -- untouched.
         local dest_class = classify_destination(forward_to)
         freeswitch.consoleLog("DEBUG", string.format(
             "[%s] Destination %s classified as %s for trunk selection\n",
             uuid, forward_to, dest_class))
         local eligible_trunks = {}
         for _, trunk in ipairs(term_trunks) do
-            if trunk.traffic_class == "any" or trunk.traffic_class == dest_class then
+            local ok
+            if dest_class == "tollfree" then
+                ok = trunk.traffic_class == "tollfree"
+            else
+                ok = trunk.traffic_class == "any" or trunk.traffic_class == dest_class
+            end
+            if ok then
                 eligible_trunks[#eligible_trunks + 1] = trunk
             end
         end
         if #eligible_trunks == 0 then
+            if dest_class == "tollfree" then
+                freeswitch.consoleLog("ERR", string.format(
+                    "[%s] No enabled 'tollfree' termination trunk for 8YY %s (DID %s) — failing closed NO_ROUTE_DESTINATION (8YY never terminates via 'any'/'ld' trunks)\n",
+                    uuid, forward_to, normalized_did))
+                set_var("term_class_blocked", "tollfree")
+                hard_reject("NO_ROUTE_DESTINATION",
+                    "[" .. uuid .. "] 8YY termination blocked: no tollfree trunk enabled")
+                return
+            end
             freeswitch.consoleLog("WARNING", string.format(
                 "[%s] No termination trunk carries class %s (no 'any' rows either) — using the full trunk list\n",
                 uuid, dest_class))
             eligible_trunks = term_trunks
+        end
+        -- Attempt cap (TERM_TRUNKS_MAX), post-filter: first N eligible in
+        -- eff_priority order. For <= 4 outbound rows this is a no-op.
+        if #eligible_trunks > TERM_TRUNKS_MAX then
+            freeswitch.consoleLog("WARNING", string.format(
+                "[%s] %d eligible %s trunks — trying the first %d (8-attempt cap)\n",
+                uuid, #eligible_trunks, dest_class, TERM_TRUNKS_MAX))
+            local capped_list = {}
+            for i = 1, TERM_TRUNKS_MAX do
+                capped_list[i] = eligible_trunks[i]
+            end
+            eligible_trunks = capped_list
         end
 
         -- Trunk-major attempt table: for each trunk (already in
