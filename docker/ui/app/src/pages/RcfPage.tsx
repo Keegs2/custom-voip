@@ -9,13 +9,6 @@ import { fmt } from '../utils/format';
 import { normalizeNumberInput } from '../utils/phone';
 import { apiRequest } from '../api/client';
 import { useToast } from '../components/ui/Toast';
-import { searchCdrs } from '../api/cdrs';
-import type { Cdr } from '../types/cdr';
-import {
-  gradeColor, gradeLabel, goodShareColor, percentileCont, qualityStatusReason,
-  qualityStatusShort, summarizeCallQuality,
-} from './calls/quality';
-import { fmtAvgCallDuration, hasTalkTime } from '../utils/callDuration';
 import {
   listAvailableDids,
   listMyDids,
@@ -25,6 +18,11 @@ import {
 } from '../api/didInventory';
 import type { DidInventoryItem } from '../types/didInventory';
 import { Reveal } from '../components/fx/Reveal';
+import {
+  AZURE, AZURE_DEEP, DEFAULT_PAGE_SIZE, GREEN, INK, INK_DIM, INK_FAINT, INK_SOFT, MONO, RED,
+} from './rcf/theme';
+import { PaginationControls } from './rcf/PaginationControls';
+import { CallActivityTab } from './rcf/CallActivityTab';
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
@@ -40,21 +38,6 @@ async function updateRcfPassCallerId(id: number, pass_caller_id: boolean): Promi
 
 type SortField = 'did' | 'name' | 'forward_to' | 'customer' | 'status';
 type SortDir = 'asc' | 'desc';
-
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
-const DEFAULT_PAGE_SIZE = 25;
-
-const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
-
-// Daylight palette constants (mirror the .rcf-scope CSS vars for inline SVG etc.)
-const INK = '#0e1726';
-const INK_SOFT = '#46566f';
-const INK_DIM = '#5d6f8c';
-const INK_FAINT = '#8b99b0';
-const AZURE = '#2f7df6';
-const AZURE_DEEP = '#1d63dd';
-const GREEN = '#15803d';
-const RED = '#b91c1c';
 
 // ─── Sort helpers ─────────────────────────────────────────────────────────────
 
@@ -646,125 +629,16 @@ function NumberRow({ entry, isAdmin, canEdit, expanded, onToggle, onCollapse }: 
   );
 }
 
-// ─── PaginationControls ───────────────────────────────────────────────────────
-
-interface PaginationControlsProps {
-  currentPage: number;
-  totalPages: number;
-  pageSize: number;
-  totalItems: number;
-  onPageChange: (page: number) => void;
-  onPageSizeChange: (size: number) => void;
-}
-
-function PaginationControls({
-  currentPage,
-  totalPages,
-  pageSize,
-  totalItems,
-  onPageChange,
-  onPageSizeChange,
-}: PaginationControlsProps) {
-  const start = (currentPage - 1) * pageSize + 1;
-  const end = Math.min(currentPage * pageSize, totalItems);
-
-  const pageNumbers: (number | 'ellipsis')[] = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pageNumbers.push(i);
-  } else {
-    pageNumbers.push(1);
-    if (currentPage > 3) pageNumbers.push('ellipsis');
-    const rangeStart = Math.max(2, currentPage - 1);
-    const rangeEnd = Math.min(totalPages - 1, currentPage + 1);
-    for (let i = rangeStart; i <= rangeEnd; i++) pageNumbers.push(i);
-    if (currentPage < totalPages - 2) pageNumbers.push('ellipsis');
-    pageNumbers.push(totalPages);
-  }
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: 12,
-        padding: '14px 20px',
-        borderTop: '1px solid var(--rcf-line)',
-        background: 'var(--rcf-tint)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        <span style={{ fontSize: '0.75rem', color: INK_DIM }}>
-          Showing{' '}
-          <strong style={{ color: INK_SOFT, fontVariantNumeric: 'tabular-nums' }}>{start}–{end}</strong>
-          {' '}of{' '}
-          <strong style={{ color: INK_SOFT, fontVariantNumeric: 'tabular-nums' }}>{totalItems}</strong>
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <span style={{ fontSize: '0.7rem', color: INK_FAINT }}>Per page:</span>
-          <select
-            className="rcf-input"
-            value={pageSize}
-            onChange={(e) => { onPageSizeChange(Number(e.target.value)); onPageChange(1); }}
-            style={{ fontSize: '0.75rem', padding: '4px 28px 4px 8px' }}
-          >
-            {PAGE_SIZE_OPTIONS.map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <button
-          type="button"
-          disabled={currentPage === 1}
-          onClick={() => onPageChange(currentPage - 1)}
-          className="rcf-pgbtn"
-          aria-label="Previous page"
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11 }}>
-            <path d="M10 12L6 8l4-4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-
-        {pageNumbers.map((p, i) =>
-          p === 'ellipsis' ? (
-            <span key={`ell-${i}`} style={{ color: INK_FAINT, padding: '0 4px', fontSize: '0.78rem' }}>…</span>
-          ) : (
-            <button
-              key={p}
-              type="button"
-              onClick={() => onPageChange(p)}
-              className={currentPage === p ? 'rcf-pgbtn rcf-pgbtn-active' : 'rcf-pgbtn'}
-            >
-              {p}
-            </button>
-          ),
-        )}
-
-        <button
-          type="button"
-          disabled={currentPage === totalPages}
-          onClick={() => onPageChange(currentPage + 1)}
-          className="rcf-pgbtn"
-          aria-label="Next page"
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11 }}>
-            <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ─── Page header ──────────────────────────────────────────────────────────────
 
 interface RcfPageHeaderProps {
   title: string;
   subtitle: string;
+  /** Secondary scope context shown as the last breadcrumb segment
+      (admin: the selected customer / "All Customers"). */
+  context?: string | null;
+  /** False before an admin picks a scope — no figures to show yet. */
+  showMetrics: boolean;
   /** Total forwards on the account (server total). */
   total: number;
   /** Enabled / disabled counts from the loaded entries. */
@@ -781,7 +655,7 @@ interface RcfPageHeaderProps {
  * 1px rule closes the zone. The only accent is the small azure tick on the
  * breadcrumb. Uses only data already loaded by the page.
  */
-function RcfPageHeader({ title, subtitle, total, active, disabled, loaded }: RcfPageHeaderProps) {
+function RcfPageHeader({ title, subtitle, context, showMetrics, total, active, disabled, loaded }: RcfPageHeaderProps) {
   return (
     <header className="rcf-header fx-load">
       <div className="rcf-header-id">
@@ -789,27 +663,35 @@ function RcfPageHeader({ title, subtitle, total, active, disabled, loaded }: Rcf
           <span>Remote Call Forwarding</span>
           <span className="rcf-crumb-sep" aria-hidden="true">/</span>
           <span>Granite CRAG</span>
+          {context && (
+            <>
+              <span className="rcf-crumb-sep" aria-hidden="true">/</span>
+              <span className="rcf-crumb-context">{context}</span>
+            </>
+          )}
         </div>
         <h1 className="rcf-title">{title}</h1>
         <p className="rcf-sub">{subtitle}</p>
       </div>
 
-      <div className="rcf-metrics">
-        <div className="rcf-metric">
-          <div className="rcf-metric-value">{loaded ? total.toLocaleString() : '—'}</div>
-          <div className="rcf-metric-label">Forwards</div>
-        </div>
-        <div className="rcf-metric">
-          <div className="rcf-metric-value">{loaded ? active.toLocaleString() : '—'}</div>
-          <div className="rcf-metric-label">Enabled</div>
-        </div>
-        {loaded && disabled > 0 && (
+      {showMetrics && (
+        <div className="rcf-metrics">
           <div className="rcf-metric">
-            <div className="rcf-metric-value">{disabled.toLocaleString()}</div>
-            <div className="rcf-metric-label">Disabled</div>
+            <div className="rcf-metric-value">{loaded ? total.toLocaleString() : '—'}</div>
+            <div className="rcf-metric-label">Forwards</div>
           </div>
-        )}
-      </div>
+          <div className="rcf-metric">
+            <div className="rcf-metric-value">{loaded ? active.toLocaleString() : '—'}</div>
+            <div className="rcf-metric-label">Enabled</div>
+          </div>
+          {loaded && disabled > 0 && (
+            <div className="rcf-metric">
+              <div className="rcf-metric-value">{disabled.toLocaleString()}</div>
+              <div className="rcf-metric-label">Disabled</div>
+            </div>
+          )}
+        </div>
+      )}
     </header>
   );
 }
@@ -908,120 +790,28 @@ function SearchEmptyState({ query, onClear }: { query: string; onClear: () => vo
 
 type DashboardTab = 'numbers' | 'activity' | 'dids';
 
-// ─── Time helpers ─────────────────────────────────────────────────────────────
-
-function timeAgo(isoString: string): string {
-  const now = Date.now();
-  const then = new Date(isoString).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay}d ago`;
-}
-
-// ─── Call quality label (the ONE grade definition — pages/calls/quality.ts) ───
-
-interface CallQualityLabel {
-  /** Great / Good / Fair / Poor / One-way, or null when the call wasn't graded. */
-  text: string | null;
-  color: string;
-  /** Plain-language explanation (why not graded / what one-way means). */
-  reason: string | null;
-  /** Short reason for the table cell when not graded ("under 5 sec"). */
-  short: string | null;
-}
-
 /**
- * The call's grade = the WORSE of the two audio directions
- * (`call_quality_grade`). One-way audio reads "One-way" in red — never a
- * perfect score for a call nobody could hear.
+ * Admin console scope — what the admin has chosen to look at.
+ *   null      → nothing selected yet (the page opens empty; no data loads)
+ *   'all'     → every customer's RCF numbers
+ *   number    → one customer account id
+ * Tenants never use this: they are always scoped to their own account.
  */
-function callQualityLabel(cdr: Cdr): CallQualityLabel {
-  const grade = cdr.call_quality_grade ?? null;
-  const status = cdr.call_quality_status ?? null;
-  if (grade == null) {
-    return {
-      text: null,
-      color: INK_FAINT,
-      reason: qualityStatusReason(status, 'customer'),
-      short: qualityStatusShort(status),
-    };
-  }
-  return {
-    text: gradeLabel(grade, status),
-    color: gradeColor(grade),
-    reason: status === 'no_rtp' ? qualityStatusReason(status, 'customer') : null,
-    short: null,
-  };
-}
+type AdminScope = null | 'all' | number;
 
-function carrierDisplayName(carrier: string | null | undefined): string {
-  if (!carrier) return '—';
-  switch (carrier) {
-    case 'carrier_primary': return 'Bandwidth Dallas';
-    case 'carrier_secondary': return 'Bandwidth LA';
-    default: return carrier.replace(/^carrier_/, '').replace(/_/g, ' ');
-  }
-}
+// ─── ScopePrompt — the admin console's quiet pre-selection state ─────────────
 
-function callStatusInfo(cdr: Cdr): { label: string; bg: string; color: string; border: string } {
-  const GOOD    = { bg: 'rgba(22,163,74,0.1)',   color: GREEN,    border: '1px solid rgba(22,163,74,0.24)' };
-  const NEUTRAL = { bg: 'rgba(93,111,140,0.1)',  color: INK_SOFT, border: '1px solid rgba(93,111,140,0.24)' };
-  const BAD     = { bg: 'rgba(220,38,38,0.07)',  color: RED,      border: '1px solid rgba(220,38,38,0.22)' };
-  const INFO    = { bg: 'rgba(47,125,246,0.09)', color: AZURE_DEEP, border: '1px solid rgba(47,125,246,0.24)' };
-
-  const cause = (cdr.hangup_cause ?? '').toUpperCase();
-
-  // Answered calls (has answer_time and non-zero duration — exact seconds on
-  // staff rows, whole minutes on tenant rows; see utils/callDuration.ts)
-  if (cdr.answer_time != null && hasTalkTime(cdr)) {
-    return { label: 'Answered', ...GOOD };
-  }
-
-  // Map specific hangup causes to friendly labels
-  switch (cause) {
-    case 'ORIGINATOR_CANCEL':
-      return { label: 'Caller Hung Up', ...NEUTRAL };
-    case 'NO_ANSWER':
-      return { label: 'No Answer', ...NEUTRAL };
-    case 'USER_BUSY':
-      return { label: 'Busy', ...BAD };
-    case 'CALL_REJECTED':
-      return { label: 'Rejected', ...BAD };
-    case 'NORMAL_TEMPORARY_FAILURE':
-      return { label: 'Unavailable', ...BAD };
-    case 'UNALLOCATED_NUMBER':
-      return { label: 'Invalid Number', ...BAD };
-    case 'NO_ROUTE_DESTINATION':
-      return { label: 'No Route', ...BAD };
-    case 'RECOVERY_ON_TIMER_EXPIRE':
-      return { label: 'Timed Out', ...BAD };
-    case 'NORMAL_CLEARING':
-      if (cdr.answer_time == null) return { label: 'Not Connected', ...NEUTRAL };
-      return { label: 'Answered', ...GOOD };
-    default:
-      break;
-  }
-
-  // SIP error codes
-  if (cdr.sip_code != null && cdr.sip_code >= 400) {
-    if (cdr.sip_code === 486) return { label: 'Busy', ...BAD };
-    if (cdr.sip_code === 487) return { label: 'Cancelled', ...NEUTRAL };
-    if (cdr.sip_code === 603) return { label: 'Declined', ...BAD };
-    return { label: 'Failed', ...BAD };
-  }
-
-  // Fallback: no answer_time and zero duration = never connected
-  if (cdr.answer_time == null) {
-    return { label: 'No Answer', ...NEUTRAL };
-  }
-
-  return { label: 'Answered', ...INFO };
+function ScopePrompt({ message }: { message: string }) {
+  return (
+    <div className="rcf-panel rcf-scope-prompt fx-load fx-load-d2" role="status">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
+        <circle cx="12" cy="8" r="3.5" />
+        <path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" strokeLinecap="round" />
+      </svg>
+      <p className="rcf-scope-prompt-title">{message}</p>
+      <p className="rcf-scope-prompt-sub">Use the <strong>Viewing</strong> menu above to choose a customer, or All Customers.</p>
+    </div>
+  );
 }
 
 // ─── TabBar ───────────────────────────────────────────────────────────────────
@@ -1092,1187 +882,6 @@ function TabBar({ active, onChange }: TabBarProps) {
           </button>
         );
       })}
-    </div>
-  );
-}
-
-// ─── CallActivityTab ──────────────────────────────────────────────────────────
-
-interface CallActivityTabProps {
-  customerId: number | undefined;
-}
-
-/** Staff ACD format (exact seconds) — unchanged from the original tile. */
-function fmtAcdExact(acd: number): string {
-  return acd >= 60 ? `${Math.floor(acd / 60)}m ${Math.round(acd % 60)}s` : `${Math.round(acd)}s`;
-}
-
-/** Compute aggregate quality stats from a list of CDRs. */
-function computeQualityStats(cdrs: Cdr[]) {
-  let answered = 0;
-  const answeredRows: Cdr[] = [];
-
-  for (const cdr of cdrs) {
-    if (cdr.answer_time != null && hasTalkTime(cdr)) {
-      answered++;
-      answeredRows.push(cdr);
-    }
-  }
-
-  const total = cdrs.length;
-  const asr = total > 0 ? (answered / total) * 100 : null;
-  // Call grades → shares only (never an average of MOS).
-  const quality = summarizeCallQuality(cdrs);
-  // Staff rows: exact "Xm Ys". Tenant rows: mean of whole minutes, 1 decimal
-  // ("2.3 min") — the API never sends customers seconds.
-  const acdLabel = fmtAvgCallDuration(answeredRows, fmtAcdExact);
-
-  return { total, answered, asr, quality, acdLabel };
-}
-
-// ─── DailyStats type ─────────────────────────────────────────────────────────
-
-interface DailyStats {
-  date: string;          // YYYY-MM-DD
-  label: string;         // "Mon, Apr 28"
-  shortLabel: string;    // "Mon"
-  total: number;
-  answered: number;
-  asr: number | null;    // 0–100, null if no calls
-  medianMos: number | null; // median call MOS over graded calls, null if none
-}
-
-/** Build daily quality summary for the last 7 days. */
-function buildDailyDots(cdrs: Cdr[]): DailyStats[] {
-  const byDate = new Map<string, { moses: number[]; total: number; answered: number }>();
-
-  for (const cdr of cdrs) {
-    const key = cdr.start_time.slice(0, 10);
-    const bucket = byDate.get(key) ?? { moses: [], total: 0, answered: 0 };
-    bucket.total++;
-    if (cdr.answer_time != null && hasTalkTime(cdr)) bucket.answered++;
-    if (cdr.call_quality_status === 'rated' && cdr.call_mos != null) bucket.moses.push(cdr.call_mos);
-    byDate.set(key, bucket);
-  }
-
-  const result: DailyStats[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
-    const label = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    const shortLabel = d.toLocaleDateString(undefined, { weekday: 'short' });
-    const b = byDate.get(key);
-
-    if (!b || b.total === 0) {
-      result.push({ date: key, label, shortLabel, total: 0, answered: 0, asr: null, medianMos: null });
-      continue;
-    }
-
-    const asr = (b.answered / b.total) * 100;
-    const medianMos = percentileCont(b.moses, 0.5);
-    result.push({ date: key, label, shortLabel, total: b.total, answered: b.answered, asr, medianMos });
-  }
-  return result;
-}
-
-// ─── WeeklyChart — recolored for the daylight canvas ──────────────────────────
-
-interface WeeklyChartProps {
-  days: DailyStats[];
-}
-
-const CHART_MOS = '#16a34a';
-const CHART_ASR = AZURE;
-
-function WeeklyChart({ days }: WeeklyChartProps) {
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-
-  // Chart geometry constants
-  const W = 600;
-  const H = 180;
-  const PAD_LEFT = 36;   // room for left Y-axis labels
-  const PAD_RIGHT = 36;  // room for right Y-axis labels
-  const PAD_TOP = 14;
-  const PAD_BOTTOM = 28; // room for X-axis labels
-  const innerW = W - PAD_LEFT - PAD_RIGHT;
-  const innerH = H - PAD_TOP - PAD_BOTTOM;
-
-  // X positions for 7 evenly spaced data points
-  const xPos = (i: number) => PAD_LEFT + (i / 6) * innerW;
-
-  // Y scale helpers: MOS 1–5 on left, ASR 0–100 on right
-  const yMos = (v: number) => PAD_TOP + (1 - (v - 1) / 4) * innerH;
-  const yAsr = (v: number) => PAD_TOP + (1 - v / 100) * innerH;
-
-  // Build monotone cubic spline paths, skipping gaps where data is null.
-  function buildSplinePath(
-    points: Array<{ x: number; y: number } | null>,
-  ): string {
-    const segments: string[] = [];
-    let runStart = -1;
-    let run: Array<{ x: number; y: number }> = [];
-
-    const flushRun = () => {
-      if (run.length === 0) return;
-      if (run.length === 1) {
-        segments.push(`M ${run[0].x} ${run[0].y}`);
-      } else {
-        segments.push(monotoneCubicPath(run));
-      }
-      run = [];
-      runStart = -1;
-    };
-
-    for (let i = 0; i < points.length; i++) {
-      const pt = points[i];
-      if (pt === null) {
-        flushRun();
-      } else {
-        if (runStart === -1) runStart = i;
-        run.push(pt);
-      }
-    }
-    flushRun();
-    return segments.join(' ');
-  }
-
-  // Monotone cubic interpolation — smooth curves that never overshoot
-  function monotoneCubicPath(pts: Array<{ x: number; y: number }>): string {
-    if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
-    const n = pts.length;
-    const dx = pts.map((p, i) => i < n - 1 ? pts[i + 1].x - p.x : 0);
-    const dy = pts.map((p, i) => i < n - 1 ? pts[i + 1].y - p.y : 0);
-    const m = pts.map((_, i) => i < n - 1 ? dy[i] / dx[i] : 0);
-    const t: number[] = new Array(n).fill(0);
-    t[0] = m[0];
-    t[n - 1] = m[n - 2];
-    for (let i = 1; i < n - 1; i++) t[i] = (m[i - 1] + m[i]) / 2;
-    for (let i = 0; i < n - 1; i++) {
-      if (m[i] === 0) { t[i] = t[i + 1] = 0; continue; }
-      const alpha = t[i] / m[i];
-      const beta = t[i + 1] / m[i];
-      const s = alpha * alpha + beta * beta;
-      if (s > 9) { const k = 3 / Math.sqrt(s); t[i] *= k; t[i + 1] *= k; }
-    }
-    let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
-    for (let i = 0; i < n - 1; i++) {
-      const cp1x = pts[i].x + dx[i] / 3;
-      const cp1y = pts[i].y + t[i] * dx[i] / 3;
-      const cp2x = pts[i + 1].x - dx[i] / 3;
-      const cp2y = pts[i + 1].y - t[i + 1] * dx[i] / 3;
-      d += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${pts[i + 1].x.toFixed(2)} ${pts[i + 1].y.toFixed(2)}`;
-    }
-    return d;
-  }
-
-  // Build area fill path: line path + vertical drop to baseline + close
-  function buildAreaPath(
-    points: Array<{ x: number; y: number } | null>,
-    baseline: number,
-  ): string {
-    const areas: string[] = [];
-    let run: Array<{ x: number; y: number }> = [];
-
-    const flushArea = () => {
-      if (run.length < 2) { run = []; return; }
-      const linePath = monotoneCubicPath(run);
-      const closeSegment = ` L ${run[run.length - 1].x.toFixed(2)} ${baseline.toFixed(2)} L ${run[0].x.toFixed(2)} ${baseline.toFixed(2)} Z`;
-      areas.push(linePath + closeSegment);
-      run = [];
-    };
-
-    for (const pt of points) {
-      if (pt === null) { flushArea(); } else { run.push(pt); }
-    }
-    flushArea();
-    return areas.join(' ');
-  }
-
-  const mosMemo = useMemo(() => {
-    const pts = days.map((d, i) =>
-      d.medianMos !== null ? { x: xPos(i), y: yMos(d.medianMos) } : null,
-    );
-    return {
-      linePath: buildSplinePath(pts),
-      areaPath: buildAreaPath(pts, PAD_TOP + innerH),
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days]);
-
-  const asrMemo = useMemo(() => {
-    const pts = days.map((d, i) =>
-      d.asr !== null ? { x: xPos(i), y: yAsr(d.asr) } : null,
-    );
-    return {
-      linePath: buildSplinePath(pts),
-      areaPath: buildAreaPath(pts, PAD_TOP + innerH),
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days]);
-
-  const hoveredDay = hoveredIdx !== null ? days[hoveredIdx] : null;
-
-  return (
-    <div className="rcf-panel" style={{ padding: '18px 20px 16px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-        <div
-          style={{
-            width: 22,
-            height: 22,
-            borderRadius: 6,
-            background: '#e4eeff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke={AZURE_DEEP} strokeWidth={1.8} style={{ width: 10, height: 10 }}>
-            <polyline points="1,12 5,7 8,9 12,4 15,6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <span className="rcf-panel-title">7-Day Performance</span>
-      </div>
-
-      {/* SVG chart — uses viewBox for responsive width */}
-      <div style={{ position: 'relative' }}>
-        <svg
-          viewBox={`0 0 ${W} ${H}`}
-          style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}
-          aria-label="7-day call quality chart"
-        >
-          <defs>
-            <linearGradient id="mos-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={CHART_MOS} stopOpacity="0.14" />
-              <stop offset="100%" stopColor={CHART_MOS} stopOpacity="0" />
-            </linearGradient>
-            <linearGradient id="asr-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={CHART_ASR} stopOpacity="0.12" />
-              <stop offset="100%" stopColor={CHART_ASR} stopOpacity="0" />
-            </linearGradient>
-          </defs>
-
-          {/* ── Background grid lines ─────────────────────────────── */}
-          {[1, 2, 3, 4, 5].map((mosVal) => {
-            const y = yMos(mosVal);
-            return (
-              <line
-                key={`mos-grid-${mosVal}`}
-                x1={PAD_LEFT} y1={y} x2={PAD_LEFT + innerW} y2={y}
-                stroke="rgba(14,23,38,0.05)"
-                strokeWidth={1}
-              />
-            );
-          })}
-
-          {/* ── Threshold grid lines (dashed) ─────────────────────── */}
-          <line
-            x1={PAD_LEFT} y1={yMos(3.0)} x2={PAD_LEFT + innerW} y2={yMos(3.0)}
-            stroke="rgba(220,38,38,0.16)"
-            strokeWidth={1}
-            strokeDasharray="4 4"
-          />
-          <line
-            x1={PAD_LEFT} y1={yMos(4.0)} x2={PAD_LEFT + innerW} y2={yMos(4.0)}
-            stroke="rgba(22,163,74,0.2)"
-            strokeWidth={1}
-            strokeDasharray="4 4"
-          />
-          <line
-            x1={PAD_LEFT} y1={yAsr(85)} x2={PAD_LEFT + innerW} y2={yAsr(85)}
-            stroke="rgba(47,125,246,0.14)"
-            strokeWidth={1}
-            strokeDasharray="3 5"
-          />
-          <line
-            x1={PAD_LEFT} y1={yAsr(95)} x2={PAD_LEFT + innerW} y2={yAsr(95)}
-            stroke="rgba(47,125,246,0.14)"
-            strokeWidth={1}
-            strokeDasharray="3 5"
-          />
-
-          {/* ── Y-axis labels (left = MOS) ─────────────────────────── */}
-          {[1, 2, 3, 4, 5].map((v) => (
-            <text
-              key={`mos-label-${v}`}
-              x={PAD_LEFT - 5}
-              y={yMos(v) + 4}
-              textAnchor="end"
-              fill="#7c8ba3"
-              fontSize={8}
-              fontFamily={MONO}
-            >
-              {v}
-            </text>
-          ))}
-
-          {/* ── Y-axis labels (right = ASR%) ──────────────────────── */}
-          {[0, 50, 85, 95, 100].map((v) => (
-            <text
-              key={`asr-label-${v}`}
-              x={PAD_LEFT + innerW + 5}
-              y={yAsr(v) + 4}
-              textAnchor="start"
-              fill="#7c8ba3"
-              fontSize={8}
-              fontFamily={MONO}
-            >
-              {v}%
-            </text>
-          ))}
-
-          {/* ── Axis titles ───────────────────────────────────────── */}
-          <text
-            x={8}
-            y={PAD_TOP + innerH / 2}
-            textAnchor="middle"
-            fill="#7c8ba3"
-            fontSize={7.5}
-            fontFamily="system-ui, sans-serif"
-            letterSpacing="0.05em"
-            transform={`rotate(-90, 8, ${PAD_TOP + innerH / 2})`}
-          >
-            MOS
-          </text>
-          <text
-            x={W - 6}
-            y={PAD_TOP + innerH / 2}
-            textAnchor="middle"
-            fill="#7c8ba3"
-            fontSize={7.5}
-            fontFamily="system-ui, sans-serif"
-            letterSpacing="0.05em"
-            transform={`rotate(90, ${W - 6}, ${PAD_TOP + innerH / 2})`}
-          >
-            ASR%
-          </text>
-
-          {/* ── Area fills ────────────────────────────────────────── */}
-          <path d={mosMemo.areaPath} fill="url(#mos-fill)" />
-          <path d={asrMemo.areaPath} fill="url(#asr-fill)" />
-
-          {/* ── Line paths ────────────────────────────────────────── */}
-          <path
-            d={mosMemo.linePath}
-            fill="none"
-            stroke={CHART_MOS}
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d={asrMemo.linePath}
-            fill="none"
-            stroke={CHART_ASR}
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-
-          {/* ── X-axis labels + data dots ─────────────────────────── */}
-          {days.map((day, i) => {
-            const x = xPos(i);
-            const hasData = day.total > 0;
-            const isHovered = hoveredIdx === i;
-
-            return (
-              <g key={day.date}>
-                <text
-                  x={x}
-                  y={H - 4}
-                  textAnchor="middle"
-                  fill={isHovered ? INK_SOFT : '#8b99b0'}
-                  fontSize={8.5}
-                  fontFamily="system-ui, sans-serif"
-                  style={{ transition: 'fill 0.15s' }}
-                >
-                  {day.shortLabel}
-                </text>
-
-                {/* Invisible wide hit area for hover */}
-                <rect
-                  x={x - innerW / 14}
-                  y={PAD_TOP}
-                  width={innerW / 7}
-                  height={innerH}
-                  fill="transparent"
-                  style={{ cursor: hasData ? 'crosshair' : 'default' }}
-                  onMouseEnter={() => setHoveredIdx(i)}
-                  onMouseLeave={() => setHoveredIdx(null)}
-                />
-
-                {hasData ? (
-                  <>
-                    {/* MOS dot */}
-                    {day.medianMos !== null && (
-                      <circle
-                        cx={x}
-                        cy={yMos(day.medianMos)}
-                        r={isHovered ? 4.5 : 3}
-                        fill={isHovered ? CHART_MOS : '#ffffff'}
-                        stroke={CHART_MOS}
-                        strokeWidth={isHovered ? 2 : 1.5}
-                        style={{ transition: 'r 0.15s, fill 0.15s' }}
-                        onMouseEnter={() => setHoveredIdx(i)}
-                        onMouseLeave={() => setHoveredIdx(null)}
-                      />
-                    )}
-                    {/* ASR dot */}
-                    {day.asr !== null && (
-                      <circle
-                        cx={x}
-                        cy={yAsr(day.asr)}
-                        r={isHovered ? 4.5 : 3}
-                        fill={isHovered ? CHART_ASR : '#ffffff'}
-                        stroke={CHART_ASR}
-                        strokeWidth={isHovered ? 2 : 1.5}
-                        style={{ transition: 'r 0.15s, fill 0.15s' }}
-                        onMouseEnter={() => setHoveredIdx(i)}
-                        onMouseLeave={() => setHoveredIdx(null)}
-                      />
-                    )}
-                    {/* Vertical hover line */}
-                    {isHovered && (
-                      <line
-                        x1={x} y1={PAD_TOP} x2={x} y2={PAD_TOP + innerH}
-                        stroke="rgba(14,23,38,0.08)"
-                        strokeWidth={1}
-                      />
-                    )}
-                  </>
-                ) : (
-                  /* No-data marker: subtle hollow circle at chart midpoint */
-                  <circle
-                    cx={x}
-                    cy={PAD_TOP + innerH / 2}
-                    r={2.5}
-                    fill="none"
-                    stroke="rgba(14,23,38,0.15)"
-                    strokeWidth={1}
-                    strokeDasharray="2 2"
-                  />
-                )}
-              </g>
-            );
-          })}
-        </svg>
-
-        {/* ── Hover tooltip (absolutely positioned over SVG) ─────── */}
-        {hoveredDay !== null && hoveredIdx !== null && (
-          <div
-            style={{
-              position: 'absolute',
-              left: `clamp(0px, calc(${((hoveredIdx / 6) * 100).toFixed(1)}% - 90px), calc(100% - 200px))`,
-              top: 4,
-              pointerEvents: 'none',
-              background: '#ffffff',
-              border: '1px solid #dfe6f0',
-              borderRadius: 8,
-              padding: '8px 12px',
-              minWidth: 190,
-              boxShadow: '0 12px 28px -8px rgba(14,23,38,0.28)',
-              zIndex: 10,
-            }}
-          >
-            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: INK, marginBottom: 6 }}>
-              {hoveredDay.label}
-            </div>
-            {hoveredDay.total === 0 ? (
-              <div style={{ fontSize: '0.68rem', color: INK_FAINT }}>No calls recorded</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-                  <span style={{ fontSize: '0.68rem', color: INK_DIM }}>Calls</span>
-                  <span style={{ fontSize: '0.68rem', fontWeight: 600, color: INK, fontVariantNumeric: 'tabular-nums' }}>
-                    {hoveredDay.total}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', color: AZURE_DEEP }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: CHART_ASR, display: 'inline-block', flexShrink: 0 }} />
-                    ASR
-                  </span>
-                  <span style={{ fontSize: '0.68rem', fontWeight: 600, color: INK, fontVariantNumeric: 'tabular-nums' }}>
-                    {hoveredDay.asr !== null ? `${hoveredDay.asr.toFixed(1)}%` : '—'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', color: GREEN }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: CHART_MOS, display: 'inline-block', flexShrink: 0 }} />
-                    MOS
-                  </span>
-                  <span style={{ fontSize: '0.68rem', fontWeight: 600, color: INK, fontVariantNumeric: 'tabular-nums' }}>
-                    {hoveredDay.medianMos !== null ? hoveredDay.medianMos.toFixed(2) : '—'}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: 18, marginTop: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <svg width="20" height="6" style={{ flexShrink: 0 }}>
-            <line x1="0" y1="3" x2="20" y2="3" stroke={CHART_MOS} strokeWidth="2" strokeLinecap="round" />
-            <circle cx="10" cy="3" r="2.5" fill="#ffffff" stroke={CHART_MOS} strokeWidth="1.5" />
-          </svg>
-          <span style={{ fontSize: '0.66rem', color: INK_DIM }}>Median MOS of graded calls (left axis, 1–5)</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <svg width="20" height="6" style={{ flexShrink: 0 }}>
-            <line x1="0" y1="3" x2="20" y2="3" stroke={CHART_ASR} strokeWidth="2" strokeLinecap="round" />
-            <circle cx="10" cy="3" r="2.5" fill="#ffffff" stroke={CHART_ASR} strokeWidth="1.5" />
-          </svg>
-          <span style={{ fontSize: '0.66rem', color: INK_DIM }}>ASR% (right axis, 0–100%)</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <svg width="14" height="14" style={{ flexShrink: 0 }}>
-            <circle cx="7" cy="7" r="4" fill="none" stroke="rgba(14,23,38,0.2)" strokeWidth="1" strokeDasharray="2 2" />
-          </svg>
-          <span style={{ fontSize: '0.66rem', color: INK_FAINT }}>No data</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CallActivityTab({ customerId }: CallActivityTabProps) {
-  // ALL hooks unconditionally at top — rules of hooks (#310 prevention)
-  const { isAdmin, isSupport } = useAuth();
-  // Carrier routing is a platform internal — the API withholds carrier_used
-  // from tenant rows, so the Carrier Trunk column is staff-only.
-  const showCarrier = isAdmin || isSupport;
-  const [activitySearch, setActivitySearch] = useState('');
-  const [selectedDid, setSelectedDid] = useState<string | null>(null);
-  const [didDropdownOpen, setDidDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['rcf-activity', customerId],
-    queryFn: () =>
-      // No sort params — GET /cdrs doesn't declare any; it always returns
-      // ORDER BY start_time DESC (the old sort_by/sort_dir were silently
-      // dropped by FastAPI).
-      searchCdrs({
-        customer_id: customerId,
-        product_type: 'rcf',
-        limit: 200,
-      }),
-    enabled: true,
-    staleTime: 60_000,
-  });
-
-  const { data: rcfData } = useQuery({
-    queryKey: ['rcf-dids', customerId],
-    queryFn: () => listRcf({ customer_id: customerId, limit: 500 }),
-    staleTime: 60_000,
-  });
-  const rcfEntries: RcfEntry[] = rcfData?.items ?? [];
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    if (!didDropdownOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDidDropdownOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [didDropdownOpen]);
-
-  const allCalls = data?.items ?? [];
-
-  // Client-side DID filter — applies before search and stats
-  const filteredCalls = useMemo(() => {
-    if (!selectedDid) return allCalls;
-    return allCalls.filter((c) => c.destination === selectedDid);
-  }, [allCalls, selectedDid]);
-
-  const stats = useMemo(() => computeQualityStats(filteredCalls), [filteredCalls]);
-  const dailyDots = useMemo(() => buildDailyDots(filteredCalls), [filteredCalls]);
-
-  // Table rows: DID filter + search filter stacked
-  const calls = useMemo(() => {
-    if (!activitySearch.trim()) return filteredCalls;
-    const q = activitySearch.trim().toLowerCase();
-    return filteredCalls.filter((c) => {
-      const fields = [
-        c.caller_id,
-        c.destination,
-        c.hangup_cause,
-        c.carrier_used,
-        c.start_time,
-        c.sip_code?.toString(),
-        fmt(c.caller_id),
-        fmt(c.destination),
-      ];
-      return fields.some((f) => f && f.toLowerCase().includes(q));
-    });
-  }, [filteredCalls, activitySearch]);
-
-  // Selected DID label for display
-  const selectedEntry = rcfEntries.find((e) => e.did === selectedDid) ?? null;
-  const selectedLabel = selectedEntry
-    ? `${fmt(selectedEntry.did)}${selectedEntry.name ? ` — ${selectedEntry.name}` : ''}`
-    : null;
-
-  // Voice quality is the share of GRADED calls that sounded good or better
-  // (quality.ts grade bands). ASR / calls / ACD are informational and stay
-  // in the neutral ink scale.
-  const goodShare = stats.quality.goodSharePct;
-  const goodShareTone = goodShareColor(goodShare);
-  const goodShareKeyline = goodShare == null ? '#c6d2e4' : goodShareTone;
-
-  if (isLoading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center', padding: '64px 0', color: INK_DIM }}>
-        <Spinner size="sm" />
-        <span style={{ fontSize: '0.875rem' }}>Loading recent calls…</span>
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div style={{ padding: '16px 20px', borderRadius: 12, background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: RED, fontSize: '0.875rem' }}>
-        Unable to load call activity. Please try refreshing.
-      </div>
-    );
-  }
-
-  if (allCalls.length === 0) {
-    return (
-      <div
-        className="rcf-panel"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '72px 24px',
-          gap: 16,
-          textAlign: 'center',
-        }}
-      >
-        <div
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: 14,
-            background: '#e4eeff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke={AZURE_DEEP} strokeWidth={1.5} style={{ width: 28, height: 28 }}>
-            <path d="M2 12 L5 8 L7 11 L11 5 L13 8 L17 4 L22 9" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <div>
-          <p style={{ color: INK, fontSize: '1rem', fontWeight: 700, margin: '0 0 6px' }}>
-            No recent calls
-          </p>
-          <p style={{ color: INK_DIM, fontSize: '0.82rem', margin: 0, lineHeight: 1.6, maxWidth: 360 }}>
-            Once calls start flowing, your activity log will light up here.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingBottom: 40 }}>
-
-      {/* ── DID Selector bar ───────────────────────────────────── */}
-      {rcfEntries.length > 0 && (
-        <div
-          className="rcf-panel fx-load"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: '12px 18px',
-            position: 'relative',
-            zIndex: 50,
-            overflow: 'visible',
-            borderColor: selectedDid ? 'rgba(47,125,246,0.4)' : undefined,
-          }}
-        >
-          {/* Left: icon + label */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            <div
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 7,
-                background: '#e4eeff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke={AZURE_DEEP} strokeWidth={1.7} style={{ width: 11, height: 11 }}>
-                <path d="M3 5a2 2 0 0 1 2-2h1.28a.8.8 0 0 1 .758.547l.6 1.797a.8.8 0 0 1-.401.968l-.903.452a8.833 8.833 0 0 0 4.413 4.413l.452-.903a.8.8 0 0 1 .968-.401l1.797.6A.8.8 0 0 1 14 11.72V13a2 2 0 0 1-2 2h-.4C5.87 15 1 10.13 1 4.4V4a1 1 0 0 1 1-1h1z" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <span style={{ fontSize: '0.66rem', fontWeight: 700, color: INK_DIM, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              Viewing
-            </span>
-          </div>
-
-          {/* Centre: custom dropdown */}
-          <div ref={dropdownRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-            <button
-              type="button"
-              onClick={() => setDidDropdownOpen((o) => !o)}
-              className="rcf-input"
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                cursor: 'pointer',
-                borderColor: didDropdownOpen ? AZURE : selectedDid ? 'rgba(47,125,246,0.45)' : undefined,
-                boxShadow: didDropdownOpen ? '0 0 0 3px rgba(47,125,246,0.16)' : undefined,
-                background: '#ffffff',
-              }}
-            >
-              <span style={{ flex: 1, minWidth: 0, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {selectedDid ? (
-                  <span style={{ fontSize: '0.84rem', fontWeight: 700, color: AZURE_DEEP, fontFamily: MONO, letterSpacing: '0.01em' }}>
-                    {selectedLabel}
-                  </span>
-                ) : (
-                  <span style={{ fontSize: '0.84rem', fontWeight: 700, color: INK }}>
-                    All Numbers
-                  </span>
-                )}
-              </span>
-              <svg
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke={selectedDid ? AZURE_DEEP : INK_DIM}
-                strokeWidth={2}
-                style={{
-                  width: 12,
-                  height: 12,
-                  flexShrink: 0,
-                  transform: didDropdownOpen ? 'rotate(180deg)' : 'none',
-                  transition: 'transform 0.18s',
-                }}
-              >
-                <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-
-            {/* Dropdown panel */}
-            {didDropdownOpen && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 'calc(100% + 6px)',
-                  left: 0,
-                  right: 0,
-                  zIndex: 999,
-                  background: '#ffffff',
-                  border: '1px solid #d5deeb',
-                  borderRadius: 12,
-                  overflow: 'hidden',
-                  boxShadow: '0 20px 44px -12px rgba(14,23,38,0.32)',
-                  animation: 'fx-rise 0.12s ease',
-                }}
-              >
-                {/* All Numbers option */}
-                <button
-                  type="button"
-                  onClick={() => { setSelectedDid(null); setDidDropdownOpen(false); }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '11px 14px',
-                    border: 'none',
-                    borderBottom: '1px solid var(--rcf-line)',
-                    background: !selectedDid ? 'rgba(47,125,246,0.07)' : 'transparent',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    textAlign: 'left',
-                    transition: 'background 0.14s',
-                  }}
-                  onMouseEnter={(e) => { if (selectedDid) e.currentTarget.style.background = '#f2f7ff'; }}
-                  onMouseLeave={(e) => { if (selectedDid) e.currentTarget.style.background = 'transparent'; }}
-                >
-                  <div
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 7,
-                      background: !selectedDid ? '#dfeaff' : '#eef2f8',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                      transition: 'background 0.14s',
-                    }}
-                  >
-                    <svg viewBox="0 0 16 16" fill="none" stroke={!selectedDid ? AZURE_DEEP : INK_DIM} strokeWidth={1.7} style={{ width: 11, height: 11 }}>
-                      <rect x="2" y="2" width="5" height="5" rx="1.2" />
-                      <rect x="9" y="2" width="5" height="5" rx="1.2" />
-                      <rect x="2" y="9" width="5" height="5" rx="1.2" />
-                      <rect x="9" y="9" width="5" height="5" rx="1.2" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.84rem', fontWeight: 800, color: !selectedDid ? AZURE_DEEP : INK, letterSpacing: '-0.01em' }}>
-                      All Numbers
-                    </div>
-                    <div style={{ fontSize: '0.65rem', color: INK_FAINT, marginTop: 1 }}>
-                      Aggregate data for all {rcfEntries.length} number{rcfEntries.length !== 1 ? 's' : ''}
-                    </div>
-                  </div>
-                  {!selectedDid && (
-                    <span style={{ marginLeft: 'auto', fontSize: '0.6rem', fontWeight: 700, color: AZURE_DEEP, background: 'rgba(47,125,246,0.1)', border: '1px solid rgba(47,125,246,0.28)', borderRadius: 20, padding: '2px 8px', letterSpacing: '0.06em', textTransform: 'uppercase', flexShrink: 0 }}>
-                      Active
-                    </span>
-                  )}
-                </button>
-
-                {/* Individual DID options */}
-                <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-                  {rcfEntries.map((entry) => {
-                    const isSelected = selectedDid === entry.did;
-                    return (
-                      <button
-                        key={entry.did}
-                        type="button"
-                        onClick={() => { setSelectedDid(entry.did); setDidDropdownOpen(false); }}
-                        style={{
-                          width: '100%',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          padding: '10px 14px',
-                          border: 'none',
-                          borderBottom: '1px solid var(--rcf-line-soft)',
-                          background: isSelected ? 'rgba(47,125,246,0.06)' : 'transparent',
-                          cursor: 'pointer',
-                          fontFamily: 'inherit',
-                          textAlign: 'left',
-                          transition: 'background 0.14s',
-                        }}
-                        onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#f2f7ff'; }}
-                        onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
-                      >
-                        {/* Status dot */}
-                        <span
-                          style={{
-                            width: 7,
-                            height: 7,
-                            borderRadius: '50%',
-                            background: entry.enabled ? '#16a34a' : '#dc2626',
-                            flexShrink: 0,
-                            display: 'inline-block',
-                          }}
-                        />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '0.84rem', fontWeight: 700, color: isSelected ? AZURE_DEEP : INK, fontFamily: MONO, letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {fmt(entry.did)}
-                          </div>
-                          {entry.name && (
-                            <div style={{ fontSize: '0.65rem', color: isSelected ? AZURE : INK_DIM, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {entry.name}
-                            </div>
-                          )}
-                        </div>
-                        {isSelected && (
-                          <svg viewBox="0 0 16 16" fill="none" stroke={AZURE_DEEP} strokeWidth={2.2} style={{ width: 13, height: 13, flexShrink: 0 }}>
-                            <path d="M2 8l4 4 8-8" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Right: count badge + clear button */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            <span
-              style={{
-                fontSize: '0.65rem',
-                fontWeight: 700,
-                color: INK_DIM,
-                background: 'var(--rcf-tint)',
-                border: '1px solid var(--rcf-line)',
-                borderRadius: 20,
-                padding: '3px 9px',
-                whiteSpace: 'nowrap',
-                letterSpacing: '0.04em',
-              }}
-            >
-              {rcfEntries.length} number{rcfEntries.length !== 1 ? 's' : ''}
-            </span>
-            {selectedDid && (
-              <button
-                type="button"
-                onClick={() => setSelectedDid(null)}
-                title="Back to All Numbers"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 26,
-                  height: 26,
-                  borderRadius: 7,
-                  border: '1px solid rgba(47,125,246,0.3)',
-                  background: 'rgba(47,125,246,0.07)',
-                  color: AZURE_DEEP,
-                  cursor: 'pointer',
-                  padding: 0,
-                  transition: 'background 0.15s, border-color 0.15s',
-                  flexShrink: 0,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(47,125,246,0.14)';
-                  e.currentTarget.style.borderColor = 'rgba(47,125,246,0.5)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(47,125,246,0.07)';
-                  e.currentTarget.style.borderColor = 'rgba(47,125,246,0.3)';
-                }}
-              >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 10, height: 10 }}>
-                  <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── Quality stat strip — one slab, left-keyline figures ── */}
-      <div className="rcf-panel fx-load fx-load-d1" style={{ padding: '20px 24px' }}>
-        <div className="rcf-statline" style={{ marginTop: 0, gap: '12px 36px' }}>
-          <div className="rcf-stat">
-            <div className="rcf-stat-value" style={{ color: AZURE_DEEP }}>
-              {stats.asr != null ? `${stats.asr.toFixed(1)}%` : '—'}
-            </div>
-            <div className="rcf-stat-label">ASR · answered</div>
-          </div>
-          <div
-            className="rcf-stat"
-            style={{ borderLeftColor: goodShareKeyline }}
-            title={
-              stats.quality.graded > 0
-                ? `${stats.quality.goodOrBetter} of ${stats.quality.graded} graded calls sounded good or better. Calls that weren’t answered, lasted under 5 seconds or carried too little sound aren’t graded.`
-                : 'No graded calls yet — calls that weren’t answered, lasted under 5 seconds or carried too little sound aren’t graded.'
-            }
-          >
-            <div className="rcf-stat-value" style={{ color: goodShare != null ? goodShareTone : INK_FAINT }}>
-              {goodShare != null ? `${Math.floor(goodShare)}%` : '—'}
-            </div>
-            <div className="rcf-stat-label">Sounded good or better</div>
-          </div>
-          {stats.quality.oneWay > 0 && (
-            <div className="rcf-stat" style={{ borderLeftColor: RED }} title="Calls where no sound came through from one side">
-              <div className="rcf-stat-value" style={{ color: RED }}>{stats.quality.oneWay.toLocaleString()}</div>
-              <div className="rcf-stat-label">One-way audio</div>
-            </div>
-          )}
-          <div className="rcf-stat rcf-stat-dim">
-            <div className="rcf-stat-value">{stats.total.toLocaleString()}</div>
-            <div className="rcf-stat-label">Calls · period</div>
-          </div>
-          <div className="rcf-stat rcf-stat-dim">
-            <div className="rcf-stat-value">
-              {stats.acdLabel}
-            </div>
-            <div className="rcf-stat-label">Avg duration</div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── 7-day performance chart — scroll reveal ────────────── */}
-      <Reveal>
-        <WeeklyChart days={dailyDots} />
-      </Reveal>
-
-      {/* ── Recent calls table — scroll reveal ─────────────────── */}
-      <Reveal delay={90}>
-      <div className="rcf-panel">
-        <div className="rcf-panel-head">
-          <span className="rcf-panel-title">Recent Calls</span>
-          {selectedDid && selectedLabel && (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                fontSize: '0.65rem',
-                fontWeight: 700,
-                color: AZURE_DEEP,
-                background: 'rgba(47,125,246,0.08)',
-                border: '1px solid rgba(47,125,246,0.24)',
-                borderRadius: 20,
-                padding: '2px 8px 2px 6px',
-                whiteSpace: 'nowrap',
-                letterSpacing: '0.02em',
-                flexShrink: 0,
-              }}
-            >
-              <span
-                style={{
-                  width: 5,
-                  height: 5,
-                  borderRadius: '50%',
-                  background: AZURE_DEEP,
-                  display: 'inline-block',
-                  flexShrink: 0,
-                }}
-              />
-              {selectedLabel}
-            </span>
-          )}
-          <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
-            <svg viewBox="0 0 20 20" fill="currentColor" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#9aa9c0' }}>
-              <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-            </svg>
-            <input
-              type="text"
-              className="rcf-input"
-              value={activitySearch}
-              onChange={(e) => setActivitySearch(e.target.value)}
-              placeholder="Filter by number, date, cause..."
-              style={{ width: '100%', padding: '7px 12px 7px 30px', fontSize: '0.8rem' }}
-            />
-          </div>
-          <span
-            style={{
-              fontSize: '0.68rem',
-              fontWeight: 600,
-              color: AZURE_DEEP,
-              background: 'rgba(47,125,246,0.08)',
-              border: '1px solid rgba(47,125,246,0.2)',
-              borderRadius: 20,
-              padding: '2px 9px',
-              flexShrink: 0,
-            }}
-          >
-            {calls.length}{(activitySearch.trim() || selectedDid) ? ` of ${allCalls.length}` : ''} shown
-          </span>
-        </div>
-
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 580 }}>
-            <thead>
-              <tr>
-                {['Time', 'From', 'To (DID)', ...(showCarrier ? ['Carrier Trunk'] : []), 'Status', 'Quality'].map((h) => (
-                  <th key={h} className="rcf-th" style={{ padding: '11px 14px' }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {calls.map((cdr) => {
-                const status = callStatusInfo(cdr);
-                const quality = callQualityLabel(cdr);
-                return (
-                  <tr key={cdr.uuid} className="rcf-row">
-                    {/* Time */}
-                    <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
-                      <span style={{ fontSize: '0.78rem', color: INK_DIM, fontVariantNumeric: 'tabular-nums' }}>
-                        {timeAgo(cdr.start_time)}
-                      </span>
-                    </td>
-
-                    {/* From */}
-                    <td style={{ padding: '12px 14px' }}>
-                      <span style={{ fontSize: '0.82rem', color: INK_SOFT, fontFamily: MONO, fontWeight: 500 }}>
-                        {fmt(cdr.caller_id)}
-                      </span>
-                    </td>
-
-                    {/* To (DID) */}
-                    <td style={{ padding: '12px 14px' }}>
-                      <span style={{ fontSize: '0.82rem', color: AZURE_DEEP, fontFamily: MONO, fontWeight: 600 }}>
-                        {fmt(cdr.destination)}
-                      </span>
-                    </td>
-
-                    {/* Carrier Trunk — staff only */}
-                    {showCarrier && (
-                      <td style={{ padding: '12px 14px' }}>
-                        <span style={{ fontSize: '0.78rem', color: INK_DIM }}>
-                          {carrierDisplayName(cdr.carrier_used)}
-                        </span>
-                      </td>
-                    )}
-
-                    {/* Status badge */}
-                    <td style={{ padding: '12px 14px' }}>
-                      <span
-                        style={{
-                          fontSize: '0.68rem',
-                          fontWeight: 700,
-                          color: status.color,
-                          background: status.bg,
-                          border: status.border,
-                          borderRadius: 20,
-                          padding: '3px 9px',
-                          whiteSpace: 'nowrap',
-                          letterSpacing: '0.02em',
-                        }}
-                      >
-                        {status.label}
-                      </span>
-                    </td>
-
-                    {/* Quality dot — call grade (worse direction), or "Not rated" + why */}
-                    <td style={{ padding: '12px 14px' }}>
-                      {quality.text != null ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={quality.reason ?? undefined}>
-                          <span
-                            style={{
-                              width: 8,
-                              height: 8,
-                              borderRadius: '50%',
-                              background: quality.color,
-                              flexShrink: 0,
-                              display: 'inline-block',
-                            }}
-                          />
-                          <span style={{ fontSize: '0.72rem', color: quality.color, fontWeight: 600 }}>
-                            {quality.text}
-                          </span>
-                        </div>
-                      ) : (
-                        <span
-                          style={{ fontSize: '0.72rem', color: INK_FAINT, whiteSpace: 'nowrap' }}
-                          title={quality.reason ?? undefined}
-                        >
-                          Not rated{quality.short ? ` · ${quality.short}` : ''}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      </Reveal>
     </div>
   );
 }
@@ -3301,12 +1910,18 @@ function AvailableNumbersSection({
   isError,
   onRequest,
   requestingDid,
+  canRequest,
+  isStaff,
 }: {
   items: DidInventoryItem[];
   isLoading: boolean;
   isError: boolean;
   onRequest: (item: DidInventoryItem) => void;
   requestingDid: string | null;
+  /** True only for the tenant `user` role — staff and readonly tenants never request. */
+  canRequest: boolean;
+  /** Real role is admin/support — picks the view-only note's wording. */
+  isStaff: boolean;
 }) {
   // ALL hooks unconditionally at top
   const [filters, setFilters] = useState<DidFilterState>({ npa: '', nxx: '', state: '', search: '' });
@@ -3359,6 +1974,13 @@ function AvailableNumbersSection({
         count={filtered.length}
         countLabel={filtered.length === 1 ? 'number available' : 'numbers available'}
       />
+      {!canRequest && (
+        <p style={{ margin: '0 0 14px', fontSize: '0.8rem', color: INK_DIM }}>
+          {isStaff
+            ? 'View only — staff assign numbers to customers from the number inventory tool.'
+            : 'View only — your account has read-only access. Ask your account administrator to request numbers.'}
+        </p>
+      )}
 
       {items.length === 0 ? (
         <div
@@ -3442,7 +2064,7 @@ function AvailableNumbersSection({
                     <DidTh>Number</DidTh>
                     <DidTh>Location</DidTh>
                     <DidTh>Rate Center</DidTh>
-                    <th className="rcf-th" aria-label="Actions" />
+                    {canRequest && <th className="rcf-th" aria-label="Actions" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -3468,6 +2090,7 @@ function AvailableNumbersSection({
                             {item.rate_center ?? '—'}
                           </span>
                         </td>
+                        {canRequest && (
                         <td style={{ padding: '11px 18px 11px 16px', textAlign: 'right' }}>
                           <button
                             type="button"
@@ -3491,6 +2114,7 @@ function AvailableNumbersSection({
                             {isRequesting ? 'Requesting…' : 'Request'}
                           </button>
                         </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -3508,13 +2132,25 @@ function AvailableNumbersSection({
 
 interface DIDManagementTabProps {
   customerId: number | undefined;
+  /**
+   * Admin viewing ONE customer: GET /numbers/my returns every assigned DID
+   * platform-wide for admins, so narrow it to this account client-side.
+   * Undefined for tenants (the API already scopes them).
+   */
+  filterToCustomer?: number;
   onSwitchTab: (tab: DashboardTab) => void;
 }
 
-function DIDManagementTab({ customerId, onSwitchTab }: DIDManagementTabProps) {
+function DIDManagementTab({ customerId, filterToCustomer, onSwitchTab }: DIDManagementTabProps) {
   // ALL hooks unconditionally at top — React rules-of-hooks
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
+  // Only the tenant `user` role may request numbers — the API 403s everyone
+  // else. Staff assign numbers in the inventory tool; readonly tenants are
+  // view-only. Keyed on the REAL role (user.role, as canEdit is), so an
+  // admin in customer-view mode — still role 'admin' — never sees Request.
+  const { user, isActualAdmin, isSupport } = useAuth();
+  const canRequest = user?.role === 'user';
 
   // Request modal state
   const [requestTarget, setRequestTarget] = useState<DidInventoryItem | null>(null);
@@ -3580,7 +2216,10 @@ function DIDManagementTab({ customerId, onSwitchTab }: DIDManagementTabProps) {
     },
   });
 
-  const myItems = myDids ?? [];
+  const myItems = useMemo(() => {
+    const all = myDids ?? [];
+    return filterToCustomer === undefined ? all : all.filter((d) => d.customer_id === filterToCustomer);
+  }, [myDids, filterToCustomer]);
   const availItems = availableDids ?? [];
 
   // My Numbers shows active DIDs: assigned + pending-release (still forwarding)
@@ -3657,6 +2296,8 @@ function DIDManagementTab({ customerId, onSwitchTab }: DIDManagementTabProps) {
           isError={availError}
           onRequest={handleRequestClick}
           requestingDid={requestMutation.isPending ? (requestMutation.variables ?? null) : null}
+          canRequest={canRequest}
+          isStaff={isActualAdmin || isSupport}
         />
       </div>
     </>
@@ -3665,6 +2306,14 @@ function DIDManagementTab({ customerId, onSwitchTab }: DIDManagementTabProps) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+/** `<select>` value → AdminScope ('' = placeholder, 'all', or a customer id). */
+function parseScope(value: string): AdminScope {
+  if (value === '') return null;
+  if (value === 'all') return 'all';
+  const id = Number(value);
+  return Number.isInteger(id) ? id : null;
+}
+
 export function RcfPage() {
   // ── All hooks unconditionally at top (React rules-of-hooks) ──────────────────
   const { user, isAdmin } = useAuth();
@@ -3672,9 +2321,14 @@ export function RcfPage() {
   // Tab state
   const [activeTab, setActiveTab] = useState<DashboardTab>('numbers');
 
-  // Admin customer selector
-  const [adminSelectedCustomer, setAdminSelectedCustomer] = useState<number | undefined>(undefined);
-  const customerId = isAdmin ? adminSelectedCustomer : (user?.customer_id ?? undefined);
+  // Admin scope — starts EMPTY (null): nothing loads until the admin picks
+  // "All Customers" or one account. Tenants are always ready (own account).
+  const [adminScope, setAdminScope] = useState<AdminScope>(null);
+  const scopeReady = !isAdmin || adminScope !== null;
+  const adminCustomerId = typeof adminScope === 'number' ? adminScope : undefined;
+  // customer_id filter for every scoped query: the admin's pick (undefined =
+  // All Customers) or the tenant's own account.
+  const customerId = isAdmin ? adminCustomerId : (user?.customer_id ?? undefined);
 
   // Customer list for the admin scope selector + the header title. Same query
   // key as other admin pages so React Query dedupes it. Only runs for admins.
@@ -3689,9 +2343,9 @@ export function RcfPage() {
     [adminCustomersData],
   );
   const adminSelectedCustomerName = useMemo(() => {
-    if (!isAdmin || adminSelectedCustomer === undefined) return null;
-    return adminCustomersData?.items.find((c) => c.id === adminSelectedCustomer)?.name ?? null;
-  }, [isAdmin, adminSelectedCustomer, adminCustomersData]);
+    if (!isAdmin || adminCustomerId === undefined) return null;
+    return adminCustomersData?.items.find((c) => c.id === adminCustomerId)?.name ?? null;
+  }, [isAdmin, adminCustomerId, adminCustomersData]);
 
   // Numbers tab state
   const [page, setPage] = useState(1);
@@ -3705,10 +2359,12 @@ export function RcfPage() {
   // Expandable-row state — one row open at a time
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  // Numbers query — always run (enabled unconditionally)
+  // Numbers query — gated on scope: an admin opening the page must NOT pull
+  // every customer's numbers before choosing what to look at.
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['rcf', customerId, page, pageSize],
+    queryKey: ['rcf', customerId ?? 'all', page, pageSize],
     queryFn: () => listRcf({ limit: pageSize, offset: (page - 1) * pageSize, customer_id: customerId }),
+    enabled: scopeReady,
   });
 
   // Cleanup debounce on unmount
@@ -3763,8 +2419,8 @@ export function RcfPage() {
     }, 250);
   }
 
-  function handleCustomerSelect(id: number | undefined) {
-    setAdminSelectedCustomer(id);
+  function handleScopeSelect(scope: AdminScope) {
+    setAdminScope(scope);
     setPage(1);
     setSearchInput('');
     setSearchQuery('');
@@ -3786,10 +2442,21 @@ export function RcfPage() {
     }
   }
 
-  // Header title: prefer the admin-scoped customer name, then the logged-in
-  // customer's name; fall back to the bare console title (admin "All Customers").
-  const scopedCustomerName = adminSelectedCustomerName ?? user?.customer_name ?? null;
-  const pageTitle = scopedCustomerName ?? 'Call Forwarding Console';
+  // Header: admins get a FIXED console title with the scope as breadcrumb
+  // context; tenants keep their account name (unchanged behavior).
+  const pageTitle = isAdmin
+    ? 'Administrative Call Forwarding Console'
+    : (user?.customer_name ?? 'Call Forwarding Console');
+  const headerContext = !isAdmin
+    ? null
+    : adminScope === 'all'
+      ? 'All Customers'
+      : adminCustomerId !== undefined
+        ? (adminSelectedCustomerName ?? `Customer ${adminCustomerId}`)
+        : null;
+  const pageSubtitle = isAdmin && !scopeReady
+    ? 'Select a customer to manage their forwarding destinations and monitor call health.'
+    : 'Manage forwarding destinations and monitor call health across your numbers.';
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
@@ -3799,7 +2466,9 @@ export function RcfPage() {
         {/* Quiet console header — breadcrumb, title, inline metrics, closing rule */}
         <RcfPageHeader
           title={pageTitle}
-          subtitle="Manage forwarding destinations and monitor call health across your numbers."
+          subtitle={pageSubtitle}
+          context={headerContext}
+          showMetrics={scopeReady}
           total={serverTotal}
           active={activeCount}
           disabled={disabledCount}
@@ -3813,20 +2482,22 @@ export function RcfPage() {
             <select
               className="rcf-input"
               style={{ minWidth: 260, fontSize: '0.84rem' }}
-              value={adminSelectedCustomer ?? ''}
-              onChange={(e) => handleCustomerSelect(e.target.value ? Number(e.target.value) : undefined)}
+              aria-label="Customer scope"
+              value={adminScope === null ? '' : String(adminScope)}
+              onChange={(e) => handleScopeSelect(parseScope(e.target.value))}
             >
-              <option value="">All Customers</option>
+              <option value="" disabled>Select a customer…</option>
+              <option value="all">All Customers</option>
               {scopeCustomers.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name} ({c.account_type.toUpperCase()})
                 </option>
               ))}
             </select>
-            {adminSelectedCustomer !== undefined && (
+            {adminScope !== null && (
               <button
                 type="button"
-                onClick={() => handleCustomerSelect(undefined)}
+                onClick={() => handleScopeSelect(null)}
                 style={{
                   fontSize: '0.72rem',
                   color: INK_DIM,
@@ -3844,11 +2515,14 @@ export function RcfPage() {
           </div>
         )}
 
+        {/* ── Admin pre-selection: nothing loads, nothing renders ── */}
+        {!scopeReady && <ScopePrompt message="Select a customer to view their call forwarding numbers" />}
+
         {/* ── Tab navigation ──────────────────────────────────── */}
-        <TabBar active={activeTab} onChange={setActiveTab} />
+        {scopeReady && <TabBar active={activeTab} onChange={setActiveTab} />}
 
         {/* ── Numbers Tab ─────────────────────────────────────── */}
-        {activeTab === 'numbers' && (
+        {scopeReady && activeTab === 'numbers' && (
           <>
             {/* Toolbar: Search + NPA filter + count */}
             {!isLoading && !isError && (
@@ -4053,13 +2727,24 @@ export function RcfPage() {
         )}
 
         {/* ── Call Activity Tab ────────────────────────────────── */}
-        {activeTab === 'activity' && (
-          <CallActivityTab customerId={customerId} />
+        {/* Keyed per scope so a DID / range picked under one customer
+            never carries over to the next. */}
+        {scopeReady && activeTab === 'activity' && (
+          <CallActivityTab key={`activity-${customerId ?? 'all'}`} customerId={customerId} />
         )}
 
         {/* ── DID Management Tab ───────────────────────────────── */}
-        {activeTab === 'dids' && (
-          <DIDManagementTab customerId={customerId} onSwitchTab={setActiveTab} />
+        {/* Inventory actions are per account — "All Customers" asks for one. */}
+        {scopeReady && activeTab === 'dids' && (
+          isAdmin && adminScope === 'all' ? (
+            <ScopePrompt message="Select a single customer to manage their DIDs" />
+          ) : (
+            <DIDManagementTab
+              customerId={customerId}
+              filterToCustomer={isAdmin ? adminCustomerId : undefined}
+              onSwitchTab={setActiveTab}
+            />
+          )
         )}
       </div>
     </div>

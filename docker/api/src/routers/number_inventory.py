@@ -1205,11 +1205,28 @@ async def request_number(
 
     Admin reviews and approves (via /assign) or the system auto-approves.
     """
+    # Allow-list: only the customer `user` role may reserve a DID. Staff never
+    # request numbers — admins assign them directly via /{did}/assign
+    # (inventory tool); an admin request used to reserve the DID with
+    # customer_id NULL, a stranded 'reserved' row no one owned. `readonly` is
+    # a write here (status -> 'reserved') and RCF-V1 has no global readonly
+    # write guard, so it is refused explicitly. Unknown/missing roles fail
+    # closed. All before any DB access.
+    role = user.get("role")
+    if role != "user":
+        if role in ("admin", "support"):
+            detail = "Staff cannot request numbers; assign them from the number inventory tool"
+        elif role == "readonly":
+            detail = "Read-only account: requesting numbers is not permitted"
+        else:
+            detail = "Only customer users can request numbers"
+        raise HTTPException(status_code=403, detail=detail)
+
     e164 = _canonical_did(did)
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
 
-    if customer_id is None and user.get("role") != "admin":
+    if customer_id is None:
         raise HTTPException(
             status_code=400,
             detail="User is not associated with a customer account",

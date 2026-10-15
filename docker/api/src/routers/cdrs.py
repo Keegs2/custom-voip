@@ -8,6 +8,7 @@ import config
 from services import stir_outcome as stir_oc
 from services import tenant_redaction as tr
 from services import call_quality as cq
+from services import cdr_activity as act
 import asyncpg
 import logging
 import math
@@ -2310,6 +2311,38 @@ async def _tenant_summary(where_sql: str, values: list, group_by: str) -> dict:
     results = await db.fetch_all(query, *values)
     return {"summary": [tr.redact_summary_row(r) for r in results],
             "group_by": group_by}
+
+
+# ---------------------------------------------------------------------------
+# /activity — server-side Call Activity aggregate (services/cdr_activity.py).
+# Declared BEFORE `/{cdr_uuid}` so the literal path is not shadowed.
+# ---------------------------------------------------------------------------
+@router.get("/activity")
+async def cdr_activity(
+    range_: act.ActivityRange = Query("7d", alias="range"),
+    tz: str = Query("UTC", max_length=64, description="IANA time zone"),
+    customer_id: Optional[int] = None,
+    product_type: Optional[str] = Query("rcf", max_length=32),
+    destination: Optional[str] = Query(None, max_length=32, description="exact DID"),
+    customer_filter: int | None = Depends(get_support_read_filter),
+):
+    """Zero-filled KPIs + time series over a fixed window (24h hourly, 7d/30d
+    daily, 90d ISO-weekly), bucketed in `tz`. One row per call (no carrier
+    B-legs). Tenants are hard-scoped to their own customer (`customer_id`
+    ignored) and get whole-minute averages only — never seconds or costs;
+    staff may omit `customer_id` for all customers. Contract: module
+    docstring of services/cdr_activity.py. Unknown tz -> 422; timeout -> 503.
+    """
+    staff = customer_filter is None
+    canon_tz = act.canonical_tz(tz)
+    if canon_tz is None:
+        raise HTTPException(422, "unknown time zone")
+    window = act.compute_window(range_, canon_tz, act.utc_now())
+    sql, args = act.build_activity_query(
+        window, staff=staff,
+        customer_id=customer_id if staff else customer_filter,
+        product_type=product_type, destination=destination)
+    return act.shape_activity(window, await act.run_activity_query(sql, args), staff=staff)
 
 
 @router.get("/{cdr_uuid}")
