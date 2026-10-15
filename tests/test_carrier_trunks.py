@@ -52,6 +52,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -1249,5 +1250,121 @@ def test_migration47_b_leg_for_unknown_a_leg_is_a_noop(trunks_db, client):
         assert r.json()["detail"] == "a-leg row not found"
         after = await db.fetch_one("SELECT COUNT(*) AS n FROM cdrs")
         assert after["n"] == before["n"]
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 9) Migration 52 — Sinch toll-free ORIGINATION trunks + probe-less passive
+#    health. Kept LAST in the module on purpose: it applies 45 (+52) to the
+#    shared scratch DB, which changes carrier_trunk_health semantics that the
+#    earlier 44-era assertions (test_health_view_setid_filter_widened) pin.
+# ---------------------------------------------------------------------------
+MIG_ORIG_PASSIVE = REPO / "docker" / "postgres" / "init" / "45_orig_trunk_passive_health.sql"
+MIG_SINCH_TF_ORIG = REPO / "docker" / "postgres" / "init" / "52_sinch_tf_origination.sql"
+
+# The TF_INGRESS_ENFORCE variant of the Kamailio route[CARRIER_TRUST] SELECT
+# (compiled in by default): adds traffic_class (NULL -> 'any') as column 3.
+SBC_CONTRACT_SQL_TF = (
+    "SELECT carrier, pop, cps_limit, COALESCE(traffic_class, 'any') FROM carrier_trunks "
+    "WHERE source_ip = '{si}'::inet "
+    "AND direction IN ('inbound','both') AND enabled = true "
+    "LIMIT 1"
+)
+
+TF_ORIG_SEEDS = {
+    "atlanta-tf-orig": {"source_ip": "206.146.98.25", "trunk_group": "ATLNGAQSGR2_7284"},
+    "denver-tf-orig":  {"source_ip": "206.146.100.25", "trunk_group": "DNVTCOZIGR2_3327"},
+}
+
+
+def test_migration52_tf_origination(trunks_db, client):
+    pg = trunks_db["pg"]
+    db = trunks_db["db"]
+
+    async def go():
+        owner = await asyncpg.connect(
+            host=pg.sock, port=pg.port, user="postgres", database="postgres",
+            statement_cache_size=0)
+        try:
+            await owner.execute(MIG_ORIG_PASSIVE.read_text())
+            # 52 twice — idempotent seed (ON CONFLICT DO NOTHING) + view.
+            await owner.execute(MIG_SINCH_TF_ORIG.read_text())
+            await owner.execute(MIG_SINCH_TF_ORIG.read_text())
+            rows = await owner.fetch(
+                "SELECT pop, host(source_ip) AS ip, trunk_group, direction, "
+                "traffic_class, cps_limit, enabled, notes FROM carrier_trunks "
+                "WHERE carrier = 'sinch' AND pop LIKE '%-tf-orig'")
+        finally:
+            await owner.close()
+        by_pop = {r["pop"]: dict(r) for r in rows}
+        assert set(by_pop) == set(TF_ORIG_SEEDS)
+        for pop, want in TF_ORIG_SEEDS.items():
+            r = by_pop[pop]
+            assert r["ip"] == want["source_ip"] and r["trunk_group"] == want["trunk_group"]
+            assert (r["direction"], r["traffic_class"], r["cps_limit"], r["enabled"]) == \
+                ("inbound", "tollfree", 10, True)
+            assert "50 sessions" in r["notes"]
+
+        # SBC contract (TF variant) as the freeswitch role: tollfree for the
+        # new trunks, 'any' for a pre-relabel orig row; and the inbound-only
+        # rows never enter the FS termination contract.
+        conn = await asyncpg.connect(
+            host=pg.sock, port=pg.port, user="freeswitch", database="postgres",
+            statement_cache_size=0)
+        try:
+            r = await conn.fetch(SBC_CONTRACT_SQL_TF.format(si="206.146.98.25"))
+            assert [tuple(x) for x in r] == [("sinch", "atlanta-tf-orig", 10, "tollfree")]
+            r = await conn.fetch(SBC_CONTRACT_SQL_TF.format(si="206.146.100.24"))
+            assert r[0][3] == "any"
+            for zone in ZONES:
+                term = await conn.fetch(TERM_CONTRACT_SQL.format(zone=zone))
+                assert not any(t["pop"].endswith("-tf-orig") for t in term)
+        finally:
+            await conn.close()
+
+        # Fresh probe rows for the pre-existing duids (self-contained under -k).
+        await db.execute(
+            """
+            INSERT INTO carrier_trunk_status (duid, sbc_id, name, ip, setid, is_up)
+            VALUES
+              ('bw-dallas-primary', 'east-sbc-1', 'Bandwidth Dallas', '67.231.2.12',    2, true),
+              ('sinch-denver',      'east-sbc-1', 'Sinch Denver',     '206.146.100.24', 6, true),
+              ('sinch-chicago',     'east-sbc-1', 'Sinch Chicago',    '206.146.101.39', 7, false)
+            ON CONFLICT (duid, sbc_id) DO UPDATE
+              SET is_up = EXCLUDED.is_up, updated_at = now()
+            """
+        )
+        # Probe-less passive health: no carrier_trunk_status rows exist for
+        # the TF orig duids, yet the view emits them ('passive', never
+        # down/stale) — and 'up' (traffic) once an inbound CDR lands.
+        h = {r["duid"]: dict(r) for r in await db.fetch_all(
+            "SELECT * FROM carrier_trunk_health")}
+        for duid in ("sinch-atlanta-tf-orig", "sinch-denver-tf-orig"):
+            assert h[duid]["status"] == "passive", h[duid]
+            assert h[duid]["is_up"] is False and h[duid]["stale"] is False
+            assert h[duid]["setid"] is None and h[duid]["total_sbcs"] == 0
+            assert h[duid]["recent_inbound_calls"] == 0
+        # Pre-existing duids render as 45 defines them (chicago probe-down,
+        # no traffic -> 'passive'; denver probe-up -> 'up').
+        assert h["sinch-chicago"]["status"] == "passive"
+        assert h["sinch-denver"]["status"] == "up"
+        assert h["bw-dallas-primary"]["status"] == "up"
+
+        now = int(time.time())
+        r = await client.post("/v1/cdrs/ingest", json=_ingest_payload(
+            "ct-ingest-tf-orig-1",
+            {"inbound_carrier": "sinch", "inbound_carrier_pop": "atlanta-tf-orig",
+             "destination_number": "+18885550100",
+             "start_epoch": str(now - 60), "answer_epoch": str(now - 55),
+             "end_epoch": str(now - 30)},
+        ))
+        assert r.status_code == 200, r.text
+        h = {r["duid"]: dict(r) for r in await db.fetch_all(
+            "SELECT * FROM carrier_trunk_health")}
+        a = h["sinch-atlanta-tf-orig"]
+        assert (a["status"], a["is_up"], a["health_source"], a["recent_inbound_calls"]) == \
+            ("up", True, "traffic", 1)
+        assert h["sinch-denver-tf-orig"]["status"] == "passive"
 
     _run(go())

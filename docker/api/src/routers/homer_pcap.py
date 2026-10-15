@@ -93,6 +93,9 @@ HEP_IP_ALIASES: dict[str, str] = {
     # Sinch origination (inbound to us)
     "206.146.100.24": "Sinch-Denver",
     "206.146.101.39": "Sinch-Chicago",
+    # Sinch toll-free origination (8XX-T, 8YY R-URIs only — migration 52)
+    "206.146.98.25": "Sinch-Atlanta-TF-Orig",
+    "206.146.100.25": "Sinch-Denver-TF-Orig",
     # Sinch termination (outbound from us)
     "206.146.98.26": "Sinch-Atlanta-LD",
     "206.146.100.26": "Sinch-Denver-TF",

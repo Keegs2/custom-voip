@@ -125,6 +125,13 @@ Every SIP request enters here. Processing order:
    - Bandwidth IPs (67.231.0.0/16, 216.82.224.0/19) -> trusted
    - Sinch origination IPs (`SINCH_DENVER_IP` 206.146.100.24, `SINCH_CHICAGO_IP`
      206.146.101.39 — env-templated defines, origination only) -> trusted
+   - Sinch TOLL-FREE origination IPs (`SINCH_TF_ATL_IP` 206.146.98.25,
+     `SINCH_TF_DEN_IP` 206.146.100.25 — 8XX-T trunks, 50 sessions each, pops
+     `atlanta-tf-orig`/`denver-tf-orig`) -> trusted. Static ON PURPOSE: as
+     DB-only rows they would run pike/SCANNER_DETECT and be auto-blocked
+     (>30 INVITEs/min) within minutes, after which even BYE/ACK are dropped.
+     No dispatcher probe group (origination-only). Not to be confused with
+     `SINCH_TF_IP` (206.146.100.26, the OSAO 8YY TERMINATION trunk).
    - Internal networks: Docker `172.28.0.0/16`, loopback `127.0.0.0/8`,
      `GCE_INTERNAL_NETWORK` `10.142.0.0/20`, and `VOIP_SUBNET` `192.168.10.0/24`
      (the FS media subnet) -> trusted
@@ -156,7 +163,8 @@ Every SIP request enters here. Processing order:
 13. **OPTIONS**: Responds 200 OK. Tracks floods from untrusted sources.
 14. **INVITE routing** (source-based decision tree):
     - **From a static carrier (Bandwidth or Sinch)** -> shared carrier-ingress branch:
-      dedup check (htable `bw_dedup`, 3s TTL, source-independent From::To key) ->
+      toll-free ingress class check (`TF_INGRESS_ENFORCE`, §4.6.2; 404 on
+      mismatch, BEFORE dedup so a reject never sets `bw_dedup`) -> dedup check (htable `bw_dedup`, 3s TTL, source-independent From::To key) ->
       per-source-IP CPS backstop (`bw_cps`, BW_CPS_LIMIT) -> STIR capture ->
       X-Inbound-TC (Sinch gets tc4: egress stays Bandwidth) -> spoof-proofed
       `X-Inbound-Carrier`/`X-Inbound-PoP` attribution (strip wire copies, then
@@ -310,6 +318,36 @@ static carriers (WITHINDIALOG/FROM_NET_INDIALOG are carrier-agnostic).
 Deliberately NOT replicated: Bandwidth-PAI verstat/attest capture
 (Bandwidth-format observability) and the closed-enum Prometheus trunk
 metrics (a DB-sourced name is not a bounded label).
+
+With `TF_INGRESS_ENFORCE` on (default) the SELECT also returns
+`COALESCE(traffic_class, 'any')` (migration 44 column, replicated) and the
+toll-free class check (§4.6.2) runs right after the row is matched, before
+dedup/CPS. Fail-closed semantics are unchanged (error/miss return before it).
+
+### 4.6.2 Toll-free ingress enforcement (`TF_INGRESS_ENFORCE`, default on)
+
+Carrier ingress only — the static carrier branch and route[CARRIER_TRUST].
+Customer trunks (TRUNK_AUTH) and FS-originated traffic are never checked.
+`route[TF_CLASSIFY]` matches `$rU` against
+`^[+]?1?8(00|33|44|55|66|77|88)[0-9]{7}(;.*)?$` (trailing user params tolerated) — the SAME NPA set as FS
+`number_utils.TOLLFREE_NPAS` / `inbound_router.lua TOLLFREE_NPAS_FALLBACK`
+(pinned by `tests/test_classify_destination.py`; change all three together).
+Toll-free RCF DIDs are identified purely by NPA — there is no column.
+
+| Source | R-URI user | Result |
+|---|---|---|
+| TF orig trunk (`SINCH_TF_ATL_IP`/`SINCH_TF_DEN_IP`, or a DB row with `traffic_class='tollfree'`) | 8YY | admitted |
+| TF orig trunk | non-8YY | `404 Not Found`, `L_WARN` rule=tf-trunk-non-8yy |
+| Any other carrier (Bandwidth, Sinch Denver/Chicago, DB rows `traffic_class != 'tollfree'`) | 8YY | `404 Not Found`, `L_WARN` rule=8yy-on-non-tf-carrier |
+| Any other carrier | non-8YY | admitted |
+
+404 = what the platform already answers for an unprovisioned DID: terminal
+per-number, not in either carrier's reroute set (unlike 5xx/408), so no retry
+storm; stateless `sl_send_reply`, no dialog, no dedup key. `TF_INGRESS_ENFORCE=off`
+(exactly "off") compiles every block out — byte-identical pre-TF logic.
+**Rollout risk:** any 8YY DID still delivered by Bandwidth is rejected once
+this is on — move the 8YY RespOrg routing to the Sinch TF trunks first, or
+deploy with `TF_INGRESS_ENFORCE=off` and flip it after cutover.
 
 ### 4.7 route[NAT_DETECT]
 
@@ -515,6 +553,9 @@ Set in `.env` file on each SBC VM. Passed via `docker-compose.sbc.yml`.
 | `BANDWIDTH_TC2_LA` | No (default 67.231.4.138) | — | TC2 Los Angeles PoP (TC2 in-trunk failover target, dispatcher group 5 keepalive). |
 | `SINCH_DENVER_IP` | No (default 206.146.100.24) | — | Sinch Denver origination PoP (Trunk Group DNVTCOZIGR2_3278, test TN 5305480845). Static inbound trust + attribution + dispatcher group 6 keepalive. Origination-only — never an egress target. |
 | `SINCH_CHICAGO_IP` | No (default 206.146.101.39) | — | Sinch Chicago origination PoP (Trunk Group CHCGIL24GR4_7412, test TN 5305480846). Static inbound trust + attribution + dispatcher group 7 keepalive. Origination-only — never an egress target. |
+| `SINCH_TF_ATL_IP` | No (default 206.146.98.25) | — | Sinch Atlanta TOLL-FREE origination (8XX-T, TG ATLNGAQSGR2_7284, SBX ATLSBX21, pop `atlanta-tf-orig`). Static inbound trust + attribution + TF-only ingress class. No dispatcher group. |
+| `SINCH_TF_DEN_IP` | No (default 206.146.100.25) | — | Sinch Denver TOLL-FREE origination (8XX-T, TG DNVTCOZIGR2_3327, SBX DENSBX21, pop `denver-tf-orig`). Static inbound trust + attribution + TF-only ingress class. No dispatcher group. |
+| `TF_INGRESS_ENFORCE` | No (default on) | off | Toll-free ingress class split (§4.6.2): TF orig trunks accept only 8YY R-URIs, every other carrier accepts no 8YY R-URIs (404). Only exactly `off` disables (compiles out, byte-identical). |
 | `VIP_EGRESS` | No (default off) | on | Carrier-bound INVITE egress from the external NLB VIP for INVITEs received on the signaling ILB VIP (`if ($Ri == "SIGNALING_VIP") { $fs = "udp:ADVERTISE_IP:5060"; }` in `route[TO_CARRIER]` Step 9, compiled in via `#!define VIP_EGRESS` + `SBC_SIGVIP_DEDICATED`). on/true/1 = ON, anything else = OFF; entrypoint forces OFF (warning) when `SBC_SIGNALING_VIP` is unset. Direct-IP ingress keeps own-public-IP egress — the 6 SBC public IPs stay whitelisted. Enable on both SBCs of a zone. See "Carrier-bound INVITE egress" in §5 Dispatcher Configuration. |
 
 ## 7. SIP Call Flows

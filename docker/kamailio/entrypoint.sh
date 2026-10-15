@@ -187,6 +187,22 @@ else
   STIR_SHAKEN_SIGN=off
 fi
 
+# Toll-free ingress enforcement toggle. DEFAULT ON. Same compile-time
+# line-replacement mechanism as FS_AWARE_OPTIONS: substitute the
+# __TF_INGRESS_ENFORCE_DEFINE__ placeholder LINE with the real
+# `#!define TF_INGRESS_ENFORCE` (ON) or a comment (OFF), so the
+# `#!ifdef TF_INGRESS_ENFORCE` blocks (route[TF_CLASSIFY]/[TF_INGRESS_CHECK],
+# their two call sites, the CARRIER_TRUST traffic_class column) compile in/out.
+# Only exactly "off" disables it (fail-safe toward the enforced class split —
+# a typo keeps enforcement ON; OFF renders byte-identical pre-TF logic).
+if [ "${TF_INGRESS_ENFORCE:-on}" = "off" ]; then
+  TF_INGRESS_ENFORCE_DEFINE="# TF_INGRESS_ENFORCE disabled via env (TF_INGRESS_ENFORCE=off) — no toll-free ingress class check"
+  TF_INGRESS_ENFORCE=off
+else
+  TF_INGRESS_ENFORCE_DEFINE="#!define TF_INGRESS_ENFORCE"
+  TF_INGRESS_ENFORCE=on
+fi
+
 # E.164 egress normalization toggle. DEFAULT OFF (dark). Same compile-time
 # line-replacement mechanism as STIR_SHAKEN_SIGN: substitute the __E164_EGRESS__
 # placeholder LINE with the real `#!define E164_EGRESS` (ON) or a comment (OFF),
@@ -345,6 +361,17 @@ BANDWIDTH_TC2_LA="${BANDWIDTH_TC2_LA:-67.231.4.138}"
 SINCH_DENVER_IP="${SINCH_DENVER_IP:-206.146.100.24}"
 SINCH_CHICAGO_IP="${SINCH_CHICAGO_IP:-206.146.101.39}"
 
+# Sinch TOLL-FREE ORIGINATION signaling IPs (8XX-T "To Customer" trunks, 50
+# sessions each, round-robin to all 3 zone VIPs). Same posture as the
+# origination PoPs above: static trust (flag 5) + attribution in kamailio.cfg,
+# defaults are production so NO .env edits. kamailio.cfg ONLY — no dispatcher
+# keepalive group (origination-only). Not SINCH_TF_IP (that is the OSAO 8YY
+# TERMINATION trunk below).
+#   Atlanta: TG ATLNGAQSGR2_7284, order 229644121, SBX ATLSBX21
+#   Denver:  TG DNVTCOZIGR2_3327, order 229644753, SBX DENSBX21
+SINCH_TF_ATL_IP="${SINCH_TF_ATL_IP:-206.146.98.25}"
+SINCH_TF_DEN_IP="${SINCH_TF_DEN_IP:-206.146.100.25}"
+
 # Sinch TERMINATION signaling IPs (trunk groups registered to all 6 SBC
 # public IPs on the Sinch side — DIFFERENT IPs from the origination PoPs
 # above). Same env-driven/default posture as SINCH_DENVER_IP. These appear
@@ -430,6 +457,9 @@ sed -i "s|__STIR_MASKED_REORIG_DEFINE__|${STIR_MASKED_REORIG_DEFINE}|" "$CONFIG"
 # E.164 egress toggle: same line-replacement pattern; the replacement string is
 # a fixed literal (a #!define or a comment) with no '|', '&' or '\'.
 sed -i "s|__E164_EGRESS__|${E164_EGRESS_DEFINE}|" "$CONFIG"
+# Toll-free ingress toggle: same fixed-literal line replacement (no '|', '&'
+# or '\' in either string).
+sed -i "s|__TF_INGRESS_ENFORCE_DEFINE__|${TF_INGRESS_ENFORCE_DEFINE}|" "$CONFIG"
 # UDP MTU fallback toggle + value. Both replacement strings are fixed literals
 # (the define/comment line and a sanitized integer) with no '|', '&' or '\'.
 # The value is substituted even when the toggle is OFF (renders 0 inside the
@@ -471,13 +501,17 @@ sed -i "s|__BANDWIDTH_TC2_LA__|${BANDWIDTH_TC2_LA}|g" "$CONFIG" "$DISPATCH"
 # so trust and keepalive targets stay in lockstep.
 sed -i "s|__SINCH_DENVER_IP__|${SINCH_DENVER_IP}|g" "$CONFIG" "$DISPATCH"
 sed -i "s|__SINCH_CHICAGO_IP__|${SINCH_CHICAGO_IP}|g" "$CONFIG" "$DISPATCH"
+# Sinch TOLL-FREE ORIGINATION IPs appear ONLY in kamailio.cfg (trust +
+# attribution + TF ingress class) — no dispatcher group, so config file only.
+sed -i "s|__SINCH_TF_ATL_IP__|${SINCH_TF_ATL_IP}|g" "$CONFIG"
+sed -i "s|__SINCH_TF_DEN_IP__|${SINCH_TF_DEN_IP}|g" "$CONFIG"
 # Sinch TERMINATION IPs appear ONLY in dispatcher.list (keepalive groups
 # 8-9) — kamailio.cfg has no define for them (egress is table-driven via
 # X-Carrier-IP), so DELIBERATELY only the dispatcher file is templated.
 sed -i "s|__SINCH_LD_IP__|${SINCH_LD_IP}|g" "$DISPATCH"
 sed -i "s|__SINCH_TF_IP__|${SINCH_TF_IP}|g" "$DISPATCH"
 
-echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, E164_EGRESS=${E164_EGRESS}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
+echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_TF_ATL=${SINCH_TF_ATL_IP}, SINCH_TF_DEN=${SINCH_TF_DEN_IP}, TF_INGRESS_ENFORCE=${TF_INGRESS_ENFORCE}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, E164_EGRESS=${E164_EGRESS}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
 echo "Kamailio peer reply hand-off: SBC_PEER_HANDOFF=${SBC_PEER_MODE} (peer=${SBC_PEER_ECHO}; on = transaction-less external replies received on the VIP socket are handed raw to the peer while dispatcher group 10 reads it UP, off = today's stateless via2 forward)"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.

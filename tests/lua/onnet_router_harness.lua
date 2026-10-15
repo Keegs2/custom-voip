@@ -934,6 +934,126 @@ do
 end
 
 -- Optional regression mode against the pre-split router.
+-- ------------------------------------------------------------------
+-- [13] Strict toll-free termination class filter (2026-10). Kept OUT of
+-- the `scenarios` table on purpose: the BASELINE regression mode replays
+-- every `scenarios` entry against the pre-change router, and 8YY routing is
+-- an intended behavior change. Prod has NO 'any' rows (Bandwidth + Sinch
+-- orig relabeled 'ld'); an 'any' row is still eligible for 'ld' only.
+-- ------------------------------------------------------------------
+local TF_TRUNKS = {
+    bw_dal  = { carrier = "bandwidth", pop = "dallas",     term_ip = "67.231.2.12",    traffic_class = "ld" },
+    bw_la   = { carrier = "bandwidth", pop = "la",         term_ip = "216.82.238.134", traffic_class = "ld" },
+    atl_ld  = { carrier = "sinch",     pop = "atlanta-ld", term_ip = "206.146.98.26",  traffic_class = "ld" },
+    den_tf  = { carrier = "sinch",     pop = "denver-tf",  term_ip = "206.146.100.26", traffic_class = "tollfree" },
+    any_row = { carrier = "future",    pop = "any",        term_ip = "198.51.100.9",   traffic_class = "any" },
+}
+local function tf_scenario(n, forward_to, trunks, results)
+    return {
+        inbound_did   = string.format("+1617000%04d", 60 + n),
+        sip_from_user = "+15085550160",
+        caller_id     = "+15085550160",
+        extra_vars    = SPLIT_HDRS,
+        step1 = {
+            product_type = "rcf",
+            customer_id = 10, forward_to = forward_to,
+            pass_caller_id = true, ring_timeout = 30, max_channels = 0,
+            rcf_name = "TF Test",
+        },
+        oracle = {},
+        trunk_endpoints = {},
+        term_trunks = trunks,
+        bridge_results = results,
+    }
+end
+local function bridged_ips(c)
+    local ips = {}
+    for _, b in ipairs(c.bridges) do
+        ips[#ips + 1] = b:match("sip_h_X%-Carrier%-IP=([^,}]+)")
+    end
+    return table.concat(ips, ",")
+end
+
+do
+    print("[13a] 8YY destination, only 'ld' (+'any') trunks -> FAIL CLOSED, no bridge")
+    local T = TF_TRUNKS
+    local c = run_scenario(tf_scenario(1, "+18885550100",
+        { T.bw_dal, T.bw_la, T.atl_ld, T.any_row }))
+    check("13a: zero carrier bridges", #c.bridges == 0, bridged_ips(c))
+    check("13a: hangup NO_ROUTE_DESTINATION (exactly once)",
+          #c.hangups == 1 and c.hangups[1] == "NO_ROUTE_DESTINATION",
+          table.concat(c.hangups, ","))
+    check("13a: term_class_blocked=tollfree breadcrumb",
+          c.setvars["term_class_blocked"] == "tollfree", c.setvars["term_class_blocked"])
+    check("13a: lua_routed=true (dialplan must not mask)",
+          c.setvars["lua_routed"] == "true", c.setvars["lua_routed"])
+    check("13a: table-driven path (term_trunks_source=db)",
+          c.setvars["term_trunks_source"] == "db", c.setvars["term_trunks_source"])
+end
+
+do
+    print("[13b] 8YY destination with a 'tollfree' trunk -> ONLY that trunk")
+    local T = TF_TRUNKS
+    local c = run_scenario(tf_scenario(2, "18005550100",
+        { T.bw_dal, T.bw_la, T.atl_ld, T.any_row, T.den_tf }, { "SUCCESS" }))
+    check("13b: only the tollfree trunk bridged",
+          bridged_ips(c) == "206.146.100.26", bridged_ips(c))
+    check("13b: carrier_used = sinch-denver-tf",
+          c.setvars["carrier_used"] == "sinch-denver-tf", c.setvars["carrier_used"])
+    check("13b: no block breadcrumb", c.setvars["term_class_blocked"] == nil,
+          c.setvars["term_class_blocked"])
+    check("13b: no router hangup (answered)", #c.hangups == 0, table.concat(c.hangups, ","))
+end
+
+do
+    print("[13c] 8YY tollfree trunk fails on both SBCs -> 503, never spills to ld")
+    local T = TF_TRUNKS
+    local c = run_scenario(tf_scenario(3, "+18445550100",
+        { T.bw_dal, T.den_tf, T.atl_ld },
+        { "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE" }))
+    check("13c: 2 attempts, both the tollfree trunk",
+          bridged_ips(c) == "206.146.100.26,206.146.100.26", bridged_ips(c))
+    check("13c: 503 after the tollfree attempts",
+          c.hangups[1] == "NORMAL_TEMPORARY_FAILURE", table.concat(c.hangups, ","))
+end
+
+do
+    print("[13d] LD destination with ld + tollfree (+any) trunks -> ld/any only")
+    local T = TF_TRUNKS
+    local c = run_scenario(tf_scenario(4, "+17745550160",
+        { T.bw_dal, T.den_tf, T.atl_ld, T.any_row },
+        { "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE",
+          "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE",
+          "NORMAL_TEMPORARY_FAILURE", "SUCCESS" }))
+    local ips = bridged_ips(c)
+    check("13d: tollfree trunk never attempted for LD",
+          not ips:find("206.146.100.26", 1, true), ips)
+    check("13d: ld + any trunks attempted in priority order (x2 SBCs)",
+          ips == "67.231.2.12,67.231.2.12,206.146.98.26,206.146.98.26,198.51.100.9,198.51.100.9", ips)
+end
+
+do
+    print("[13e] LD destination, only 'tollfree' trunks -> existing full-list fallback")
+    local T = TF_TRUNKS
+    local c = run_scenario(tf_scenario(5, "+17745550161", { T.den_tf }, { "SUCCESS" }))
+    check("13e: falls back to the full list (never strand LD)",
+          bridged_ips(c) == "206.146.100.26", bridged_ips(c))
+    check("13e: no block breadcrumb", c.setvars["term_class_blocked"] == nil,
+          c.setvars["term_class_blocked"])
+end
+
+do
+    print("[13f] LD destination, 5 eligible ld trunks -> attempt cap 4 (post-filter)")
+    local trunks = {}
+    for i = 1, 5 do
+        trunks[i] = { carrier = "c" .. i, pop = "p", term_ip = "198.51.100." .. i, traffic_class = "ld" }
+    end
+    local c = run_scenario(tf_scenario(6, "+17745550162", trunks, {}))
+    check("13f: 8 attempts (first 4 trunks x 2 SBCs)", #c.bridges == 8, #c.bridges)
+    check("13f: 5th trunk never attempted",
+          not bridged_ips(c):find("198.51.100.5", 1, true), bridged_ips(c))
+end
+
 local BASELINE = os.getenv("BASELINE_ROUTER")
 if BASELINE and BASELINE ~= "" then
     print("[11] BASELINE regression: A-leg state + dial strings (minus [cdr_*]) identical to " .. BASELINE)

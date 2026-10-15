@@ -131,6 +131,10 @@ end
 -- until the registry activates them (add here when that happens). Lua
 -- patterns have no alternation/{n} quantifiers, so the NPA rides a closed
 -- set lookup instead of a regex.
+-- KEEP IN SYNC: inbound_router.lua TOLLFREE_NPAS_FALLBACK and the Kamailio
+-- SBC toll-free ingress classifier (kamailio.cfg route[TF_CLASSIFY], gated
+-- by TF_INGRESS_ENFORCE) must use this SAME NPA set — a mismatch would
+-- admit a TF call on one side that the other rejects/misroutes.
 local TOLLFREE_NPAS = {
     ["800"] = true, ["833"] = true, ["844"] = true, ["855"] = true,
     ["866"] = true, ["877"] = true, ["888"] = true,

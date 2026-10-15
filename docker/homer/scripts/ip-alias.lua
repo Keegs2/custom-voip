@@ -28,6 +28,8 @@ local aliases = {
     -- Sinch origination (inbound to us)
     ["206.146.100.24"] = "Sinch-Denver",
     ["206.146.101.39"] = "Sinch-Chicago",
+    ["206.146.98.25"]  = "Sinch-Atlanta-TF-Orig",  -- TG ATLNGAQSGR2_7284 (8XX-T, 8YY only)
+    ["206.146.100.25"] = "Sinch-Denver-TF-Orig",   -- TG DNVTCOZIGR2_3327 (8XX-T, 8YY only)
 
     -- Sinch termination (outbound from us; DIFFERENT IPs from origination)
     ["206.146.98.26"]  = "Sinch-Atlanta-LD",  -- TG ATLNGAQSGR2_7214 (INT LD)
