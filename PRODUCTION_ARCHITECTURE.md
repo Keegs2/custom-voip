@@ -194,7 +194,7 @@ External health checks: GCP NLB fs-aware HTTP HC on `:8080/healthz`
 |-----------|---------------|---------|---------|-------------|
 | `voip-freeswitch` | build `./docker/freeswitch` | host | :5080 udp+tcp (internal profile, inbound), :5090 udp+tcp (external profile, outbound), :8021 ESL (loopback + Docker/RFC1918 ACL), udp :16384–49151 RTP | `fs_cli` sofia status (needs `-p $ESL_PASSWORD`) |
 | `voip-redis` | build `./docker/redis` | bridge (6379 → host) | :6379 | `redis-cli ping` |
-| `voip-ops-agent` (role=fs) | build `./docker/carrier-monitor` | host | 127.0.0.1:8710 (command API); 127.0.0.1:9103 (ESL exporter) | — |
+| `voip-ops-agent` (role=fs) | build `./docker/carrier-monitor` | host | :8710 (command API — binds `0.0.0.0` via `OPS_AGENT_BIND` default; reachability limited by the `allow-ops-agent` firewall tag rule, §3.6); 127.0.0.1:9103 (ESL exporter) | — |
 | `voip-vmagent` | victoriametrics/vmagent:v1.103.0 | host | :8429 | wget `:8429/health` |
 | `voip-node-exporter` | prom/node-exporter:v1.8.2 | host | :9100 | — |
 
@@ -276,7 +276,7 @@ production services, no monitoring enrollment).
 | 8428 | TCP | VictoriaMetrics | Remote-write + query API (12-mo retention) | All zones' vmagents (firewall: West/Central → East :8428), vmalert, Grafana |
 | 8880 | TCP | vmalert | Rule status | Grafana/ops (bridge) |
 | 8429 | TCP | vmagent (every VM) | Agent health/buffer | Local |
-| 8710 | TCP | ops-agent (all roles) | NOC/CRAG command API — bearer token, argv-only verbs (§10.3) | CRAG GKE backend + console hosts (VPC-internal; loopback-only on media VMs) |
+| 8710 | TCP | ops-agent (all roles) | NOC/CRAG command API — bearer token, argv-only verbs (§10.3) | CRAG GKE backend + console hosts (VPC-internal on every role, media VMs included: host-network, binds `0.0.0.0`; access restricted by the `allow-ops-agent` firewall tag rule) |
 | 9100 | TCP | node-exporter (every monitored VM) | Host metrics | Local vmagent |
 | 9103 | TCP (lo) | ops-agent ESL exporter (media) | FS channel/call gauges | Local vmagent |
 | 9104 | TCP (lo) | ops-agent fsdisp exporter (SBC) | Dispatcher group-1 state incl. `fs_dispatcher_disabled` (MAINT) | Local vmagent |
@@ -583,7 +583,7 @@ The dead-man switch lives **in the SBC**, not in tooling:
 | `/healthz` while drained | 503 body `DRAINING maint=1` — BEFORE any FS-health logic → both NLB planes drain this SBC in ~10–12s; never reported to carriers/DNS as a dead zone |
 | Metrics | `kamailio_maint_drain` gauge (display-only mirror of the flag) + `fs_dispatcher_disabled{fs_ip}` from the :9104 exporter |
 | Agent verbs | `sbc.drain` / `sbc.restore` (mutating, step-up) / `sbc.drain_status` (read: `drain=<0\|1> healthz=<status>` with a REAL local healthz GET) — `docker/carrier-monitor/ops_commands.py` |
-| FS drain | `kamcmd ds_set_state d` on the group-1 destination (**Disabled** — probing never re-activates it; **no dead-man**, restore is explicit) via `fs.drain`/`fs.restore` |
+| FS drain | `kamcmd ds_set_state d` on the group-1 destination (**Disabled** — probing never re-activates it; **no dead-man**, restore is explicit). There is no `fs.drain`/`fs.restore` agent verb: FS drain is a TED/CRAG Maintenance orchestration that issues `kamcmd.dispatcher.set_state` (state `d` to drain, `a` to restore, group 1, the FS's `sip:<ip>:5080`) on **both** zone SBCs |
 | Zone dark | = both SBCs drained (typed zone confirmation required in CRAG) |
 | CRAG Maintenance tool | Step-up password re-auth, dangerous tier, typed zone confirm for zone ops, ground-truth verification loop ≤20s (§10.4) |
 | Grafana | MAINT renders as yellow 3-state (UP/DOWN/MAINT) on server boxes + election rows; a drained node can never claim ACTIVE |
@@ -1118,14 +1118,19 @@ GKE backend behind the ted LB; code lives in the ted-next repo, plan
 | Admin rail | FLEET: Infrastructure + **Maintenance** · CUSTOMERS: Customers / Users / Onboarding · PLATFORM: Carriers / SIP Trunks / Rates / Tiers / DIDs / STIR |
 | CDRs | Platform CDR views |
 | Bridge | Deny-by-default **76-route** bridge to the revup API — service-account JWT, hash-chained audit log |
-| AuthZ | `crag.noc.read` for reads; step-up (password re-auth) for writes; `crag.admin.dangerous` for the dangerous tier; two-person approval is a deliberate no-op seam (deferred) |
+| AuthZ | `crag.noc.read` for reads; step-up (password re-auth, 5-min window) for fleet writes (ops-agent verbs + Maintenance); customer/platform admin writes through the revup bridge are capability-gated + audited but NOT step-up; `crag.admin.dangerous` for the dangerous tier; two-person approval is a deliberate no-op seam (deferred) |
 
 ### 10.3 ops-agent (`docker/carrier-monitor`, :8710 fleet-wide)
 
 One container, three roles (`OPS_AGENT_ROLE=sbc|fs|services`). Bearer-token
 auth (fail-closed), **argv-only** command construction (no shell), read verbs
-(16) + write verbs (11) incl. the maintenance pair `sbc.drain`/`sbc.restore`/
-`sbc.drain_status` and `fs.drain`/`fs.restore`. SBC role doubles as
+(17) + write verbs (11) — 28 `CATALOG` entries in `ops_commands.py`, incl. the
+SBC maintenance verbs `sbc.drain`/`sbc.restore` (write) and `sbc.drain_status`
+(read). There are no FS drain verbs: FS drain/restore is done by the TED
+Maintenance tool via `kamcmd.dispatcher.set_state` on group 1 across both zone
+SBCs (no dead-man, §4.6). The listener binds `0.0.0.0:8710` on every role
+(`OPS_AGENT_BIND`; media VMs are host-network), so exposure is governed by the
+`allow-ops-agent` firewall tag rule, not by a loopback bind. SBC role doubles as
 carrier-monitor (POSTs trunk health snapshots to the API — migrations 25/26)
 and fsdisp metrics exporter (:9104); media role exports ESL gauges (:9103).
 Writes require step-up; dangerous-tier verbs additionally require
