@@ -45,10 +45,10 @@ export function TabBar({ tabs, activeTab, onTabChange, className }: TabBarProps)
               borderRadius: 9,
               color: isActive ? '#e2e8f0' : '#718096',
               background: isActive
-                ? 'linear-gradient(135deg, rgba(59,130,246,0.24) 0%, rgba(59,130,246,0.12) 100%)'
+                ? 'linear-gradient(135deg, rgba(47,125,246,0.24) 0%, rgba(47,125,246,0.12) 100%)'
                 : 'transparent',
               boxShadow: isActive
-                ? 'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 16px rgba(59,130,246,0.22)'
+                ? 'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 16px rgba(47,125,246,0.22)'
                 : 'none',
               cursor: 'pointer',
               border: 'none',
@@ -71,7 +71,7 @@ export function TabBar({ tabs, activeTab, onTabChange, className }: TabBarProps)
                   fontSize: '0.62rem',
                   fontWeight: 700,
                   borderRadius: 20,
-                  background: isActive ? 'rgba(59,130,246,0.2)' : 'rgba(30,33,48,0.8)',
+                  background: isActive ? 'rgba(47,125,246,0.2)' : 'rgba(30,33,48,0.8)',
                   color: isActive ? '#93c5fd' : '#4a5568',
                 }}
               >

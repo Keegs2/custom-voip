@@ -23,6 +23,7 @@
  */
 import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { listCustomers } from '../../api/customers';
@@ -80,7 +81,12 @@ function ReportingView() {
   const [today] = useState(() => toIsoDate(new Date()));
   const [tz] = useState(browserTimeZone);
 
-  const [pickedCustomerId, setStaffCustomerId] = useState<number | undefined>(undefined);
+  // `?customer=ID` (admin dashboard links) pre-selects the staff customer.
+  const [searchParams] = useSearchParams();
+  const [pickedCustomerId, setStaffCustomerId] = useState<number | undefined>(() => {
+    const raw = searchParams.get('customer');
+    return isStaffViewer && raw && /^\d+$/.test(raw) ? Number(raw) : undefined;
+  });
   // An admin in "View as Customer" reports on the customer picked in the
   // sidebar; otherwise staff pick here.
   const previewCustomer = isStaffViewer && customerViewMode ? effectiveCustomer : null;

@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { BRAND_AZURE_BRIGHT } from '../../styles/brand';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,7 +53,7 @@ const VARIANT_COLOR: Record<ToastVariant, string> = {
   success: '#4ade80',
   error:   '#ef4444',
   warning: '#f59e0b',
-  info:    '#3b82f6',
+  info:    BRAND_AZURE_BRIGHT, // toasts sit on the dark shell
 };
 
 // ---------------------------------------------------------------------------

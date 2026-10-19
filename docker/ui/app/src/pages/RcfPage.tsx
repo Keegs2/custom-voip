@@ -1,14 +1,35 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+/**
+ * /rcf — call forwarding numbers. Three views, as separate components so
+ * switching customer view or the previewed customer remounts instead of
+ * changing hook order (React #310):
+ *
+ *  - a customer (tenant, or an admin previewing one in "View as Customer"):
+ *    the numbers manager for that account (CustomerNumbersPage), keyed by id;
+ *  - an admin in customer view with no preview picked yet: PreviewPrompt;
+ *  - admin / support: the Administrative Call Forwarding Console below.
+ *
+ * The console wears the account dashboard's look so the app reads as one:
+ * the granite DashboardHeader with the "Viewing" scope dropdown in it,
+ * card-styled panels, the dashboard numbers table, the brand blue family.
+ *
+ *   ┌ Granite header: Administrative Call Forwarding Console   [Viewing ▾] [Open dashboard] ┐
+ *   │ Remote call forwarding · Staff        42 forwards · 40 forwarding · 2 paused           │
+ *   [ Numbers | Call activity | DID management ]                 (segmented tab rail)
+ *   ┌ Numbers card: search · area code · table (sortable) · rows → RowEditor · paging ┐
+ *
+ * Scope (admins) lives in the URL: `?customer=all` or `?customer=<id>`;
+ * absent = nothing chosen yet (nothing loads). The dashboard and its links
+ * deep-link here with the scope pre-selected.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Spinner } from '../components/ui/Spinner';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { LayoutDashboard } from 'lucide-react';
 import { listRcf } from '../api/rcf';
 import type { RcfEntry } from '../types/rcf';
 import { useAuth } from '../contexts/AuthContext';
-import { listCustomers } from '../api/customers';
 import { fmt } from '../utils/format';
-import {
-  AZURE_DEEP, DEFAULT_PAGE_SIZE, INK, INK_DIM, INK_FAINT, INK_SOFT, RED,
-} from './rcf/theme';
+import { DEFAULT_PAGE_SIZE } from './rcf/theme';
 import { PaginationControls } from './rcf/PaginationControls';
 import { CallActivityTab } from './rcf/CallActivityTab';
 import { RowEditor } from './rcf/RowEditor';
@@ -16,15 +37,22 @@ import { DIDManagementTab } from './rcf/DidManagement';
 import { extractNpa } from './rcf/didFormat';
 import { CustomerNumbersPage } from './rcf/CustomerNumbersPage';
 import { PreviewPrompt } from './dashboard/PreviewPrompt';
+import { DashboardHeader, type HeaderAction } from './dashboard/DashboardHeader';
+import { AdminScopeSelect, type AdminScopeValue } from './dashboard/AdminScopeSelect';
+import { Card, CardState } from './dashboard/Card';
+import { hasCallForwarding, useAdminCustomers } from './dashboard/adminData';
+import { dashboardHref } from './dashboard/adminLinks';
+import { RCF_LIST_CAP } from './dashboard/accountData';
+import '../styles/rcf-dashboard.css';
+import '../styles/account-dashboard.css';
 
-// ─── Types & constants ────────────────────────────────────────────────────────
+// ─── Types & helpers ──────────────────────────────────────────────────────────
 
 type SortField = 'did' | 'name' | 'forward_to' | 'customer' | 'status';
 type SortDir = 'asc' | 'desc';
+type ConsoleTab = 'numbers' | 'activity' | 'dids';
 
-// ─── Sort helpers ─────────────────────────────────────────────────────────────
-
-function sortEntries(entries: RcfEntry[], field: SortField, dir: SortDir): RcfEntry[] {
+function sortEntries(entries: readonly RcfEntry[], field: SortField, dir: SortDir): RcfEntry[] {
   return [...entries].sort((a, b) => {
     let aVal = '';
     let bVal = '';
@@ -40,458 +68,17 @@ function sortEntries(entries: RcfEntry[], field: SortField, dir: SortDir): RcfEn
   });
 }
 
-
-// ─── StatusPill ───────────────────────────────────────────────────────────────
-
-function StatusPill({ enabled }: { enabled: boolean }) {
-  return (
-    <span className={enabled ? 'rcf-pill rcf-pill-on' : 'rcf-pill rcf-pill-off'}>
-      {enabled ? 'Active' : 'Disabled'}
-    </span>
-  );
+/** `?customer=` → console scope: absent = not chosen yet, 'all', or an id. */
+function parseConsoleScope(raw: string | null): AdminScopeValue {
+  if (raw === null || raw === '') return null;
+  if (raw === 'all') return 'all';
+  if (!/^\d{1,9}$/.test(raw)) return null;
+  const id = Number(raw);
+  return id > 0 ? id : null;
 }
 
-// ─── SortHeader ───────────────────────────────────────────────────────────────
+// ─── Route entry ──────────────────────────────────────────────────────────────
 
-interface SortHeaderProps {
-  label: string;
-  field: SortField;
-  currentField: SortField;
-  currentDir: SortDir;
-  onSort: (field: SortField) => void;
-  /** Optional fixed column width (px) — presentation only, keeps Label from crowding */
-  width?: number;
-}
-
-function SortHeader({ label, field, currentField, currentDir, onSort, width }: SortHeaderProps) {
-  const isActive = currentField === field;
-  return (
-    <th
-      onClick={() => onSort(field)}
-      aria-sort={isActive ? (currentDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className={`rcf-th rcf-th-sort${isActive ? ' rcf-th-active' : ''}`}
-      style={width !== undefined ? { width } : undefined}
-    >
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-        {label}
-        <span style={{ fontSize: '0.72rem', lineHeight: 1, opacity: isActive ? 1 : 0.45 }}>
-          {isActive ? (currentDir === 'asc' ? '↑' : '↓') : '↕'}
-        </span>
-      </span>
-    </th>
-  );
-}
-
-
-// ─── NumberRow — collapsed row + expanded configuration panel ─────────────────
-
-interface NumberRowProps {
-  entry: RcfEntry;
-  isAdmin: boolean;
-  canEdit: boolean;
-  expanded: boolean;
-  onToggle: () => void;
-  onCollapse: () => void;
-}
-
-function NumberRow({ entry, isAdmin, canEdit, expanded, onToggle, onCollapse }: NumberRowProps) {
-  const colSpan = isAdmin ? 6 : 5;
-
-  return (
-    <>
-      <tr
-        className={`rcf-row rcf-nrow${expanded ? ' rcf-nrow-open' : ''}`}
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded}
-        onClick={onToggle}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); }
-          if (e.key === 'Escape' && expanded) { e.preventDefault(); onCollapse(); }
-        }}
-      >
-        {/* Chevron affordance */}
-        <td style={{ padding: '15px 4px 15px 18px', width: 34 }}>
-          <svg
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke={expanded ? AZURE_DEEP : INK_FAINT}
-            strokeWidth={1.75}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={`rcf-chev${expanded ? ' rcf-chev-open' : ''}`}
-            style={{ width: 13, height: 13 }}
-          >
-            <path d="M6 3l5 5-5 5" />
-          </svg>
-        </td>
-
-        {/* Number — muted when disabled so state reads before the pill */}
-        <td style={{ padding: '15px 16px', whiteSpace: 'nowrap' }}>
-          <span style={{ fontSize: '0.92rem', fontWeight: 600, color: entry.enabled ? INK : INK_SOFT, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
-            {fmt(entry.did)}
-          </span>
-        </td>
-
-        {/* Forwards to — azure means "this forward is live"; disabled goes quiet */}
-        <td style={{ padding: '15px 16px', whiteSpace: 'nowrap' }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}>
-            <svg viewBox="0 0 16 10" fill="none" style={{ width: 14, height: 9, flexShrink: 0, opacity: 0.55 }} aria-hidden="true">
-              <line x1="1" y1="5" x2="13" y2="5" stroke={INK_DIM} strokeWidth={1.5} strokeLinecap="round" />
-              <path d="M10 2l3 3-3 3" stroke={INK_DIM} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span style={{ fontSize: '0.92rem', fontWeight: 600, color: entry.enabled ? AZURE_DEEP : INK_DIM, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>
-              {fmt(entry.forward_to)}
-            </span>
-          </span>
-        </td>
-
-        {/* Label */}
-        <td style={{ padding: '15px 16px' }}>
-          <span
-            style={{
-              display: 'block',
-              maxWidth: 280,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              fontSize: '0.85rem',
-              color: entry.name ? INK_SOFT : '#a7b3c8',
-              fontStyle: entry.name ? 'normal' : 'italic',
-            }}
-          >
-            {entry.name ?? 'No label'}
-          </span>
-        </td>
-
-        {/* Status */}
-        <td style={{ padding: '15px 16px' }}>
-          <StatusPill enabled={entry.enabled} />
-        </td>
-
-        {/* Customer (admin only) */}
-        {isAdmin && (
-          <td style={{ padding: '15px 16px' }}>
-            <span
-              style={{
-                fontSize: '0.74rem',
-                fontWeight: 600,
-                color: INK_DIM,
-                background: 'rgba(47,125,246,0.06)',
-                border: '1px solid rgba(47,125,246,0.16)',
-                borderRadius: 6,
-                padding: '2px 9px',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {entry.customer_name ?? `ID ${entry.customer_id}`}
-            </span>
-          </td>
-        )}
-      </tr>
-
-      {/* Expanded configuration panel — animated one-shot, inside table flow */}
-      {expanded && (
-        <tr>
-          <td colSpan={colSpan} style={{ padding: 0, borderTop: 'none' }}>
-            <div className="rcf-xwrap">
-              <div>
-                <RowEditor entry={entry} isAdmin={isAdmin} canEdit={canEdit} onClose={onCollapse} />
-              </div>
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-// ─── Page header ──────────────────────────────────────────────────────────────
-
-interface RcfPageHeaderProps {
-  title: string;
-  subtitle: string;
-  /** Secondary scope context shown as the last breadcrumb segment
-      (admin: the selected customer / "All Customers"). */
-  context?: string | null;
-  /** False before an admin picks a scope — no figures to show yet. */
-  showMetrics: boolean;
-  /** Total forwards on the account (server total). */
-  total: number;
-  /** Enabled / disabled counts from the loaded entries. */
-  active: number;
-  disabled: number;
-  /** False while the entries query is still loading or errored. */
-  loaded: boolean;
-}
-
-/**
- * Quiet console header — set directly on the paper canvas, no framing card.
- * A small product breadcrumb, a calm Archivo title, a one-line description,
- * and the key figures as inline metrics separated by hairline rules. A single
- * 1px rule closes the zone. The only accent is the small azure tick on the
- * breadcrumb. Uses only data already loaded by the page.
- */
-function RcfPageHeader({ title, subtitle, context, showMetrics, total, active, disabled, loaded }: RcfPageHeaderProps) {
-  return (
-    <header className="rcf-header fx-load">
-      <div className="rcf-header-id">
-        <div className="rcf-crumb">
-          <span>Remote Call Forwarding</span>
-          <span className="rcf-crumb-sep" aria-hidden="true">/</span>
-          <span>Granite CRAG</span>
-          {context && (
-            <>
-              <span className="rcf-crumb-sep" aria-hidden="true">/</span>
-              <span className="rcf-crumb-context">{context}</span>
-            </>
-          )}
-        </div>
-        <h1 className="rcf-title">{title}</h1>
-        <p className="rcf-sub">{subtitle}</p>
-      </div>
-
-      {showMetrics && (
-        <div className="rcf-metrics">
-          <div className="rcf-metric">
-            <div className="rcf-metric-value">{loaded ? total.toLocaleString() : '—'}</div>
-            <div className="rcf-metric-label">Forwards</div>
-          </div>
-          <div className="rcf-metric">
-            <div className="rcf-metric-value">{loaded ? active.toLocaleString() : '—'}</div>
-            <div className="rcf-metric-label">Enabled</div>
-          </div>
-          {loaded && disabled > 0 && (
-            <div className="rcf-metric">
-              <div className="rcf-metric-value">{disabled.toLocaleString()}</div>
-              <div className="rcf-metric-label">Disabled</div>
-            </div>
-          )}
-        </div>
-      )}
-    </header>
-  );
-}
-
-// ─── Empty states ─────────────────────────────────────────────────────────────
-
-function EmptyState() {
-  return (
-    <div
-      className="rcf-panel"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '80px 24px',
-        gap: 16,
-        textAlign: 'center',
-      }}
-    >
-      <div
-        style={{
-          width: 64,
-          height: 64,
-          borderRadius: 14,
-          background: '#e4eeff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: 4,
-        }}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke={AZURE_DEEP} strokeWidth={1.6} style={{ width: 30, height: 30 }}>
-          <path d="M3 5a2 2 0 0 1 2-2h3.28a1 1 0 0 1 .948.684l1.498 4.493a1 1 0 0 1-.502 1.21l-2.257 1.13a11.042 11.042 0 0 0 5.516 5.516l1.13-2.257a1 1 0 0 1 1.21-.502l4.493 1.498a1 1 0 0 1 .684.949V19a2 2 0 0 1-2 2h-1C9.716 21 3 14.284 3 6V5z" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
-      <div>
-        <p style={{ color: INK, fontSize: '1rem', fontWeight: 700, margin: '0 0 6px' }}>
-          No numbers configured yet
-        </p>
-        <p style={{ color: INK_DIM, fontSize: '0.82rem', margin: 0, lineHeight: 1.6 }}>
-          Contact support to provision Remote Call Forwarding numbers for your account.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function SearchEmptyState({ query, onClear }: { query: string; onClear: () => void }) {
-  return (
-    <div
-      className="rcf-panel"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '60px 24px',
-        gap: 12,
-        textAlign: 'center',
-      }}
-    >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        style={{ width: 36, height: 36, color: '#b6c2d4', marginBottom: 4 }}
-      >
-        <path d="m21 21-5.197-5.197M15.803 15.803A7.5 7.5 0 1 0 4.197 4.197a7.5 7.5 0 0 0 11.606 11.606Z" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      <p style={{ color: INK_SOFT, fontSize: '0.9rem', fontWeight: 500, margin: 0 }}>
-        No numbers match &ldquo;{query}&rdquo;
-      </p>
-      <button
-        type="button"
-        onClick={onClear}
-        style={{
-          background: 'transparent',
-          border: 'none',
-          color: AZURE_DEEP,
-          fontSize: '0.8rem',
-          cursor: 'pointer',
-          textDecoration: 'underline',
-          fontFamily: 'inherit',
-          padding: 0,
-        }}
-      >
-        Clear filter
-      </button>
-    </div>
-  );
-}
-
-// ─── Tab types ────────────────────────────────────────────────────────────────
-
-type DashboardTab = 'numbers' | 'activity' | 'dids';
-
-/**
- * Admin console scope — what the admin has chosen to look at.
- *   null      → nothing selected yet (the page opens empty; no data loads)
- *   'all'     → every customer's RCF numbers
- *   number    → one customer account id
- * Tenants never use this: they are always scoped to their own account.
- */
-type AdminScope = null | 'all' | number;
-
-// ─── ScopePrompt — the admin console's quiet pre-selection state ─────────────
-
-function ScopePrompt({ message }: { message: string }) {
-  return (
-    <div className="rcf-panel rcf-scope-prompt fx-load fx-load-d2" role="status">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
-        <circle cx="12" cy="8" r="3.5" />
-        <path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" strokeLinecap="round" />
-      </svg>
-      <p className="rcf-scope-prompt-title">{message}</p>
-      <p className="rcf-scope-prompt-sub">Use the <strong>Viewing</strong> menu above to choose a customer, or All Customers.</p>
-    </div>
-  );
-}
-
-// ─── TabBar ───────────────────────────────────────────────────────────────────
-
-interface TabBarProps {
-  active: DashboardTab;
-  onChange: (tab: DashboardTab) => void;
-}
-
-function TabBar({ active, onChange }: TabBarProps) {
-  const tabs: { id: DashboardTab; label: string; icon: React.ReactNode }[] = [
-    {
-      id: 'numbers',
-      label: 'Numbers',
-      icon: (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
-          <rect x="2" y="2" width="5" height="5" rx="1.5" />
-          <rect x="9" y="2" width="5" height="5" rx="1.5" />
-          <rect x="2" y="9" width="5" height="5" rx="1.5" />
-          <rect x="9" y="9" width="5" height="5" rx="1.5" />
-        </svg>
-      ),
-    },
-    {
-      id: 'activity',
-      label: 'Call Activity',
-      icon: (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
-          <path d="M2 12 L4 8 L6 10 L9 5 L11 7 L14 3" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ),
-    },
-    {
-      id: 'dids',
-      label: 'DID Management',
-      icon: (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} style={{ width: 13, height: 13 }}>
-          <rect x="2" y="2" width="12" height="12" rx="2" />
-          <path d="M5 8h6M8 5v6" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-  ];
-
-  return (
-    <div className="rcf-tabs fx-load fx-load-d1" role="tablist">
-      {tabs.map((tab) => {
-        const isActive = active === tab.id;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={isActive}
-            onClick={() => onChange(tab.id)}
-            className={isActive ? 'rcf-tab rcf-tab-active' : 'rcf-tab'}
-          >
-            <span
-              style={{
-                display: 'inline-flex',
-                color: isActive ? 'var(--rcf-azure-deep)' : 'inherit',
-                transition: 'color 0.15s ease',
-              }}
-            >
-              {tab.icon}
-            </span>
-            {tab.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
-/** `<select>` value → AdminScope ('' = placeholder, 'all', or a customer id). */
-function parseScope(value: string): AdminScope {
-  if (value === '') return null;
-  if (value === 'all') return 'all';
-  const id = Number(value);
-  return Number.isInteger(id) ? id : null;
-}
-
-/**
- * /rcf entry point. Admins (not in "View as Customer") get the
- * Administrative Call Forwarding Console; a customer user — or an admin
- * previewing customer view, who then carries their own customer_id — gets
- * the full-page customer dashboard. Anyone else (e.g. support, which has no
- * customer of its own) keeps the console exactly as before.
- *
- * The two views are separate components so toggling customer view swaps
- * whole subtrees instead of changing this component's hook order (#310).
- */
-/**
- * /rcf picks one of three views — separate components, so switching customer
- * view or the previewed customer remounts instead of changing hook order:
- *  - a customer (tenant, or an admin previewing one in "View as Customer"):
- *    the numbers manager for that account, keyed by its id;
- *  - an admin in customer view with no preview picked yet: the picker;
- *  - admin / support: the Administrative Call Forwarding Console.
- */
 export function RcfPage() {
   const { isAdmin, isActualAdmin, isSupport, customerViewMode, effectiveCustomer } = useAuth();
   if (!isAdmin && effectiveCustomer) {
@@ -507,40 +94,279 @@ export function RcfPage() {
   return <RcfConsole />;
 }
 
+// ─── Console shell (header + scope + tabs) ────────────────────────────────────
+
 function RcfConsole() {
-  // ── All hooks unconditionally at top (React rules-of-hooks) ──────────────────
-  const { user, isAdmin } = useAuth();
+  // ── ALL hooks unconditionally at the top (React #310) ──
+  const { user, isAdmin, isSupport } = useAuth();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<ConsoleTab>('numbers');
+  const customers = useAdminCustomers(isAdmin);
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState<DashboardTab>('numbers');
-
-  // Admin scope — starts EMPTY (null): nothing loads until the admin picks
-  // "All Customers" or one account. Tenants are always ready (own account).
-  const [adminScope, setAdminScope] = useState<AdminScope>(null);
+  const adminScope = isAdmin ? parseConsoleScope(params.get('customer')) : null;
   const scopeReady = !isAdmin || adminScope !== null;
   const adminCustomerId = typeof adminScope === 'number' ? adminScope : undefined;
-  // customer_id filter for every scoped query: the admin's pick (undefined =
-  // All Customers) or the tenant's own account.
+  // customer_id for every scoped query: the admin's pick (undefined = All
+  // customers) or, for support, the platform (support has no account).
   const customerId = isAdmin ? adminCustomerId : (user?.customer_id ?? undefined);
 
-  // Customer list for the admin scope selector + the header title. Same query
-  // key as other admin pages so React Query dedupes it. Only runs for admins.
-  const { data: adminCustomersData } = useQuery({
-    queryKey: ['customers-dropdown'],
-    queryFn: () => listCustomers({ limit: 500 }),
-    enabled: isAdmin,
-    staleTime: 60_000,
-  });
   const scopeCustomers = useMemo(
-    () => (adminCustomersData?.items ?? []).filter((c) => ['rcf', 'hybrid'].includes(c.account_type)),
-    [adminCustomersData],
+    () => (customers.data ?? []).filter((c) => hasCallForwarding(c.account_type) && c.account_type !== 'ucaas'),
+    [customers.data],
   );
-  const adminSelectedCustomerName = useMemo(() => {
-    if (!isAdmin || adminCustomerId === undefined) return null;
-    return adminCustomersData?.items.find((c) => c.id === adminCustomerId)?.name ?? null;
-  }, [isAdmin, adminCustomerId, adminCustomersData]);
 
-  // Numbers tab state
+  const selectScope = useCallback(
+    (next: number | 'all') => {
+      setParams((prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('customer', String(next));
+        return p;
+      });
+    },
+    [setParams],
+  );
+
+  // Figures for the header come from the Numbers body (it owns the query).
+  const [figures, setFigures] = useState<ConsoleFigures | null>(null);
+
+  // ── Derived (after all hooks) ──
+  const customerName =
+    adminCustomerId !== undefined
+      ? (customers.data?.find((c) => c.id === adminCustomerId)?.name ?? `Customer #${adminCustomerId}`)
+      : null;
+  const context = !isAdmin ? 'Every customer' : adminScope === 'all' ? 'All customers' : customerName;
+
+  const secondary: HeaderAction | null =
+    isAdmin && scopeReady
+      ? {
+          label: 'Open dashboard',
+          icon: <LayoutDashboard size={14} strokeWidth={2.2} aria-hidden="true" />,
+          onClick: () => navigate(dashboardHref(adminScope)),
+        }
+      : null;
+
+  const scopeKey = adminScope === null ? 'none' : String(adminScope);
+
+  return (
+    <div className="rcf-scope ad-scope rcfc">
+      <div className="ad-shell">
+        <DashboardHeader
+          name="Administrative Call Forwarding Console"
+          status={null}
+          since={null}
+          kicker="Remote call forwarding"
+          tag={isAdmin ? 'Staff' : isSupport ? 'Support' : null}
+          meta={
+            context ? (
+              <span className="rcfc-context">
+                Viewing <strong>{context}</strong>
+              </span>
+            ) : (
+              <span>Pick a customer, or All customers, to see their numbers.</span>
+            )
+          }
+          scope={
+            isAdmin ? (
+              <AdminScopeSelect
+                value={adminScope}
+                onChange={selectScope}
+                customers={scopeCustomers}
+                loading={customers.isLoading}
+                error={customers.isError}
+              />
+            ) : undefined
+          }
+          secondary={secondary}
+        >
+          {scopeReady && <HeaderFigures figures={figures} />}
+        </DashboardHeader>
+
+        {!scopeReady ? (
+          <ScopePrompt message="Select a customer to view their call forwarding numbers" />
+        ) : (
+          <>
+            <ConsoleTabs active={activeTab} onChange={setActiveTab} />
+
+            {/* Numbers stays mounted (hidden) so its figures feed the header
+                on every tab; keyed per scope so search/sort/paging reset. */}
+            <div hidden={activeTab !== 'numbers'} role="tabpanel" id="rcfc-panel-numbers" aria-labelledby="rcfc-tab-numbers">
+              <NumbersPanel
+                key={`numbers-${scopeKey}`}
+                customerId={customerId}
+                showCustomer={isAdmin && adminScope === 'all'}
+                isAdmin={isAdmin}
+                canEdit={(user?.role ?? 'user') !== 'readonly' && (user?.role ?? 'user') !== 'support'}
+                onFigures={setFigures}
+              />
+            </div>
+
+            {activeTab === 'activity' && (
+              <div role="tabpanel" id="rcfc-panel-activity" aria-labelledby="rcfc-tab-activity">
+                {/* Keyed per scope so a DID / range picked under one customer
+                    never carries over to the next. */}
+                <CallActivityTab key={`activity-${scopeKey}`} customerId={customerId} />
+              </div>
+            )}
+
+            {activeTab === 'dids' && (
+              <div role="tabpanel" id="rcfc-panel-dids" aria-labelledby="rcfc-tab-dids">
+                {/* Inventory actions are per account — "All customers" asks for one. */}
+                {isAdmin && adminScope === 'all' ? (
+                  <ScopePrompt message="Select a single customer to manage their DIDs" />
+                ) : (
+                  <DIDManagementTab
+                    key={`dids-${scopeKey}`}
+                    customerId={customerId}
+                    filterToCustomer={isAdmin ? adminCustomerId : undefined}
+                    onShowNumbers={() => setActiveTab('numbers')}
+                  />
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Header figures ───────────────────────────────────────────────────────────
+
+interface ConsoleFigures {
+  total: number;
+  forwarding: number;
+  paused: number;
+  /** GET /rcf hit its 100-row cap. */
+  capped: boolean;
+}
+
+function HeaderFigures({ figures }: { figures: ConsoleFigures | null }) {
+  const items: { label: string; value: string }[] = [
+    { label: figures?.capped ? 'Forwards (first 100)' : 'Forwards', value: figures ? figures.total.toLocaleString() : '—' },
+    { label: 'Forwarding', value: figures ? figures.forwarding.toLocaleString() : '—' },
+    { label: 'Paused', value: figures ? figures.paused.toLocaleString() : '—' },
+  ];
+  return (
+    <dl className="rcfc-figures" aria-label="Numbers in this view">
+      {items.map((f) => (
+        <div key={f.label}>
+          <dt>{f.label}</dt>
+          <dd>{f.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+// ─── Scope prompt ─────────────────────────────────────────────────────────────
+
+function ScopePrompt({ message }: { message: string }) {
+  return (
+    <section className="ad-card ad-prompt ad-rise" style={{ '--i': 1 } as CSSProperties} role="status">
+      <span className="ad-prompt-icon rcfc-prompt-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} width={22} height={22}>
+          <circle cx="12" cy="8" r="3.5" />
+          <path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" strokeLinecap="round" />
+        </svg>
+      </span>
+      <h2 className="ad-prompt-title">{message}</h2>
+      <p className="ad-quiet">
+        Use the <strong>Viewing</strong> menu in the header to choose a customer, or All customers.
+      </p>
+    </section>
+  );
+}
+
+// ─── Tabs — a segmented rail, same family as the dashboard's chips ───────────
+
+const TABS: { id: ConsoleTab; label: string; icon: ReactNode }[] = [
+  {
+    id: 'numbers',
+    label: 'Numbers',
+    icon: (
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+        <rect x="2" y="2" width="5" height="5" rx="1.5" />
+        <rect x="9" y="2" width="5" height="5" rx="1.5" />
+        <rect x="2" y="9" width="5" height="5" rx="1.5" />
+        <rect x="9" y="9" width="5" height="5" rx="1.5" />
+      </svg>
+    ),
+  },
+  {
+    id: 'activity',
+    label: 'Call activity',
+    icon: (
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+        <path d="M2 12 L4 8 L6 10 L9 5 L11 7 L14 3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    id: 'dids',
+    label: 'DID management',
+    icon: (
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+        <rect x="2" y="2" width="12" height="12" rx="2" />
+        <path d="M5 8h6M8 5v6" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+];
+
+function ConsoleTabs({ active, onChange }: { active: ConsoleTab; onChange: (tab: ConsoleTab) => void }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  return (
+    <div className="rcfc-tabs-scroll ad-rise" style={{ '--i': 1 } as CSSProperties}>
+      <div className="rcfc-tabs" role="tablist" aria-label="Console sections">
+        {TABS.map((tab, i) => {
+          const isActive = active === tab.id;
+          return (
+            <button
+              key={tab.id}
+              ref={(el) => {
+                refs.current[i] = el;
+              }}
+              id={`rcfc-tab-${tab.id}`}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`rcfc-panel-${tab.id}`}
+              tabIndex={isActive ? 0 : -1}
+              className={isActive ? 'rcfc-tab rcfc-tab-active' : 'rcfc-tab'}
+              onClick={() => onChange(tab.id)}
+              onKeyDown={(e) => {
+                // Arrow keys move between tabs (WAI-ARIA tabs pattern).
+                if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+                e.preventDefault();
+                const next = (i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length;
+                onChange(TABS[next].id);
+                refs.current[next]?.focus();
+              }}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Numbers panel ────────────────────────────────────────────────────────────
+
+interface NumbersPanelProps {
+  customerId: number | undefined;
+  /** All customers: add the Customer column. */
+  showCustomer: boolean;
+  isAdmin: boolean;
+  canEdit: boolean;
+  onFigures: (figures: ConsoleFigures | null) => void;
+}
+
+function NumbersPanel({ customerId, showCustomer, isAdmin, canEdit, onFigures }: NumbersPanelProps) {
+  // ── ALL hooks unconditionally at the top (React #310) ──
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [searchInput, setSearchInput] = useState('');
@@ -549,38 +375,33 @@ function RcfConsole() {
   const [sortField, setSortField] = useState<SortField>('did');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [npaFilter, setNpaFilter] = useState('');
-  // Expandable-row state — one row open at a time
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  // Numbers query — gated on scope: an admin opening the page must NOT pull
-  // every customer's numbers before choosing what to look at.
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['rcf', customerId ?? 'all', page, pageSize],
-    queryFn: () => listRcf({ limit: pageSize, offset: (page - 1) * pageSize, customer_id: customerId }),
-    enabled: scopeReady,
+  // GET /rcf ignores limit/offset and returns at most 100 rows, so the list
+  // is fetched once per scope and paged here in the browser.
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['rcf', customerId ?? 'all', 'console'],
+    queryFn: () => listRcf({ customer_id: customerId }),
   });
 
-  // Cleanup debounce on unmount
   useEffect(() => {
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, []);
 
-  // Derived Numbers tab values
-  const rawEntries: RcfEntry[] = useMemo(() => data?.items ?? [], [data]);
-  const serverTotal: number = data?.total ?? 0;
+  const rawEntries = useMemo(() => data?.items ?? [], [data]);
 
   const filteredEntries = useMemo(() => {
     let result = rawEntries;
-    if (npaFilter.length === 3) {
-      result = result.filter((e) => extractNpa(e.did) === npaFilter);
-    }
+    if (npaFilter.length === 3) result = result.filter((e) => extractNpa(e.did) === npaFilter);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
+      const qDigits = q.replace(/\D/g, '');
       result = result.filter(
         (e) =>
           e.did.includes(q) ||
+          (qDigits.length >= 2 && (e.did.replace(/\D/g, '').includes(qDigits) || e.forward_to.replace(/\D/g, '').includes(qDigits))) ||
           e.forward_to.toLowerCase().includes(q) ||
           (e.name ?? '').toLowerCase().includes(q) ||
           (e.customer_name ?? '').toLowerCase().includes(q),
@@ -589,19 +410,28 @@ function RcfConsole() {
     return result;
   }, [rawEntries, searchQuery, npaFilter]);
 
-  const sortedEntries = useMemo(
-    () => sortEntries(filteredEntries, sortField, sortDir),
-    [filteredEntries, sortField, sortDir],
-  );
+  const sortedEntries = useMemo(() => sortEntries(filteredEntries, sortField, sortDir), [filteredEntries, sortField, sortDir]);
 
-  const role = user?.role ?? 'user';
-  // readonly (customer view-only) and support (platform read-only) never edit.
-  const canEdit = role !== 'readonly' && role !== 'support';
-  const totalPages = Math.max(1, Math.ceil(serverTotal / pageSize));
-  const activeCount = useMemo(() => rawEntries.filter((e) => e.enabled).length, [rawEntries]);
-  const disabledCount = useMemo(() => rawEntries.filter((e) => !e.enabled).length, [rawEntries]);
+  useEffect(() => {
+    if (!data) {
+      onFigures(null);
+      return;
+    }
+    const forwarding = data.items.filter((e) => e.enabled).length;
+    onFigures({
+      total: data.items.length,
+      forwarding,
+      paused: data.items.length - forwarding,
+      capped: data.items.length >= RCF_LIST_CAP,
+    });
+  }, [data, onFigures]);
 
-  // ── Handlers ──────────────────────────────────────────────────────────────────
+  // ── Derived (after all hooks) ──
+  const totalPages = Math.max(1, Math.ceil(sortedEntries.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = sortedEntries.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const filtersActive = searchQuery !== '' || npaFilter.length === 3;
+  const colCount = showCustomer ? 6 : 5; // incl. the chevron column
 
   function handleSearchInput(value: string) {
     setSearchInput(value);
@@ -609,337 +439,263 @@ function RcfConsole() {
     searchDebounceRef.current = setTimeout(() => {
       setSearchQuery(value.trim());
       setPage(1);
+      setExpandedId(null);
     }, 250);
   }
 
-  function handleScopeSelect(scope: AdminScope) {
-    setAdminScope(scope);
-    setPage(1);
+  function clearFilters() {
     setSearchInput('');
     setSearchQuery('');
     setNpaFilter('');
-    setExpandedId(null);
-  }
-
-  function handlePageChange(p: number) {
-    setPage(p);
-    setExpandedId(null);
+    setPage(1);
   }
 
   function handleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
+    if (sortField === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else {
       setSortField(field);
       setSortDir('asc');
     }
   }
 
-  // Header: admins get a FIXED console title with the scope as breadcrumb
-  // context; tenants keep their account name (unchanged behavior).
-  const pageTitle = isAdmin
-    ? 'Administrative Call Forwarding Console'
-    : (user?.customer_name ?? 'Call Forwarding Console');
-  const headerContext = !isAdmin
-    ? null
-    : adminScope === 'all'
-      ? 'All Customers'
-      : adminCustomerId !== undefined
-        ? (adminSelectedCustomerName ?? `Customer ${adminCustomerId}`)
-        : null;
-  const pageSubtitle = isAdmin && !scopeReady
-    ? 'Select a customer to manage their forwarding destinations and monitor call health.'
-    : 'Manage forwarding destinations and monitor call health across your numbers.';
+  const sortProps = { currentField: sortField, currentDir: sortDir, onSort: handleSort };
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  const footer =
+    sortedEntries.length > 0 ? (
+      <div className="ad-foot-split rcfc-foot">
+        <span className="ad-faint">
+          {filtersActive
+            ? `${sortedEntries.length.toLocaleString()} of ${rawEntries.length.toLocaleString()} match`
+            : `${rawEntries.length.toLocaleString()} ${rawEntries.length === 1 ? 'number' : 'numbers'}`}
+          {rawEntries.length >= RCF_LIST_CAP && ' · the list shows the newest 100'}
+        </span>
+        {sortedEntries.length > pageSize || pageSize !== DEFAULT_PAGE_SIZE ? (
+          <PaginationControls
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={sortedEntries.length}
+            onPageChange={(p) => {
+              setPage(p);
+              setExpandedId(null);
+            }}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+              setExpandedId(null);
+            }}
+          />
+        ) : null}
+      </div>
+    ) : undefined;
 
   return (
-    <div className="rcf-scope">
-      <div className="rcf-shell">
-        {/* Quiet console header — breadcrumb, title, inline metrics, closing rule */}
-        <RcfPageHeader
-          title={pageTitle}
-          subtitle={pageSubtitle}
-          context={headerContext}
-          showMetrics={scopeReady}
-          total={serverTotal}
-          active={activeCount}
-          disabled={disabledCount}
-          loaded={!isLoading && !isError}
-        />
-
-        {/* Admin customer scope — light select mirroring AdminCustomerSelector */}
-        {isAdmin && (
-          <div className="rcf-scopebar fx-load fx-load-d1">
-            <span className="rcf-scopebar-label">Viewing</span>
-            <select
-              className="rcf-input"
-              style={{ minWidth: 260, fontSize: '0.84rem' }}
-              aria-label="Customer scope"
-              value={adminScope === null ? '' : String(adminScope)}
-              onChange={(e) => handleScopeSelect(parseScope(e.target.value))}
-            >
-              <option value="" disabled>Select a customer…</option>
-              <option value="all">All Customers</option>
-              {scopeCustomers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.account_type.toUpperCase()})
-                </option>
-              ))}
-            </select>
-            {adminScope !== null && (
-              <button
-                type="button"
-                onClick={() => handleScopeSelect(null)}
-                style={{
-                  fontSize: '0.72rem',
-                  color: INK_DIM,
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  padding: 0,
-                  fontFamily: 'inherit',
-                }}
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* ── Admin pre-selection: nothing loads, nothing renders ── */}
-        {!scopeReady && <ScopePrompt message="Select a customer to view their call forwarding numbers" />}
-
-        {/* ── Tab navigation ──────────────────────────────────── */}
-        {scopeReady && <TabBar active={activeTab} onChange={setActiveTab} />}
-
-        {/* ── Numbers Tab ─────────────────────────────────────── */}
-        {scopeReady && activeTab === 'numbers' && (
-          <>
-            {/* Toolbar: Search + NPA filter + count */}
-            {!isLoading && !isError && (
-              <div className="fx-load fx-load-d2" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-                {/* Search bar */}
-                <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 200 }}>
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      position: 'absolute',
-                      left: 13,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: '#9aa9c0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
-                      <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
-                  <input
-                    type="text"
-                    className="rcf-input"
-                    value={searchInput}
-                    onChange={(e) => handleSearchInput(e.target.value)}
-                    placeholder="Filter by DID, name, or destination…"
-                    style={{ width: '100%', padding: '9px 36px' }}
-                  />
-                  {searchInput && (
-                    <button
-                      type="button"
-                      onClick={() => { setSearchInput(''); setSearchQuery(''); }}
-                      style={{
-                        position: 'absolute',
-                        right: 10,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        background: 'rgba(47,125,246,0.08)',
-                        border: '1px solid rgba(47,125,246,0.2)',
-                        borderRadius: 5,
-                        color: AZURE_DEEP,
-                        cursor: 'pointer',
-                        padding: '2px 5px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 10, height: 10 }}>
-                        <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-
-                {/* NPA (area code) filter */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                  <label style={{ fontSize: '0.68rem', fontWeight: 700, color: INK_DIM, whiteSpace: 'nowrap', letterSpacing: '0.06em' }}>
-                    NPA
-                  </label>
-                  <input
-                    type="text"
-                    className="rcf-input rcf-input-mono"
-                    value={npaFilter}
-                    onChange={(e) => {
-                      const v = e.target.value.replace(/\D/g, '').slice(0, 3);
-                      setNpaFilter(v);
-                      setPage(1);
-                    }}
-                    placeholder="617"
-                    maxLength={3}
-                    inputMode="numeric"
-                    title="Filter by area code (NPA)"
-                    style={{
-                      width: 58,
-                      textAlign: 'center',
-                      letterSpacing: '0.08em',
-                      color: npaFilter.length === 3 ? AZURE_DEEP : undefined,
-                      borderColor: npaFilter.length === 3 ? 'rgba(47,125,246,0.55)' : undefined,
-                    }}
-                  />
-                  {npaFilter && (
-                    <button
-                      type="button"
-                      onClick={() => { setNpaFilter(''); setPage(1); }}
-                      style={{
-                        background: 'rgba(47,125,246,0.07)',
-                        border: '1px solid rgba(47,125,246,0.18)',
-                        borderRadius: 5,
-                        color: AZURE_DEEP,
-                        cursor: 'pointer',
-                        padding: '3px 5px',
-                        display: 'flex',
-                        alignItems: 'center',
-                      }}
-                      title="Clear NPA filter"
-                    >
-                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ width: 9, height: 9 }}>
-                        <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-
-                {/* Count pill (shows filtered subset when a filter is active) */}
-                {serverTotal > 0 && (searchQuery || npaFilter.length === 3) && filteredEntries.length !== rawEntries.length && (
-                  <div
-                    style={{
-                      fontSize: '0.72rem',
-                      fontWeight: 600,
-                      color: AZURE_DEEP,
-                      background: 'rgba(47,125,246,0.08)',
-                      border: '1px solid rgba(47,125,246,0.22)',
-                      borderRadius: 20,
-                      padding: '5px 13px',
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0,
-                      letterSpacing: '0.02em',
-                    }}
-                  >
-                    {`${filteredEntries.length} of ${serverTotal} shown`}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Loading */}
-            {isLoading && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: INK_DIM, fontSize: '0.875rem', padding: '48px 0', justifyContent: 'center' }}>
-                <Spinner size="sm" />
-                <span>Loading your numbers…</span>
-              </div>
-            )}
-
-            {/* Error */}
-            {isError && (
-              <div style={{ padding: '16px 20px', borderRadius: 12, background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.22)', color: RED, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 16, height: 16, flexShrink: 0 }}>
-                  <circle cx="8" cy="8" r="7" />
-                  <path d="M8 5v3.5M8 10.5v.5" strokeLinecap="round" />
-                </svg>
-                Unable to load RCF numbers. Please try refreshing the page.
-              </div>
-            )}
-
-            {/* Empty (no numbers at all) */}
-            {!isLoading && !isError && rawEntries.length === 0 && <EmptyState />}
-
-            {/* Search empty state */}
-            {!isLoading && !isError && rawEntries.length > 0 && sortedEntries.length === 0 && searchQuery && (
-              <SearchEmptyState query={searchQuery} onClear={() => { setSearchInput(''); setSearchQuery(''); }} />
-            )}
-
-            {/* Expandable-row number table — both admin and customer views */}
-            {!isLoading && !isError && sortedEntries.length > 0 && (
-              <div className="rcf-panel fx-load fx-load-d3">
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: isAdmin ? 760 : 640 }}>
-                    <thead>
-                      <tr>
-                        <th className="rcf-th" style={{ width: 34, padding: '11px 4px 11px 18px' }} aria-label="Expand" />
-                        <SortHeader label="Number"      field="did"        width={190} currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                        <SortHeader label="Forwards To" field="forward_to" width={230} currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                        <SortHeader label="Label"       field="name"                   currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                        <SortHeader label="Status"      field="status"     width={120} currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                        {isAdmin && (
-                          <SortHeader label="Customer" field="customer" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedEntries.map((entry) => (
-                        <NumberRow
-                          key={entry.id}
-                          entry={entry}
-                          isAdmin={isAdmin}
-                          canEdit={canEdit}
-                          expanded={expandedId === entry.id}
-                          onToggle={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
-                          onCollapse={() => setExpandedId(null)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {serverTotal > pageSize && (
-                  <PaginationControls
-                    currentPage={page}
-                    totalPages={totalPages}
-                    pageSize={pageSize}
-                    totalItems={serverTotal}
-                    onPageChange={handlePageChange}
-                    onPageSizeChange={(size) => { setPageSize(size); handlePageChange(1); }}
-                  />
-                )}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ── Call Activity Tab ────────────────────────────────── */}
-        {/* Keyed per scope so a DID / range picked under one customer
-            never carries over to the next. */}
-        {scopeReady && activeTab === 'activity' && (
-          <CallActivityTab key={`activity-${customerId ?? 'all'}`} customerId={customerId} />
-        )}
-
-        {/* ── DID Management Tab ───────────────────────────────── */}
-        {/* Inventory actions are per account — "All Customers" asks for one. */}
-        {scopeReady && activeTab === 'dids' && (
-          isAdmin && adminScope === 'all' ? (
-            <ScopePrompt message="Select a single customer to manage their DIDs" />
-          ) : (
-            <DIDManagementTab
-              customerId={customerId}
-              filterToCustomer={isAdmin ? adminCustomerId : undefined}
-              onShowNumbers={() => setActiveTab('numbers')}
+    <Card
+      id="rcfc-numbers"
+      title="Numbers"
+      count={data ? rawEntries.length : null}
+      sub={canEdit ? 'Select a number to change where it rings.' : 'Select a number to see its settings.'}
+      className="rcfc-card"
+      order={2}
+      footer={footer}
+    >
+      {data && rawEntries.length > 0 && (
+        <div className="ad-toolbar">
+          <label className="ad-search">
+            <span className="ad-visually-hidden">Search numbers</span>
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(e) => handleSearchInput(e.target.value)}
+              placeholder={showCustomer ? 'Search number, label, destination or customer' : 'Search number, label or destination'}
             />
-          )
+          </label>
+          <label className="rcfc-npa">
+            <span>Area code</span>
+            <input
+              type="text"
+              value={npaFilter}
+              onChange={(e) => {
+                setNpaFilter(e.target.value.replace(/\D/g, '').slice(0, 3));
+                setPage(1);
+                setExpandedId(null);
+              }}
+              placeholder="617"
+              maxLength={3}
+              inputMode="numeric"
+              className={npaFilter.length === 3 ? 'rcfc-npa-on' : undefined}
+            />
+          </label>
+          {filtersActive && (
+            <button type="button" className="ad-linkbtn" onClick={clearFilters}>
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
+
+      {isLoading ? (
+        <CardState kind="loading">Loading numbers…</CardState>
+      ) : isError ? (
+        <CardState kind="error" onRetry={() => void refetch()}>We couldn’t load the numbers.</CardState>
+      ) : rawEntries.length === 0 ? (
+        <div className="ad-empty">
+          <p className="ad-empty-title">No call forwarding numbers here yet</p>
+          <p className="ad-empty-sub">Numbers appear once they’re assigned to the account in the number inventory.</p>
+        </div>
+      ) : sortedEntries.length === 0 ? (
+        <div className="ad-empty">
+          <p className="ad-empty-title">{searchQuery ? `No numbers match “${searchQuery}”` : 'No numbers in this area code'}</p>
+          <button type="button" className="ad-btn ad-btn-quiet" onClick={clearFilters}>
+            Clear search and filters
+          </button>
+        </div>
+      ) : (
+        <div className="ad-tablewrap">
+          <table className={`ad-table rcfc-table${showCustomer ? ' rcfc-table-cust' : ''}`}>
+            <thead>
+              <tr>
+                <SortHeader label="Number" field="did" {...sortProps} />
+                <SortHeader label="Forwards to" field="forward_to" {...sortProps} />
+                <SortHeader label="Label" field="name" className="rcfc-col-label" {...sortProps} />
+                <SortHeader label="Status" field="status" {...sortProps} />
+                {showCustomer && <SortHeader label="Customer" field="customer" {...sortProps} />}
+                <th scope="col" className="ad-col-chev"><span className="ad-visually-hidden">Details</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((entry) => (
+                <NumberRow
+                  key={entry.id}
+                  entry={entry}
+                  showCustomer={showCustomer}
+                  isAdmin={isAdmin}
+                  canEdit={canEdit}
+                  colCount={colCount}
+                  expanded={expandedId === entry.id}
+                  onToggle={() => setExpandedId((cur) => (cur === entry.id ? null : entry.id))}
+                  onCollapse={() => setExpandedId(null)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ─── Sortable header — a real button, so it's keyboard reachable ─────────────
+
+interface SortHeaderProps {
+  label: string;
+  field: SortField;
+  currentField: SortField;
+  currentDir: SortDir;
+  onSort: (field: SortField) => void;
+  className?: string;
+}
+
+function SortHeader({ label, field, currentField, currentDir, onSort, className }: SortHeaderProps) {
+  const isActive = currentField === field;
+  return (
+    <th
+      scope="col"
+      className={className}
+      aria-sort={isActive ? (currentDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button type="button" className={`rcfc-sort${isActive ? ' rcfc-sort-active' : ''}`} onClick={() => onSort(field)}>
+        {label}
+        <span aria-hidden="true" className="rcfc-sort-glyph">
+          {isActive ? (currentDir === 'asc' ? '↑' : '↓') : '↕'}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+// ─── One number row + its inline RowEditor ────────────────────────────────────
+
+interface NumberRowProps {
+  entry: RcfEntry;
+  showCustomer: boolean;
+  isAdmin: boolean;
+  canEdit: boolean;
+  colCount: number;
+  expanded: boolean;
+  onToggle: () => void;
+  onCollapse: () => void;
+}
+
+function NumberRow({ entry, showCustomer, isAdmin, canEdit, colCount, expanded, onToggle, onCollapse }: NumberRowProps) {
+  const editorId = `rcfc-editor-${entry.id}`;
+  return (
+    <>
+      <tr
+        className={`ad-row${expanded ? ' ad-row-open' : ''}${entry.enabled ? '' : ' rcfc-row-off'}`}
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-controls={expanded ? editorId : undefined}
+        aria-label={`${fmt(entry.did)}${entry.name ? `, ${entry.name}` : ''}, ${entry.enabled ? 'forwarding' : 'paused'} to ${fmt(
+          entry.forward_to,
+        )}${showCustomer && entry.customer_name ? `, ${entry.customer_name}` : ''}. ${canEdit ? 'Edit' : 'View'} settings`}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggle();
+          } else if (e.key === 'Escape' && expanded) {
+            e.preventDefault();
+            onCollapse();
+          }
+        }}
+      >
+        <td>
+          <span className="ad-num">{fmt(entry.did)}</span>
+        </td>
+        <td>
+          <span className="ad-stack">
+            <span className="ad-num ad-num-dest">{fmt(entry.forward_to)}</span>
+            <span className="ad-faint">
+              {entry.failover_to ? `Failover ${fmt(entry.failover_to)}` : `Rings ${entry.ring_timeout}s`}
+            </span>
+          </span>
+        </td>
+        <td className="rcfc-col-label">
+          <span className={`rcfc-label${entry.name ? '' : ' ad-faint ad-italic'}`}>{entry.name ?? 'No label'}</span>
+        </td>
+        <td>
+          <span className={`ad-status ad-status-${entry.enabled ? 'on' : 'off'}`}>
+            <span className="ad-dot" aria-hidden="true" />
+            {entry.enabled ? 'Forwarding' : 'Paused'}
+          </span>
+        </td>
+        {showCustomer && (
+          <td>
+            <span className="ad-cust ad-ellipsis rcfc-cust">{entry.customer_name ?? `#${entry.customer_id}`}</span>
+          </td>
         )}
-      </div>
-    </div>
+        <td className="ad-col-chev">
+          <svg className="ad-chev" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="ad-editor-row">
+          <td colSpan={colCount} id={editorId}>
+            <div className="ad-editor rcf-xwrap">
+              <div>
+                <RowEditor entry={entry} isAdmin={isAdmin} canEdit={canEdit} onClose={onCollapse} />
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }

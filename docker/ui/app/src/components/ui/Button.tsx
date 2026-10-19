@@ -14,10 +14,12 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
+  // The brand primary (index.css :root --brand-btn-*): azure → azure-deep
+  // gradient with a 1px inner top highlight; the azure glow blooms on hover.
   primary: [
-    'bg-[#3b82f6] text-white border border-transparent',
-    'shadow-[0_0_12px_rgba(59,130,246,0.2)]',
-    'hover:bg-[#2563eb] hover:shadow-[0_0_20px_rgba(59,130,246,0.35)] hover:scale-[1.02]',
+    'bg-[image:var(--brand-btn-bg)] text-white border border-transparent',
+    'shadow-[var(--brand-btn-shadow)]',
+    'hover:bg-[image:var(--brand-btn-bg-hover)] hover:shadow-[var(--brand-btn-shadow-hover)] hover:scale-[1.02]',
     'disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100',
   ].join(' '),
 
@@ -72,7 +74,7 @@ export function Button({
         'inline-flex items-center justify-center gap-1.5 whitespace-nowrap leading-none',
         'transition-all duration-150',
         'active:scale-[0.97] active:transition-none',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/50',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--brand-focus-ring)]',
         'disabled:active:scale-100',
         variantClasses[variant],
         sizeClasses[size],

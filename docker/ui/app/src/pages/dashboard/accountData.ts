@@ -128,14 +128,19 @@ function useTzFallback() {
   };
 }
 
-export function useWeekActivity(customerId: number, tz: string) {
+/**
+ * `customerId` null = every customer (staff only — the admin dashboard's
+ * All customers view); tenants are hard-scoped by the API either way.
+ */
+export function useWeekActivity(customerId: number | null, tz: string) {
   const run = useTzFallback();
   return useQuery({
-    queryKey: ['rcf-dash-activity', customerId, tz],
+    queryKey: ['rcf-dash-activity', customerId ?? 'all', tz],
     queryFn: (): Promise<CdrActivityResponse> =>
       run(
         tz,
-        (zone) => getCdrActivity({ range: '7d', tz: zone, customer_id: customerId, product_type: 'rcf' }),
+        (zone) =>
+          getCdrActivity({ range: '7d', tz: zone, customer_id: customerId ?? undefined, product_type: 'rcf' }),
         isTimeZoneRejection,
       ),
     staleTime: 60_000,
@@ -184,15 +189,16 @@ export function useWeekNumberStats(customerId: number, tz: string) {
 /** How many calls the Recent calls card lists. */
 export const RECENT_CALLS = 6;
 
-/** The newest calls to the account's numbers in the last 7 days. */
-export function useRecentCalls(customerId: number) {
+/** The newest calls to the account's numbers in the last 7 days
+ *  (`customerId` null = every customer, staff only). */
+export function useRecentCalls(customerId: number | null) {
   return useQuery({
-    queryKey: ['dash-recent-calls', customerId],
+    queryKey: ['dash-recent-calls', customerId ?? 'all'],
     queryFn: () => {
       const end = new Date();
       const start = new Date(end.getTime() - 7 * 24 * 3_600_000);
       return searchCdrs({
-        customer_id: customerId,
+        customer_id: customerId ?? undefined,
         product_type: 'rcf',
         start_date: start.toISOString(),
         end_date: end.toISOString(),

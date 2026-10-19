@@ -10,6 +10,10 @@
  * Selecting a row (click, Enter or Space) opens the shared RowEditor right
  * under it — the same editor, mutations and readonly gating as /rcf. One
  * row open at a time; Esc closes it.
+ *
+ * Staff (the admin dashboard's one-customer view) get the admin RowEditor
+ * fields (e.g. max channels) via `isAdmin`, and "View all" goes to the
+ * admin console scoped to the customer via `allHref`.
  */
 import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -66,6 +70,12 @@ export interface NumbersCardProps {
   requestLabel: string | null;
   onRequest: () => void;
   order: number;
+  /** Card title (default "Your numbers"). */
+  title?: string;
+  /** Show the admin-only RowEditor fields (real admin, not in customer view). */
+  isAdmin?: boolean;
+  /** Where "View all N numbers" goes (default /rcf). */
+  allHref?: string;
 }
 
 export function NumbersCard({
@@ -79,6 +89,9 @@ export function NumbersCard({
   requestLabel,
   onRequest,
   order,
+  title = 'Your numbers',
+  isAdmin = false,
+  allHref = '/rcf',
 }: NumbersCardProps) {
   // ALL hooks unconditionally at the top (React #310).
   const [search, setSearch] = useState('');
@@ -116,7 +129,7 @@ export function NumbersCard({
             ? `${Math.min(rows.length, visible.length)} of ${visible.length.toLocaleString()} matching`
             : `Showing ${rows.length} of ${allCount.toLocaleString()}`}
         </span>
-        <Link to="/rcf" className="ad-linkbtn ad-linkbtn-arrow">
+        <Link to={allHref} className="ad-linkbtn ad-linkbtn-arrow">
           View all {allCount.toLocaleString()} numbers
           <ArrowRight size={14} aria-hidden="true" />
         </Link>
@@ -126,7 +139,7 @@ export function NumbersCard({
   return (
     <Card
       id="ad-numbers"
-      title="Your numbers"
+      title={title}
       icon={<Hash size={15} strokeWidth={2.2} />}
       count={entries.length > 0 ? allCount : null}
       sub={canEdit ? 'Select a number to change where it rings.' : 'Select a number to see its settings.'}
@@ -172,9 +185,9 @@ export function NumbersCard({
       )}
 
       {loading ? (
-        <CardState kind="loading">Loading your numbers…</CardState>
+        <CardState kind="loading">Loading numbers…</CardState>
       ) : error ? (
-        <CardState kind="error" onRetry={onRetry}>We couldn’t load your numbers.</CardState>
+        <CardState kind="error" onRetry={onRetry}>We couldn’t load the numbers.</CardState>
       ) : entries.length === 0 ? (
         <div className="ad-empty">
           <p className="ad-empty-title">No numbers on this account yet</p>
@@ -278,7 +291,7 @@ export function NumbersCard({
                         <td colSpan={5} id={editorId}>
                           <div className="ad-editor rcf-xwrap">
                             <div>
-                              <RowEditor entry={entry} isAdmin={false} canEdit={canEdit} onClose={() => setOpenId(null)} />
+                              <RowEditor entry={entry} isAdmin={isAdmin} canEdit={canEdit} onClose={() => setOpenId(null)} />
                             </div>
                           </div>
                         </td>

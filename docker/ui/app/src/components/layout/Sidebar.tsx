@@ -30,19 +30,21 @@ interface NavItemDef {
 // Live products only. SIP Trunking moved to Coming Soon (2026-10) — the
 // /trunks route still works and is reached from its linked Coming Soon row.
 const allProductNavItems: NavItemDef[] = [
-  { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#3b82f6', accountTypes: ['rcf', 'hybrid'] },
+  { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#2f7df6', accountTypes: ['rcf', 'hybrid'] },
 ];
 
 /* ─── Dashboard (top-level, above Products) ───────────────── */
 
-// The customer's account home (/dashboard). Shown to every non-support user
-// who has an effective customer: tenants, and an admin in "View as Customer"
-// once a preview customer is picked. Normal (live) active style, not muted.
+// The account home (/dashboard). Shown to platform admins (the admin
+// dashboard: All customers + a dropdown per customer) and to every
+// non-support user with an effective customer: tenants, and an admin in
+// "View as Customer" once a preview customer is picked. Normal (live) active
+// style, not muted.
 const dashboardNavItem: NavItemDef = {
   label: 'Dashboard',
   icon: <LayoutDashboard size={18} />,
   to: '/dashboard',
-  color: '#3b82f6',
+  color: '#2f7df6',
 };
 
 /* ─── Insights nav items ──────────────────────────────────── */
@@ -53,7 +55,7 @@ const reportingNavItem: NavItemDef = {
   label: 'Reporting',
   icon: <BarChart3 size={18} />,
   to: '/reporting',
-  color: '#3b82f6',
+  color: '#2f7df6',
   isActiveFn: (p) => p.startsWith('/reporting'),
 };
 
@@ -240,8 +242,8 @@ function SidebarLoginForm() {
           placeholder="Email"
           style={{
             ...inputBase,
-            border: `1px solid ${emailFocused ? '#3b82f6' : 'rgba(42,47,69,0.8)'}`,
-            boxShadow: emailFocused ? '0 0 0 2px rgba(59,130,246,0.12)' : 'none',
+            border: `1px solid ${emailFocused ? '#2f7df6' : 'rgba(42,47,69,0.8)'}`,
+            boxShadow: emailFocused ? '0 0 0 2px rgba(47,125,246,0.12)' : 'none',
           }}
         />
 
@@ -257,8 +259,8 @@ function SidebarLoginForm() {
           placeholder="Password"
           style={{
             ...inputBase,
-            border: `1px solid ${passFocused ? '#3b82f6' : 'rgba(42,47,69,0.8)'}`,
-            boxShadow: passFocused ? '0 0 0 2px rgba(59,130,246,0.12)' : 'none',
+            border: `1px solid ${passFocused ? '#2f7df6' : 'rgba(42,47,69,0.8)'}`,
+            boxShadow: passFocused ? '0 0 0 2px rgba(47,125,246,0.12)' : 'none',
           }}
         />
 
@@ -289,8 +291,8 @@ function SidebarLoginForm() {
             padding: '8px 12px',
             borderRadius: 8,
             background: isSubmitting
-              ? 'rgba(59,130,246,0.45)'
-              : 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)',
+              ? 'rgba(47,125,246,0.45)'
+              : 'var(--brand-btn-bg)',
             border: 'none',
             color: '#fff',
             fontSize: '0.78rem',
@@ -303,7 +305,7 @@ function SidebarLoginForm() {
             gap: 6,
             boxShadow: isSubmitting
               ? 'none'
-              : '0 2px 12px -3px rgba(59,130,246,0.5)',
+              : 'var(--brand-btn-shadow)',
             transition: 'background 0.15s, box-shadow 0.15s',
           }}
         >
@@ -570,7 +572,7 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to, mut
               width: 10,
               height: 10,
               flexShrink: 0,
-              color: '#3b82f6',
+              color: '#2f7df6',
               opacity: 0.7,
               transition: 'opacity 0.15s',
             }}
@@ -665,7 +667,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
   // support tool their role can actually call).
   const showAdmin = isAdmin || isSupport || isReadonly;
   const showReporting = canSeeReporting(user);
-  const showDashboard = !isSupport && !isAdmin && effectiveCustomer !== null;
+  const showDashboard = !isSupport && (isAdmin || effectiveCustomer !== null);
 
   /* ── Product items filtered by role/account_type ───────── */
 
@@ -786,10 +788,10 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
             fontWeight: 800,
             color: '#e2e8f0',
             letterSpacing: '-0.02em',
-            textShadow: '0 0 20px rgba(59, 130, 246, 0.5)',
+            textShadow: '0 0 20px rgba(47,125,246,0.5)',
           }}
         >
-          Custom <span style={{ color: '#3b82f6' }}>VoIP</span>
+          Custom <span style={{ color: '#4f92ff' }}>VoIP</span>
         </span>
       </div>
 
@@ -885,7 +887,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               position: 'absolute',
               top: 0, left: 0, right: 0,
               height: 80,
-              background: 'radial-gradient(ellipse 140% 100% at 50% 0%, rgba(59,130,246,0.10) 0%, transparent 70%)',
+              background: 'radial-gradient(ellipse 140% 100% at 50% 0%, rgba(47,125,246,0.10) 0%, transparent 70%)',
               pointerEvents: 'none',
             }}
           />
@@ -897,16 +899,16 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                 height: 40,
                 width: 'auto',
                 flexShrink: 0,
-                filter: 'drop-shadow(0 0 4px rgba(59, 130, 246, 0.2))',
+                filter: 'drop-shadow(0 0 4px rgba(47,125,246,0.2))',
                 transition: 'filter 0.3s ease',
               }}
               onMouseEnter={(e) => {
                 (e.currentTarget as HTMLImageElement).style.filter =
-                  'drop-shadow(0 0 8px rgba(59, 130, 246, 0.5)) drop-shadow(0 0 16px rgba(59, 130, 246, 0.2))';
+                  'drop-shadow(0 0 8px rgba(47,125,246,0.5)) drop-shadow(0 0 16px rgba(47,125,246,0.2))';
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLImageElement).style.filter =
-                  'drop-shadow(0 0 4px rgba(59, 130, 246, 0.2))';
+                  'drop-shadow(0 0 4px rgba(47,125,246,0.2))';
               }}
             />
           </div>
@@ -952,7 +954,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               scrollbarColor: 'rgba(42,47,69,0.6) transparent',
             }}
           >
-            {/* ── Dashboard — the customer's account home, top-level ─ */}
+            {/* ── Dashboard — the account home (admin: all customers), top-level ─ */}
             {showDashboard && (
               <div style={{ marginBottom: 10 }}>
                 <SidebarNavItem item={dashboardNavItem} onNavigate={closeMobile} />
@@ -1184,7 +1186,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                     borderRadius: 7,
                     padding: '2px 4px',
                     margin: '-2px -4px',
-                    background: isActive ? 'rgba(59,130,246,0.08)' : undefined,
+                    background: isActive ? 'rgba(47,125,246,0.08)' : undefined,
                     cursor: 'pointer',
                   })}
                 >
@@ -1195,14 +1197,14 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                         width: 30,
                         height: 30,
                         borderRadius: '50%',
-                        background: 'linear-gradient(135deg, rgba(59,130,246,0.30) 0%, rgba(59,130,246,0.15) 100%)',
-                        border: '1px solid rgba(59,130,246,0.3)',
+                        background: 'linear-gradient(135deg, rgba(47,125,246,0.30) 0%, rgba(47,125,246,0.15) 100%)',
+                        border: '1px solid rgba(47,125,246,0.3)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontSize: '0.7rem',
                         fontWeight: 700,
-                        color: '#60a5fa',
+                        color: '#4f92ff',
                         letterSpacing: '0.02em',
                         textTransform: 'uppercase',
                       }}

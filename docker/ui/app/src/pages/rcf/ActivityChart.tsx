@@ -3,7 +3,7 @@
  * bucket of GET /cdrs/activity (fixed + zero-filled server-side).
  *
  * Two aligned small multiples on one shared x-axis, never a dual y-axis:
- *   1. Call volume — stacked columns, answered (azure) under missed (amber),
+ *   1. Call volume — stacked columns, answered (azure) under missed (slate),
  *      a 2px surface gap between segments, 4px rounded top, ≤24px wide.
  *   2. Rates — Answer rate and Sounded-good-or-better as 2px lines on ONE
  *      0–100% axis. A bucket with no denominator (no calls / nothing graded)
@@ -21,22 +21,24 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import type { ActivityBucket, CdrActivityPoint } from '../../types/cdrActivity';
 import { TREND_COLORS } from '../reporting/reportFormat';
-import { AZURE_DEEP } from './theme';
+import { CHART_SERIES, brandAzureAlpha } from '../../styles/brand';
 import { bucketRangeLabel, bucketTick, fmtPct1, fmtShareFloor, plural, tickStep } from './activityFormat';
 
-// Series colors — validated as pairs (dataviz validator, light surface):
-// columns azure/amber (same pair as the Reporting page), lines azure-deep/teal.
+// Series colors — the brand chart roles (src/styles/brand.ts): columns
+// azure/slate (same pair as the Reporting page and the dashboard's Call
+// volume card); lines cobalt (solid) / azure-bright (dashed) — the dash is
+// the secondary channel, so the two blues never rely on hue alone.
 const C_ANSWERED = TREND_COLORS.answered;
 const C_MISSED = TREND_COLORS.missed;
-const C_ASR = AZURE_DEEP;
-const C_GOOD = '#0d9488';
+const C_ASR = CHART_SERIES.secondary;
+const C_GOOD = CHART_SERIES.tertiary;
 const GOOD_DASH = '5 3';
 
 const SURFACE = '#ffffff';
 const INK_TICK = '#5d6f8c';
 const GRID = 'rgba(14, 23, 38, 0.07)';
 const BASELINE = 'rgba(14, 23, 38, 0.16)';
-const HOVER_BAND = 'rgba(47, 125, 246, 0.07)';
+const HOVER_BAND = brandAzureAlpha(0.07);
 
 // Geometry (px). The rate plot sits under the volume plot with room for its
 // own caption; the shared x labels run once, under the rate plot.

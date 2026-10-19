@@ -10,12 +10,15 @@
   --color-surface-raised: #1e2130;
   --color-border: #2a2f45;
   --color-border-hover: #363c57;
-  --color-border-focus: #3b82f6;
+  --color-border-focus: #4f92ff; /* = --brand-azure-bright */
   --color-text: #e2e8f0;
   --color-muted: #718096;
-  --color-accent: #3b82f6;
-  --color-accent-hover: #2563eb;
-  --color-accent-glow: rgba(59, 130, 246, 0.28);
+  /* Accent = the brand blue family (see :root below). Literal hex here
+     because @theme values are compiled by Tailwind; keep them equal to the
+     --brand-* tokens. */
+  --color-accent: #2f7df6;       /* = --brand-azure */
+  --color-accent-hover: #1d63dd; /* = --brand-azure-deep */
+  --color-accent-glow: rgba(47, 125, 246, 0.35); /* = --brand-glow */
   --color-danger: #7f1d1d;
   --color-danger-hover: #991b1b;
   --color-danger-text: #fca5a5;
@@ -32,13 +35,50 @@
 }
 
 /* ─── Shared brand tokens ───────────────────────────────────
-   The landing stat-band cobalt, hoisted from .landing-root (its original
-   home — see the LANDING PAGE palette below) so the authenticated app
-   shell can use it too (sidebar collapse tab). .landing-root descendants
-   still resolve these via :root inheritance. */
+   The brand blue family + the landing stat-band cobalt (hoisted from
+   .landing-root, its original home — see the LANDING PAGE palette below).
+   .landing-root descendants still resolve these via :root inheritance. */
 :root {
-  --lg-cobalt: #113398;
-  --lg-cobalt-deep: #0b246e;
+  /* THE BLUE FAMILY — taken from the account dashboard's hero header and used
+     for every button, chart series, link and active state in the app. One
+     source of truth: CSS reads these tokens; TS (inline SVG / chart fills)
+     reads the mirror in src/styles/brand.ts — keep the two equal.
+       azure        primary buttons, primary chart series, links, active
+       azure-deep   button hover/pressed, link hover, text-on-paper accents
+       azure-bright highlights + glow on dark, focus rings, series on dark
+       cobalt       deep accent, secondary series, gradients (azure → cobalt)
+       cobalt-deep  darkest accent, pressed on dark */
+  --brand-azure: #2f7df6;
+  --brand-azure-deep: #1d63dd;
+  --brand-azure-bright: #4f92ff;
+  --brand-cobalt: #113398;
+  --brand-cobalt-deep: #0b246e;
+  --brand-glow: rgba(47, 125, 246, 0.35);
+
+  /* Primary button — the hero CTA's recipe adapted for paper: an azure →
+     azure-deep vertical gradient (the deep stop lands at 62% so the label,
+     which sits in the middle band, is always on ≥ 4.5:1 blue for white
+     12.8px/700 text), a 1px inner top highlight, and an azure glow that
+     blooms on hover. Pressed sinks to deep → cobalt. */
+  --brand-btn-bg: linear-gradient(180deg, var(--brand-azure) 0%, var(--brand-azure-deep) 62%);
+  --brand-btn-bg-hover: linear-gradient(180deg, var(--brand-azure-deep) 0%, color-mix(in srgb, var(--brand-azure-deep) 78%, var(--brand-cobalt)) 100%);
+  --brand-btn-bg-active: linear-gradient(180deg, var(--brand-azure-deep) 0%, color-mix(in srgb, var(--brand-azure-deep) 55%, var(--brand-cobalt)) 100%);
+  --brand-btn-edge: rgba(17, 51, 152, 0.28);
+  --brand-btn-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 1px 2px rgba(11, 36, 110, 0.18),
+    0 6px 16px -8px rgba(47, 125, 246, 0.7);
+  --brand-btn-shadow-hover:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 1px 2px rgba(11, 36, 110, 0.2),
+    0 10px 24px -8px rgba(47, 125, 246, 0.85),
+    0 0 0 4px rgba(47, 125, 246, 0.12);
+  --brand-focus-ring: var(--brand-azure-bright);
+
+  /* Landing stat-band cobalt, hoisted from .landing-root so the app shell
+     can use it too (sidebar collapse tab) — aliases of the family. */
+  --lg-cobalt: var(--brand-cobalt);
+  --lg-cobalt-deep: var(--brand-cobalt-deep);
 }
 
 *, *::before, *::after {
@@ -89,7 +129,7 @@ body {
 
 /* ─── Focus ring ─────────────────────────────────────────── */
 :focus-visible {
-  outline: 2px solid rgba(59, 130, 246, 0.6);
+  outline: 2px solid var(--brand-focus-ring);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -132,13 +172,13 @@ body {
 
 /* ─── Selection highlight ─────────────────────────────────── */
 ::selection {
-  background: rgba(59, 130, 246, 0.28);
+  background: rgba(47, 125, 246, 0.28);
   color: #e2e8f0;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
    LIQUID-GLASS DESIGN SYSTEM
-   Blue-on-dark only (#3b82f6 accent). Borderless: depth is drawn with light,
+   Blue-on-dark only (--brand-azure accent). Borderless: depth is drawn with light,
    ambient shadow, and negative space — never a hard 1px outline.
 
    Building blocks:
@@ -155,7 +195,7 @@ body {
      .glass-input     borderless frosted input/select field (see .form-control).
 
    The blue "light-up" is a layered box-shadow: an outer accent bloom
-   (rgba(59,130,246,…)) for the glow, an ambient black drop for float depth, plus
+   (rgba(47,125,246,…) = --brand-glow family) for the glow, an ambient black drop for float depth, plus
    an inset top-highlight line for the glass sheen — all animated together over
    ~200ms ease. Motion (the lift) is disabled under prefers-reduced-motion.
    ══════════════════════════════════════════════════════════════════════════ */
@@ -178,15 +218,15 @@ body {
 
 .glass-hover:hover {
   background:
-    linear-gradient(180deg, rgba(59, 130, 246, 0.05) 0%, transparent 46%),
+    linear-gradient(180deg, rgba(47, 125, 246, 0.05) 0%, transparent 46%),
     linear-gradient(135deg, rgba(33, 38, 56, 0.8) 0%, rgba(20, 23, 33, 0.86) 100%);
   box-shadow:
     inset 0 1px 0 0 rgba(255, 255, 255, 0.1),          /* brighter sheen */
-    inset 0 0 0 1px rgba(59, 130, 246, 0.14),          /* faint blue edge */
+    inset 0 0 0 1px rgba(47, 125, 246, 0.14),          /* faint blue edge */
     0 2px 4px rgba(0, 0, 0, 0.35),
     0 14px 40px -12px rgba(0, 0, 0, 0.62),
-    0 0 0 1px rgba(59, 130, 246, 0.1),
-    0 8px 40px -6px rgba(59, 130, 246, 0.35);          /* the blue glow bloom */
+    0 0 0 1px rgba(47, 125, 246, 0.1),
+    0 8px 40px -6px rgba(47, 125, 246, 0.35);          /* the blue glow bloom */
 }
 
 .glass-hover {
@@ -222,7 +262,7 @@ body {
   right: -60px;
   width: 340px;
   height: 340px;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 68%);
+  background: radial-gradient(circle, rgba(47, 125, 246, 0.1) 0%, transparent 68%);
   pointer-events: none;
   z-index: 0;
 }
@@ -233,11 +273,11 @@ body {
 }
 
 .glass-row-hover:hover {
-  background: rgba(59, 130, 246, 0.055);
+  background: rgba(47, 125, 246, 0.055);
   box-shadow:
     inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
-    inset 3px 0 0 0 rgba(59, 130, 246, 0.55),          /* accent leading edge */
-    0 1px 12px -2px rgba(59, 130, 246, 0.16);
+    inset 3px 0 0 0 rgba(47, 125, 246, 0.55),          /* accent leading edge */
+    0 1px 12px -2px rgba(47, 125, 246, 0.16);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -259,7 +299,7 @@ body {
   -webkit-backdrop-filter: blur(8px);
   box-shadow:
     inset 0 1px 0 0 rgba(255, 255, 255, 0.04),
-    inset 0 0 0 1px rgba(59, 130, 246, 0.1);
+    inset 0 0 0 1px rgba(47, 125, 246, 0.1);
   color: #e2e8f0;
   width: 100%;
   font-family: inherit;
@@ -268,18 +308,18 @@ body {
 .form-control:hover {
   box-shadow:
     inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
-    inset 0 0 0 1px rgba(59, 130, 246, 0.2);
+    inset 0 0 0 1px rgba(47, 125, 246, 0.2);
 }
 
 .form-control:focus {
   background:
-    linear-gradient(180deg, rgba(59, 130, 246, 0.04) 0%, transparent 60%),
+    linear-gradient(180deg, rgba(47, 125, 246, 0.04) 0%, transparent 60%),
     rgba(15, 17, 23, 0.72);
   box-shadow:
     inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
-    inset 0 0 0 1px rgba(59, 130, 246, 0.5),
-    0 0 0 3px rgba(59, 130, 246, 0.16),
-    0 4px 18px -6px rgba(59, 130, 246, 0.28);
+    inset 0 0 0 1px rgba(47, 125, 246, 0.5),
+    0 0 0 3px rgba(47, 125, 246, 0.16),
+    0 4px 18px -6px rgba(47, 125, 246, 0.28);
 }
 
 .form-control::placeholder {
@@ -332,13 +372,13 @@ select.form-control {
 }
 
 .toggle input:checked + .toggle-slider {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: #3b82f6;
+  background: rgba(47, 125, 246, 0.2);
+  border-color: var(--brand-azure);
 }
 
 .toggle input:checked + .toggle-slider::before {
   transform: translateX(16px);
-  background: #3b82f6;
+  background: var(--brand-azure);
 }
 
 /* ─── Color-scheme for date/time inputs ──────────────────── */
@@ -743,9 +783,9 @@ input[type="time"] {
      so the app shell shares them; they still apply here via inheritance. */
   --lg-granite: #070c16;
   --lg-granite-hi: #0c1424;
-  --lg-azure: #2f7df6;
-  --lg-azure-deep: #1d63dd;
-  --lg-azure-bright: #4f92ff;
+  --lg-azure: var(--brand-azure);
+  --lg-azure-deep: var(--brand-azure-deep);
+  --lg-azure-bright: var(--brand-azure-bright);
   --lg-paper: #f3f5f9;
   --lg-card: #ffffff;
   --lg-ink: #0e1726;
@@ -2791,8 +2831,8 @@ select.landing-input {
   --rcf-ink: #0e1726;
   --rcf-ink-soft: #46566f;
   --rcf-ink-dim: #5d6f8c;
-  --rcf-azure: #2f7df6;
-  --rcf-azure-deep: #1d63dd;
+  --rcf-azure: var(--brand-azure);
+  --rcf-azure-deep: var(--brand-azure-deep);
   --rcf-line: #e2e8f2;
   --rcf-line-soft: #edf1f7;
   --rcf-tint: #f7f9fc;
@@ -3126,23 +3166,41 @@ select.dl-input {
   white-space: nowrap;
 }
 
+/* Primary — the brand treatment (the dashboard hero's button recipe): azure →
+   azure-deep gradient, 1px inner top highlight, azure glow on hover,
+   azure-bright focus ring. Values are the `--brand-btn-*` tokens in :root.
+   Disabled keeps a flat pale-azure fill. */
 .rcf-btn-primary,
 .dl-btn-primary {
-  background: var(--rcf-azure);
+  background: var(--brand-btn-bg);
   color: #ffffff;
-  box-shadow: 0 8px 20px -10px rgba(47, 125, 246, 0.7);
+  box-shadow: var(--brand-btn-shadow);
+  text-shadow: 0 1px 0 rgba(11, 36, 110, 0.25);
 }
 
 .rcf-btn-primary:hover:not(:disabled),
 .dl-btn-primary:hover:not(:disabled) {
-  background: var(--rcf-azure-deep);
-  box-shadow: 0 10px 24px -10px rgba(47, 125, 246, 0.85);
+  background: var(--brand-btn-bg-hover);
+  box-shadow: var(--brand-btn-shadow-hover);
+}
+
+.rcf-btn-primary:active:not(:disabled),
+.dl-btn-primary:active:not(:disabled) {
+  background: var(--brand-btn-bg-active);
+  box-shadow: inset 0 1px 2px rgba(11, 36, 110, 0.3);
+}
+
+.rcf-btn-primary:focus-visible,
+.dl-btn-primary:focus-visible {
+  outline: 2px solid var(--brand-focus-ring);
+  outline-offset: 2px;
 }
 
 .rcf-btn-primary:disabled,
 .dl-btn-primary:disabled {
   background: #b9cdf2;
   box-shadow: none;
+  text-shadow: none;
   cursor: not-allowed;
 }
 

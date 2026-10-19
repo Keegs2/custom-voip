@@ -3,6 +3,9 @@
  *
  *   Numbers · Forwarding · Calls, 7 days · Answered · Sounded good · Team
  *
+ * The admin's All customers view swaps Team for a leading Customers card
+ * and reads the platform-wide feeds (`scope: 'platform'`); the copy follows.
+ *
  * Each card: a 3px top edge in the metric's tone, an icon in a soft tinted
  * chip, a label, a big tabular value and one small context line; the three
  * call metrics add a 7-day sparkline from GET /cdrs/activity's daily points.
@@ -14,24 +17,28 @@
  */
 import type { CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { CircleCheck, Hash, PhoneForwarded, PhoneIncoming, Users, Volume2 } from 'lucide-react';
+import { Building2, CircleCheck, Hash, PhoneForwarded, PhoneIncoming, Users, Volume2 } from 'lucide-react';
 import type { CdrActivityPoint, CdrActivityResponse } from '../../types/cdrActivity';
 import { goodShareColor } from '../calls/quality';
 import { fmtPct1, fmtShareFloor } from '../rcf/activityFormat';
 import { GREEN } from '../rcf/theme';
+import { BRAND_AZURE as AZURE, BRAND_AZURE_DEEP as AZURE_DEEP, BRAND_COBALT as COBALT } from '../../styles/brand';
 import { shareWord, type Feed } from './accountData';
-
-const AZURE = '#2f7df6';
-const AZURE_DEEP = '#1d63dd';
-const COBALT = '#113398';
 
 export interface NumberCounts {
   /** Numbers on the account (or listed, when `partial`). */
   total: number;
   forwarding: number;
   paused: number;
-  /** GET /rcf hit its 100-row cap and no account total was available. */
+  /** The total is a lower bound (a list hit its cap and no exact count was available). */
   partial: boolean;
+  /** The paused count is a lower bound (GET /rcf?enabled=false hit its cap). */
+  pausedPartial?: boolean;
+}
+
+export interface CustomerCounts {
+  total: number;
+  active: number;
 }
 
 export interface TeamCounts {
@@ -153,11 +160,22 @@ function Placeholder({ state }: { state: 'loading' | 'error' }) {
 
 // ─── Row ─────────────────────────────────────────────────────────────────────
 
+/** The "people" card: an account's team, or (All customers) the customer count. */
+export type PeopleKpi =
+  | { kind: 'team'; feed: Feed<TeamCounts>; /** Where the card leads, or null. */ href: string | null }
+  | { kind: 'customers'; feed: Feed<CustomerCounts> };
+
 export interface KpiRowProps {
   numbers: Feed<NumberCounts>;
   activity: Feed<CdrActivityResponse>;
-  team: Feed<TeamCounts>;
+  people: PeopleKpi;
   onOpenActivity: () => void;
+  /** Where the numbers cards lead. */
+  numbersHref: string;
+  /** 'account' = one customer (tenant / staff), 'platform' = every customer. */
+  scope: 'account' | 'platform';
+  /** Copy voice: a tenant reads "your"; staff read "the account". */
+  voice: 'tenant' | 'staff';
   /** Base stagger slot for the first card. */
   order: number;
 }
@@ -166,7 +184,7 @@ function series(points: readonly CdrActivityPoint[], pick: (p: CdrActivityPoint)
   return points.map(pick);
 }
 
-export function KpiRow({ numbers, activity, team, onOpenActivity, order }: KpiRowProps) {
+export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref, scope, voice, order }: KpiRowProps) {
   const data = activity.state === 'ready' ? activity.value : null;
   const k = data?.kpis ?? null;
   const points = data?.points ?? [];
@@ -177,23 +195,69 @@ export function KpiRow({ numbers, activity, team, onOpenActivity, order }: KpiRo
   const shareTone = goodShareColor(share);
   const word = share != null ? shareWord(shareTone) : null;
 
-  return (
-    <div className="ad-kpis" role="list" aria-label="Account at a glance">
-      <div role="listitem" className="ad-kpi-cell">
+  const platform = scope === 'platform';
+  const yours = voice === 'tenant';
+  const numbersWhere = platform ? 'Across all customers' : yours ? 'On your account' : 'On the account';
+  const callsWhere = platform ? 'Every call, all customers' : yours ? 'Every call to your numbers' : 'Every call to its numbers';
+  // Customers lead the platform row; the team closes an account row.
+  const slot = (i: number) => order + (platform ? i + 1 : i);
+
+  const peopleCard =
+    people.kind === 'customers' ? (
+      <div role="listitem" className="ad-kpi-cell" key="people">
         <KpiCard
           order={order}
+          label="Customers"
+          icon={<Building2 size={16} strokeWidth={2} />}
+          tone={COBALT}
+          value={people.feed.state === 'ready' ? people.feed.value.total.toLocaleString() : <Placeholder state={people.feed.state} />}
+          context={
+            people.feed.state === 'ready'
+              ? `${people.feed.value.active.toLocaleString()} active · call forwarding`
+              : 'With call forwarding'
+          }
+          target={null}
+        />
+      </div>
+    ) : (
+      <div role="listitem" className="ad-kpi-cell" key="people">
+        <KpiCard
+          order={slot(5)}
+          label="Team"
+          icon={<Users size={16} strokeWidth={2} />}
+          tone={COBALT}
+          value={people.feed.state === 'ready' ? people.feed.value.total.toLocaleString() : <Placeholder state={people.feed.state} />}
+          context={
+            people.feed.state === 'ready'
+              ? `${people.feed.value.active.toLocaleString()} can sign in`
+              : yours
+                ? 'People on your account'
+                : 'People on the account'
+          }
+          target={people.href ? { kind: 'link', to: people.href, hint: 'Open My account' } : null}
+        />
+      </div>
+    );
+
+  return (
+    <div className="ad-kpis" role="list" aria-label={platform ? 'All customers at a glance' : 'Account at a glance'}>
+      {platform && peopleCard}
+
+      <div role="listitem" className="ad-kpi-cell">
+        <KpiCard
+          order={slot(0)}
           label="Numbers"
           icon={<Hash size={16} strokeWidth={2} />}
           tone={AZURE}
           value={numbers.state === 'ready' ? `${numbers.value.total.toLocaleString()}${numbers.value.partial ? '+' : ''}` : <Placeholder state={numbers.state} />}
-          context={numbers.state === 'ready' && numbers.value.partial ? 'First 100 listed' : 'On your account'}
-          target={{ kind: 'link', to: '/rcf', hint: 'See all your numbers' }}
+          context={numbers.state === 'ready' && numbers.value.partial ? (platform ? 'First 1,000 listed' : 'First 100 listed') : numbersWhere}
+          target={{ kind: 'link', to: numbersHref, hint: yours ? 'See all your numbers' : 'Open the numbers' }}
         />
       </div>
 
       <div role="listitem" className="ad-kpi-cell">
         <KpiCard
-          order={order + 1}
+          order={slot(1)}
           label="Forwarding"
           icon={<PhoneForwarded size={16} strokeWidth={2} />}
           tone={GREEN}
@@ -206,22 +270,23 @@ export function KpiRow({ numbers, activity, team, onOpenActivity, order }: KpiRo
               </span>
             ) : (
               <span>
-                <span className="ad-dot ad-dot-off" aria-hidden="true" /> {numbers.value.paused.toLocaleString()} paused
+                <span className="ad-dot ad-dot-off" aria-hidden="true" /> {numbers.value.paused.toLocaleString()}
+                {numbers.value.pausedPartial ? '+' : ''} paused
               </span>
             )
           }
-          target={{ kind: 'link', to: '/rcf', hint: 'Manage forwarding' }}
+          target={{ kind: 'link', to: numbersHref, hint: 'Manage forwarding' }}
         />
       </div>
 
       <div role="listitem" className="ad-kpi-cell">
         <KpiCard
-          order={order + 2}
+          order={slot(2)}
           label="Calls, 7 days"
           icon={<PhoneIncoming size={16} strokeWidth={2} />}
           tone={AZURE}
           value={k ? k.calls.toLocaleString() : activityPlaceholder}
-          context={k ? `${k.answered.toLocaleString()} answered` : 'Every call to your numbers'}
+          context={k ? `${k.answered.toLocaleString()} answered` : callsWhere}
           spark={k && k.calls > 0 ? <Sparkline values={series(points, (p) => p.calls)} color={AZURE} floorZero /> : null}
           target={openActivity}
         />
@@ -229,7 +294,7 @@ export function KpiRow({ numbers, activity, team, onOpenActivity, order }: KpiRo
 
       <div role="listitem" className="ad-kpi-cell">
         <KpiCard
-          order={order + 3}
+          order={slot(3)}
           label="Answered"
           icon={<CircleCheck size={16} strokeWidth={2} />}
           tone={AZURE_DEEP}
@@ -242,7 +307,7 @@ export function KpiRow({ numbers, activity, team, onOpenActivity, order }: KpiRo
 
       <div role="listitem" className="ad-kpi-cell">
         <KpiCard
-          order={order + 4}
+          order={slot(4)}
           label="Sounded good"
           icon={<Volume2 size={16} strokeWidth={2} />}
           tone={shareTone}
@@ -273,17 +338,7 @@ export function KpiRow({ numbers, activity, team, onOpenActivity, order }: KpiRo
         />
       </div>
 
-      <div role="listitem" className="ad-kpi-cell">
-        <KpiCard
-          order={order + 5}
-          label="Team"
-          icon={<Users size={16} strokeWidth={2} />}
-          tone={COBALT}
-          value={team.state === 'ready' ? team.value.total.toLocaleString() : <Placeholder state={team.state} />}
-          context={team.state === 'ready' ? `${team.value.active.toLocaleString()} can sign in` : 'People on your account'}
-          target={{ kind: 'link', to: '/my-account', hint: 'Open My account' }}
-        />
-      </div>
+      {!platform && peopleCard}
     </div>
   );
 }

@@ -561,7 +561,7 @@
 
 /* ─── Call rows — the whole row opens the call panel ───
    Rows are keyboard-reachable (tabindex=0; Enter/Space open, ↑/↓ move). The
-   open call's row is held in the modal's indigo accent so the two read as
+   open call's row is held in the modal's cobalt accent so the two read as
    linked while the panel is up. */
 .dl-row.dlx5-row {
   cursor: pointer;
@@ -709,8 +709,9 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    CALL TRACE MODAL — pages/troubleshooting/CallTraceModal.tsx
    A large portal panel (min(1600px, 96vw) × ≤92vh) over a dimmed, lightly
-   blurred backdrop. Its one deliberate colour is the INDIGO outline + ring —
-   distinct from the page's azure accents and neutral hairline cards — so it
+   blurred backdrop. Its one deliberate colour is the COBALT outline + ring
+   (--brand-cobalt, the deep end of the brand family) — distinct from the
+   page's lighter azure accents and neutral hairline cards — so it
    unmistakably reads as a separate panel. Head and PCAP strip are fixed; the
    body scrolls (both axes: a wide ladder pans inside the body, never the
    page). The portal root carries `.dl-scope` for the --rcf-* tokens; the
@@ -718,9 +719,9 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 .dl-scope.dlx5-canvas,
 .dl-scope.dlx5-modal-root {
-  --dlx5-accent: #4f5bd5;
-  --dlx5-accent-deep: #3a45b4;
-  --dlx5-accent-wash: rgba(79, 91, 213, 0.07);
+  --dlx5-accent: var(--brand-cobalt);
+  --dlx5-accent-deep: var(--brand-cobalt);
+  --dlx5-accent-wash: rgba(17, 51, 152, 0.06);
 }
 
 .dl-scope.dlx5-modal-root {
@@ -752,8 +753,8 @@
   border-radius: 14px;
   overflow: hidden;
   box-shadow:
-    0 0 0 5px rgba(79, 91, 213, 0.16),
-    0 12px 28px -12px rgba(79, 91, 213, 0.35),
+    0 0 0 5px rgba(79, 146, 255, 0.22),
+    0 12px 28px -12px rgba(17, 51, 152, 0.4),
     0 36px 90px -28px rgba(14, 23, 38, 0.6);
   animation: dlx5-modal-rise 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -795,7 +796,7 @@
   white-space: nowrap;
 }
 
-/* The panel's accent tick — indigo, matching the outline */
+/* The panel's accent tick — cobalt, matching the outline */
 .dlx5-modal-eyebrow::before {
   content: '';
   width: 6px;

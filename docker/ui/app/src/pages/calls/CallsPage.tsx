@@ -55,6 +55,7 @@
  * React #310: every hook is called unconditionally at the top.
  */
 import { useState, useCallback, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { searchCdrs } from '../../api/cdrs';
 import { listCustomers } from '../../api/customers';
@@ -105,9 +106,18 @@ export function CallsPage() {
   // keys off this; the Rate CDR write additionally requires isAdmin.
   const isStaff = isAdmin || isSupport;
 
-  const [draftFilters, setDraftFilters] = useState<CallsFilters>(defaultCallsFilters);
+  // `?customer=ID` (admin dashboard links) pre-selects the customer for staff.
+  const [searchParams] = useSearchParams();
+  const linkedCustomer = searchParams.get('customer');
+  const initialFilters = useCallback((): CallsFilters => {
+    const base = defaultCallsFilters();
+    return isStaff && linkedCustomer && /^\d+$/.test(linkedCustomer)
+      ? { ...base, customer_id: linkedCustomer }
+      : base;
+  }, [isStaff, linkedCustomer]);
+  const [draftFilters, setDraftFilters] = useState<CallsFilters>(initialFilters);
   const [committed, setCommitted] = useState<CommittedSearch>(() => ({
-    params: filtersToParams(defaultCallsFilters()),
+    params: filtersToParams(initialFilters()),
     nonce: 0,
   }));
   const [page, setPage] = useState(1);

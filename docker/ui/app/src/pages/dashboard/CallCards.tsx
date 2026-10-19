@@ -7,6 +7,10 @@
  *   RecentCard   GET /cdrs           the newest calls: time · from · to · outcome · quality
  *   BusiestCard  GET /reports/numbers top numbers by calls, with a relative bar
  *
+ * The admin's All customers view passes platform-wide feeds plus a
+ * customer-name map: Recent calls then gains a Customer column whose names
+ * jump to that customer's dashboard.
+ *
  * Tenant redaction holds: no money, no raw FreeSWITCH values, no packet
  * counters, no MOS figures — quality is words + tone from quality.ts only.
  */
@@ -49,9 +53,13 @@ export interface ActivityCardProps {
   activity: UseQueryResult<CdrActivityResponse>;
   onOpen: () => void;
   order: number;
+  /** Line shown when the week had no calls. */
+  emptyText?: string;
 }
 
-export function VolumeCard({ activity, onOpen, order }: ActivityCardProps) {
+const NO_CALLS = 'No calls reached your numbers in the last 7 days.';
+
+export function VolumeCard({ activity, onOpen, order, emptyText = NO_CALLS }: ActivityCardProps) {
   const data = activity.data;
   return (
     <Card
@@ -70,7 +78,7 @@ export function VolumeCard({ activity, onOpen, order }: ActivityCardProps) {
           <CardState kind="loading">Loading call activity…</CardState>
         )
       ) : data.kpis.calls === 0 ? (
-        <p className="ad-quiet">No calls reached your numbers in the last 7 days.</p>
+        <p className="ad-quiet">{emptyText}</p>
       ) : (
         <>
           <WeekBars data={data} />
@@ -140,7 +148,7 @@ function WeekBars({ data }: { data: CdrActivityResponse }) {
 const RING_R = 42;
 const RING_C = 2 * Math.PI * RING_R;
 
-export function QualityCard({ activity, onOpen, order }: ActivityCardProps) {
+export function QualityCard({ activity, onOpen, order }: Omit<ActivityCardProps, 'emptyText'>) {
   const k = activity.data?.kpis;
   const share = k?.good_share_pct ?? null;
   const tone = goodShareColor(share);
@@ -222,15 +230,29 @@ export interface RecentCardProps {
   nowMs: number;
   onOpen: () => void;
   order: number;
+  sub?: string;
+  /** Customer id → name. When given, a Customer column is shown. */
+  customerNames?: ReadonlyMap<number, string>;
+  /** Makes the customer names buttons (admin: open that customer's dashboard). */
+  onPickCustomer?: (customerId: number) => void;
 }
 
-export function RecentCard({ calls, nowMs, onOpen, order }: RecentCardProps) {
+export function RecentCard({
+  calls,
+  nowMs,
+  onOpen,
+  order,
+  sub = 'The newest calls to your numbers',
+  customerNames,
+  onPickCustomer,
+}: RecentCardProps) {
   const rows = calls.data?.items ?? [];
+  const showCustomer = customerNames !== undefined;
   return (
     <Card
       id="ad-recent"
       title="Recent calls"
-      sub="The newest calls to your numbers"
+      sub={sub}
       icon={<Activity size={15} strokeWidth={2.2} />}
       action={<OpenActivity onOpen={onOpen} />}
       className="ad-span-8 ad-card-calls"
@@ -251,7 +273,7 @@ export function RecentCard({ calls, nowMs, onOpen, order }: RecentCardProps) {
         <p className="ad-quiet">No calls in the last 7 days.</p>
       ) : (
         <div className="ad-tablewrap">
-          <table className="ad-table ad-calltable">
+          <table className={`ad-table ad-calltable${showCustomer ? ' ad-calltable-cust' : ''}`}>
             <thead>
               <tr>
                 <th scope="col">When</th>
@@ -259,6 +281,7 @@ export function RecentCard({ calls, nowMs, onOpen, order }: RecentCardProps) {
                 <th scope="col" className="ad-col-to">To</th>
                 <th scope="col">Outcome</th>
                 <th scope="col">Quality</th>
+                {showCustomer && <th scope="col" className="ad-col-cust">Customer</th>}
               </tr>
             </thead>
             <tbody>
@@ -294,6 +317,11 @@ export function RecentCard({ calls, nowMs, onOpen, order }: RecentCardProps) {
                         </span>
                       )}
                     </td>
+                    {showCustomer && (
+                      <td className="ad-col-cust">
+                        <CustomerName id={cdr.customer_id} names={customerNames} onPick={onPickCustomer} />
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -302,6 +330,31 @@ export function RecentCard({ calls, nowMs, onOpen, order }: RecentCardProps) {
         </div>
       )}
     </Card>
+  );
+}
+
+/** A customer's name — a button to their dashboard when `onPick` is given. */
+export function CustomerName({
+  id,
+  names,
+  onPick,
+}: {
+  id: number | null | undefined;
+  names: ReadonlyMap<number, string> | undefined;
+  onPick?: (customerId: number) => void;
+}) {
+  if (id == null) return <span className="ad-faint">—</span>;
+  const name = names?.get(id) ?? `Customer #${id}`;
+  if (!onPick) return <span className="ad-cust ad-ellipsis">{name}</span>;
+  return (
+    <button
+      type="button"
+      className="ad-cust ad-cust-btn ad-ellipsis"
+      onClick={() => onPick(id)}
+      title={`Open ${name}’s dashboard`}
+    >
+      {name}
+    </button>
   );
 }
 

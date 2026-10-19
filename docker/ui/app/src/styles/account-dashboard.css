@@ -24,8 +24,8 @@
 .ad-scope {
   --ad-granite: #070c16;
   --ad-granite-hi: #0c1424;
-  --ad-cobalt: #113398;
-  --ad-azure-bright: #4f92ff;
+  --ad-cobalt: var(--brand-cobalt, #113398);
+  --ad-azure-bright: var(--brand-azure-bright, #4f92ff);
   --ad-live: #22c55e; /* app success green — legible on granite */
   --ad-slate: #8b99b0;
   --ad-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -218,7 +218,7 @@
 }
 
 .ad-btn-glow:hover {
-  background: linear-gradient(180deg, #62a0ff 0%, var(--ad-azure-bright) 100%);
+  background: var(--ad-azure-bright);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.32),
     0 10px 28px -8px rgba(47, 125, 246, 0.95),
@@ -231,11 +231,17 @@
 
 .ad-btn-primary {
   color: #fff;
-  background: var(--rcf-azure);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 4px 12px -4px rgba(47, 125, 246, 0.55);
+  background: var(--brand-btn-bg, linear-gradient(180deg, #2f7df6 0%, #1d63dd 62%));
+  border-color: var(--brand-btn-edge, rgba(17, 51, 152, 0.28));
+  box-shadow: var(--brand-btn-shadow, inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 6px 16px -8px rgba(47, 125, 246, 0.7));
 }
 
-.ad-btn-primary:hover { background: var(--rcf-azure-deep); }
+.ad-btn-primary:hover {
+  background: var(--brand-btn-bg-hover, #1d63dd);
+  box-shadow: var(--brand-btn-shadow-hover, 0 10px 24px -8px rgba(47, 125, 246, 0.85));
+}
+
+.ad-btn-primary:active { background: var(--brand-btn-bg-active, #1d63dd); }
 
 .ad-btn-quiet {
   color: var(--rcf-azure-deep);
@@ -1415,6 +1421,185 @@ button.ad-kpi { cursor: pointer; }
 
 .ad-prompt-picker { width: min(320px, 100%); margin-top: 6px; text-align: left; }
 
+/* ─── Admin dashboard (AdminDashboard / AdminCards / AdminScopeSelect) ─────
+   The admin's "Viewing" dropdown sits in the granite header's tools row as
+   dark glass; the header can also carry a quiet glass secondary action
+   ("View as customer"). The customers table reuses .ad-table / .ad-row. */
+
+.ad-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.ad-btn-glass {
+  color: #e8eef9;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.ad-btn-glass:hover {
+  color: #fff;
+  background: rgba(79, 146, 255, 0.14);
+  border-color: color-mix(in srgb, var(--ad-azure-bright) 55%, transparent);
+}
+
+.ad-btn-glass:focus-visible { outline-color: var(--ad-azure-bright); }
+
+.ad-scope-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ad-scope-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #93a4c0;
+  white-space: nowrap;
+}
+
+.ad-scope-field {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ad-scope-select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-width: 220px;
+  max-width: 320px;
+  height: 40px;
+  padding: 0 38px 0 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #fff;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: border-color var(--rcf-ease), background-color var(--rcf-ease), box-shadow var(--rcf-ease);
+}
+
+.ad-scope-select:hover {
+  border-color: color-mix(in srgb, var(--ad-azure-bright) 55%, transparent);
+  background: rgba(79, 146, 255, 0.1);
+}
+
+.ad-scope-select:focus-visible {
+  outline: none;
+  border-color: var(--ad-azure-bright);
+  box-shadow: 0 0 0 3px var(--brand-glow, rgba(47, 125, 246, 0.35));
+}
+
+/* Native option popups render on a light OS surface. */
+.ad-scope-select option,
+.ad-scope-select optgroup { color: #0e1726; background: #fff; }
+
+.ad-scope-caret {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 15px;
+  height: 15px;
+  transform: translateY(-50%);
+  color: #b4c2d9;
+  pointer-events: none;
+}
+
+/* Customers table */
+.ad-custname {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rcf-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ad-typeword { font-size: 12.5px; color: var(--rcf-ink-soft); white-space: nowrap; }
+.ad-col-num { text-align: right; white-space: nowrap; }
+.ad-table th.ad-col-num { text-align: right; }
+.ad-row:hover .ad-chev-go,
+.ad-row:focus-visible .ad-chev-go { transform: translateX(2px); color: var(--rcf-azure-deep); }
+
+@container ad-numbers (max-width: 540px) {
+  .ad-custtable thead { display: none; }
+  .ad-custtable .ad-col-type { display: none; }
+
+  .ad-custtable .ad-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "name status chev"
+      "nums paused chev";
+    gap: 6px 14px;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--rcf-line-soft);
+  }
+
+  .ad-custtable .ad-row > td { padding: 0 !important; border: none; }
+  .ad-custtable .ad-row > td:nth-child(1) { grid-area: name; min-width: 0; }
+  .ad-custtable .ad-row > td:nth-child(3) { grid-area: status; justify-self: end; }
+  .ad-custtable .ad-row > td:nth-child(4) { grid-area: nums; justify-self: start; text-align: left; }
+  .ad-custtable .ad-row > td:nth-child(4)::before { content: 'Numbers '; font-size: 12px; color: var(--rcf-ink-dim); }
+  .ad-custtable .ad-row > td:nth-child(5) { grid-area: paused; justify-self: end; }
+  .ad-custtable .ad-row > td:nth-child(5)::before { content: 'Paused '; font-size: 12px; color: var(--rcf-ink-dim); }
+  .ad-custtable .ad-row > td.ad-col-chev { grid-area: chev; align-self: center; }
+}
+
+/* Customer names on calls / requests — a quiet link to that customer's dashboard. */
+.ad-cust {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rcf-ink-soft);
+  vertical-align: middle;
+}
+
+.ad-cust-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  color: var(--rcf-azure-deep);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.ad-cust-btn:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ad-cust-btn:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+
+.ad-calltable .ad-col-cust { max-width: 180px; }
+
+@container ad-calls (max-width: 560px) {
+  .ad-calltable-cust tbody tr {
+    grid-template-areas:
+      "when outcome"
+      "from quality"
+      "cust cust";
+  }
+
+  .ad-calltable-cust td.ad-col-cust { grid-area: cust; max-width: none; }
+}
+
+/* An admin to-do count (waiting approvals / pending releases). */
+.ad-fact-todo { color: var(--rcf-azure-deep) !important; }
+
 /* ─── Responsive (content width) ────────────────────────────────────────── */
 
 @container ad-shell (max-width: 1240px) {
@@ -1440,6 +1625,10 @@ button.ad-kpi { cursor: pointer; }
   .ad-header-tools { width: 100%; justify-content: stretch; }
   .ad-header-tools .ad-switch-scroll { width: 100%; }
   .ad-header-tools .ad-btn-glow { width: 100%; }
+  .ad-header-actions { width: 100%; }
+  .ad-header-actions .ad-btn { flex: 1 1 auto; }
+  .ad-scope-pick { width: 100%; }
+  .ad-scope-select { max-width: none; min-width: 0; }
 }
 
 /* ─── Reduced motion ────────────────────────────────────────────────────── */
@@ -1461,6 +1650,7 @@ button.ad-kpi { cursor: pointer; }
   .ad-row,
   .ad-chev,
   .ad-switch-opt,
+  .ad-scope-select,
   .ad-search input,
   .ad-linkbtn-arrow svg {
     transition: none;
@@ -1472,7 +1662,9 @@ button.ad-kpi { cursor: pointer; }
   .ad-action:focus-visible,
   .ad-btn-glow:hover,
   .ad-action:hover .ad-action-arrow,
-  .ad-linkbtn-arrow:hover svg {
+  .ad-linkbtn-arrow:hover svg,
+  .ad-row:hover .ad-chev-go,
+  .ad-row:focus-visible .ad-chev-go {
     transform: none;
   }
 }

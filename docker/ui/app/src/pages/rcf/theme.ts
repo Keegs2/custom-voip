@@ -11,8 +11,8 @@ export const INK = '#0e1726';
 export const INK_SOFT = '#46566f';
 export const INK_DIM = '#5d6f8c';
 export const INK_FAINT = '#8b99b0';
-export const AZURE = '#2f7df6';
-export const AZURE_DEEP = '#1d63dd';
+// The blues come from the one brand family (src/styles/brand.ts).
+export { BRAND_AZURE as AZURE, BRAND_AZURE_DEEP as AZURE_DEEP } from '../../styles/brand';
 export const GREEN = '#15803d';
 export const RED = '#b91c1c';
 

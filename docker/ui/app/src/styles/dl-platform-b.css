@@ -164,7 +164,7 @@
   height: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--rcf-azure);
+  background: var(--rcf-azure-deep); /* 5.4:1 for 10.5px white digits */;
   color: #ffffff;
   font-size: 0.66rem;
   font-weight: 700;
@@ -188,7 +188,8 @@
   border-radius: 8px;
 }
 
-.cqf-action.dl-btn-primary { box-shadow: 0 6px 16px -10px rgba(47, 125, 246, 0.7); }
+/* Search inherits the brand primary button (gradient + highlight + glow) from
+   the shared .dl-btn-primary rule in index.css — no local shadow override. */
 
 /* In-button busy indicator (replaces the icon; label width stays fixed) */
 .cqf-spin {

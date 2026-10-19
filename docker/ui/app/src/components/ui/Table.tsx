@@ -59,8 +59,8 @@ export function Thead({ children, className }: TableProps) {
     <thead
       className={cn(className)}
       style={{
-        background: 'rgba(59,130,246,0.035)',
-        boxShadow: 'inset 0 -1px 0 0 rgba(59,130,246,0.12)',
+        background: 'rgba(47,125,246,0.035)',
+        boxShadow: 'inset 0 -1px 0 0 rgba(47,125,246,0.12)',
       }}
     >
       {children}
