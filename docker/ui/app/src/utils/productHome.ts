@@ -10,8 +10,9 @@ import { API_CALLING_ENABLED } from '../config/features';
  * customer view must land on the customer home, or the `/` → home →
  * RequireAdmin → `/` redirects loop forever.
  *
- * - Admins land on `/cdrs` (CDR Search) — platform + customer administration
- *   lives in TED, so there is no revup `/admin` to send them to.
+ * - Admins land on `/dashboard` — the admin dashboard (All customers, with a
+ *   dropdown to open any one customer). Customer + platform administration
+ *   itself lives in TED; the dashboard links into the staff tools here.
  * - Support lands on `/troubleshooting`.
  * - Customers (rcf / hybrid / ucaas / unknown type) land on the account
  *   `/dashboard` — readonly users too (it is read-only for them: RowEditor
@@ -26,7 +27,7 @@ import { API_CALLING_ENABLED } from '../config/features';
  */
 export function productHome(user: User | null, effectiveAdmin: boolean): string {
   if (!user) return '/rcf';
-  if (effectiveAdmin) return '/cdrs';
+  if (effectiveAdmin) return '/dashboard';
   if (user.role === 'support') return '/troubleshooting';
   const hasAccount = user.customer_id != null || user.role === 'admin';
   if (!hasAccount) return '/my-account';

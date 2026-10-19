@@ -22,7 +22,7 @@
  *
  * Call detail (2026-10): clicking a row — or Enter/Space on a focused row —
  * opens <CallTraceModal> (pages/troubleshooting/CallTraceModal.tsx), a large
- * portal panel with a distinct indigo outline holding the call summary, the
+ * portal panel with a distinct cobalt outline holding the call summary, the
  * Grafana deep link, PCAP export, network path, correlation notice and the
  * full <SipLadder> + packet inspector. It replaced the old inline expanded
  * row. ←/→ (or the panel's Prev/Next) step through the calls on the current

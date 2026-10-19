@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getCallAttestation } from '../../api/stir';
 import { ApiError } from '../../api/client';
 import { Spinner } from '../ui/Spinner';
+import { BRAND_AZURE } from '../../styles/brand';
 import type { CallAttestation } from '../../types/stir';
 import {
   attestColor,
@@ -91,7 +92,7 @@ function Arrow() {
   return (
     <span
       aria-hidden="true"
-      style={{ color: '#3b82f6', fontSize: '0.9rem', lineHeight: 1, opacity: 0.7, flexShrink: 0 }}
+      style={{ color: BRAND_AZURE, fontSize: '0.9rem', lineHeight: 1, opacity: 0.7, flexShrink: 0 }}
     >
       →
     </span>

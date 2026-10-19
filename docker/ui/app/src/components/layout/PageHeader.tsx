@@ -25,7 +25,7 @@ export function PageHeader({ title, subtitle, actions, className }: PageHeaderPr
         className="pointer-events-none absolute left-8 right-8 top-0 h-px"
         style={{
           background:
-            'linear-gradient(90deg, transparent, rgba(59,130,246,0.55), transparent)',
+            'linear-gradient(90deg, transparent, rgba(47,125,246,0.55), transparent)',
         }}
       />
       <div className="relative z-[1] min-w-0">

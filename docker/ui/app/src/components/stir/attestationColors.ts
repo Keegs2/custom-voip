@@ -6,12 +6,14 @@
  * identical everywhere.
  *
  * Palette follows the app convention (green=good, amber=partial, red=bad,
- * gray=none) with the blue brand (#3b82f6) reserved for `div` (diversion):
+ * gray=none) with the brand blue (src/styles/brand.ts) reserved for `div`
+ * (diversion) — azure-deep text (5.4:1 on white) on an azure wash:
  *   - Attestation:  A = green,   B = amber,  C = gray,  div = blue
  *   - Verstat:      Passed = green,  Failed = red,  No-TN / none = gray
  */
 
 import type { AttestationLevel, StirBadgeFields, StirBadgeSource, VerstatSource } from '../../types/stir';
+import { BRAND_AZURE_DEEP, brandAzureAlpha } from '../../styles/brand';
 
 export interface ColorToken {
   /** Foreground / text colour. */
@@ -26,7 +28,7 @@ export interface ColorToken {
 const GREEN: ColorToken = { text: '#22c55e', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.25)' };
 const AMBER: ColorToken = { text: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.28)' };
 const RED: ColorToken   = { text: '#ef4444', bg: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.28)'  };
-const BLUE: ColorToken  = { text: '#3b82f6', bg: 'rgba(59,130,246,0.14)', border: 'rgba(59,130,246,0.30)' };
+const BLUE: ColorToken  = { text: BRAND_AZURE_DEEP, bg: brandAzureAlpha(0.12), border: brandAzureAlpha(0.3) };
 const GRAY: ColorToken  = { text: '#94a3b8', bg: 'rgba(74,85,104,0.15)',  border: 'rgba(74,85,104,0.30)'  };
 
 /** Colour for an attestation level. `null`/unknown → gray ("none"). */

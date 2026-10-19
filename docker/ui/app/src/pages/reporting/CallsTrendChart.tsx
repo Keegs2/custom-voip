@@ -1,6 +1,6 @@
 /**
- * CallsTrendChart — "calls over time" as stacked bars: answered (azure) at
- * the bottom, missed (amber) on top, one bar per day / week / month bucket.
+ * CallsTrendChart — "calls over time" as stacked bars: answered (brand azure)
+ * at the bottom, missed (neutral slate) on top, one bar per day / week / month bucket.
  *
  * Built in the same hand-rolled idiom as components/charts/QualityTrendChart:
  *   - TRUE-PIXEL TEXT: the SVG is drawn at the container's measured width
@@ -17,13 +17,14 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import type { ReportTrendPoint, TrendBucket } from '../../types/reports';
 import { dayKeyToUtc, fmtMinutes, plural, TREND_COLORS } from './reportFormat';
+import { brandAzureAlpha } from '../../styles/brand';
 import '../../styles/dl-trend-chart.css';
 
 const ANSWERED = TREND_COLORS.answered;
 const MISSED = TREND_COLORS.missed;
 const INK_TICK = '#46566f';
 const GRID_LINE = 'rgba(14, 23, 38, 0.055)';
-const HOVER_BAND = 'rgba(47, 125, 246, 0.07)';
+const HOVER_BAND = brandAzureAlpha(0.07);
 
 const PAD_L = 40;
 const PAD_R = 10;

@@ -18,7 +18,7 @@ export function Spinner({ size = 'md', className }: SpinnerProps) {
       role="status"
       aria-label="Loading"
       className={cn(
-        'inline-block rounded-full border-[#3b82f6]/30 border-t-[#3b82f6] animate-spin flex-shrink-0',
+        'inline-block rounded-full border-[color:var(--brand-azure)]/30 border-t-[color:var(--brand-azure)] animate-spin flex-shrink-0',
         sizeClasses[size],
         className,
       )}

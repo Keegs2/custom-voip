@@ -37,7 +37,7 @@ export const GOOD = '#15803d';
 export const WARN = '#b45309';
 export const BAD = '#b91c1c';
 export const INK_FAINT = '#8b99b0';
-export const AZURE_DEEP = '#1d63dd';
+export { BRAND_AZURE_DEEP as AZURE_DEEP } from '../../styles/brand';
 
 /* ─── The one grade definition (§D) ─────────────────────────────────────── */
 

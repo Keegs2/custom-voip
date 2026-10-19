@@ -33,7 +33,7 @@ const controlBase = [
   'text-sm px-3 py-2 rounded-lg w-full h-9',
   'border border-[#2a2f45] bg-[#1e2130] text-[#e2e8f0]',
   'outline-none transition-all duration-150',
-  'focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)]',
+  'focus:border-[color:var(--brand-azure)] focus:shadow-[0_0_0_3px_rgba(47,125,246,0.2)]',
   'placeholder:text-[#4a5568]',
   'disabled:opacity-50 disabled:cursor-not-allowed',
 ].join(' ');

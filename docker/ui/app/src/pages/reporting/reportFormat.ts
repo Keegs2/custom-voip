@@ -12,6 +12,7 @@
  * offset (same idiom as QualityTrendChart).
  */
 import type { IsoDate, QualityGrade } from '../../types/reports';
+import { CHART_SERIES } from '../../styles/brand';
 
 /* ─── Timezone ──────────────────────────────────────────────────────────── */
 
@@ -299,4 +300,6 @@ export const GRADE_BLURB: Record<QualityGrade, string> = {
 
 /* ─── Chart series colors (legend + bars + PDF share them) ──────────────── */
 
-export const TREND_COLORS = { answered: '#2f7df6', missed: '#d97706' } as const;
+// Brand chart roles (src/styles/brand.ts): answered = azure, missed = the
+// neutral slate — the same pair as the account dashboard's Call volume card.
+export const TREND_COLORS = { answered: CHART_SERIES.primary, missed: CHART_SERIES.neutral } as const;

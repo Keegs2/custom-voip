@@ -108,8 +108,9 @@ QueryClient defaults:
 / (index)                 DashboardPage            (PUBLIC — outside RequireAuth, inside AppLayout)
 
 ── inside AppLayout + RequireAuth ──
-/dashboard                AccountDashboard (pages/dashboard/) — customer account home; tenants +
-                          admin "View as Customer" preview; everyone else → productHome
+/dashboard                AccountDashboard (pages/dashboard/) — account home: tenants, admin "View as
+                          Customer" preview, and the ADMIN dashboard (?customer=ID | All customers);
+                          support / no account → productHome
 /rcf                      RcfPage (customer numbers manager / admin console, + pages/rcf/ Call Activity)
 /api-dids                 ApiDidsPage — RETIRED: ProductHomeRedirect while API_CALLING_ENABLED=false
 /trunks                   TrunksPage
@@ -133,8 +134,9 @@ QueryClient defaults:
   (`SidebarLoginForm`) / landing `SignInModal`; `LoginPage.tsx` is orphaned.
 - **There is no admin UI in this SPA any more.** Customer + platform
   administration (customers, trunks, carriers, rates, tiers, DIDs, onboarding)
-  lives in **TED** (the CRAG console). Staff-facing pages here are Calls &
-  Quality (`/cdrs`) and Troubleshooting only.
+  lives in **TED** (the CRAG console). Staff-facing pages here are the admin
+  dashboard (`/dashboard`), the admin `/rcf` console, Calls & Quality (`/cdrs`)
+  and Troubleshooting.
 
 `AuthProvider` is intentionally **inside** `BrowserRouter` so it can call `useNavigate`.
 
@@ -194,7 +196,8 @@ customer pages swap self-scoped endpoints for the admin ones (see
 `pages/dashboard/accountData.ts`). With no pick yet, /dashboard and /rcf show
 `PreviewPrompt` (same picker).
 
-**`utils/productHome.ts`** — signed-in home: admin → `/cdrs`, support →
+**`utils/productHome.ts`** — signed-in home: admin → `/dashboard` (the admin
+dashboard, All customers), support →
 `/troubleshooting`, `trunk` → `/trunks`, `api` → `/my-account` (API Calling
 retired), a tenant login with no customer → `/my-account`, everyone else
 (rcf/hybrid/ucaas/unknown, readonly included, admin in customer view) →
@@ -333,37 +336,86 @@ Navigation hub. Static card grid linking to all product areas. No API calls.
 API Calling copy + product card render only while `API_CALLING_ENABLED` (src/config/features.ts) is true — the product is retired (2026-09), so they are hidden.
 
 **`AccountDashboard`** (`/dashboard`, `pages/dashboard/`)
-The customer's account home — everything at a glance, as cards. Renders for
-`effectiveCustomer` (tenant, or admin preview — keyed by its id); admin in
-customer view with no pick → `PreviewPrompt`; anyone else → `productHome`.
-- `DashboardHeader` — compact granite band: name, status word + dot, "Customer
-  since", "Staff preview" tag for admins; product switcher driven by
-  `products.ts` (RCF live; SIP Trunking / Visual Voicemail dimmed "Soon",
-  aria-disabled) and the primary action (Request numbers for the tenant `user`
-  role; Manage numbers for a staff preview).
-- `KpiCards` — six cards: Numbers · Forwarding (paused count) · Calls 7d ·
-  Answered · Sounded good (quality.ts tone + word) · Team; 3px tone edge, icon
-  chip, 7-day sparklines; cards link to /rcf, Call activity, /my-account.
+The account home — everything at a glance, as cards. `AccountDashboard.tsx` is
+only the route entry: tenant → `AccountDashboardView viewer="tenant"`; admin in
+customer view → `viewer="preview"` on the preview customer (or `PreviewPrompt`
+until one is picked); admin (normal view) → `AdminDashboard`; support / no
+account → `productHome`. Every view is KEYED (customer id / `all`), so a scope
+switch remounts instead of changing hook order.
+- `DashboardHeader` — compact granite band: kicker + amber tag ("Staff
+  preview" / "Staff" / "Support"), name, status word + dot, "Customer since",
+  optional meta; tools row: optional scope dropdown (`AdminScopeSelect`),
+  optional product switcher (`products.ts`: RCF live; SIP Trunking / Visual
+  Voicemail dimmed "Soon", aria-disabled), a quiet glass secondary action and
+  the azure-glow primary action. Also used by the admin `/rcf` console.
+- `KpiCards` (`KpiRow`) — six cards. Account scope: Numbers · Forwarding
+  (paused count) · Calls 7d · Answered · Sounded good (quality.ts tone + word)
+  · Team. Platform scope (`scope="platform"`): Customers leads, Team dropped.
+  3px tone edge, icon chip, 7-day sparklines; `numbersHref` (tenant `/rcf`,
+  admin `/rcf?customer=…`), call cards open Call activity; Team links My
+  account (tenant/preview) or nothing (admin).
 - `NumbersCard` — small table (8 rows), search + All/Forwarding/Paused chips,
-  row → shared `RowEditor` inline, "View all N numbers" → /rcf.
+  row → shared `RowEditor` inline (`isAdmin` = admin fields such as max
+  channels, admin dashboard only), "View all N numbers" → `allHref`.
 - `CallCards` — Call volume (daily answered/missed bars), Call quality
   (good-share ring + one-way/poor/graded), Recent calls (last 6, outcome +
-  quality words from `pages/rcf/callOutcome.ts`), Busiest numbers.
-- `AccountCards` — Team, Number requests, Quick actions (Request/Manage numbers
-  → `DidManagement` in `DashboardOverlay`; Open call activity →
-  `CallActivityTab` in `DashboardOverlay`; Download a report → /reporting;
-  Manage all numbers → /rcf).
-- Data (`accountData.ts`) — tenant vs staff preview:
+  quality words from `pages/rcf/callOutcome.ts`; optional Customer column via
+  `customerNames`, names are buttons to that customer's dashboard), Busiest
+  numbers. `CustomerName` is shared with the admin cards.
+- `AccountCards` — Team (header link optional), Number requests (optional
+  footer action; optional customer names), `QuickActionsCard` (renders a list
+  built by `quickActions.tsx`: `customerQuickActions` — Request/Manage numbers →
+  `DidManagement` overlay, Open call activity → `CallActivityTab` overlay,
+  Download a report, Manage all numbers; `adminCustomerActions` /
+  `adminPlatformActions` — see below).
+- **Admin dashboard** (`AdminDashboard.tsx`, admin in normal view). Same look,
+  "Viewing" dropdown in the header (All customers default | each call
+  forwarding customer; a deep-linked customer of another type is added).
+  Scope in the URL: `?customer=<id>`, absent = All customers (push history, so
+  Back works; an unknown id → "We couldn't find customer #id"). Helpers in
+  `adminLinks.ts` (`parseCustomerParam`, `dashboardHref`, `rcfConsoleHref`,
+  `callsHref`, `reportingHref`, `READS_CUSTOMER_PARAM`).
+  - **All customers** (`AdminOverview`): KPIs platform-wide (Customers ·
+    Numbers · Forwarding/paused · Calls 7d · Answered · Sounded good); cards
+    `CustomersCard` (name/since · type · status · numbers · paused; row →
+    that customer; search + show-all above 8), Call volume, Call quality,
+    Recent calls (+ Customer column), Number requests across customers
+    (waiting approval / release pending — the admin's to-dos), `PausedCard`,
+    `InventoryCard` (pool: available · assigned · call forwarding · waiting ·
+    releasing), admin quick actions (Numbers console `/rcf?customer=all`, Call
+    activity overlay for all customers, Calls & Quality, Reporting,
+    Troubleshooting). `AdminCards.tsx`.
+  - **One customer**: `AccountDashboardView viewer="admin"` — the customer
+    cards with admin actions: header "View as customer" (sets
+    `previewCustomer` + turns on customer view → lands on that customer's
+    dashboard as the customer sees it) and "Manage numbers" (DID management
+    overlay); RowEditor admin fields; numbers links → `/rcf?customer=ID`;
+    read-only team; quick actions View as this customer · Numbers console ·
+    Call activity · Calls & Quality (`/cdrs?customer=ID`) · Reporting
+    (`/reporting?customer=ID`) · Troubleshooting. No "Request numbers".
+  - `/cdrs` and `/reporting` do NOT read `?customer=` yet — their action
+    sub-lines say "pick X in Customer" until `READS_CUSTOMER_PARAM` flips.
+- Data (`accountData.ts`) — tenant vs staff:
   account `GET /customers/me` vs `GET /customers/{id}` (identity fields only —
   the admin row carries financials, never copied); team `GET /auth/team` vs
   `GET /search/user/by-customer/{id}` (is_self false); number requests
   `GET /numbers/my` vs `GET /numbers/inventory?customer_id=`; both pass
   `customer_id` to `GET /rcf`, `/cdrs/activity` (7d), `/reports/numbers` (7d),
   `/cdrs` (recent). Staff number counts come from the /rcf list (100-row cap →
-  "100+").
+  "100+"). `useWeekActivity(null)` / `useRecentCalls(null)` = every customer.
+- Admin data (`adminData.ts`, admin-only endpoints): customers
+  `GET /customers?limit=500` (shared `['customers-dropdown']`, `select` maps to
+  identity fields — no money); platform numbers + per-customer counts
+  `GET /numbers/inventory?product_type=rcf&limit=1000` (statuses on an
+  account; exact total, "1,000+" past one page); paused `GET /rcf?enabled=false`
+  (server cap 100 → "+"); open requests `GET /numbers/inventory?status=reserved`
+  + `?status=release_requested`; pool `GET /numbers/stats`. NOT available
+  without a backend change: per-customer call counts and a cross-customer
+  "busiest numbers" (no cross-customer per-number/per-customer roll-up).
 - Styles `styles/account-dashboard.css` (`ad-`): 12-col card grid (8/4 spans) →
   2 cols → 1 col by CONTENT width (container queries); one load-in stagger;
-  reduced motion respected. No money anywhere.
+  reduced motion respected. Brand blues via `--brand-*` tokens. No money
+  anywhere.
 
 **`RcfPage`** (`/rcf`)
 Picks one of three views (separate components, so toggling customer view or
@@ -376,10 +428,24 @@ the preview can't break hook order):
   `accountData.ts` hooks as the dashboard. Styles `styles/rcf-dashboard.css`
   (`rcfd-`/`rcfn-`).
 - **Admin in customer view, no preview picked**: `PreviewPrompt`.
-- **Admin / support**: the Administrative Call Forwarding Console (customer scope
-  select, tabs Numbers / Call Activity / DID Management) — unchanged.
-`GET /rcf` is capped at 100 rows server-side and ignores limit/offset; the
-board pages in the browser and says so above 100.
+- **Admin / support**: the Administrative Call Forwarding Console (`RcfConsole`),
+  in the dashboard's look: `.rcf-scope.ad-scope.rcfc` + `.ad-shell`, granite
+  `DashboardHeader` (Staff/Support tag, "Viewing X", Forwards / Forwarding /
+  Paused figures, the `AdminScopeSelect` dropdown incl. All customers, "Open
+  dashboard" → `/dashboard?customer=…`), a segmented tab rail (Numbers / Call
+  activity / DID management; WAI-ARIA tabs, arrow keys), Numbers as a dashboard
+  `Card` with the `.ad-table` look (search incl. customer, area-code filter,
+  sortable header BUTTONS, Forwarding/Paused words + dot, Customer column on
+  All customers, rows → `RowEditor` with admin fields, browser paging).
+  Scope is in the URL: `?customer=all|<id>`; absent = nothing chosen (prompt,
+  nothing loads). Numbers / Activity / DID state is keyed per scope. DID
+  management on All customers asks for one customer. `.rcfc .rcf-panel`
+  re-skins the Call activity / DID panels as cards (console only — the shared
+  `.rcf-panel/.dl-panel` rule is untouched). Styles: `rcfc-` in
+  `styles/rcf-dashboard.css`.
+`GET /rcf` is capped at 100 rows server-side and ignores limit/offset; both
+the board and the console fetch once and page in the browser, and say so at
+100.
 
 **`ReportingPage`** (`/reporting`, lazy)
 Staff pick a customer; an admin in customer view reports on the sidebar's
@@ -441,7 +507,7 @@ Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
   `pages/troubleshooting/callGrouping.assert.ts` (esbuild | node).
 - Results render as a table. **Clicking a row (or Enter/Space; ↑/↓ move between
   rows) opens `pages/troubleshooting/CallTraceModal.tsx`** — a portal modal
-  (z 1200, 2px indigo outline + ring, blurred backdrop) holding everything for
+  (z 1200, 2px cobalt outline + azure-bright ring, blurred backdrop) holding everything for
   that call: summary facts (start/last msg, result + attempts, STIR
   attestation, duration, zone, orig/term, legs), "Open in Grafana"
   (`buildGrafanaLink` in `callDisplay.ts`), PCAP export, network path,
@@ -478,8 +544,10 @@ content area (max-width 1160px, centered). Background `#0f1117`.
 Fixed left sidebar (collapsible on desktop via `SidebarCollapse`). Authenticated
 order: **Dashboard (top-level item) → Products → Insights (Reporting) →
 Administration/Support → Coming Soon**. **Dashboard** (`/dashboard`, normal live
-active style) shows for every non-support user with an `effectiveCustomer`
-(tenants, and an admin in customer view once a preview is picked). There is no
+active style) shows for platform admins (the admin dashboard) and every
+non-support user with an `effectiveCustomer` (tenants, and an admin in
+customer view once a preview is picked). Sidebar blues are the brand family
+(`#2f7df6` accents, `#4f92ff` on dark, sign-in button `--brand-btn-*`). There is no
 Documentation group any more (2026-10). Coming Soon
 is ALWAYS last and rendered darkened (muted header, dim slate rows + "Soon"
 pill, no product accent even when active) — new pre-launch or de-prioritised
@@ -578,7 +646,9 @@ inline edit/action affordances and live in the page directories (not `ui/`):
 
 Dropdown that lets admins filter portal pages by customer. Only renders when
 `isAdmin` is true. Loads up to 500 customers and can filter by `accountTypes`.
-Used on `RcfPage` and `CallQualityPage`.
+Currently imported nowhere (legacy dark style, brand accent `#2f7df6`). The
+admin dashboard and `/rcf` console use `pages/dashboard/AdminScopeSelect`
+(granite header dropdown) instead.
 
 ---
 

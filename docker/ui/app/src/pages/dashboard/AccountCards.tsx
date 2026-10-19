@@ -5,17 +5,23 @@
  *                     staff preview: /search/user/by-customer/{id})
  *   RequestsCard      numbers waiting on Granite (tenant: /numbers/my,
  *                     staff preview: /numbers/inventory?customer_id)
- *   QuickActionsCard  request / manage numbers, open call activity, reports,
- *                     the full numbers manager
+ *   QuickActionsCard  a list of actions — built by quickActions.tsx
+ *                     (customer set, or the admin sets)
+ *
+ * Staff variants: the Team card is read-only (no My account link), and the
+ * requests card can list every customer's requests with the customer's name
+ * as a way into that customer's dashboard.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { ArrowRight, BarChart3, Inbox, ListChecks, PhoneIncoming, Plus, Users, Zap } from 'lucide-react';
+import { ArrowRight, Inbox, Users, Zap } from 'lucide-react';
 import type { TeamMember, TeamRole } from '../../types/account';
 import type { DidInventoryItem } from '../../types/didInventory';
 import { fmt } from '../../utils/format';
 import { Card, CardState } from './Card';
+import { CustomerName } from './CallCards';
+import type { QuickAction } from './quickActions';
 import { fmtRelative, initials } from './accountData';
 
 // ─── Team ────────────────────────────────────────────────────────────────────
@@ -32,9 +38,21 @@ export interface TeamCardProps {
   team: UseQueryResult<TeamMember[]>;
   nowMs: number;
   order: number;
+  /** Header link (default My account), or null for none. */
+  link?: { to: string; label: string } | null;
+  /** Shown when nobody has access. */
+  emptyText?: string;
 }
 
-export function TeamCard({ team, nowMs, order }: TeamCardProps) {
+const MY_ACCOUNT_LINK = { to: '/my-account', label: 'My account' };
+
+export function TeamCard({
+  team,
+  nowMs,
+  order,
+  link = MY_ACCOUNT_LINK,
+  emptyText = 'No one has access yet. Ask Granite support to add a teammate.',
+}: TeamCardProps) {
   // ALL hooks unconditionally at the top (React #310).
   const [showAll, setShowAll] = useState(false);
   const members = useMemo(() => {
@@ -50,7 +68,7 @@ export function TeamCard({ team, nowMs, order }: TeamCardProps) {
       title="Team"
       icon={<Users size={15} strokeWidth={2.2} />}
       count={team.data ? team.data.length : null}
-      action={<Link to="/my-account" className="ad-linkbtn">My account</Link>}
+      action={link ? <Link to={link.to} className="ad-linkbtn">{link.label}</Link> : undefined}
       className="ad-span-4"
       order={order}
       footer={
@@ -68,7 +86,7 @@ export function TeamCard({ team, nowMs, order }: TeamCardProps) {
           <CardState kind="loading">Loading the team…</CardState>
         )
       ) : members.length === 0 ? (
-        <p className="ad-quiet">No one has access yet. Ask Granite support to add a teammate.</p>
+        <p className="ad-quiet">{emptyText}</p>
       ) : (
         <ul className="ad-team">
           {shown.map((m) => {
@@ -102,12 +120,25 @@ const REQUEST_PREVIEW = 4;
 
 export interface RequestsCardProps {
   dids: UseQueryResult<DidInventoryItem[]>;
-  actionLabel: string;
-  onOpen: () => void;
+  /** Footer button, or null for none. */
+  action: { label: string; onClick: () => void } | null;
   order: number;
+  sub?: string;
+  emptyText?: string;
+  /** Customer id → name: each request shows whose it is. */
+  customerNames?: ReadonlyMap<number, string>;
+  onPickCustomer?: (customerId: number) => void;
 }
 
-export function RequestsCard({ dids, actionLabel, onOpen, order }: RequestsCardProps) {
+export function RequestsCard({
+  dids,
+  action,
+  order,
+  sub = 'Waiting on Granite',
+  emptyText = 'Nothing waiting on Granite. Need more numbers? Request them any time.',
+  customerNames,
+  onPickCustomer,
+}: RequestsCardProps) {
   const open = useMemo(
     () => (dids.data ?? []).filter((d) => d.status === 'reserved' || d.status === 'release_requested'),
     [dids.data],
@@ -119,15 +150,17 @@ export function RequestsCard({ dids, actionLabel, onOpen, order }: RequestsCardP
     <Card
       id="ad-requests"
       title="Number requests"
-      sub="Waiting on Granite"
+      sub={sub}
       icon={<Inbox size={15} strokeWidth={2.2} />}
       count={dids.data ? open.length : null}
       className="ad-span-4"
       order={order}
       footer={
-        <button type="button" className="ad-btn ad-btn-quiet ad-btn-block" onClick={onOpen}>
-          {actionLabel}
-        </button>
+        action ? (
+          <button type="button" className="ad-btn ad-btn-quiet ad-btn-block" onClick={action.onClick}>
+            {action.label}
+          </button>
+        ) : undefined
       }
     >
       {dids.data === undefined ? (
@@ -137,7 +170,7 @@ export function RequestsCard({ dids, actionLabel, onOpen, order }: RequestsCardP
           <CardState kind="loading">Loading requests…</CardState>
         )
       ) : open.length === 0 ? (
-        <p className="ad-quiet">Nothing waiting on Granite. Need more numbers? Request them any time.</p>
+        <p className="ad-quiet">{emptyText}</p>
       ) : (
         <>
           <div className="ad-req-counts">
@@ -147,7 +180,14 @@ export function RequestsCard({ dids, actionLabel, onOpen, order }: RequestsCardP
           <ul className="ad-req-list">
             {open.slice(0, REQUEST_PREVIEW).map((d) => (
               <li key={d.id}>
-                <span className="ad-num ad-num-sm">{fmt(d.did)}</span>
+                {customerNames ? (
+                  <span className="ad-stack">
+                    <span className="ad-num ad-num-sm">{fmt(d.did)}</span>
+                    <CustomerName id={d.customer_id} names={customerNames} onPick={onPickCustomer} />
+                  </span>
+                ) : (
+                  <span className="ad-num ad-num-sm">{fmt(d.did)}</span>
+                )}
                 <span className={`ad-req-state ad-req-${d.status === 'reserved' ? 'pending' : 'release'}`}>
                   <span className="ad-dot" aria-hidden="true" />
                   {d.status === 'reserved' ? 'Waiting for approval' : 'Release pending'}
@@ -164,60 +204,19 @@ export function RequestsCard({ dids, actionLabel, onOpen, order }: RequestsCardP
 
 // ─── Quick actions ───────────────────────────────────────────────────────────
 
-interface ActionDef {
-  key: string;
-  label: string;
-  sub: string;
-  icon: ReactNode;
-  run: { to: string } | { onClick: () => void };
-}
-
 export interface QuickActionsCardProps {
-  numbersLabel: string;
-  onNumbers: () => void;
-  onActivity: () => void;
-  showReports: boolean;
+  actions: readonly QuickAction[];
   order: number;
+  title?: string;
+  sub?: string;
 }
 
-export function QuickActionsCard({ numbersLabel, onNumbers, onActivity, showReports, order }: QuickActionsCardProps) {
-  const actions: ActionDef[] = [
-    {
-      key: 'numbers',
-      label: numbersLabel,
-      sub: 'New numbers, releases and open requests',
-      icon: <Plus size={16} strokeWidth={2.2} />,
-      run: { onClick: onNumbers },
-    },
-    {
-      key: 'activity',
-      label: 'Open call activity',
-      sub: 'Every call, by number and time range',
-      icon: <PhoneIncoming size={16} strokeWidth={2.2} />,
-      run: { onClick: onActivity },
-    },
-    ...(showReports
-      ? [{
-          key: 'reports',
-          label: 'Download a report',
-          sub: 'Spreadsheet or PDF for any period',
-          icon: <BarChart3 size={16} strokeWidth={2.2} />,
-          run: { to: '/reporting' },
-        }]
-      : []),
-    {
-      key: 'all',
-      label: 'Manage all numbers',
-      sub: 'The full list, with sorting and paging',
-      icon: <ListChecks size={16} strokeWidth={2.2} />,
-      run: { to: '/rcf' },
-    },
-  ];
-
+export function QuickActionsCard({ actions, order, title = 'Quick actions', sub }: QuickActionsCardProps) {
   return (
     <Card
       id="ad-actions"
-      title="Quick actions"
+      title={title}
+      sub={sub}
       icon={<Zap size={15} strokeWidth={2.2} />}
       className="ad-span-4"
       order={order}

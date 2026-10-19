@@ -17,7 +17,7 @@ interface AdminCustomerSelectorProps {
   accountTypes?: string[];
 }
 
-export function AdminCustomerSelector({ selectedCustomerId, onSelect, accent = '#3b82f6', accountTypes }: AdminCustomerSelectorProps) {
+export function AdminCustomerSelector({ selectedCustomerId, onSelect, accent = '#2f7df6', accountTypes }: AdminCustomerSelectorProps) {
   const { isAdmin } = useAuth();
 
   const { data } = useQuery({
@@ -71,13 +71,13 @@ export function AdminCustomerSelector({ selectedCustomerId, onSelect, accent = '
           minWidth: 240,
           transition: 'box-shadow 0.18s ease, background 0.18s ease',
           cursor: 'pointer',
-          boxShadow: `inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px ${selectedCustomerId ? accent + '55' : 'rgba(59,130,246,0.12)'}`,
+          boxShadow: `inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px ${selectedCustomerId ? accent + '55' : 'rgba(47,125,246,0.12)'}`,
         }}
         onFocus={(e) => {
           e.currentTarget.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 1px ${accent}, 0 0 0 3px ${accent}28, 0 4px 18px -6px ${accent}47`;
         }}
         onBlur={(e) => {
-          e.currentTarget.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px ${selectedCustomerId ? accent + '55' : 'rgba(59,130,246,0.12)'}`;
+          e.currentTarget.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px ${selectedCustomerId ? accent + '55' : 'rgba(47,125,246,0.12)'}`;
         }}
       >
         <option value="">All Customers</option>

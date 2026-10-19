@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import type { ReactNode } from 'react';
+import { BRAND_AZURE, brandAzureAlpha } from '../../styles/brand';
 
 interface RequireAuthProps {
   /** When provided, renders children (wrapper usage). Omit to use as a layout route. */
@@ -71,10 +72,10 @@ function FullPageSpinner() {
           }}
         >
           <style>{`@keyframes auth-spin { to { transform: rotate(360deg); } }`}</style>
-          <circle cx="24" cy="24" r="18" stroke="rgba(59,130,246,0.15)" strokeWidth="4" />
+          <circle cx="24" cy="24" r="18" stroke={brandAzureAlpha(0.15)} strokeWidth="4" />
           <path
             d="M42 24a18 18 0 0 0-18-18"
-            stroke="#3b82f6"
+            stroke={BRAND_AZURE}
             strokeWidth="4"
             strokeLinecap="round"
           />

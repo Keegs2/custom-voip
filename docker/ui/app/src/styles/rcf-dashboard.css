@@ -21,7 +21,7 @@
   --rcfd-granite: #070c16;
   --rcfd-granite-hi: #0c1424;
   --rcfd-cobalt: var(--lg-cobalt, #113398);
-  --rcfd-azure-bright: #4f92ff;
+  --rcfd-azure-bright: var(--brand-azure-bright, #4f92ff);
   --rcfd-slate: #8b99b0;
   --rcfd-slate-soft: #b6c2d4;
   --rcfd-live: #22c55e; /* app success green — legible on granite */
@@ -831,4 +831,225 @@
   .rcfd-chev {
     transition: none;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ADMIN CONSOLE — `rcfc-` prefix (RcfPage.tsx → RcfConsole, admin/support)
+
+   The Administrative Call Forwarding Console wears the account dashboard's
+   look (`.ad-scope` + `.ad-shell` + DashboardHeader + Card + .ad-table from
+   account-dashboard.css): granite header with the "Viewing" scope dropdown
+   and the view's figures, a segmented tab rail, card-styled panels. Only
+   what the console adds lives here. The Call activity and DID management
+   tabs keep their own components; `.rcfc .rcf-panel` re-skins their panels
+   as dashboard cards without touching the shared `.rcf-panel / .dl-panel`
+   rule other daylight pages use.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Figures inside the granite header, under the identity. */
+.rcfc-context strong { color: #fff; font-weight: 600; }
+
+.rcfc-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+  margin: 16px 0 0;
+}
+
+.rcfc-figures > div { min-width: 0; }
+
+.rcfc-figures dt {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #93a4c0;
+}
+
+.rcfc-figures dd {
+  margin: 3px 0 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+.rcfc-prompt-icon {
+  color: var(--rcf-azure-deep);
+  background: color-mix(in srgb, var(--brand-azure, #2f7df6) 10%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand-azure, #2f7df6) 22%, #fff);
+}
+
+/* ─── Tab rail — segmented pill on paper, same family as the switcher ─── */
+.rcfc-tabs-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.rcfc-tabs-scroll::-webkit-scrollbar { display: none; }
+
+.rcfc-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--rcf-line);
+  background: var(--rcf-card);
+  box-shadow: var(--ad-shadow);
+}
+
+.rcfc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rcf-ink-soft);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--rcf-ease), color var(--rcf-ease), box-shadow var(--rcf-ease);
+}
+
+.rcfc-tab svg { width: 14px; height: 14px; flex-shrink: 0; }
+.rcfc-tab:hover { color: var(--rcf-azure-deep); background: var(--rcf-tint-hover); }
+.rcfc-tab:focus-visible { outline: 2px solid var(--brand-focus-ring, #4f92ff); outline-offset: 1px; }
+
+.rcfc-tab-active,
+.rcfc-tab-active:hover {
+  color: #fff;
+  background: var(--brand-btn-bg, linear-gradient(180deg, #2f7df6 0%, #1d63dd 62%));
+  box-shadow: var(--brand-btn-shadow, 0 6px 16px -8px rgba(47, 125, 246, 0.7));
+}
+
+/* ─── Numbers card ─── */
+.rcfc-card .ad-card-body {
+  padding: 0;
+  container-type: inline-size;
+  container-name: rcfc-numbers;
+}
+
+.rcfc-card .ad-state { padding-left: 18px; padding-right: 18px; }
+
+.rcfc-npa {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rcf-ink-soft);
+}
+
+.rcfc-npa input {
+  width: 64px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--rcf-line);
+  background: var(--rcf-tint);
+  font-family: var(--ad-mono);
+  font-size: 13px;
+  text-align: center;
+  letter-spacing: 0.08em;
+  color: var(--rcf-ink);
+}
+
+.rcfc-npa input:hover { border-color: #cdd7e6; }
+
+.rcfc-npa input:focus-visible {
+  outline: none;
+  background: #fff;
+  border-color: var(--rcf-azure);
+  box-shadow: var(--ad-focus);
+}
+
+.rcfc-npa input.rcfc-npa-on { color: var(--rcf-azure-deep); border-color: color-mix(in srgb, var(--rcf-azure) 55%, #fff); }
+
+/* Sortable headers are real buttons. */
+.rcfc-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.rcfc-sort:hover { color: var(--rcf-ink); }
+.rcfc-sort:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+.rcfc-sort-active { color: var(--rcf-azure-deep); }
+.rcfc-sort-glyph { font-size: 11px; opacity: 0.5; }
+.rcfc-sort-active .rcfc-sort-glyph { opacity: 1; }
+
+.rcfc-label {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--rcf-ink-soft);
+}
+
+.rcfc-row-off .ad-num { color: var(--rcf-ink-soft); }
+.rcfc-row-off .ad-num-dest { color: var(--rcf-ink-dim); }
+.rcfc-cust { max-width: 200px; }
+
+.rcfc-foot { gap: 10px 16px; }
+.rcfc-foot > div { margin: 0 !important; padding: 0 !important; border: none !important; }
+
+/* Narrow card: two-line rows, no header row, label hidden. */
+@container rcfc-numbers (max-width: 600px) {
+  .rcfc-table thead { display: none; }
+  .rcfc-table .rcfc-col-label { display: none; }
+
+  .rcfc-table .ad-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num status"
+      "fwd chev";
+    gap: 6px 12px;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--rcf-line-soft);
+  }
+
+  .rcfc-table-cust .ad-row {
+    grid-template-areas:
+      "num status"
+      "fwd chev"
+      "cust cust";
+  }
+
+  .rcfc-table .ad-row > td { padding: 0 !important; border: none; }
+  .rcfc-table .ad-row > td:nth-child(1) { grid-area: num; }
+  .rcfc-table .ad-row > td:nth-child(2) { grid-area: fwd; min-width: 0; }
+  .rcfc-table .ad-row > td:nth-child(4) { grid-area: status; justify-self: end; }
+  .rcfc-table-cust .ad-row > td:nth-child(5) { grid-area: cust; }
+  .rcfc-table .ad-row > td.ad-col-chev { grid-area: chev; justify-self: end; align-self: end; }
+  .rcfc-table .ad-editor-row,
+  .rcfc-table .ad-editor-row > td { display: block; }
+}
+
+/* ─── The other tabs' panels, as dashboard cards (console only) ─── */
+.rcfc .rcf-panel {
+  border-radius: 14px;
+  box-shadow: var(--ad-shadow);
+}
+
+.rcfc .rcf-panel:hover { box-shadow: var(--ad-shadow); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rcfc-tab,
+  .rcfc-npa input { transition: none; }
 }
