@@ -75,9 +75,12 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
   });
   const rcfEntries: RcfEntry[] = useMemo(() => rcfData?.items ?? [], [rcfData]);
 
-  // Tenants are scoped server-side — only an admin's explicit customer pick
-  // is sent to /cdrs/activity ("All Customers" omits it).
-  const activityCustomerId = isAdmin ? customerId : undefined;
+  // Tenants are hard-scoped server-side (the param is ignored for them), so
+  // the scope is sent whenever there is one: an admin's pick, or — for an
+  // admin previewing customer view, still staff to the API — their own
+  // account, which would otherwise read platform-wide. "All Customers"
+  // (undefined) omits it.
+  const activityCustomerId = customerId;
   const activity = useQuery({
     queryKey: ['rcf-activity', activityCustomerId ?? 'all', range, tz, selectedDid],
     queryFn: async (): Promise<CdrActivityResponse> => {
