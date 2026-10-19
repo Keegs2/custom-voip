@@ -44,3 +44,44 @@ export async function getCustomerBilling(id: number): Promise<BillingEstimate> {
 export async function listMyTeam(): Promise<TeamMember[]> {
   return apiRequest<TeamMember[]>('GET', '/auth/team');
 }
+
+/** One row of the admin `GET /search/user/by-customer/{id}` listing. */
+interface CustomerUserRow {
+  id: number;
+  name: string | null;
+  email: string;
+  role: string;
+  status: string;
+  last_login: string | null;
+}
+
+function isTeamRole(role: string): role is TeamMember['role'] {
+  return role === 'admin' || role === 'user' || role === 'readonly';
+}
+
+/**
+ * Staff counterpart of `listMyTeam` for ONE customer (admin only) — used when
+ * an admin previews a customer in "View as Customer" mode, where `/auth/team`
+ * would return the admin's own (empty) team.
+ *
+ * `GET /search/user/by-customer/{id}` → `{results, total, customer_id}`.
+ * Mapped onto TeamMember: the row has no `created_at` (left empty) and the
+ * viewer is never on the previewed account, so `is_self` is always false.
+ * Roles outside the tenant set (none expected) read as view-only.
+ */
+export async function listCustomerTeam(customerId: number): Promise<TeamMember[]> {
+  const raw = await apiRequest<{ results?: CustomerUserRow[] }>(
+    'GET',
+    `/search/user/by-customer/${customerId}?limit=500`,
+  );
+  return (raw.results ?? []).map((r) => ({
+    id: r.id,
+    email: r.email,
+    name: r.name ?? '',
+    role: isTeamRole(r.role) ? r.role : 'readonly',
+    status: r.status,
+    created_at: '',
+    last_login: r.last_login,
+    is_self: false,
+  }));
+}

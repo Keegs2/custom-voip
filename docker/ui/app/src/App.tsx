@@ -8,6 +8,7 @@ import { RequireReportingAccess } from './components/auth/RequireReportingAccess
 import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { RcfPage } from './pages/RcfPage';
+import { AccountDashboard } from './pages/dashboard/AccountDashboard';
 import { ApiDidsPage } from './pages/ApiDidsPage';
 import { TrunksPage } from './pages/TrunksPage';
 import { IvrBuilderPage } from './pages/IvrBuilderPage';
@@ -52,6 +53,9 @@ export function App() {
 
             {/* Protected — all other routes require authentication */}
             <Route element={<RequireAuth />}>
+              {/* Customer account home (tenants + admin "View as Customer"
+                  preview); everyone else is redirected to their own home. */}
+              <Route path="dashboard"  element={<AccountDashboard />} />
               <Route path="rcf"        element={<RcfPage />} />
               {/* API Calling is retired (API_CALLING_ENABLED=false): the page
                   stays in code, but the route bounces to the product home. */}

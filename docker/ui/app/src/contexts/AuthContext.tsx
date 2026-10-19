@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react';
@@ -12,6 +13,17 @@ import { ApiError } from '../api/client';
 import type { User } from '../types/auth';
 
 const AUTH_TOKEN_KEY = 'auth_token';
+
+/**
+ * The customer account a customer-facing page is about. For a tenant it is
+ * their own account; for an admin in "View as Customer" it is the customer
+ * they picked to preview (see `previewCustomer`).
+ */
+export interface EffectiveCustomer {
+  id: number;
+  name: string;
+  account_type: User['account_type'];
+}
 
 /* ─── Context shape ──────────────────────────────────────── */
 
@@ -40,6 +52,24 @@ interface AuthContextValue {
   customerViewMode: boolean;
   /** Toggles customerViewMode on/off. Navigates to / when turning ON. */
   toggleCustomerView: () => void;
+  /**
+   * The customer an admin previews while in customer view (picked in the
+   * sidebar). In memory only — like customerViewMode it resets on refresh,
+   * and it is cleared on logout. Kept across exit/re-enter of customer view
+   * within the session so toggling back lands on the same account.
+   */
+  previewCustomer: EffectiveCustomer | null;
+  setPreviewCustomer: (customer: EffectiveCustomer | null) => void;
+  /**
+   * The account every customer-facing page (Dashboard, /rcf, Reporting)
+   * scopes to:
+   *  - tenant (user / readonly with a customer_id) → their own account;
+   *  - admin in customer view → `previewCustomer` (null until one is picked);
+   *  - admin (normal view), support, or no account → null.
+   * Pages key their customer view on `effectiveCustomer.id` so switching the
+   * preview remounts them instead of changing hook order.
+   */
+  effectiveCustomer: EffectiveCustomer | null;
   /** True while the initial token validation is running on mount */
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -63,14 +93,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Intentionally NOT persisted to localStorage — resets on every page refresh
   // so an admin can never accidentally leave customer view active between sessions.
   const [customerViewMode, setCustomerViewMode] = useState(false);
+  // Same lifetime as customerViewMode: memory only, gone on refresh/logout.
+  const [previewCustomer, setPreviewCustomer] = useState<EffectiveCustomer | null>(null);
 
   /* ── Validate persisted token on mount ───────────────────── */
   useEffect(() => {
     const persisted = localStorage.getItem(AUTH_TOKEN_KEY);
-    if (!persisted) {
-      setIsLoading(false);
-      return;
-    }
+    // No token: isLoading already started false (see its initialiser).
+    if (!persisted) return;
 
     let cancelled = false;
 
@@ -98,7 +128,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ── Login ───────────────────────────────────────────────── */
@@ -115,6 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     setCustomerViewMode(false);
+    setPreviewCustomer(null);
     navigate('/', { replace: true });
   }, [navigate]);
 
@@ -126,14 +156,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /* ── Toggle customer view ────────────────────────────────── */
   const toggleCustomerView = useCallback(() => {
-    setCustomerViewMode((prev) => {
-      const next = !prev;
-      // When entering customer view, send the admin back to the dashboard
-      // in case they are on an admin-only page that would 404 in customer mode.
-      if (next) navigate('/', { replace: true });
-      return next;
-    });
-  }, [navigate]);
+    const next = !customerViewMode;
+    setCustomerViewMode(next);
+    // When entering customer view, send the admin home (`/` → productHome →
+    // /dashboard) in case they are on an admin-only page. Called here, not
+    // inside the state updater: updaters run during render, and navigating
+    // from one updates the router while AuthProvider renders.
+    if (next) navigate('/', { replace: true });
+  }, [customerViewMode, navigate]);
 
   /* ── Derived state ───────────────────────────────────────── */
   const isAuthenticated = user !== null && token !== null;
@@ -144,11 +174,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = isActualAdmin && !customerViewMode;
   const isSupport = user?.role === 'support';
 
+  const ownCustomerId = user?.customer_id ?? null;
+  const ownCustomerName = user?.customer_name ?? null;
+  const ownAccountType = user?.account_type ?? null;
+  const effectiveCustomer = useMemo<EffectiveCustomer | null>(() => {
+    if (!user || isSupport) return null;
+    if (isActualAdmin) return customerViewMode ? previewCustomer : null;
+    if (ownCustomerId === null) return null;
+    return { id: ownCustomerId, name: ownCustomerName ?? '', account_type: ownAccountType };
+  }, [user, isSupport, isActualAdmin, customerViewMode, previewCustomer, ownCustomerId, ownCustomerName, ownAccountType]);
+
   return (
     <AuthContext.Provider value={{
       user, token, isAuthenticated,
       isAdmin, isActualAdmin, isSupport,
       customerViewMode, toggleCustomerView,
+      previewCustomer, setPreviewCustomer, effectiveCustomer,
       isLoading, login, logout, refreshUser,
     }}>
       {children}
@@ -158,6 +199,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 /* ─── Hook ───────────────────────────────────────────────── */
 
+// The hook lives beside its provider by design; Fast Refresh falls back to a
+// full reload for this file, which is fine for an auth context.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) {

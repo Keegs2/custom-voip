@@ -108,7 +108,9 @@ QueryClient defaults:
 / (index)                 DashboardPage            (PUBLIC — outside RequireAuth, inside AppLayout)
 
 ── inside AppLayout + RequireAuth ──
-/rcf                      RcfPage (+ pages/rcf/ Call Activity)
+/dashboard                AccountDashboard (pages/dashboard/) — customer account home; tenants +
+                          admin "View as Customer" preview; everyone else → productHome
+/rcf                      RcfPage (customer numbers manager / admin console, + pages/rcf/ Call Activity)
 /api-dids                 ApiDidsPage — RETIRED: ProductHomeRedirect while API_CALLING_ENABLED=false
 /trunks                   TrunksPage
 /ivr                      IvrBuilderPage (placeholder)
@@ -150,7 +152,16 @@ Single context that owns all auth state. Exposed via `useAuth()`.
   user: User | null
   token: string | null
   isAuthenticated: boolean
-  isAdmin: boolean           // user.role === 'admin'
+  isAdmin: boolean           // role === 'admin' AND not in customer view
+  isActualAdmin: boolean     // role === 'admin' regardless of customer view
+  isSupport: boolean
+  customerViewMode: boolean  // admin "View as Customer" (memory only — resets on refresh)
+  toggleCustomerView(): void // entering navigates to / → productHome → /dashboard
+  previewCustomer: EffectiveCustomer | null      // the customer an admin previews (memory only,
+  setPreviewCustomer(c): void                    //   cleared on logout; sidebar picker sets it)
+  effectiveCustomer: EffectiveCustomer | null    // {id, name, account_type} every customer page
+                             // scopes to: tenant → own account; admin in customer view →
+                             // previewCustomer; admin (normal view) / support → null
   isLoading: boolean         // true while validating persisted token on mount
   login(email, password): Promise<void>
   logout(): void
@@ -168,7 +179,26 @@ Single context that owns all auth state. Exposed via `useAuth()`.
 There is **no standalone login page** — the login form lives in the sidebar on the
 public homepage (`DashboardPage`). `LoginPage.tsx` still exists but is orphaned.
 
-**Logout:** clears localStorage, nulls state, navigates to `/` (the public home).
+**Logout:** clears localStorage, nulls state (incl. customer view + preview
+customer), navigates to `/` (the public home).
+
+**Customer preview (admin "View as Customer").** The admin user has
+`customer_id = null` / `account_type = null`, so customer pages must never read
+`user.customer_id` — they read `effectiveCustomer`. The sidebar's amber
+customer-view banner carries `components/preview/CustomerPreviewPicker`
+(GET /customers, key `['customers-dropdown']`); entering customer view with no
+pick defaults to the admin's own account, else the first rcf/hybrid customer by
+name. Customer pages key their view component on `effectiveCustomer.id` so a
+switch remounts (no hook-order change). The admin is still STAFF to the API, so
+customer pages swap self-scoped endpoints for the admin ones (see
+`pages/dashboard/accountData.ts`). With no pick yet, /dashboard and /rcf show
+`PreviewPrompt` (same picker).
+
+**`utils/productHome.ts`** — signed-in home: admin → `/cdrs`, support →
+`/troubleshooting`, `trunk` → `/trunks`, `api` → `/my-account` (API Calling
+retired), a tenant login with no customer → `/my-account`, everyone else
+(rcf/hybrid/ucaas/unknown, readonly included, admin in customer view) →
+`/dashboard`.
 
 **401 interceptor in `src/api/client.ts`:** any API call that gets a 401 clears
 the token and calls `window.location.replace('/')` (the homepage with the sidebar
@@ -302,22 +332,58 @@ Standard query key conventions:
 Navigation hub. Static card grid linking to all product areas. No API calls.
 API Calling copy + product card render only while `API_CALLING_ENABLED` (src/config/features.ts) is true — the product is retired (2026-09), so they are hidden.
 
+**`AccountDashboard`** (`/dashboard`, `pages/dashboard/`)
+The customer's account home — everything at a glance, as cards. Renders for
+`effectiveCustomer` (tenant, or admin preview — keyed by its id); admin in
+customer view with no pick → `PreviewPrompt`; anyone else → `productHome`.
+- `DashboardHeader` — compact granite band: name, status word + dot, "Customer
+  since", "Staff preview" tag for admins; product switcher driven by
+  `products.ts` (RCF live; SIP Trunking / Visual Voicemail dimmed "Soon",
+  aria-disabled) and the primary action (Request numbers for the tenant `user`
+  role; Manage numbers for a staff preview).
+- `KpiCards` — six cards: Numbers · Forwarding (paused count) · Calls 7d ·
+  Answered · Sounded good (quality.ts tone + word) · Team; 3px tone edge, icon
+  chip, 7-day sparklines; cards link to /rcf, Call activity, /my-account.
+- `NumbersCard` — small table (8 rows), search + All/Forwarding/Paused chips,
+  row → shared `RowEditor` inline, "View all N numbers" → /rcf.
+- `CallCards` — Call volume (daily answered/missed bars), Call quality
+  (good-share ring + one-way/poor/graded), Recent calls (last 6, outcome +
+  quality words from `pages/rcf/callOutcome.ts`), Busiest numbers.
+- `AccountCards` — Team, Number requests, Quick actions (Request/Manage numbers
+  → `DidManagement` in `DashboardOverlay`; Open call activity →
+  `CallActivityTab` in `DashboardOverlay`; Download a report → /reporting;
+  Manage all numbers → /rcf).
+- Data (`accountData.ts`) — tenant vs staff preview:
+  account `GET /customers/me` vs `GET /customers/{id}` (identity fields only —
+  the admin row carries financials, never copied); team `GET /auth/team` vs
+  `GET /search/user/by-customer/{id}` (is_self false); number requests
+  `GET /numbers/my` vs `GET /numbers/inventory?customer_id=`; both pass
+  `customer_id` to `GET /rcf`, `/cdrs/activity` (7d), `/reports/numbers` (7d),
+  `/cdrs` (recent). Staff number counts come from the /rcf list (100-row cap →
+  "100+").
+- Styles `styles/account-dashboard.css` (`ad-`): 12-col card grid (8/4 spans) →
+  2 cols → 1 col by CONTENT width (container queries); one load-in stagger;
+  reduced motion respected. No money anywhere.
+
 **`RcfPage`** (`/rcf`)
-Picks one of two views (separate components, so toggling customer view can't
-break hook order):
-- **Customer** (not admin, has `customer_id`, incl. an admin in customer view):
-  `pages/rcf/CustomerDashboard.tsx` — full-width dashboard. Granite overview band
-  (`OverviewBand`: numbers, forwarding/paused, 7-day calls, answered %, sounded-good
-  share via quality.ts, team count) · routing board (`RoutingBoard`: search, All/
-  Forwarding/Paused chips, sort, rows open the shared `RowEditor`) · rail
-  (`DashboardRail`: 7-day bars, busiest numbers, team from `/auth/team`, number
-  requests from `/numbers/my`). "Open call activity" and "Request numbers" open
-  `CallActivityTab` / `DidManagement` in `DashboardOverlay`. Styles:
-  `styles/rcf-dashboard.css` (`rcfd-` prefix). No money shown.
+Picks one of three views (separate components, so toggling customer view or
+the preview can't break hook order):
+- **Customer** (`effectiveCustomer` set and not admin — tenant or admin
+  preview): `pages/rcf/CustomerNumbersPage.tsx`, keyed by customer id — quiet
+  header "Call forwarding numbers" (breadcrumb back to Dashboard) + Request /
+  Manage numbers (opens `DidManagement` in `DashboardOverlay`) + the full
+  `RoutingBoard` (search, chips, sort, paging, rows open `RowEditor`). Same
+  `accountData.ts` hooks as the dashboard. Styles `styles/rcf-dashboard.css`
+  (`rcfd-`/`rcfn-`).
+- **Admin in customer view, no preview picked**: `PreviewPrompt`.
 - **Admin / support**: the Administrative Call Forwarding Console (customer scope
-  select, tabs Numbers / Call Activity / DID Management).
+  select, tabs Numbers / Call Activity / DID Management) — unchanged.
 `GET /rcf` is capped at 100 rows server-side and ignores limit/offset; the
-dashboard pages in the browser and says so above 100.
+board pages in the browser and says so above 100.
+
+**`ReportingPage`** (`/reporting`, lazy)
+Staff pick a customer; an admin in customer view reports on the sidebar's
+preview customer (no page picker; the page is keyed on it).
 
 **`TrunksPage`** (`/trunks`)
 Currently a placeholder/coming-soon shell. Shows the page header but no data.
@@ -410,8 +476,11 @@ content area (max-width 1160px, centered). Background `#0f1117`.
 
 **`Sidebar`**
 Fixed left sidebar (collapsible on desktop via `SidebarCollapse`). Authenticated
-group order: **Products → Insights (Reporting) → Administration/Support →
-Coming Soon**. There is no Documentation group any more (2026-10). Coming Soon
+order: **Dashboard (top-level item) → Products → Insights (Reporting) →
+Administration/Support → Coming Soon**. **Dashboard** (`/dashboard`, normal live
+active style) shows for every non-support user with an `effectiveCustomer`
+(tenants, and an admin in customer view once a preview is picked). There is no
+Documentation group any more (2026-10). Coming Soon
 is ALWAYS last and rendered darkened (muted header, dim slate rows + "Soon"
 pill, no product accent even when active) — new pre-launch or de-prioritised
 items go in `COMING_SOON_ITEMS`, never in the live groups. It currently holds
@@ -423,9 +492,12 @@ prefix-match `/docs/guides/:product`, `/docs/api/:product`); the same
 `isSoonItemActive()` drives the row's muted active style and the group's
 auto-open. Coming Soon rows show to every non-support user regardless of
 `account_type`. Support sees only its Support tools (no Products/Coming Soon).
-Products holds only live products, filtered by `account_type` — today just
-RCF (`rcf`, `hybrid`); the Products group (header included) is hidden when
-the filtered list is empty (e.g. a `trunk`-only account).
+Products holds only live products, filtered by the EFFECTIVE account type
+(`effectiveCustomer.account_type`, falling back to `user.account_type`; admins in
+normal view see all) — today just RCF (`rcf`, `hybrid`); the Products group
+(header included) is hidden when the filtered list is empty (e.g. a
+`trunk`-only account). In customer view the amber "Viewing as Customer" banner
+holds the preview-customer picker.
 Group open state persists in `localStorage` (`sidebar_groups_open`). Admins get
 a "View as Customer" toggle above the user footer.
 
@@ -643,11 +715,13 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 
 ### RCF customers specifically
 
-RCF customers (`account_type: 'rcf'`) get RCF under Products and Reporting under
-Insights. Coming Soon (darkened, last) lists SIP Trunking (NOT a link for them —
+RCF customers (`account_type: 'rcf'`) land on **Dashboard** (`/dashboard`, the
+card overview — top-level sidebar item) and get RCF (`/rcf`, the full numbers
+manager) under Products and Reporting under Insights. Coming Soon (darkened, last) lists SIP Trunking (NOT a link for them —
 `linkAccountTypes` limits the link to admins and trunk/hybrid), Visual Voicemail,
 Guides and API Reference. Products are filtered in `Sidebar.tsx` against
-`user.account_type` (`allProductNavItems`).
+the effective account type (`allProductNavItems`) — an admin previewing an RCF
+customer in "View as Customer" sees exactly this nav, scoped to that customer.
 
 ---
 

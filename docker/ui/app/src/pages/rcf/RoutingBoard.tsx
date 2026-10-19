@@ -16,13 +16,12 @@
  */
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { RcfEntry } from '../../types/rcf';
-import type { ReportNumberRow } from '../../types/reports';
 import { fmt } from '../../utils/format';
 import { Spinner } from '../../components/ui/Spinner';
 import { RowEditor } from './RowEditor';
 import { PaginationControls } from './PaginationControls';
 import { DEFAULT_PAGE_SIZE } from './theme';
-import { numberKey } from './dashboardData';
+import { numberKey, type NumberStats } from '../dashboard/accountData';
 
 type StatusFilter = 'all' | 'on' | 'off';
 type SortKey = 'did' | 'name' | 'forward_to' | 'calls' | 'status';
@@ -34,12 +33,6 @@ const SORT_OPTIONS: { id: SortKey; label: string }[] = [
   { id: 'calls', label: 'Most calls this week' },
   { id: 'status', label: 'Paused first' },
 ];
-
-/** Per-number weekly figures, or why they're absent. */
-export type NumberStats =
-  | { state: 'loading' }
-  | { state: 'unavailable' }
-  | { state: 'ready'; byNumber: ReadonlyMap<string, ReportNumberRow> };
 
 export interface RoutingBoardProps {
   entries: readonly RcfEntry[];
