@@ -14,7 +14,8 @@ import { CallActivityTab } from './rcf/CallActivityTab';
 import { RowEditor } from './rcf/RowEditor';
 import { DIDManagementTab } from './rcf/DidManagement';
 import { extractNpa } from './rcf/didFormat';
-import { CustomerDashboard } from './rcf/CustomerDashboard';
+import { CustomerNumbersPage } from './rcf/CustomerNumbersPage';
+import { PreviewPrompt } from './dashboard/PreviewPrompt';
 
 // ─── Types & constants ────────────────────────────────────────────────────────
 
@@ -483,12 +484,26 @@ function parseScope(value: string): AdminScope {
  * The two views are separate components so toggling customer view swaps
  * whole subtrees instead of changing this component's hook order (#310).
  */
+/**
+ * /rcf picks one of three views — separate components, so switching customer
+ * view or the previewed customer remounts instead of changing hook order:
+ *  - a customer (tenant, or an admin previewing one in "View as Customer"):
+ *    the numbers manager for that account, keyed by its id;
+ *  - an admin in customer view with no preview picked yet: the picker;
+ *  - admin / support: the Administrative Call Forwarding Console.
+ */
 export function RcfPage() {
-  const { user, isAdmin } = useAuth();
-  const dashboardCustomerId = !isAdmin ? (user?.customer_id ?? null) : null;
-  if (dashboardCustomerId !== null) {
-    return <CustomerDashboard key={dashboardCustomerId} customerId={dashboardCustomerId} />;
+  const { isAdmin, isActualAdmin, isSupport, customerViewMode, effectiveCustomer } = useAuth();
+  if (!isAdmin && effectiveCustomer) {
+    return (
+      <CustomerNumbersPage
+        key={effectiveCustomer.id}
+        customer={effectiveCustomer}
+        staff={isActualAdmin || isSupport}
+      />
+    );
   }
+  if (isActualAdmin && customerViewMode) return <PreviewPrompt />;
   return <RcfConsole />;
 }
 

@@ -1,6 +1,7 @@
 /**
- * DashboardOverlay — the large panel the customer dashboard opens for the
- * deep tools it does not rebuild (full Call Activity, number management).
+ * DashboardOverlay — the large panel the customer views (/dashboard, the
+ * customer /rcf page) open for the deep tools they do not rebuild (full
+ * Call Activity, number management).
  *
  * Follows the CallTraceModal pattern: portal to document.body (so the page's
  * stacking/overflow can't clip it), the portal root carries `.rcf-scope` so
@@ -14,6 +15,7 @@
  */
 import { useCallback, useEffect, useId, useRef, type MouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import '../../styles/rcf-dashboard.css';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';

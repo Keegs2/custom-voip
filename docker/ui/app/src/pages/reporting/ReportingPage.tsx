@@ -57,9 +57,20 @@ const REPORTABLE_TYPES = ['rcf', 'trunk', 'hybrid'];
 
 const DEFAULT_FILTERS: CallListFilters = { outcome: 'all', direction: 'all' };
 
+/**
+ * Route entry. Keyed on the previewed customer so an admin switching the
+ * sidebar preview starts a fresh report (numbers, filters) — a remount, not
+ * a hook-order change.
+ */
 export function ReportingPage() {
+  const { customerViewMode, effectiveCustomer } = useAuth();
+  const key = customerViewMode ? `preview-${effectiveCustomer?.id ?? 'none'}` : 'own';
+  return <ReportingView key={key} />;
+}
+
+function ReportingView() {
   // ── ALL hooks unconditionally at the top (React #310 prevention) ──────────
-  const { user, isActualAdmin, customerViewMode } = useAuth();
+  const { user, isActualAdmin, customerViewMode, effectiveCustomer } = useAuth();
   const { toastOk, toastErr } = useToast();
 
   // Staff = real admins. In customer-view mode the API still sees an admin
@@ -69,7 +80,11 @@ export function ReportingPage() {
   const [today] = useState(() => toIsoDate(new Date()));
   const [tz] = useState(browserTimeZone);
 
-  const [staffCustomerId, setStaffCustomerId] = useState<number | undefined>(undefined);
+  const [pickedCustomerId, setStaffCustomerId] = useState<number | undefined>(undefined);
+  // An admin in "View as Customer" reports on the customer picked in the
+  // sidebar; otherwise staff pick here.
+  const previewCustomer = isStaffViewer && customerViewMode ? effectiveCustomer : null;
+  const staffCustomerId = previewCustomer?.id ?? pickedCustomerId;
   const [preset, setPreset] = useState<PeriodPreset>('this_month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
@@ -121,7 +136,7 @@ export function ReportingPage() {
   );
 
   const customerName = isStaffViewer
-    ? (staffCustomers.find((c) => c.id === staffCustomerId)?.name ?? null)
+    ? (previewCustomer?.name ?? staffCustomers.find((c) => c.id === staffCustomerId)?.name ?? null)
     : (user?.customer_name ?? null);
 
   const customError = preset === 'custom' ? validateRange(customStart, customEnd) : null;
@@ -245,28 +260,40 @@ export function ReportingPage() {
           {/* ── Staff customer picker ───────────────────────────────────── */}
           {isStaffViewer && (
             <div className="rpt-staffbar">
-              <label className="rpt-staffbar-label" htmlFor="rpt-customer">
-                {customerViewMode ? 'Previewing report for' : 'Customer'}
-              </label>
-              <select
-                id="rpt-customer"
-                className="dl-input"
-                value={staffCustomerId ?? ''}
-                onChange={(e) => handleCustomerChange(e.target.value)}
-                disabled={customersLoading}
-              >
-                <option value="">{customersLoading ? 'Loading customers…' : 'Pick a customer…'}</option>
-                {staffCustomers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.account_type.toUpperCase()})
-                  </option>
-                ))}
-              </select>
-              <span className="rpt-staffbar-note">
-                {customerViewMode
-                  ? 'Customers see this page for their own account only — no picker.'
-                  : 'Staff view — a report always covers one customer.'}
-              </span>
+              {previewCustomer ? (
+                <>
+                  <span className="rpt-staffbar-label">Previewing report for</span>
+                  <strong>{previewCustomer.name}</strong>
+                  <span className="rpt-staffbar-note">
+                    Change the customer in the sidebar. Customers see this page for their own account only.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <label className="rpt-staffbar-label" htmlFor="rpt-customer">
+                    {customerViewMode ? 'Previewing report for' : 'Customer'}
+                  </label>
+                  <select
+                    id="rpt-customer"
+                    className="dl-input"
+                    value={staffCustomerId ?? ''}
+                    onChange={(e) => handleCustomerChange(e.target.value)}
+                    disabled={customersLoading}
+                  >
+                    <option value="">{customersLoading ? 'Loading customers…' : 'Pick a customer…'}</option>
+                    {staffCustomers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.account_type.toUpperCase()})
+                      </option>
+                    ))}
+                  </select>
+                  <span className="rpt-staffbar-note">
+                    {customerViewMode
+                      ? 'Customers see this page for their own account only — no picker.'
+                      : 'Staff view — a report always covers one customer.'}
+                  </span>
+                </>
+              )}
             </div>
           )}
 

@@ -7,7 +7,8 @@ import {
   IconRCF, IconTrunk, IconAPI, IconVoicemail, IconDocs,
   IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen, BarChart3 } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen, BarChart3, LayoutDashboard } from 'lucide-react';
+import { CustomerPreviewPicker } from '../preview/CustomerPreviewPicker';
 import { API_CALLING_ENABLED } from '../../config/features';
 import { canSeeReporting } from '../../utils/reportingAccess';
 
@@ -31,6 +32,18 @@ interface NavItemDef {
 const allProductNavItems: NavItemDef[] = [
   { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#3b82f6', accountTypes: ['rcf', 'hybrid'] },
 ];
+
+/* ─── Dashboard (top-level, above Products) ───────────────── */
+
+// The customer's account home (/dashboard). Shown to every non-support user
+// who has an effective customer: tenants, and an admin in "View as Customer"
+// once a preview customer is picked. Normal (live) active style, not muted.
+const dashboardNavItem: NavItemDef = {
+  label: 'Dashboard',
+  icon: <LayoutDashboard size={18} />,
+  to: '/dashboard',
+  color: '#3b82f6',
+};
 
 /* ─── Insights nav items ──────────────────────────────────── */
 
@@ -639,7 +652,9 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
   });
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAuthenticated, isAdmin, isActualAdmin, customerViewMode, toggleCustomerView, logout } = useAuth();
+  const {
+    user, isAuthenticated, isAdmin, isActualAdmin, customerViewMode, toggleCustomerView, logout, effectiveCustomer,
+  } = useAuth();
 
   /* ── Access flags ──────────────────────────────────────── */
 
@@ -650,14 +665,20 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
   // support tool their role can actually call).
   const showAdmin = isAdmin || isSupport || isReadonly;
   const showReporting = canSeeReporting(user);
+  const showDashboard = !isSupport && !isAdmin && effectiveCustomer !== null;
 
   /* ── Product items filtered by role/account_type ───────── */
+
+  // The account type the customer nav follows: the tenant's own, or — for an
+  // admin in customer view — the previewed customer's (the admin user itself
+  // has account_type null, which used to hide RCF and the whole group).
+  const effectiveAccountType = isAdmin ? null : (effectiveCustomer?.account_type ?? user?.account_type ?? null);
 
   const productNavItems = allProductNavItems.filter((item) => {
     if (isAdmin) return true;
     if (item.adminOnly) return false;
-    if (item.accountTypes && user?.account_type) {
-      return item.accountTypes.includes(user.account_type);
+    if (item.accountTypes && effectiveAccountType) {
+      return item.accountTypes.includes(effectiveAccountType);
     }
     return !item.accountTypes;
   });
@@ -817,26 +838,30 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
           <div
             style={{
               display: 'flex',
-              alignItems: 'center',
+              flexDirection: 'column',
               gap: 7,
-              padding: '6px 14px',
+              padding: '7px 14px 10px',
               background: 'rgba(245, 158, 11, 0.12)',
               borderBottom: '1px solid rgba(245, 158, 11, 0.35)',
               flexShrink: 0,
             }}
           >
-            <Eye size={11} style={{ color: '#f59e0b', flexShrink: 0 }} />
-            <span
-              style={{
-                fontSize: '0.6rem',
-                fontWeight: 600,
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase',
-                color: '#f59e0b',
-              }}
-            >
-              Viewing as Customer
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <Eye size={11} style={{ color: '#f59e0b', flexShrink: 0 }} />
+              <span
+                style={{
+                  fontSize: '0.6rem',
+                  fontWeight: 600,
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  color: '#f59e0b',
+                }}
+              >
+                Viewing as Customer
+              </span>
+            </div>
+            {/* Which customer the customer pages show (admin preview only). */}
+            {isActualAdmin && <CustomerPreviewPicker tone="dark" label="Customer" />}
           </div>
         )}
 
@@ -927,6 +952,13 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               scrollbarColor: 'rgba(42,47,69,0.6) transparent',
             }}
           >
+            {/* ── Dashboard — the customer's account home, top-level ─ */}
+            {showDashboard && (
+              <div style={{ marginBottom: 10 }}>
+                <SidebarNavItem item={dashboardNavItem} onNavigate={closeMobile} />
+              </div>
+            )}
+
             {/* ── GROUP 1: Products (hidden for support staff, and
                  entirely — header too — when the account has no live
                  product, e.g. a trunk-only customer now that SIP Trunking
@@ -1020,7 +1052,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                 >
                   {COMING_SOON_ITEMS.map((item) => {
                     const linked = !item.linkAccountTypes || isAdmin
-                      || (user?.account_type != null && item.linkAccountTypes.includes(user.account_type));
+                      || (effectiveAccountType != null && item.linkAccountTypes.includes(effectiveAccountType));
                     return (
                       <ComingSoonNavItem
                         key={item.label}

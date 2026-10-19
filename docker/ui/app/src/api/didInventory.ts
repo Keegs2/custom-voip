@@ -39,6 +39,23 @@ export async function listMyDids(): Promise<DidInventoryItem[]> {
 }
 
 /**
+ * GET /numbers/inventory?customer_id= (admin only)
+ * Staff counterpart of `listMyDids` for ONE customer — `/numbers/my` is
+ * platform-wide for staff, so an admin previewing a customer reads that
+ * customer's inventory rows instead. Every status is returned; callers pick
+ * the ones they show.
+ */
+export async function listCustomerInventory(customerId: number): Promise<DidInventoryItem[]> {
+  const qs = new URLSearchParams({ customer_id: String(customerId), limit: '1000' });
+  const raw = await apiRequest<DidInventoryItem[] | { items: DidInventoryItem[] }>(
+    'GET',
+    `/numbers/inventory?${qs.toString()}`,
+  );
+  if (Array.isArray(raw)) return raw;
+  return raw.items ?? [];
+}
+
+/**
  * POST /numbers/{did}/request
  * Customer endpoint — customer requests a specific available DID.
  */
