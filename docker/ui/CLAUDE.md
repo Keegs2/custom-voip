@@ -303,9 +303,21 @@ Navigation hub. Static card grid linking to all product areas. No API calls.
 API Calling copy + product card render only while `API_CALLING_ENABLED` (src/config/features.ts) is true — the product is retired (2026-09), so they are hidden.
 
 **`RcfPage`** (`/rcf`)
-Lists RCF entries for the authenticated customer (or all customers for admin via
-`AdminCustomerSelector`). Supports card and table view modes, sorting, pagination,
-and inline `forward_to` editing. API: `GET /rcf`.
+Picks one of two views (separate components, so toggling customer view can't
+break hook order):
+- **Customer** (not admin, has `customer_id`, incl. an admin in customer view):
+  `pages/rcf/CustomerDashboard.tsx` — full-width dashboard. Granite overview band
+  (`OverviewBand`: numbers, forwarding/paused, 7-day calls, answered %, sounded-good
+  share via quality.ts, team count) · routing board (`RoutingBoard`: search, All/
+  Forwarding/Paused chips, sort, rows open the shared `RowEditor`) · rail
+  (`DashboardRail`: 7-day bars, busiest numbers, team from `/auth/team`, number
+  requests from `/numbers/my`). "Open call activity" and "Request numbers" open
+  `CallActivityTab` / `DidManagement` in `DashboardOverlay`. Styles:
+  `styles/rcf-dashboard.css` (`rcfd-` prefix). No money shown.
+- **Admin / support**: the Administrative Call Forwarding Console (customer scope
+  select, tabs Numbers / Call Activity / DID Management).
+`GET /rcf` is capped at 100 rows server-side and ignores limit/offset; the
+dashboard pages in the browser and says so above 100.
 
 **`TrunksPage`** (`/trunks`)
 Currently a placeholder/coming-soon shell. Shows the page header but no data.
@@ -398,12 +410,22 @@ content area (max-width 1160px, centered). Background `#0f1117`.
 
 **`Sidebar`**
 Fixed left sidebar (collapsible on desktop via `SidebarCollapse`). Authenticated
-group order: **Products → Insights (Reporting) → Documentation →
-Administration/Support → Coming Soon**. Coming Soon is ALWAYS last and rendered
-darkened (muted header, dim slate rows + "Soon" pill, no product accent even
-when active) — new pre-launch items go in `COMING_SOON_ITEMS`, never in the live
-groups. Support sees only its Support tools (no Products/Docs/Coming Soon).
-Products are filtered by `account_type` (`rcf`, `trunk`, `hybrid` = both).
+group order: **Products → Insights (Reporting) → Administration/Support →
+Coming Soon**. There is no Documentation group any more (2026-10). Coming Soon
+is ALWAYS last and rendered darkened (muted header, dim slate rows + "Soon"
+pill, no product accent even when active) — new pre-launch or de-prioritised
+items go in `COMING_SOON_ITEMS`, never in the live groups. It currently holds
+**SIP Trunking (`/trunks`), [API Calling while `API_CALLING_ENABLED`], Visual
+Voicemail, Guides (`/docs/guides`), API Reference (`/docs/api`)** — all LINKED
+rows (`sb-soon-row--link`), so their routes stay reachable (SIP Trunking hosts
+the owner's test customer). A row may carry `isActiveFn` (the docs rows
+prefix-match `/docs/guides/:product`, `/docs/api/:product`); the same
+`isSoonItemActive()` drives the row's muted active style and the group's
+auto-open. Coming Soon rows show to every non-support user regardless of
+`account_type`. Support sees only its Support tools (no Products/Coming Soon).
+Products holds only live products, filtered by `account_type` — today just
+RCF (`rcf`, `hybrid`); the Products group (header included) is hidden when
+the filtered list is empty (e.g. a `trunk`-only account).
 Group open state persists in `localStorage` (`sidebar_groups_open`). Admins get
 a "View as Customer" toggle above the user footer.
 
@@ -621,10 +643,11 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 
 ### RCF customers specifically
 
-RCF customers (`account_type: 'rcf'`) see only: RCF page, API Docs, Call Quality,
-Troubleshooting, and Account in the sidebar. They never see SIP Trunks, API Calling,
-or IVR Builder. This is enforced in `Sidebar.tsx` by filtering `allProductNavItems`
-against `user.account_type`.
+RCF customers (`account_type: 'rcf'`) get RCF under Products and Reporting under
+Insights. Coming Soon (darkened, last) lists SIP Trunking (NOT a link for them —
+`linkAccountTypes` limits the link to admins and trunk/hybrid), Visual Voicemail,
+Guides and API Reference. Products are filtered in `Sidebar.tsx` against
+`user.account_type` (`allProductNavItems`).
 
 ---
 

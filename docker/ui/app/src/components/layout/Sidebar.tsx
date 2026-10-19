@@ -26,16 +26,16 @@ interface NavItemDef {
 
 /* ─── Nav item definitions ────────────────────────────────── */
 
+// Live products only. SIP Trunking moved to Coming Soon (2026-10) — the
+// /trunks route still works and is reached from its linked Coming Soon row.
 const allProductNavItems: NavItemDef[] = [
-  { label: 'RCF',          icon: <IconRCF size={18} />,   to: '/rcf',      color: '#3b82f6', accountTypes: ['rcf', 'hybrid'] },
-  { label: 'SIP Trunking', icon: <IconTrunk size={18} />, to: '/trunks',   color: '#fbbf24', accountTypes: ['trunk', 'hybrid'] },
+  { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#3b82f6', accountTypes: ['rcf', 'hybrid'] },
 ];
 
 /* ─── Insights nav items ──────────────────────────────────── */
 
-// Customer Reporting — rendered in its own group directly above
-// Documentation (so it sits right above Guides). Visibility is the shared
-// canSeeReporting() rule, identical to the /reporting route guard.
+// Customer Reporting — rendered in its own Insights group. Visibility is the
+// shared canSeeReporting() rule, identical to the /reporting route guard.
 const reportingNavItem: NavItemDef = {
   label: 'Reporting',
   icon: <BarChart3 size={18} />,
@@ -44,25 +44,6 @@ const reportingNavItem: NavItemDef = {
   isActiveFn: (p) => p.startsWith('/reporting'),
 };
 
-/* ─── Documentation nav items ─────────────────────────────── */
-
-const docNavItems: NavItemDef[] = [
-  {
-    label: 'Guides',
-    icon: <BookOpen size={18} />,
-    to: '/docs/guides',
-    color: '#3b82f6',
-    isActiveFn: (p) => p.startsWith('/docs/guides'),
-  },
-  {
-    label: 'API Reference',
-    icon: <IconDocs size={18} />,
-    to: '/docs/api',
-    color: '#3b82f6',
-    isActiveFn: (p) => p.startsWith('/docs/api'),
-  },
-];
-
 /* ─── Coming Soon item definitions ───────────────────────── */
 
 interface ComingSoonItemDef {
@@ -70,23 +51,57 @@ interface ComingSoonItemDef {
   icon: React.ReactNode;
   /** When set, the item is a real link to a coming-soon preview page. */
   to?: string;
-  /** Accent color for the hover tint / active treatment (link items only). */
-  color?: string;
+  /**
+   * Custom active-match (linked items only). Without it the row is active on
+   * `to` or any sub-path of it (see isSoonItemActive); either way the same
+   * rule drives both the row's active style and the group's auto-open.
+   */
+  isActiveFn?: (pathname: string) => boolean;
+  /**
+   * When set, only admins and these account types get the LINK; everyone else
+   * sees the same darkened row without one (e.g. an RCF-only customer has no
+   * trunks page worth opening).
+   */
+  linkAccountTypes?: string[];
 }
 
-// RCF and SIP Trunking are LIVE (gated by account_type in allProductNavItems).
-// Visual Voicemail (and API Calling, when enabled) are pre-launch — shown as "Soon" items until
-// they graduate to live product portals, each linking to its coming-soon
-// showcase page. Like the group itself, these show for ALL authenticated
-// users regardless of account_type — same visibility the IVR item had.
+// RCF is the only LIVE product (gated by account_type in allProductNavItems).
+// Everything here is pre-launch or de-prioritised and renders DARKENED: each
+// row still links to its real page (routes keep working — SIP Trunking hosts
+// the owner's test customer, the docs stay readable), but none competes with
+// live nav. Like the group itself, these show for ALL non-support
+// authenticated users regardless of account_type.
 // API Calling is RETIRED (2026-09): its item is kept but only listed while
 // API_CALLING_ENABLED is true (the /api-dids route redirects when it is off).
 const COMING_SOON_ITEMS: ComingSoonItemDef[] = [
+  { label: 'SIP Trunking', icon: <IconTrunk size={18} />, to: '/trunks', linkAccountTypes: ['trunk', 'hybrid'] },
   ...(API_CALLING_ENABLED
-    ? [{ label: 'API Calling', icon: <IconAPI size={18} />, to: '/api-dids', color: '#3b82f6' }]
+    ? [{ label: 'API Calling', icon: <IconAPI size={18} />, to: '/api-dids' }]
     : []),
-  { label: 'Visual Voicemail', icon: <IconVoicemail size={18} />, to: '/voicemail', color: '#3b82f6' },
+  { label: 'Visual Voicemail', icon: <IconVoicemail size={18} />, to: '/voicemail' },
+  {
+    label: 'Guides',
+    icon: <BookOpen size={18} />,
+    to: '/docs/guides',
+    isActiveFn: (p) => p === '/docs/guides' || p.startsWith('/docs/guides/'),
+  },
+  {
+    label: 'API Reference',
+    icon: <IconDocs size={18} />,
+    to: '/docs/api',
+    isActiveFn: (p) => p === '/docs/api' || p.startsWith('/docs/api/'),
+  },
 ];
+
+/**
+ * True when `pathname` is (or lives under) this Coming Soon row's page. One
+ * rule for both the row's active style and the group's auto-open.
+ */
+function isSoonItemActive(item: ComingSoonItemDef, pathname: string): boolean {
+  if (!item.to) return false;
+  if (item.isActiveFn) return item.isActiveFn(pathname);
+  return pathname === item.to || pathname.startsWith(item.to + '/');
+}
 
 /* ─── localStorage helpers ────────────────────────────────── */
 
@@ -309,6 +324,10 @@ function SoonBadge() {
  * gradient + glow + dot.
  */
 function ComingSoonNavItem({ item, onNavigate }: { item: ComingSoonItemDef; onNavigate?: () => void }) {
+  // Hook first — above the linked/static branch (React #310 rule).
+  const { pathname } = useLocation();
+  const isActive = isSoonItemActive(item, pathname);
+
   const rowStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -343,12 +362,10 @@ function ComingSoonNavItem({ item, onNavigate }: { item: ComingSoonItemDef; onNa
     return (
       <NavLink
         to={item.to}
-        end
         onClick={onNavigate}
         title={`${item.label} — coming soon (preview)`}
-        className={({ isActive }) =>
-          cn('block no-underline sb-soon-row sb-soon-row--link', isActive && 'sb-soon-row--active')
-        }
+        aria-current={isActive ? 'page' : undefined}
+        className={cn('block no-underline sb-soon-row sb-soon-row--link', isActive && 'sb-soon-row--active')}
         style={rowStyle}
       >
         <span className="sb-soon-icon" style={iconStyle}>{item.icon}</span>
@@ -617,7 +634,6 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
       products:          stored.products          ?? true,
       comingSoon:        stored.comingSoon        ?? false,
       insights:          stored.insights          ?? true,
-      documentation:     stored.documentation     ?? true,
       administration:    stored.administration    ?? false,
     };
   });
@@ -645,6 +661,8 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
     }
     return !item.accountTypes;
   });
+  // Never render an empty Products header (e.g. trunk-only accounts).
+  const showProducts = !isSupport && productNavItems.length > 0;
 
   // Auto-expand group when current route lives inside it
   useEffect(() => {
@@ -652,25 +670,20 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
 
     const productPaths = productNavItems.map((i) => i.to);
     const adminPaths   = ['/admin', '/call-quality', '/troubleshooting', '/cdrs'];
-    const docPaths     = docNavItems.map((i) => i.to);
-    const soonPaths    = COMING_SOON_ITEMS.flatMap((i) => (i.to ? [i.to] : []));
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
-    const inDocs     = docPaths.some((p) => path === p || path.startsWith(p + '/'));
-    const inSoon     = soonPaths.some((p) => path === p || path.startsWith(p + '/'));
+    const inSoon     = COMING_SOON_ITEMS.some((i) => isSoonItemActive(i, path));
     const inInsights = path === reportingNavItem.to || path.startsWith(reportingNavItem.to + '/');
 
     setGroupOpen((prev) => {
       const next = { ...prev };
       if (inProducts && !prev.products)       next.products       = true;
       if (inAdmin    && !prev.administration) next.administration = true;
-      if (inDocs     && !prev.documentation)  next.documentation  = true;
       if (inSoon     && !prev.comingSoon)     next.comingSoon     = true;
       if (inInsights && !prev.insights)       next.insights       = true;
       if (next.products       === prev.products &&
           next.insights       === prev.insights &&
           next.administration === prev.administration &&
-          next.documentation  === prev.documentation &&
           next.comingSoon     === prev.comingSoon) {
         return prev;
       }
@@ -914,8 +927,11 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               scrollbarColor: 'rgba(42,47,69,0.6) transparent',
             }}
           >
-            {/* ── GROUP 1: Products (hidden for support staff) ─ */}
-            {!isSupport && (
+            {/* ── GROUP 1: Products (hidden for support staff, and
+                 entirely — header too — when the account has no live
+                 product, e.g. a trunk-only customer now that SIP Trunking
+                 lives in Coming Soon) ─ */}
+            {showProducts && (
               <CollapsibleGroup
                 id="products"
                 label="Products"
@@ -929,10 +945,10 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               </CollapsibleGroup>
             )}
 
-            {/* ── GROUP 2: Insights — Reporting, directly above Guides ─ */}
+            {/* ── GROUP 2: Insights — Reporting ─ */}
             {showReporting && (
               <>
-                <div style={{ height: 6 }} />
+                {showProducts && <div style={{ height: 6 }} />}
                 <CollapsibleGroup
                   id="insights"
                   label="Insights"
@@ -945,28 +961,10 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               </>
             )}
 
-            {/* ── GROUP 3: Documentation (hidden for support) ─ */}
-            {!isSupport && (
-              <>
-                <div style={{ height: 6 }} />
-                <CollapsibleGroup
-                  id="documentation"
-                  label="Documentation"
-                  icon={<BookOpen size={11} strokeWidth={2.5} />}
-                  isOpen={groupOpen.documentation}
-                  onToggle={toggleGroup}
-                >
-                  {docNavItems.map((item) => (
-                    <SidebarNavItem key={item.to} item={item} onNavigate={closeMobile} small />
-                  ))}
-                </CollapsibleGroup>
-              </>
-            )}
-
-            {/* ── GROUP 4: Administration / Support tools ──── */}
+            {/* ── GROUP 3: Administration / Support tools ──── */}
             {showAdmin && (
               <>
-                {!isSupport && <div style={{ height: 6 }} />}
+                {(showProducts || showReporting) && <div style={{ height: 6 }} />}
                 <CollapsibleGroup
                   id="administration"
                   label={isSupport ? 'Support' : 'Administration'}
@@ -1005,8 +1003,10 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
             )}
 
             {/* ── LAST GROUP: Coming Soon — always at the bottom, darkened
-                 (pre-launch previews must never compete with live nav).
-                 Hidden while empty / for support, exactly as before. ─ */}
+                 (pre-launch / de-prioritised items — SIP Trunking, Visual
+                 Voicemail, Guides, API Reference — must never compete with
+                 live nav; each row still links to its working page).
+                 Hidden while empty / for support. ─ */}
             {!isSupport && COMING_SOON_ITEMS.length > 0 && (
               <>
                 <div className="sb-soon-divider" aria-hidden="true" />
@@ -1018,9 +1018,17 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                   onToggle={toggleGroup}
                   muted
                 >
-                  {COMING_SOON_ITEMS.map((item) => (
-                    <ComingSoonNavItem key={item.label} item={item} onNavigate={closeMobile} />
-                  ))}
+                  {COMING_SOON_ITEMS.map((item) => {
+                    const linked = !item.linkAccountTypes || isAdmin
+                      || (user?.account_type != null && item.linkAccountTypes.includes(user.account_type));
+                    return (
+                      <ComingSoonNavItem
+                        key={item.label}
+                        item={linked ? item : { label: item.label, icon: item.icon }}
+                        onNavigate={closeMobile}
+                      />
+                    );
+                  })}
                 </CollapsibleGroup>
               </>
             )}
