@@ -490,6 +490,94 @@ input[type="time"] {
   color: #94a3b8;
 }
 
+/* ─── Coming Soon (pre-launch) group — always the LAST nav group ─────────
+   Darkened at rest so previews never read as live product nav: dim slate
+   label + icon swatch, a muted slate "Soon" pill (no indigo), a quieter
+   group header, and a hairline divider separating it from the live groups.
+   Linked rows (preview pages) get only a faint NEUTRAL hover lift — no
+   product accent tint — and their active state is a neutral wash, never the
+   live gradient + glow. */
+.sb-soon-divider {
+  height: 1px;
+  margin: 12px 10px 8px;
+  background: linear-gradient(90deg, transparent, rgba(42, 47, 69, 0.75) 15%, rgba(42, 47, 69, 0.75) 85%, transparent);
+}
+
+.sb-group-head.sb-group-head--muted { color: #334155; }
+
+.sb-group-head.sb-group-head--muted:hover,
+.sb-group-head.sb-group-head--muted:focus-visible {
+  background: rgba(255, 255, 255, 0.04);
+  color: #64748b;
+}
+
+.sb-soon-row {
+  color: #3f4b5e;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.sb-soon-icon {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  color: #334155;
+  opacity: 0.8;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
+}
+
+.sb-soon-pill {
+  flex-shrink: 0;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  line-height: 1.6;
+  text-transform: uppercase;
+  color: #475569;
+  background: rgba(148, 163, 184, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 999px;
+  padding: 1px 7px;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.sb-soon-row--link { cursor: pointer; }
+
+.sb-soon-row--link:hover,
+.sb-soon-row--link:focus-visible {
+  background: rgba(255, 255, 255, 0.03);
+  color: #64748b;
+}
+
+.sb-soon-row--link:hover .sb-soon-icon,
+.sb-soon-row--link:focus-visible .sb-soon-icon {
+  color: #64748b;
+  opacity: 1;
+}
+
+.sb-soon-row--link:hover .sb-soon-pill,
+.sb-soon-row--link:focus-visible .sb-soon-pill {
+  color: #64748b;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.sb-soon-row--link:focus-visible {
+  outline: 1px solid rgba(148, 163, 184, 0.35);
+  outline-offset: -1px;
+}
+
+/* On the preview page itself: a neutral "you are here" wash. */
+.sb-soon-row.sb-soon-row--active {
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.sb-soon-row--active .sb-soon-icon {
+  color: #94a3b8;
+  opacity: 1;
+}
+
 /* View-as-Customer control — resting slate; the amber "viewing" treatment
    stays inline in Sidebar.tsx and wins over these rules. */
 .sb-viewas {
@@ -550,6 +638,9 @@ input[type="time"] {
   .sb-nav-row,
   .sb-nav-icon,
   .sb-group-head,
+  .sb-soon-row,
+  .sb-soon-icon,
+  .sb-soon-pill,
   .sb-viewas,
   .sb-viewas-label,
   .sb-viewas-glyph,

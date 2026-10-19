@@ -295,140 +295,74 @@ function SidebarLoginForm() {
 
 /* ─── ComingSoonNavItem ───────────────────────────────────── */
 
-/** Shared "Soon" pill — identical treatment for linked and static items. */
+/** Shared "Soon" pill — muted slate, identical for linked and static items. */
 function SoonBadge() {
-  return (
-    <span
-      style={{
-        fontSize: '0.55rem',
-        fontWeight: 700,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: '#818cf8',
-        background: 'rgba(99,102,241,0.15)',
-        border: '1px solid rgba(99,102,241,0.25)',
-        borderRadius: 999,
-        padding: '2px 7px',
-        lineHeight: 1.6,
-        flexShrink: 0,
-      }}
-    >
-      Soon
-    </span>
-  );
+  return <span className="sb-soon-pill">Soon</span>;
 }
 
+/**
+ * Pre-launch product row. Deliberately DARKENED at rest (dim icon + label +
+ * slate "Soon" pill — see .sb-soon-row in index.css) so it always reads as
+ * subordinate to live nav items. No product accent anywhere: the linked
+ * variant gets only a faint neutral hover lift, and even its active state
+ * (you are on the preview page) is a quiet neutral wash, never the live
+ * gradient + glow + dot.
+ */
 function ComingSoonNavItem({ item, onNavigate }: { item: ComingSoonItemDef; onNavigate?: () => void }) {
-  // Linked variant — a real NavLink to the product's coming-soon page. Rides
-  // the shared .sb-nav-row / .sb-nav-icon hover language (index.css) so it
-  // behaves like every other nav row, keeping the "Soon" pill on the right.
+  const rowStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '5px 10px 5px 14px',
+    borderRadius: 10,
+    overflow: 'hidden',
+    fontSize: '0.76rem',
+    fontWeight: 500,
+    letterSpacing: '-0.01em',
+    userSelect: 'none',
+    textDecoration: 'none',
+  };
+  const iconStyle: React.CSSProperties = {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  };
+  const labelStyle: React.CSSProperties = {
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  };
+
+  // Linked variant — a real NavLink to the product's coming-soon preview page.
   if (item.to) {
-    const accent = item.color ?? '#3b82f6';
     return (
       <NavLink
         to={item.to}
         end
         onClick={onNavigate}
-        title={`${item.label} — coming soon`}
-        className="block no-underline sb-nav-row"
-        style={({ isActive }) => ({
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '5px 10px 5px 14px',
-          borderRadius: 10,
-          overflow: 'hidden',
-          fontSize: '0.76rem',
-          fontWeight: isActive ? 600 : 500,
-          letterSpacing: '-0.01em',
-          cursor: 'pointer',
-          userSelect: 'none',
-          textDecoration: 'none',
-          ['--sb-accent-tint' as string]: `${accent}14`,
-          color: isActive ? '#f1f5f9' : undefined,
-          background: isActive
-            ? `linear-gradient(135deg, ${accent}22 0%, ${accent}10 100%)`
-            : undefined,
-          border: isActive ? `1px solid ${accent}40` : '1px solid transparent',
-          boxShadow: isActive ? `0 2px 12px -4px ${accent}40` : 'none',
-        })}
+        title={`${item.label} — coming soon (preview)`}
+        className={({ isActive }) =>
+          cn('block no-underline sb-soon-row sb-soon-row--link', isActive && 'sb-soon-row--active')
+        }
+        style={rowStyle}
       >
-        {({ isActive }) => (
-          <>
-            <span
-              className="sb-nav-icon"
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: 6,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                ...(isActive
-                  ? {
-                      background: `linear-gradient(135deg, ${accent}30 0%, ${accent}18 100%)`,
-                      border: `1px solid ${accent}40`,
-                      color: accent,
-                    }
-                  : null),
-              }}
-            >
-              {item.icon}
-            </span>
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {item.label}
-            </span>
-            <SoonBadge />
-          </>
-        )}
+        <span className="sb-soon-icon" style={iconStyle}>{item.icon}</span>
+        <span style={labelStyle}>{item.label}</span>
+        <SoonBadge />
       </NavLink>
     );
   }
 
-  // Static variant — no page yet; muted, non-interactive.
+  // Static variant — no page yet; non-interactive.
   return (
-    <div
-      title="Coming Soon"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '5px 10px 5px 14px',
-        borderRadius: 10,
-        fontSize: '0.76rem',
-        fontWeight: 500,
-        letterSpacing: '-0.01em',
-        color: '#64748b',
-        opacity: 0.45,
-        cursor: 'default',
-        userSelect: 'none',
-      }}
-    >
-      {/* Icon swatch */}
-      <span
-        style={{
-          width: 24,
-          height: 24,
-          borderRadius: 6,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          background: 'rgba(255,255,255,0.04)',
-          border: '1px solid rgba(255,255,255,0.06)',
-          color: '#475569',
-        }}
-      >
-        {item.icon}
-      </span>
-
-      {/* Label */}
-      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {item.label}
-      </span>
-
-      {/* "Soon" badge */}
+    <div title={`${item.label} — coming soon`} className="sb-soon-row" style={{ ...rowStyle, cursor: 'default' }}>
+      <span className="sb-soon-icon" style={iconStyle}>{item.icon}</span>
+      <span style={labelStyle}>{item.label}</span>
       <SoonBadge />
     </div>
   );
@@ -547,9 +481,11 @@ interface CollapsibleGroupProps {
   children: React.ReactNode;
   /** When provided: first click expands the group (if collapsed), second click navigates here. */
   to?: string;
+  /** Darkened header for the pre-launch (Coming Soon) group. */
+  muted?: boolean;
 }
 
-function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to }: CollapsibleGroupProps) {
+function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to, muted = false }: CollapsibleGroupProps) {
   const navigate = useNavigate();
 
   const handleClick = () => {
@@ -572,7 +508,7 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to }: C
         title={to && isOpen ? `Go to ${label}` : undefined}
         // Resting/hover colors live in CSS (.sb-group-head in index.css) so
         // :hover / :focus-visible share one treatment across all nav rows.
-        className="sb-group-head"
+        className={muted ? 'sb-group-head sb-group-head--muted' : 'sb-group-head'}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -993,25 +929,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               </CollapsibleGroup>
             )}
 
-            {/* ── GROUP 2: Coming Soon (hidden while empty / for support) ─ */}
-            {!isSupport && COMING_SOON_ITEMS.length > 0 && (
-              <>
-                <div style={{ height: 6 }} />
-                <CollapsibleGroup
-                  id="comingSoon"
-                  label="Coming Soon"
-                  icon={<Clock size={11} strokeWidth={2.5} />}
-                  isOpen={groupOpen.comingSoon}
-                  onToggle={toggleGroup}
-                >
-                  {COMING_SOON_ITEMS.map((item) => (
-                    <ComingSoonNavItem key={item.label} item={item} onNavigate={closeMobile} />
-                  ))}
-                </CollapsibleGroup>
-              </>
-            )}
-
-            {/* ── GROUP 3: Insights — Reporting, directly above Guides ─ */}
+            {/* ── GROUP 2: Insights — Reporting, directly above Guides ─ */}
             {showReporting && (
               <>
                 <div style={{ height: 6 }} />
@@ -1027,7 +945,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               </>
             )}
 
-            {/* ── GROUP 4: Documentation (hidden for support) ─ */}
+            {/* ── GROUP 3: Documentation (hidden for support) ─ */}
             {!isSupport && (
               <>
                 <div style={{ height: 6 }} />
@@ -1045,7 +963,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
               </>
             )}
 
-            {/* ── GROUP 5: Administration / Support tools ──── */}
+            {/* ── GROUP 4: Administration / Support tools ──── */}
             {showAdmin && (
               <>
                 {!isSupport && <div style={{ height: 6 }} />}
@@ -1082,6 +1000,27 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                       {isAdmin && <SidebarNavItem item={troubleItem} onNavigate={closeMobile} small />}
                     </>
                   )}
+                </CollapsibleGroup>
+              </>
+            )}
+
+            {/* ── LAST GROUP: Coming Soon — always at the bottom, darkened
+                 (pre-launch previews must never compete with live nav).
+                 Hidden while empty / for support, exactly as before. ─ */}
+            {!isSupport && COMING_SOON_ITEMS.length > 0 && (
+              <>
+                <div className="sb-soon-divider" aria-hidden="true" />
+                <CollapsibleGroup
+                  id="comingSoon"
+                  label="Coming Soon"
+                  icon={<Clock size={11} strokeWidth={2.5} />}
+                  isOpen={groupOpen.comingSoon}
+                  onToggle={toggleGroup}
+                  muted
+                >
+                  {COMING_SOON_ITEMS.map((item) => (
+                    <ComingSoonNavItem key={item.label} item={item} onNavigate={closeMobile} />
+                  ))}
                 </CollapsibleGroup>
               </>
             )}

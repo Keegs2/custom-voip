@@ -1,32 +1,44 @@
 /**
- * CallsFilterBar — the merged Calls & Quality filter slab.
+ * CallsFilterBar — the Calls & Quality search row.
  *
- * Evolved from the CDR Search filter bar (the more dynamic of the two pages'
- * search boxes) with the Call Quality page's trunk selector folded in and
- * role gating added. One white `dl-panel`: a scope row (customer / trunk /
- * product / direction / zone / destination prefix), a time row (range
- * presets + datetime pickers + rated-only), and a footer with inline
- * validation + the Search / Export actions.
+ * ONE compact, centered toolbar row (wraps cleanly below ~1440px for staff):
+ *
+ *   Customer* · Trunk · Product · Direction · Dest. prefix · Time range
+ *   [· From · To — only while "Custom range" is chosen] · More* | Search · Export*
+ *
+ *   (* staff only)
+ *
+ * Every control is a uniform 36px; labels sit above in the shared `dl-flabel`
+ * treatment so baselines line up and the row reads as one strip. The staff
+ * power filters that rarely change — Zone, the Rows row model (Calls / All
+ * legs / Carrier legs — the CDR A/B leg split, docs/CDR_LEG_SPLIT_CONTRACT.md)
+ * and Rated only — live behind "More" (a small anchored popover) with a
+ * count badge whenever any of them is non-default, so a narrowed search is
+ * never invisible. Validation errors and the staff "Call: <id>" single-call
+ * chip render on a slim line under the row ONLY when present.
  *
  * Role gating (presentation only — the API tenant-scopes server-side):
- * - Staff (admin + support) see the Customer and Zone filters, the Rows
- *   row-model control (Calls / All legs / Carrier legs — the CDR A/B leg
- *   split, docs/CDR_LEG_SPLIT_CONTRACT.md), the "Call: <id>" single-call
- *   chip (set from the call-detail modal's "Show all legs of this call";
- *   its × clears the filter and re-runs the search), and Export CSV.
- * - Tenants get neither; the Trunk selector stays (listTrunks is
+ * - Staff (admin + support): Customer, More (Zone / Rows / Rated only), the
+ *   "Call: <id>" chip (its × clears the filter AND re-runs the search via
+ *   onClearCallId), and Export CSV.
+ * - Tenants: none of those; the Trunk selector stays (listTrunks is
  *   tenant-scoped, so tenants only ever see their own trunks).
  *
- * Time-range semantics (state + serialization live in ./callsFilters):
- * - Presets (Last hour / 24h / 7d / 30d) are RELATIVE — they resolve to
- *   concrete instants when Search is clicked, so "Last 24h" always means 24h
- *   before the search, not before page load. While a preset is active the
- *   datetime inputs show a live preview and are disabled — the preset is
- *   authoritative.
- * - Custom enables the pickers. The user enters LOCAL wall-clock time;
- *   filtersToParams() converts to ISO 8601 UTC for the wire.
+ * Time-range semantics (state + serialization live in ./callsFilters —
+ * unchanged):
+ * - Presets are RELATIVE — they resolve to concrete instants when Search is
+ *   clicked, so "Last 24h" always means 24h before the search.
+ * - "Custom range" reveals From / To pickers inline, seeded from the window
+ *   the active preset currently covers. The user enters LOCAL wall-clock
+ *   time; filtersToParams() converts to ISO 8601 UTC for the wire.
+ *
+ * Enter in any text/date field submits the form (= Search).
+ *
+ * React #310: every hook is called unconditionally at the top.
  */
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Download, Search, SlidersHorizontal, X } from 'lucide-react';
 import { listCustomers } from '../../api/customers';
 import { listTrunks } from '../../api/trunks';
 import { API_CALLING_ENABLED } from '../../config/features';
@@ -39,6 +51,19 @@ import {
 } from './callsFilters';
 import type { CallsFilters, CdrRangePreset } from './callsFilters';
 
+/** Select order for the time-range control. */
+const RANGE_OPTIONS: ReadonlyArray<{ id: CdrRangePreset; label: string }> = [
+  ...(Object.keys(PRESET_LABELS) as Array<Exclude<CdrRangePreset, 'custom'>>).map((p) => ({
+    id: p as CdrRangePreset,
+    label: PRESET_LABELS[p],
+  })),
+  { id: 'custom', label: 'Custom range' },
+];
+
+function isRangePreset(value: string): value is CdrRangePreset {
+  return RANGE_OPTIONS.some((o) => o.id === value);
+}
+
 interface CallsFilterBarProps {
   filters: CallsFilters;
   onChange: (filters: CallsFilters) => void;
@@ -46,7 +71,7 @@ interface CallsFilterBarProps {
   onExport: () => void;
   searching: boolean;
   exporting: boolean;
-  /** Admin or support — shows Customer + Zone filters and Export CSV. */
+  /** Admin or support — shows Customer, More (Zone / Rows / Rated) and Export CSV. */
   isStaff: boolean;
   /** Clears the single-call filter AND re-runs the search (staff chip ×). */
   onClearCallId?: () => void;
@@ -82,21 +107,55 @@ export function CallsFilterBar({
     staleTime: 2 * 60 * 1000,
   });
 
-  const rangeError = validateCallsFilters(filters);
-  const rangeAlert = (
-    <div role="alert" aria-live="polite">
-      {rangeError && <span className="dlx4-ferr">{rangeError}</span>}
-    </div>
-  );
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  const moreBtnRef = useRef<HTMLButtonElement | null>(null);
+  const morePanelId = useId();
 
-  // While a preset is active the pickers show its live preview (recomputed
-  // each render — close enough to "now" for a preview; the authoritative
-  // resolution happens at Search time).
-  const preview =
-    filters.range_preset === 'custom' ? null : presetRange(filters.range_preset, new Date());
-  const isCustom = filters.range_preset === 'custom';
+  const closeMore = useCallback((restoreFocus: boolean) => {
+    setMoreOpen(false);
+    if (restoreFocus) moreBtnRef.current?.focus();
+  }, []);
+
+  // Dismiss the More popover on outside pointer-down or Escape. Listeners
+  // exist only while it is open.
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    function onPointerDown(e: PointerEvent) {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) closeMore(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeMore(true);
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [moreOpen, closeMore]);
+
+  /* ── Derived ─────────────────────────────────────────────────────── */
+
+  const rangeError = validateCallsFilters(filters);
+  const rangePreset = filters.range_preset;
+  const isCustom = rangePreset === 'custom';
+  // While a preset is active, the window it currently covers (recomputed per
+  // render) seeds the pickers when the operator switches to Custom.
+  const preview = rangePreset === 'custom' ? null : presetRange(rangePreset, new Date());
   const startValue = preview ? toDatetimeLocal(preview.start) : filters.start_local;
   const endValue = preview ? toDatetimeLocal(preview.end) : filters.end_local;
+
+  /** Non-default "More" filters — drives the badge so nothing hides silently. */
+  const moreCount =
+    (filters.zone ? 1 : 0) + (filters.rows !== 'calls' ? 1 : 0) + (filters.rated_only ? 1 : 0);
+  const activeRows = ROWS_MODE_OPTIONS.find((o) => o.id === filters.rows) ?? ROWS_MODE_OPTIONS[0];
+  const showCallChip = isStaff && filters.call_id !== '';
+
+  /* ── Mutators ────────────────────────────────────────────────────── */
 
   function set<K extends keyof CallsFilters>(key: K, value: CallsFilters[K]) {
     onChange({ ...filters, [key]: value });
@@ -109,31 +168,30 @@ export function CallsFilterBar({
 
   function selectPreset(preset: CdrRangePreset) {
     if (preset === 'custom') {
-      // Seed the editable pickers from whatever window is currently shown.
-      onChange({
-        ...filters,
-        range_preset: 'custom',
-        start_local: startValue,
-        end_local: endValue,
-      });
+      // Seed the editable pickers from whatever window is currently covered.
+      onChange({ ...filters, range_preset: 'custom', start_local: startValue, end_local: endValue });
     } else {
       onChange({ ...filters, range_preset: preset });
     }
   }
 
+  function resetMore() {
+    onChange({ ...filters, zone: '', rows: 'calls', rated_only: false });
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (rangeError) return;
+    setMoreOpen(false);
     onSearch();
   }
 
   return (
-    <section className="dl-panel">
-      <form onSubmit={handleSubmit} className="dl-panel-body">
-        {/* Row 1 — scope filters */}
-        <div className="dlx4-filterrow">
+    <section className="cqf-card" aria-label="Search calls">
+      <form onSubmit={handleSubmit} className="cqf-form">
+        <div className="cqf-row">
           {isStaff && (
-            <div className="dlx4-field" style={{ minWidth: 180 }}>
+            <div className="cqf-field cqf-w-customer">
               <label className="dl-flabel" htmlFor="cdr-f-customer">Customer</label>
               <select
                 id="cdr-f-customer"
@@ -141,7 +199,7 @@ export function CallsFilterBar({
                 value={filters.customer_id}
                 onChange={(e) => setCustomer(e.target.value)}
               >
-                <option value="">All Customers</option>
+                <option value="">All customers</option>
                 {(customersData?.items ?? []).map((c) => (
                   <option key={c.id} value={String(c.id)}>{c.name}</option>
                 ))}
@@ -149,7 +207,7 @@ export function CallsFilterBar({
             </div>
           )}
 
-          <div className="dlx4-field" style={{ minWidth: 150 }}>
+          <div className="cqf-field cqf-w-trunk">
             <label className="dl-flabel" htmlFor="cdr-f-trunk">Trunk</label>
             <select
               id="cdr-f-trunk"
@@ -157,14 +215,14 @@ export function CallsFilterBar({
               value={filters.trunk_id}
               onChange={(e) => set('trunk_id', e.target.value)}
             >
-              <option value="">All Trunks</option>
+              <option value="">All trunks</option>
               {(trunksData?.items ?? []).map((t) => (
                 <option key={t.id} value={String(t.id)}>{t.trunk_name}</option>
               ))}
             </select>
           </div>
 
-          <div className="dlx4-field" style={{ minWidth: 110 }}>
+          <div className="cqf-field cqf-w-product">
             <label className="dl-flabel" htmlFor="cdr-f-product">Product</label>
             <select
               id="cdr-f-product"
@@ -180,7 +238,7 @@ export function CallsFilterBar({
             </select>
           </div>
 
-          <div className="dlx4-field" style={{ minWidth: 110 }}>
+          <div className="cqf-field cqf-w-direction">
             <label className="dl-flabel" htmlFor="cdr-f-direction">Direction</label>
             <select
               id="cdr-f-direction"
@@ -194,196 +252,209 @@ export function CallsFilterBar({
             </select>
           </div>
 
-          {/* Zone — static options; each zone is a self-contained SIP stack.
-              Per-SBC granularity stays visible in the call-detail modal. */}
-          {isStaff && (
-            <div className="dlx4-field" style={{ minWidth: 120 }}>
-              <label className="dl-flabel" htmlFor="cdr-f-zone">Zone</label>
-              <select
-                id="cdr-f-zone"
-                className="dl-input"
-                value={filters.zone}
-                onChange={(e) => set('zone', e.target.value)}
-              >
-                <option value="">All zones</option>
-                <option value="east">East</option>
-                <option value="west">West</option>
-                <option value="central">Central</option>
-              </select>
-            </div>
-          )}
-
-          <div className="dlx4-field" style={{ minWidth: 150 }}>
-            <label className="dl-flabel" htmlFor="cdr-f-dest">Destination Prefix</label>
+          <div className="cqf-field cqf-w-dest">
+            <label className="dl-flabel" htmlFor="cdr-f-dest">Dest. prefix</label>
             <input
               id="cdr-f-dest"
               type="text"
+              inputMode="numeric"
               className="dl-input"
               placeholder="e.g. 1800"
+              title="Destination number prefix"
               value={filters.destination}
               onChange={(e) => set('destination', e.target.value)}
             />
           </div>
-        </div>
 
-        {/* Row 2 — time range */}
-        <div className="dlx4-filterrow dlx4-filterrow-time">
-          <div className="dlx4-field">
-            <span className="dl-flabel">Time Range</span>
-            <div className="dlx-seg" role="group" aria-label="Time range presets">
-              {(Object.keys(PRESET_LABELS) as Array<Exclude<CdrRangePreset, 'custom'>>).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  aria-pressed={filters.range_preset === p}
-                  className={filters.range_preset === p ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
-                  onClick={() => selectPreset(p)}
-                >
-                  {PRESET_LABELS[p]}
-                </button>
-              ))}
-              <button
-                type="button"
-                aria-pressed={isCustom}
-                className={isCustom ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
-                onClick={() => selectPreset('custom')}
-              >
-                Custom
-              </button>
-            </div>
-          </div>
-
-          <div className="dlx4-field">
-            <label className="dl-flabel" htmlFor="cdr-f-start">
-              Start {isCustom ? '(local time)' : ''}
-            </label>
-            <input
-              id="cdr-f-start"
-              type="datetime-local"
+          <div className="cqf-field cqf-w-range">
+            <label className="dl-flabel" htmlFor="cdr-f-range">Time range</label>
+            <select
+              id="cdr-f-range"
               className="dl-input"
-              value={startValue}
-              disabled={!isCustom}
-              aria-invalid={rangeError != null}
-              onChange={(e) => set('start_local', e.target.value)}
-            />
-          </div>
-
-          <div className="dlx4-field">
-            <label className="dl-flabel" htmlFor="cdr-f-end">
-              End {isCustom ? '(local time)' : ''}
-            </label>
-            <input
-              id="cdr-f-end"
-              type="datetime-local"
-              className="dl-input"
-              value={endValue}
-              disabled={!isCustom}
-              aria-invalid={rangeError != null}
-              onChange={(e) => set('end_local', e.target.value)}
-            />
-          </div>
-
-          {/* Rating state is a billing internal — staff only (the API also
-              ignores rated_only for tenants). */}
-          {isStaff && (
-          <div className="dlx4-field" style={{ justifyContent: 'flex-end' }}>
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                cursor: 'pointer',
-                fontSize: '0.8rem',
-                color: 'var(--rcf-ink-soft)',
-                whiteSpace: 'nowrap',
-                userSelect: 'none',
-                height: 36,
+              value={filters.range_preset}
+              onChange={(e) => {
+                if (isRangePreset(e.target.value)) selectPreset(e.target.value);
               }}
             >
-              <input
-                type="checkbox"
-                style={{ width: 15, height: 15, accentColor: 'var(--rcf-azure)', cursor: 'pointer' }}
-                checked={filters.rated_only}
-                onChange={(e) => set('rated_only', e.target.checked)}
-              />
-              Rated only
-            </label>
+              {RANGE_OPTIONS.map((o) => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
           </div>
-          )}
 
-          {/* Row model — staff only. Tenants never see it and never send
-              `leg` (the API pins them to one row per call anyway). */}
-          {isStaff && (
-            <div className="dlx4-field">
-              <span className="dl-flabel">Rows</span>
-              <div className="dlx-seg" role="group" aria-label="Row model">
-                {ROWS_MODE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    title={opt.title}
-                    aria-pressed={filters.rows === opt.id}
-                    className={filters.rows === opt.id ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
-                    onClick={() => set('rows', opt.id)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+          {isCustom && (
+            <>
+              <div className="cqf-field cqf-w-date">
+                <label className="dl-flabel" htmlFor="cdr-f-start">From <span className="cqf-flabel-note">local</span></label>
+                <input
+                  id="cdr-f-start"
+                  type="datetime-local"
+                  className="dl-input"
+                  value={filters.start_local}
+                  aria-invalid={rangeError != null}
+                  onChange={(e) => set('start_local', e.target.value)}
+                />
               </div>
-            </div>
+              <div className="cqf-field cqf-w-date">
+                <label className="dl-flabel" htmlFor="cdr-f-end">To <span className="cqf-flabel-note">local</span></label>
+                <input
+                  id="cdr-f-end"
+                  type="datetime-local"
+                  className="dl-input"
+                  value={filters.end_local}
+                  aria-invalid={rangeError != null}
+                  onChange={(e) => set('end_local', e.target.value)}
+                />
+              </div>
+            </>
           )}
-        </div>
 
-        {/* Footer — inline validation on the left, actions on the right */}
-        <div className="dlx4-filterfoot">
-          {/* Staff single-call filter: the chip + validation share the left
-              slot. Without a call filter the footer renders exactly as before
-              (tenants never have one). */}
-          {isStaff && filters.call_id ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
-              <span
-                className="dl-chip"
-                title={`Showing only rows of call ${filters.call_id}`}
-                style={{ gap: 6, padding: '3px 4px 3px 10px', maxWidth: '100%', minWidth: 0 }}
+          {/* Staff power filters — Zone / Rows / Rated only. Tenants never see
+              them and never send `zone` / `leg` / `rated_only`. */}
+          {isStaff && (
+            <div className="cqf-field cqf-more" ref={moreRef}>
+              <button
+                ref={moreBtnRef}
+                type="button"
+                className={moreCount > 0 ? 'cqf-btn cqf-more-btn cqf-more-btn-on' : 'cqf-btn cqf-more-btn'}
+                aria-haspopup="dialog"
+                aria-expanded={moreOpen}
+                aria-controls={moreOpen ? morePanelId : undefined}
+                title="Zone, row model, rated only"
+                onClick={() => setMoreOpen((o) => !o)}
               >
-                <span style={{ fontFamily: 'inherit', color: 'var(--rcf-ink-dim)', fontWeight: 700 }}>Call:</span>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
-                  {filters.call_id}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => (onClearCallId ? onClearCallId() : set('call_id', ''))}
-                  aria-label="Clear call filter"
-                  title="Clear call filter"
-                  className="dlx4-pgbtn"
-                  style={{ height: 22, minWidth: 22, padding: '0 6px', fontSize: '0.72rem', flex: 'none' }}
-                >
-                  ×
-                </button>
-              </span>
-              {rangeAlert}
+                <SlidersHorizontal size={14} strokeWidth={2} aria-hidden="true" />
+                More
+                {moreCount > 0 && (
+                  <span className="cqf-count" aria-label={`${moreCount} active`}>{moreCount}</span>
+                )}
+              </button>
+
+              {moreOpen && (
+                <div id={morePanelId} className="cqf-pop" role="dialog" aria-label="More filters">
+                  <div className="cqf-pop-body">
+                    <div className="cqf-pop-field">
+                      <label className="dl-flabel" htmlFor="cdr-f-zone">Zone</label>
+                      {/* Static options; each zone is a self-contained SIP stack.
+                          Per-SBC granularity stays in the call-detail modal. */}
+                      <select
+                        id="cdr-f-zone"
+                        className="dl-input"
+                        value={filters.zone}
+                        onChange={(e) => set('zone', e.target.value)}
+                      >
+                        <option value="">All zones</option>
+                        <option value="east">East</option>
+                        <option value="west">West</option>
+                        <option value="central">Central</option>
+                      </select>
+                    </div>
+
+                    <div className="cqf-pop-field">
+                      <span className="dl-flabel" id={`${morePanelId}-rows`}>Rows</span>
+                      <div className="dlx-seg cqf-seg" role="group" aria-labelledby={`${morePanelId}-rows`}>
+                        {ROWS_MODE_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            title={opt.title}
+                            aria-pressed={filters.rows === opt.id}
+                            className={filters.rows === opt.id ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
+                            onClick={() => set('rows', opt.id)}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="cqf-pop-hint">{activeRows.title}.</p>
+                    </div>
+
+                    {/* Rating state is a billing internal — staff only (the API
+                        also ignores rated_only for tenants). */}
+                    <label className="cqf-check">
+                      <input
+                        type="checkbox"
+                        checked={filters.rated_only}
+                        onChange={(e) => set('rated_only', e.target.checked)}
+                      />
+                      <span>
+                        <span className="cqf-check-label">Rated only</span>
+                        <span className="cqf-pop-hint">Only records that have been costed.</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="cqf-pop-foot">
+                    <button
+                      type="button"
+                      className="cqf-link"
+                      disabled={moreCount === 0}
+                      onClick={resetMore}
+                    >
+                      Reset
+                    </button>
+                    <span className="cqf-pop-note">Applied on Search</span>
+                    <button type="button" className="cqf-btn cqf-btn-sm" onClick={() => closeMore(true)}>
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          ) : (
-            rangeAlert
           )}
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+
+          <div className="cqf-actions">
             <button
               type="submit"
-              className="dl-btn dl-btn-primary"
+              className="dl-btn dl-btn-primary cqf-action"
               disabled={searching || rangeError != null}
+              aria-busy={searching || undefined}
             >
-              {searching ? 'Searching…' : 'Search'}
+              {/* Fixed label + icon↔spinner swap: the button never changes
+                  width mid-search, so the row can't reflow/wrap. */}
+              {searching
+                ? <span className="cqf-spin" aria-hidden="true" />
+                : <Search size={14} strokeWidth={2.25} aria-hidden="true" />}
+              Search
             </button>
             {isStaff && (
               <button
                 type="button"
-                className="dl-btn dl-btn-ghost"
+                className="dl-btn dl-btn-ghost cqf-action"
                 disabled={exporting || rangeError != null}
                 onClick={onExport}
+                title="Export the current search as CSV (up to 1,000 rows)"
+                aria-busy={exporting || undefined}
               >
-                {exporting ? 'Exporting…' : 'Export CSV'}
+                {exporting
+                  ? <span className="cqf-spin" aria-hidden="true" />
+                  : <Download size={14} strokeWidth={2.25} aria-hidden="true" />}
+                Export
               </button>
             )}
+          </div>
+        </div>
+
+        {/* Slim meta line — ONLY when there is something to say: the staff
+            single-call chip and/or the custom-range validation message. */}
+        <div className={showCallChip || rangeError ? 'cqf-meta' : undefined}>
+          {showCallChip && (
+            <span className="dl-chip cqf-callchip" title={`Showing only rows of call ${filters.call_id}`}>
+              <span className="cqf-callchip-key">Call</span>
+              <span className="cqf-callchip-id">{filters.call_id}</span>
+              <button
+                type="button"
+                onClick={() => (onClearCallId ? onClearCallId() : set('call_id', ''))}
+                aria-label="Clear call filter"
+                title="Clear call filter"
+                className="cqf-callchip-x"
+              >
+                <X size={12} strokeWidth={2.5} aria-hidden="true" />
+              </button>
+            </span>
+          )}
+          <div role="alert" aria-live="polite">
+            {rangeError && <span className="dlx4-ferr">{rangeError}</span>}
           </div>
         </div>
       </form>

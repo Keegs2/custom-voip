@@ -394,9 +394,23 @@ interface SipLadderProps {
   correlations: Record<string, string[]>;
   /** Optional pipeline diagnostics from the API (timestamp corruption, etc.) */
   pipelineWarnings?: string[];
+  /**
+   * CSS max-height of the ladder's own scroll region (which carries the
+   * sticky participant header). Defaults to the viewport-relative cap used
+   * when the ladder sat inline on the page; the Troubleshooting call modal
+   * passes a cap sized to its 92vh panel.
+   */
+  maxScrollHeight?: string;
 }
 
-export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadderProps) {
+const DEFAULT_MAX_SCROLL_HEIGHT = 'calc(100vh - 340px)';
+
+export function SipLadder({
+  messages,
+  correlations,
+  pipelineWarnings,
+  maxScrollHeight = DEFAULT_MAX_SCROLL_HEIGHT,
+}: SipLadderProps) {
   // ── ALL hooks unconditionally at the top (React rules of hooks) ──
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
   const [hide100Trying, setHide100Trying] = useState(false);
@@ -612,7 +626,7 @@ export function SipLadder({ messages, correlations, pipelineWarnings }: SipLadde
           style={{
             overflowX: 'auto',
             overflowY: 'auto',
-            maxHeight: 'calc(100vh - 340px)',
+            maxHeight: maxScrollHeight,
           }}
         >
           <table

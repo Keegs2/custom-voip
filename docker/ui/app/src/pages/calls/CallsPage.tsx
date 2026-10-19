@@ -5,15 +5,19 @@
  *
  * Composition (top → bottom):
  *   1. Quiet daylight header (role-aware copy).
- *   2. Filter slab — the CDR Search committed-search filter bar (the dynamic
- *      one), extended with the quality page's trunk selector + the newly
- *      exposed server params (zone, trunk_id). See CallsFilterBar.
- *   3. KPI strip — union of both pages' figures (page-scoped, honest).
- *   4. Quality Trends — the three polished charts, collapsible, own
- *      window-wide fetch gated on expansion. See QualityTrendsSection.
- *   5. Records / Summary segmented control (Summary is staff-only — it
+ *   2. Search row — ONE compact, centered toolbar row (committed-search
+ *      model below): scope selects, time range (+ inline From/To only for
+ *      Custom), staff "More" (zone / rows / rated only), Search + Export.
+ *      See CallsFilterBar.
+ *   3. KPI row — one centered band of equal-width, page-scoped tiles. See
+ *      CallsKpiStrip.
+ *   4. Records / Summary segmented control (Summary is staff-only — it
  *      exposes cost).
- *   6. Server-paginated results table; row click opens CdrDetailModal.
+ *   5. Server-paginated results table; row click opens CdrDetailModal.
+ *
+ * (The former "Quality Trends" chart section was removed 2026-10 at the
+ * owner's request — the per-call grades in the table/modal and the KPI
+ * shares are the quality surface.)
  *
  * Search model (inherited verbatim from CdrsTab — the part that was once
  * broken and then fixed):
@@ -24,8 +28,8 @@
  *   click provably re-runs the request (nonce bumps even when the params are
  *   value-identical), and page navigation reuses the exact frozen window —
  *   offsets stay consistent because the window never moves under them.
- * - Records, Summary, CSV export, and the trend charts ALL consume the same
- *   committed params object → identical filter set on the wire for all four.
+ * - Records, Summary, and CSV export ALL consume the same committed params
+ *   object → identical filter set on the wire for all three.
  *
  * Pagination model (PR #84 mechanics, verbatim):
  * - Plain useQuery keyed on { committedParams, nonce, page, pageSize }. A
@@ -67,7 +71,6 @@ import { CallsKpiStrip } from './CallsKpiStrip';
 import { CallsTable } from './CallsTable';
 import { CdrSummaryView } from './CdrSummaryView';
 import { CdrDetailModal } from './CdrDetailModal';
-import { QualityTrendsSection } from './QualityTrendsSection';
 import type { CallsFilters } from './callsFilters';
 import type { Cdr, CdrSearchParams } from '../../types/cdr';
 import '../../styles/dl-admin.css';
@@ -373,7 +376,7 @@ export function CallsPage() {
           </div>
         </header>
 
-        <div className="dl-stack fx-load fx-load-d1" style={{ paddingBottom: 24 }}>
+        <div className="dl-stack cq-stack fx-load fx-load-d1">
           <CallsFilterBar
             filters={draftFilters}
             onChange={setDraftFilters}
@@ -395,13 +398,10 @@ export function CallsPage() {
             <CallsKpiStrip cdrs={cdrs} total={total} isStaff={isStaff} rowsMode={rowsMode} />
           )}
 
-          {/* Quality trends — collapsible, own window-wide fetch */}
-          <QualityTrendsSection params={committed.params} nonce={committed.nonce} />
-
           {/* Records / Summary segmented control — Summary exposes cost, so
               it is staff-only; tenants get the Records view directly. */}
           {isStaff && (
-            <div className="dlx-seg" role="tablist" aria-label="CDR views" style={{ alignSelf: 'flex-start' }}>
+            <div className="dlx-seg cq-viewtabs" role="tablist" aria-label="CDR views">
               {VIEW_TABS.map((tab) => (
                 <button
                   key={tab.id}

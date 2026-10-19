@@ -438,8 +438,11 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
   // string splitting only re-runs when the packet changes, not per toggle).
   const rawNodes = useMemo(() => renderRawSip(parsed.rawText), [parsed.rawText]);
 
+  // data-trace-keys="local": arrow keys inside the inspector stay with the
+  // inspector (text navigation/selection) — the Troubleshooting call modal
+  // skips its ←/→ call stepping for events originating in here.
   return (
-    <div style={panelStyle}>
+    <div style={panelStyle} data-trace-keys="local">
       {/* Top strip: message accent tick, emphasised start line, close button */}
       <div
         style={{

@@ -5,8 +5,8 @@
  * Evolved from pages/admin/cdrFilters.ts (the CDR Search filter module) with
  * one addition: `trunk_id` — a server-declared param on GET /cdrs that the
  * old page never exposed. filtersToParams() remains the ONE place the picker
- * state becomes wire params — Records, Summary, CSV export, and the quality
- * trend charts all consume its output.
+ * state becomes wire params — Records, Summary, and CSV export all consume
+ * its output.
  *
  * PINNED API CONTRACT (GET /v1/cdrs — routers/cdrs.py query_cdrs): the
  * endpoint declares ONLY customer_id, trunk_id, product_type, direction,
@@ -15,9 +15,6 @@
  * offset. FastAPI silently drops anything else — do not add params here
  * without adding them to the router first. (`call_id` is declared on
  * /v1/cdrs only; /cdrs/summary ignores it — the Summary tab says so.)
- *
- * Quality trends deliberately DROP `leg` (see QualityTrendsSection): quality
- * is a one-row-per-call surface per the leg-split contract.
  */
 import type {
   CdrSearchParams, ProductType, CallDirection, CdrZone, CdrRowsMode,
