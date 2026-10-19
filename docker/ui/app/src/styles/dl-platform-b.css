@@ -26,6 +26,449 @@
   max-width: 1800px;
 }
 
+/* ═══ Calls & Quality — top composition (CallsPage / CallsFilterBar /
+   CallsKpiStrip). `cq-` page prefix; `cqf-` = search row, `cqk-` = KPI row.
+   Calls-page ONLY — never reused by Troubleshooting or Reporting. ═══ */
+
+/* Header → search → KPIs → tabs/table rhythm: one even 16px cadence. */
+.dl-stack.cq-stack {
+  gap: 16px;
+  padding-bottom: 24px;
+}
+
+.cq-viewtabs { align-self: flex-start; margin-top: 4px; }
+
+/* ─── Search row card. NOT a .dl-panel: that clips overflow, and the
+   staff "More" popover must hang outside the card. ─── */
+.cqf-card {
+  position: relative;
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 12px;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.05),
+    0 10px 26px -20px rgba(14, 23, 38, 0.18);
+  padding: 14px 16px;
+}
+
+/* One centered toolbar row. Fields carry a small flex-basis and grow toward
+   a max-width, so line-breaking uses the compact size (stays on one row at
+   1440px for staff) while wide screens fill out evenly around the centre.
+   Below the threshold it wraps into centered rows — the actions travel as
+   ONE unit, never an orphaned lone button. */
+.cqf-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 12px 8px;
+}
+
+.cqf-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cqf-field .dl-flabel {
+  margin-bottom: 5px;
+  white-space: nowrap;
+}
+
+.cqf-flabel-note {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: #8a9ab3;
+}
+
+/* Uniform 36px controls (selects, text, datetime) */
+.cqf-field .dl-input {
+  height: 36px;
+  width: 100%;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 10px;
+  font-size: 0.8rem;
+}
+
+.cqf-field select.dl-input {
+  padding-right: 28px;
+  background-position: right 10px center;
+  text-overflow: ellipsis;
+}
+
+.cqf-field input[type="text"].dl-input { padding-right: 10px; }
+.cqf-field input[type="datetime-local"].dl-input { padding-right: 8px; }
+
+/* Field widths — basis = compact size used for line-breaking */
+.cqf-w-customer  { flex: 1 1 132px; max-width: 240px; }
+.cqf-w-trunk     { flex: 1 1 112px; max-width: 200px; }
+.cqf-w-product   { flex: 0 0 96px; }
+.cqf-w-direction { flex: 0 0 108px; }
+.cqf-w-dest      { flex: 1 1 96px; max-width: 160px; }
+.cqf-w-range     { flex: 0 0 128px; }
+.cqf-w-date      { flex: 0 0 200px; }
+
+/* Buttons sharing the 36px line */
+.cqf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #c9d5e6;
+  background: #ffffff;
+  color: var(--rcf-ink-soft);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--rcf-ease), border-color var(--rcf-ease), color var(--rcf-ease);
+}
+
+.cqf-btn:hover:not(:disabled) {
+  background: var(--rcf-tint-hover);
+  border-color: #a3b6d3;
+  color: var(--rcf-ink);
+}
+
+.cqf-btn:focus-visible {
+  outline: 2px solid var(--rcf-azure);
+  outline-offset: 1px;
+}
+
+.cqf-btn-sm {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 0.76rem;
+}
+
+/* "More" — azure keyline once any hidden filter is non-default */
+.cqf-more { position: relative; flex: 0 0 auto; }
+
+.cqf-more-btn-on {
+  border-color: rgba(47, 125, 246, 0.5);
+  background: rgba(47, 125, 246, 0.07);
+  color: var(--rcf-azure-deep);
+}
+
+.cqf-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--rcf-azure);
+  color: #ffffff;
+  font-size: 0.66rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Search + Export travel together as ONE flex item (a wrap can never strand
+   a lone button); a little extra lead separates them from the fields. */
+.cqf-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: 6px;
+}
+
+.cqf-action.dl-btn {
+  height: 36px;
+  padding: 0 14px;
+  gap: 6px;
+  border-radius: 8px;
+}
+
+.cqf-action.dl-btn-primary { box-shadow: 0 6px 16px -10px rgba(47, 125, 246, 0.7); }
+
+/* In-button busy indicator (replaces the icon; label width stays fixed) */
+.cqf-spin {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  opacity: 0.85;
+  animation: cqf-spin 0.7s linear infinite;
+}
+
+@keyframes cqf-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .cqf-spin { animation-duration: 1.6s; }
+}
+
+/* ─── More popover ─── */
+.cqf-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: 300px;
+  background: var(--rcf-card);
+  border: 1px solid var(--rcf-line);
+  border-radius: 12px;
+  box-shadow:
+    0 1px 2px rgba(14, 23, 38, 0.08),
+    0 22px 48px -18px rgba(14, 23, 38, 0.32);
+  text-align: left;
+  animation: cqf-pop-in 0.14s ease-out;
+}
+
+@keyframes cqf-pop-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cqf-pop { animation: none; }
+}
+
+.cqf-pop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
+}
+
+.cqf-pop-field { display: flex; flex-direction: column; min-width: 0; }
+.cqf-pop-field .dl-flabel { margin-bottom: 5px; }
+
+.cqf-pop-field .dl-input {
+  height: 36px;
+  width: 100%;
+  padding: 0 28px 0 10px;
+  font-size: 0.8rem;
+  background-position: right 10px center;
+}
+
+.dlx-seg.cqf-seg { display: flex; }
+.dlx-seg.cqf-seg .dlx-seg-btn { flex: 1 1 0; justify-content: center; text-align: center; }
+
+.cqf-pop-hint {
+  display: block;
+  margin: 5px 0 0;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--rcf-ink-dim);
+}
+
+.cqf-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cqf-check input {
+  width: 15px;
+  height: 15px;
+  margin: 1px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--rcf-azure);
+  cursor: pointer;
+}
+
+.cqf-check-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--rcf-ink);
+}
+
+.cqf-check .cqf-pop-hint { margin-top: 2px; }
+
+.cqf-pop-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--rcf-line-soft);
+  background: var(--rcf-tint);
+  border-radius: 0 0 12px 12px;
+}
+
+.cqf-pop-note {
+  flex: 1;
+  text-align: right;
+  font-size: 0.68rem;
+  color: var(--rcf-ink-dim);
+}
+
+.cqf-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--rcf-azure-deep);
+  cursor: pointer;
+}
+
+.cqf-link:disabled { color: #a9b6ca; cursor: default; }
+.cqf-link:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; border-radius: 3px; }
+
+/* Narrow screens: anchor the popover to the card instead of the button so
+   it can never run off the left edge. */
+@media (max-width: 640px) {
+  .cqf-more { position: static; }
+  .cqf-pop { left: 12px; right: 12px; width: auto; top: auto; margin-top: 8px; }
+}
+
+/* ─── Meta line (call chip / validation) — only rendered with content ─── */
+.cqf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rcf-line-soft);
+}
+
+.cqf-callchip.dl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 4px 3px 10px;
+}
+
+.cqf-callchip-key {
+  font-weight: 700;
+  color: var(--rcf-ink-dim);
+}
+
+.cqf-callchip-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cqf-callchip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid #d5deeb;
+  background: #ffffff;
+  color: var(--rcf-ink-dim);
+  cursor: pointer;
+}
+
+.cqf-callchip-x:hover { background: var(--rcf-tint-hover); color: var(--rcf-ink); }
+.cqf-callchip-x:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 1px; }
+
+/* ─── KPI row — one bordered band of EQUAL-width tiles (flex: 1 1 0) on
+   hairline seams. Single row at ~1440px; below that the tiles wrap into
+   rows that each fill the full width — never a grey filler area. ─── */
+.cqk {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  container-type: inline-size;
+}
+
+.cqk-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--rcf-line);
+  border: 1px solid var(--rcf-line);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.04);
+}
+
+.cqk-tile {
+  flex: 1 1 0;
+  min-width: 128px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 5px;
+  padding: 13px 12px 12px;
+  background: var(--rcf-card);
+}
+
+.cqk-label {
+  max-width: 100%;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cqk-value {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 1.3rem;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--rcf-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Up to two lines, reserved on every tile so the band has one even height */
+.cqk-sub {
+  min-height: calc(2 * 1.35em);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--rcf-ink-dim);
+  font-variant-numeric: tabular-nums;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.cqk-note {
+  margin: 0;
+  text-align: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #92400e;
+}
+
+/* Below the single-row width, wrap into BALANCED rows instead of letting
+   one tile spill alone: 4 per row (staff 4+4, tenant 4+3 — a short last
+   row's tiles widen to fill it, so there is never a filler gap), then 2 per
+   row on phones. 1040px ≈ 8 tiles × 128px + seams. */
+@container (max-width: 1040px) {
+  .cqk-tile { flex-basis: calc(25% - 1px); min-width: 0; }
+}
+
+@container (max-width: 520px) {
+  .cqk-tile { flex-basis: calc(50% - 1px); padding: 11px 10px 10px; }
+  .cqk-value { font-size: 1.12rem; }
+}
+
 /* ─── CDR stat strip — one bordered slab divided into equal-height cells by
    hairline seams. auto-fit/minmax reflows the cells into balanced rows at
    laptop widths (no orphan wrap, cells stretch to fill); the 1px grid gap
@@ -86,38 +529,14 @@
   .dlx4-statcell-value { font-size: 1.08rem; }
 }
 
-/* ─── CDR filter slab — two wrapping field rows + an action footer ─── */
-.dlx4-filterrow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px 16px;
-  align-items: flex-end;
-}
-
-.dlx4-filterrow-time {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--rcf-line-soft);
-}
-
-/* A labelled field — label above control, never squeezed below usability */
+/* A labelled field — label above control (shared with Reporting controls) */
 .dlx4-field {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-/* Footer: inline validation left, Search / Export right */
-.dlx4-filterfoot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--rcf-line-soft);
-}
-
+/* Inline validation message (Calls search row + Reporting controls) */
 .dlx4-ferr {
   font-size: 0.76rem;
   font-weight: 600;

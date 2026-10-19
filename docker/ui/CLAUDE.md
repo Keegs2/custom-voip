@@ -107,40 +107,18 @@ QueryClient defaults:
 /login                    → redirect to /          (old bookmarks)
 / (index)                 DashboardPage            (PUBLIC — outside RequireAuth, inside AppLayout)
 
-── inside AppLayout + RequireAuth (auth required) ──
-/rcf                      RcfPage
-/api-dids                 ApiDidsPage          (API Calling RETIRED — redirects to product home while API_CALLING_ENABLED=false)
+── inside AppLayout + RequireAuth ──
+/rcf                      RcfPage (+ pages/rcf/ Call Activity)
+/api-dids                 ApiDidsPage — RETIRED: ProductHomeRedirect while API_CALLING_ENABLED=false
 /trunks                   TrunksPage
-/ivr                      IvrBuilderPage
-/documentation            → redirect to /docs/rcf
-/docs/rcf                 RcfDocsPage
-/docs/api                 ApiDocsPage
-/docs/integration         → redirect to /docs/api
-/call-quality             CallQualityPage
-/account                  AccountPage
-
-  ── legacy redirects ──
-  /admin/did-search       → redirect to /admin/platform/dids
-  /admin/user             → redirect to /admin/customers/users
-  /admin/user/:userId     → redirect to /admin/customers/users/:userId
-
-  ── Customer Management shell: AdminPage (tab shell, RequireAdmin) ──
-  /admin                          → redirect to /admin/customers (index)
-  /admin/onboarding               OnboardingAdminPage
-  /admin/customers                CustomersAdminPage
-  /admin/customers/:customerId    CustomerAccountPage
-  /admin/trunks                   TrunksAdminPage
-  /admin/customers/users          UserDetailPage
-  /admin/customers/users/:userId  UserDetailPage
-
-  ── Platform Management shell: PlatformManagementPage (tab shell, RequireAdmin) ──
-  /admin/platform                 → redirect to /admin/platform/carriers (index)
-  /admin/platform/carriers        CarriersAdminPage
-  /admin/platform/cdrs            CdrsAdminPage
-  /admin/platform/rates           RatesAdminPage
-  /admin/platform/tiers           TiersAdminPage
-  /admin/platform/sipp            SippAdminPage
-  /admin/platform/dids            DIDSearchPage
+/ivr                      IvrBuilderPage (placeholder)
+/voicemail                VisualVoicemailPage (coming-soon preview)
+/reporting                ReportingPage (lazy; RequireReportingAccess — rcf/trunk/hybrid + admin)
+/docs/guides/:product?    GuidesPage        (/documentation, /docs/rcf redirect here)
+/docs/api/:product?       ApiDocsPage       (/docs/integration redirects here)
+/call-quality             CallsPage (tenant-reachable; cost/fleet UI hidden for non-staff)
+/cdrs                     CallsPage (RequireSupportOrAdmin)   (/admin/platform/cdrs redirects here)
+/my-account               MyAccountPage     (/account redirects here)
 
 ── full-screen, outside AppLayout, RequireAuth ──
 /troubleshooting          TroubleshootingPage      (renders its own Sidebar)
@@ -149,19 +127,12 @@ QueryClient defaults:
 ```
 
 **Key facts that bite:**
-- The **homepage (`DashboardPage`) is PUBLIC** — it lives outside `RequireAuth`.
-  Every other route requires authentication.
-- `/login` now just **redirects to `/`**. `LoginPage.tsx` still exists in
-  `src/pages/` but is **orphaned** — it is not referenced by any route. Login is
-  handled inline (see Auth section). Do not assume a `/login` page renders.
-- Admin is split into **two tab shells**: `AdminPage` at `/admin` (Customer
-  Management — onboarding, customers, customer 360, customer trunks, user lookup)
-  and `PlatformManagementPage` at `/admin/platform` (carriers, CDRs, rates, tiers,
-  SIPp testing, DID search). Both wrap their children in `RequireAdmin`.
-- There is **no `DocsPage`**. Docs are split into `docs/RcfDocsPage` and
-  `docs/ApiDocsPage` (shared bits in `docs/shared.tsx`).
-- `UserDetailRedirect` is a tiny helper component that forwards
-  `/admin/user/:userId` to `/admin/customers/users/:userId`.
+- The **homepage (`DashboardPage`) is PUBLIC**. Login is the sidebar form
+  (`SidebarLoginForm`) / landing `SignInModal`; `LoginPage.tsx` is orphaned.
+- **There is no admin UI in this SPA any more.** Customer + platform
+  administration (customers, trunks, carriers, rates, tiers, DIDs, onboarding)
+  lives in **TED** (the CRAG console). Staff-facing pages here are Calls &
+  Quality (`/cdrs`) and Troubleshooting only.
 
 `AuthProvider` is intentionally **inside** `BrowserRouter` so it can call `useNavigate`.
 
@@ -353,13 +324,24 @@ Static inline documentation pages. No API calls. `/documentation` redirects to
 `/docs/rcf`; `/docs/integration` redirects to `/docs/api`. Shared layout helpers
 live in `pages/docs/shared.tsx`. There is no single `DocsPage`.
 
-**`CallQualityPage`** (`/call-quality`)
-Platform-wide SIP quality analysis (the merged Calls & Quality page,
-`pages/calls/`). Sections: filter bar, KPI strip (graded calls, good-or-better
-%, poor, one-way audio, median call MOS — shares/percentiles, never averages),
-trend charts (good+ %, median call MOS, loss p95, jitter p95), paginated CDR
-table, call detail modal (quality per audio direction). APIs: `GET /cdrs`,
-`GET /customers`, `GET /trunks`. Grades: see §16.
+**`CallsPage`** (`/call-quality` and `/cdrs`, `pages/calls/`) — Calls & Quality
+The merged CDR search + voice-quality page. Top composition (2026-10 rework):
+- **Search row** (`CallsFilterBar`) — ONE centred row at ≥1366px: Customer
+  (staff) · Trunk · Product · Direction · Dest. prefix · Time range (select;
+  From/To appear inline only for "Custom range") · **More** popover (staff:
+  Zone, Rows = Calls/All legs/Carrier legs, Rated only — the button turns blue
+  with a count when any is non-default) · Search · Export (staff). Call-ID chip
+  and range errors sit on a slim line below only when present.
+- **KPI row** (`CallsKpiStrip`) — ONE row of equal tiles (staff 8, tenant 7):
+  Calls on page · ASR · Avg duration · Graded calls · Good or better · Poor
+  calls (incl. one-way) · Median call MOS · Cost (staff only). Shares and
+  medians only. Wraps 4-up below ~1040px.
+- **No charts.** The Quality Trends section (`QualityTrendsSection`,
+  `components/charts/QualityTrendChart`) was removed 2026-10 at the owner's
+  request — do not re-add graphs to this page.
+- Records/Summary tabs (Summary = staff, tabular), paginated `CallsTable`,
+  `CdrDetailModal` on row click. Page CSS: `cq-`/`cqf-`/`cqk-` classes in
+  `styles/dl-platform-b.css`. Grades: see §16.
 
 **`TroubleshootingPage`** (`/troubleshooting`)
 Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
@@ -379,93 +361,30 @@ Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
   partial/degraded (or `correlation_truncated`) shows a warning banner. The
   ladder receives the group-scoped `ladderCorrelations`. Self-test:
   `pages/troubleshooting/callGrouping.assert.ts` (esbuild | node).
-- Results render as a table; expanding a row renders the custom **`<SipLadder>`**
-  diagram (see Components → SIP Ladder) for that call's messages.
-- Each row also offers an "Open in Grafana" deep link (`/grafana/d/sip-search/...`)
-  scoped to the call's correlated Call-IDs, and the header has an "Open SIP
-  Dashboard" link to `/grafana/`.
+- Results render as a table. **Clicking a row (or Enter/Space; ↑/↓ move between
+  rows) opens `pages/troubleshooting/CallTraceModal.tsx`** — a portal modal
+  (z 1200, 2px indigo outline + ring, blurred backdrop) holding everything for
+  that call: summary facts (start/last msg, result + attempts, STIR
+  attestation, duration, zone, orig/term, legs), "Open in Grafana"
+  (`buildGrafanaLink` in `callDisplay.ts`), PCAP export, network path,
+  correlation notice, and the full **`<SipLadder>`** with its packet inspector.
+  Prev/Next buttons and ←/→ step through the page's calls (not while typing or
+  inside the packet panel, which marks itself `data-trace-keys="local"`); Esc /
+  backdrop closes and focus returns to the row. The selection is bound to the
+  exact `callGroups` array, so paging/new searches close it. There is NO inline
+  expanded row any more. Shared pills/banners: `CallBadges.tsx`.
+- The header has an "Open SIP Dashboard" link to `/grafana/`.
 
 **`AccountPage`** (`/account`)
 Profile page. Lets users update their display name and password via
 `PATCH /api/auth/me` (calls `apiRequest('PATCH', '/auth/me', ...)`).
 Calls `refreshUser()` from `AuthContext` on success.
 
-### Admin pages (require `RequireAdmin`)
+### Admin pages
 
-Admin is split into **two tab shells**, each a tab bar + `<Outlet />`:
-
-**`AdminPage`** (`/admin`) — **Customer Management** shell.
-Tabs: Onboarding, Customers, Customer Trunks, User Lookup. Index redirects to
-`/admin/customers`. Children: `OnboardingAdminPage`, `CustomersAdminPage`,
-`CustomerAccountPage` (`customers/:customerId`), `TrunksAdminPage`, `UserDetailPage`
-(`customers/users` and `customers/users/:userId`).
-
-**`PlatformManagementPage`** (`/admin/platform`) — **Platform Management** shell.
-Tabs: Carrier Trunks, CDRs, Rates, Tiers, Testing, DID Search. Index redirects to
-`/admin/platform/carriers`. Children: `CarriersAdminPage`, `CdrsAdminPage`,
-`RatesAdminPage`, `TiersAdminPage`, `SippAdminPage`, `DIDSearchPage` (`dids`).
-
-**`OnboardingAdminPage`** (`/admin/onboarding`)
-Customer onboarding request queue. Filter tabs by `OnboardingStatus`; verify
-billing, approve (with DID config), or reject requests. APIs: `onboarding.ts`
-(`listOnboardingRequests`, `verifyBilling`, `approveOnboarding`, `rejectOnboarding`)
-+ `didInventory.ts` (`listAvailableDids`).
-
-**`CustomersAdminPage`** (`/admin/customers`)
-Searchable, paginated customer list (25 per page, load-more pattern). Inline
-create form. Each row is a `CustomerRow` that links to `CustomerAccountPage`.
-API: `GET /customers`, `POST /customers`.
-
-**`CustomerAccountPage`** (`/admin/customers/:customerId`)
-Full customer 360 view. Sections rendered conditionally by `account_type`:
-- `CustomerRcfSection` — RCF entries (always shown for `rcf`/`hybrid`)
-- `CustomerTrunkSection` — trunk management (for `trunk`/`hybrid`)
-- `CustomerApiSection` — API DID management (for `api`/`hybrid`)
-- `CustomerUcaasSection` — UCaaS extensions/voicemail (when `ucaas_enabled`)
-- `CustomerEditForm` — edit customer fields
-- `CustomerStatisticsTab` — 30-day CDR charts and quality stats
-- Credit management (inline add-credit form via `POST /customers/:id/add-credit`)
-
-APIs: `GET /customers/:id`, `GET /rcf`, `GET /trunks`, `GET /api-dids`,
-`GET /cdrs/summary`, `GET /cdrs`.
-
-**`TrunksAdminPage`** (`/admin/trunks`)
-Full trunk CRUD across all customers. Create, edit, delete trunks. Manage IPs
-and DIDs for each trunk inline. API: full `trunks` + `customers` APIs.
-
-**`UserDetailPage`** (`/admin/customers/users`, `/admin/customers/users/:userId`)
-User search and 360 view. Shows user profile, presence status, call history,
-extension assignment, and quick admin actions. The legacy `/admin/user[/:userId]`
-paths redirect here.
-
-**`CdrsAdminPage`** (`/admin/platform/cdrs`) — thin wrapper around `CdrsTab`
-Full CDR search across all customers. Filter bar, stat bar, expandable rows,
-CSV export. APIs: `GET /cdrs`, `GET /cdrs/summary`.
-
-**`RatesAdminPage`** (`/admin/platform/rates`) — thin wrapper around `RatesTab`
-Rate deck management. Add/edit/delete rates, margin analysis grid.
-APIs: `GET /rates`, `POST /rates`, `PATCH /rates/:id`, `DELETE /rates/:id`,
-`GET /rates/margins`.
-
-**`TiersAdminPage`** (`/admin/platform/tiers`) — thin wrapper around `TiersTab`
-Service tier management. APIs: `GET /tiers`, tier CRUD.
-
-**`CarriersAdminPage`** (`/admin/platform/carriers`) — thin wrapper around `CarriersTab`
-Carrier/gateway management. Each carrier card includes a live connectivity test.
-APIs: `GET /carriers`, carrier CRUD, `POST /carriers/:id/test`.
-
-**`SippAdminPage`** (`/admin/platform/sipp`) — thin wrapper around `SippTab`
-SIPp load-test runner. Preset grid, custom form, results with PASS/WARN/FAIL
-verdict. APIs: `GET /sipp/presets`, `POST /sipp/run`.
-
-**`DIDSearchPage`** (`/admin/platform/dids`)
-Cross-product DID lookup / inventory. The legacy `/admin/did-search` path
-redirects here. Uses `didInventory.ts`.
-
-**`HomerAdminPage`** / **`HomerTab`** — **orphaned, not routed.**
-`HomerAdminPage` is a thin wrapper around `HomerTab`, which still renders a Homer
-iframe at `/homer/`. Neither is reachable from `App.tsx` — SIP troubleshooting now
-lives in the native `TroubleshootingPage`. Treat these as dead/legacy code.
+None. All admin pages (customers, trunks, carriers, rates, tiers, SIPp, DID
+search, onboarding, user lookup, Homer tab) were removed from this SPA; admin
+lives in TED. `RequireAdmin` remains only for admin-gated pieces of shared pages.
 
 ---
 
@@ -478,17 +397,15 @@ Renders `Sidebar` on the left (fixed, 240px) and `<Outlet />` in the main
 content area (max-width 1160px, centered). Background `#0f1117`.
 
 **`Sidebar`**
-Fixed left sidebar. Two collapsible groups: "Products" and "Administration".
-Product items are filtered at render time by the user's `account_type` and `role`.
-Collapse state is persisted to `localStorage`. Bottom section shows user avatar,
-name/email, and sign-out button.
-
-Navigation items are shown/hidden based on `account_type`:
-- `rcf` variant: only RCF shown in Products
-- `trunk` variant: only SIP Trunks shown
-- `hybrid`: RCF + SIP Trunks
-- `ucaas`: IVR Builder shown
-- Admin/support: all items shown
+Fixed left sidebar (collapsible on desktop via `SidebarCollapse`). Authenticated
+group order: **Products → Insights (Reporting) → Documentation →
+Administration/Support → Coming Soon**. Coming Soon is ALWAYS last and rendered
+darkened (muted header, dim slate rows + "Soon" pill, no product accent even
+when active) — new pre-launch items go in `COMING_SOON_ITEMS`, never in the live
+groups. Support sees only its Support tools (no Products/Docs/Coming Soon).
+Products are filtered by `account_type` (`rcf`, `trunk`, `hybrid` = both).
+Group open state persists in `localStorage` (`sidebar_groups_open`). Admins get
+a "View as Customer" toggle above the user footer.
 
 **`PageHeader`**
 Standardised page title block: title (h1), optional subtitle, optional right-side

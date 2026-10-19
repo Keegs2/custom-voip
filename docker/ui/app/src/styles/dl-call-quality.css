@@ -95,22 +95,6 @@
   font-weight: 700;
 }
 
-/* ─── Quality Trends chart grid — hosts the shared <QualityTrendChart>
-   cards (dl-qtc-*, see dl-trend-chart.css). Charts stack full-width by
-   default so each one gets a wide, readable plot; the 3-across row returns
-   only when the shell is at full width (~340px per chart at the 1200px
-   shell cap). minmax(0, 1fr) keeps the ResizeObserver-measured SVGs from
-   ever overflowing the panel. ─── */
-.dlx-chart-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
-}
-
-@media (min-width: 1240px) {
-  .dlx-chart-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
 /* ─── Sortable table headers — used together with the shared .dl-th ─── */
 .dlx-th-sort {
   cursor: pointer;
