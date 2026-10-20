@@ -1,6 +1,6 @@
 # Encrypted Voicemail — Build Plan (plan of record, 2026-10-20)
 
-**Status:** decisions locked, Phase 0 underway (PR #145). Phases 1–7 not started.
+**Status (2026-10-20):** code for Phases 2–6 is built on branch `feat/encrypted-voicemail`, along with the Phase 1 infra files (`infra/voicemail/`). Retention is 90 days, and the caps are 300 s/100 messages/500 MB; the owner confirmed both. As-built interfaces: `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md`. Operator steps: `docs/runbooks/VOICEMAIL_GCP_SETUP.md` (GCP, run by the owner) and `docs/runbooks/VOICEMAIL_DEPLOY_RUNBOOK.md` (app deploy + first live test = Phase 7).
 **Supersedes:** `ENCRYPTED_VOICEMAIL_PLAN.md` (2026-04, per-customer HSM keys) and `docs/VISUAL_VOICEMAIL_PORT_PLAN.md` on branch `docs/vvm-port-plan` (2026-08, local-key v1). Their facts are re-checked here against `RCF-V1` @ `8b9fa40`.
 **Source to port:** branch `unified` @ `815aa46`, about 7,800 LOC of Phase-1 Visual Voicemail. Approach: port and adapt, not a rewrite.
 
