@@ -24,6 +24,7 @@ from routers import (
 )
 from middleware.auth import JWTAuthMiddleware
 from services.voicemail import retention as voicemail_retention
+from utils.access_log import install_access_log_redaction
 
 # Configure logging
 logging.basicConfig(
@@ -32,10 +33,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Voicemail playback URLs carry a token in ?t= — keep it out of uvicorn's
+# access log (utils/access_log.py). Installed here (each uvicorn worker
+# imports main AFTER uvicorn configured logging) and again in the lifespan
+# below; idempotent, uvicorn.access logger only.
+install_access_log_redaction()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup resources."""
+    install_access_log_redaction()
     logger.info("Starting RCF Platform API...")
 
     # Initialize database pool

@@ -492,6 +492,10 @@ decrypts per token in the worst case). `HEAD …/audio` is answered from the row
 whose `cid` is not the object's owner → 404. Integrity failure → 500, nothing served, no audit
 row. `DELETE /messages/{id}/purge` deletes the object first (503 if the store is down, row
 untouched), then the row.
+The `?t=` token never reaches the API's access log: `utils/access_log.py` filters the
+`uvicorn.access` logger (only) and rewrites `t=<value>` to `t=<redacted>`, installed when each
+uvicorn worker imports `main` (after uvicorn's per-worker logging setup) and again at startup.
+(The UI's nginx access log is outside the API.)
 
 **Greetings.** At most **20** (stored + pending) greetings per mailbox → 409 "This mailbox
 already has 20 greetings. Delete one first." (bounded storage; not in the original contract).

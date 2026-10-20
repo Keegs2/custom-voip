@@ -184,6 +184,8 @@ Tests: `tests/test_reports.py` (ephemeral PG 16).
 1. `init_db()` -- creates asyncpg connection pool (parses `DATABASE_URL` with regex)
 2. `schema_check.run_startup_check()` -- probes `information_schema.columns` for `cdrs.stir_outcome` / `stir_eff_actual` (47) and `leg` / `call_id` / `leg_attempt` (48), all bound by the ingest INSERT. Missing → logs **CRITICAL** with the exact remedy per migration file (`sudo -u postgres psql -d voip -f …/47_cdr_stir_outcome.sql`, `sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f …/48_cdr_call_legs.sql`); DB unreachable → WARNING. Never raises — the API keeps serving.
 3. `init_redis()` -- creates redis-py async client with retry logic (5 attempts, 2s backoff)
+4. Voicemail retention task (`services/voicemail/retention.run_forever`, unless `VOICEMAIL_RETENTION_ENABLED=false`)
+- Before all of that, at import AND at the top of the lifespan: `utils.access_log.install_access_log_redaction()` — a filter on the `uvicorn.access` logger ONLY that rewrites `t=<value>` (the voicemail playback token) to `t=<redacted>`. Import time matters: each `--workers 4` child runs uvicorn's `configure_logging()` and then imports `main`, so the filter survives uvicorn's dictConfig in every worker. Test: `tests/test_access_log_redaction.py` (incl. a fresh-process worker simulation).
 
 ### Shutdown
 1. `close_db()` -- closes asyncpg pool
