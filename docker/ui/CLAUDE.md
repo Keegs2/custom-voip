@@ -65,7 +65,7 @@ The route table, in nginx match order:
 | `/grafana/*` | `grafana:3000` | Homer 10 / SIP visualization dashboard. Strips `X-Frame-Options` for embedding. Must come before `/api/`. |
 | `/ws/verto/*` | `http://10.142.0.100:8082/` | FreeSWITCH `mod_verto` WebSocket (wss→ws unwrap). **⚠ HARDCODED East SBC-1 IP (`10.142.0.100`)** — this is East-specific and would break in West/Central zones during multi-datacenter expansion. Needs to become an env-driven upstream. |
 | `/api/ws/*` | FastAPI WebSocket (`api:8000`) with Upgrade headers | strips `/api` prefix |
-| `/api/v1/voicemail/*` | FastAPI backend, same rewrite/headers as `/api/` | **unbuffered**: `client_max_body_size 6m`, `client_body_buffer_size 6m`, `proxy_request_buffering off`, `proxy_buffering off`, `proxy_max_temp_file_size 0` — greeting uploads and decrypted playback audio never touch nginx temp files (voicemail plan D8). Sits before `/api/`. |
+| `/api/v1/voicemail/*` | FastAPI backend, same rewrite/headers as `/api/` | **unbuffered**: `client_max_body_size 6m`, `client_body_buffer_size 6m`, `proxy_request_buffering off`, `proxy_buffering off`, `proxy_max_temp_file_size 0` — greeting uploads and decrypted playback audio never touch nginx temp files (voicemail plan D8). Access log uses `log_format vm_noquery` (`nginx-maps.conf`): request PATH only, so playback tokens (`?t=`) are never logged. Sits before `/api/`. |
 | `/api/*` | FastAPI backend (`api:8000`), strips `/api` prefix | uses `$http_host` to preserve port |
 | `/docs`, `/redoc`, `/openapi.json` | FastAPI docs direct | |
 | `/api/sipp/*` | SIPp runner (`sipp:8001`), rewritten to `/sipp/*` | variable upstream (`resolver`) |
@@ -352,9 +352,13 @@ switch remounts instead of changing hook order.
 - `DashboardHeader` — compact granite band: kicker + amber tag ("Staff
   preview" / "Staff" / "Support"), name, status word + dot, "Customer since",
   optional meta; tools row: optional scope dropdown (`AdminScopeSelect`),
-  optional product switcher (`products.ts`: RCF live; SIP Trunking / Visual
-  Voicemail dimmed "Soon", aria-disabled), a quiet glass secondary action and
-  the azure-glow primary action. Also used by the admin `/rcf` console.
+  optional product switcher (`products.ts`: RCF live; SIP Trunking dimmed
+  "Soon", aria-disabled; Visual Voicemail dimmed "Soon" UNLESS the account has
+  it on — then `ProductSwitch.links` makes it a plain link to `/voicemail`
+  (admin one-customer view: `/voicemail?customer=ID`), driven by the same
+  `/v1/voicemail/summary` query + cache key as the sidebar; no dashboard
+  panel), a quiet glass secondary action and the azure-glow primary action.
+  Also used by the admin `/rcf` console.
 - `KpiCards` (`KpiRow`) — six cards. Account scope: Numbers · Forwarding
   (paused count) · Calls 7d · Answered · Sounded good (quality.ts tone + word)
   · Team. Platform scope (`scope="platform"`): Customers leads, Team dropped.
