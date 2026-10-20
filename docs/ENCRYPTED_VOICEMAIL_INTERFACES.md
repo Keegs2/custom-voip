@@ -1,0 +1,441 @@
+# Encrypted Voicemail — Build Interfaces (contract between workstreams)
+
+**Status:** binding contract for the v1 build (2026-10-20). Companion to
+`docs/ENCRYPTED_VOICEMAIL_BUILD_PLAN.md` (decisions D1–D8, RAM rules §3, phases §5).
+Every workstream codes against THIS file. If you must deviate, change this file
+in the same commit and say so in your report — never silently.
+
+Owner-confirmed limits: retention **90 days**; caps **300 s/message,
+100 messages/mailbox, 500 MB/mailbox** (500 × 1024 × 1024 bytes of plaintext).
+
+Reference (old) implementation to port from: branch `unified` @ `815aa46`
+(`git show origin/unified:<path>`). It is UCaaS/MinIO/extension-based and has the
+14 defects listed in the build plan §2 — port ideas, not code verbatim.
+
+---
+
+## 0. Design changes vs. the build plan (decided by the lead, 2026-10-20)
+
+1. **No `voicemail_box_bindings` table.** v1 is dedicated-DID only (D6), so the
+   DID lives on `voicemail_boxes.did` (UNIQUE). The attached model can add a
+   bindings table later.
+2. **No `voicemail_settings` table.** Notifications/transcription are out of v1
+   (D3); the remaining per-mailbox settings live on `voicemail_boxes`.
+3. **Per-customer keys are persisted** in `voicemail_customer_keys` (fixes
+   defect 11 "KEKs never persisted").
+4. **FS deposit is a raw `audio/wav` body, not multipart.** Metadata travels in
+   one base64url-JSON header. This removes the curl `-F` injection class
+   (defect 1) and Starlette multipart disk spooling (defect 5) entirely, and keeps
+   caller PII out of URLs/access logs. Greeting uploads from the browser use the
+   same raw-body shape.
+5. **Mailbox creation is staff-only (admin) in v1** — from the admin console /
+   "View as Customer" preview, or `POST /v1/numbers/{did}/assign` with
+   `product_type=voicemail` (the TED path). Tenants manage their existing
+   mailboxes (label, PIN, greetings, messages); they cannot claim DIDs.
+6. **Browser does all audio transcoding.** The UI records/decodes greetings and
+   uploads canonical WAV (PCM s16le, mono, 8000 or 16000 Hz). The API validates
+   strictly and never transcodes (no ffmpeg in the API image).
+7. **System prompts are optional WAV files** in the bind-mounted scripts dir
+   (deploy = `git pull`). Missing file ⇒ tone-only fallback, never a failure.
+
+---
+
+## 1. Database — migration `54_voicemail.sql` (owner: backend-A)
+
+Idempotent (BEGIN/COMMIT, IF NOT EXISTS, guarded constraint swaps), applied by
+hand on the East primary, replicates to all zones. Add it to
+`scripts/db/check_migrations.sql`. **No price/plan seeds (D5).**
+
+```sql
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS voicemail_enabled BOOLEAN NOT NULL DEFAULT false;
+
+-- did_inventory.product_type CHECK gains 'voicemail' (inline/unnamed CHECK in
+-- 17_did_inventory.sql — find it by definition, pattern of 34_release_requested_status.sql)
+
+voicemail_customer_keys (
+  customer_id     INT PRIMARY KEY REFERENCES customers(id) ON DELETE RESTRICT,
+  provider        VARCHAR(16) NOT NULL CHECK (provider IN ('gcpkms','local')),
+  key_ref         TEXT NOT NULL,          -- gcpkms: projects/../cryptoKeys/vm-cust-<id>; local: 'local:<id>'
+  status          VARCHAR(16) NOT NULL DEFAULT 'active' CHECK (status IN ('active','destroyed')),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  destroyed_at    TIMESTAMPTZ
+)
+
+voicemail_boxes (
+  id                   SERIAL PRIMARY KEY,
+  customer_id          INT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+  did                  VARCHAR(20) NOT NULL,         -- E.164 +1NXXNXXXXXX
+  label                VARCHAR(120) NOT NULL DEFAULT 'Voicemail',
+  status               VARCHAR(16) NOT NULL DEFAULT 'active'
+                         CHECK (status IN ('active','suspended','deleted')),
+  timezone             VARCHAR(64) NOT NULL DEFAULT 'America/New_York',
+  pin_hash             VARCHAR(255),                 -- bcrypt; NULL = no PIN (D7: stored for future TUI)
+  pin_failed_count     INT NOT NULL DEFAULT 0,
+  pin_locked_until     TIMESTAMPTZ,
+  greeting_mode        VARCHAR(16) NOT NULL DEFAULT 'standard' CHECK (greeting_mode IN ('standard','custom')),
+  active_greeting_id   INT,                          -- FK added after voicemail_greetings exists
+  retention_days       INT NOT NULL DEFAULT 90 CHECK (retention_days BETWEEN 1 AND 3650),
+  max_message_seconds  INT NOT NULL DEFAULT 300 CHECK (max_message_seconds BETWEEN 10 AND 300),
+  max_messages         INT NOT NULL DEFAULT 100,
+  max_bytes            BIGINT NOT NULL DEFAULT 524288000,
+  created_by           INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at           TIMESTAMPTZ
+)
+-- UNIQUE (did) WHERE status <> 'deleted'; INDEX (customer_id)
+
+voicemail_messages (
+  id                BIGSERIAL PRIMARY KEY,
+  msg_uuid          UUID NOT NULL UNIQUE,            -- generated by FS; idempotency key for deposit retries
+  mailbox_id        INT NOT NULL REFERENCES voicemail_boxes(id) ON DELETE CASCADE,
+  customer_id       INT NOT NULL,                    -- denormalized for tenant filters/AAD
+  caller_id_number  VARCHAR(40),
+  caller_id_name    VARCHAR(100),
+  duration_ms       INT NOT NULL DEFAULT 0,
+  size_bytes        INT NOT NULL,                    -- plaintext WAV bytes (quota accounting)
+  status            VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','stored','failed','purged')),
+  object_key        TEXT,                            -- set when stored
+  ciphertext_crc32c BIGINT,                          -- CRC32C of the uploaded ciphertext object
+  wrapped_dek       BYTEA,
+  kek_version       TEXT,                            -- KMS CryptoKeyVersion name that wrapped the DEK
+  iv                BYTEA,                           -- 12-byte AES-GCM nonce
+  enc_algo          VARCHAR(32) NOT NULL DEFAULT 'AES-256-GCM',
+  is_read           BOOLEAN NOT NULL DEFAULT false,
+  is_saved          BOOLEAN NOT NULL DEFAULT false,
+  deleted_at        TIMESTAMPTZ,                     -- trash
+  expires_at        TIMESTAMPTZ NOT NULL,            -- created_at + mailbox.retention_days
+  call_uuid         VARCHAR(64),
+  fs_node           VARCHAR(64),
+  zone              VARCHAR(16),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  purged_at         TIMESTAMPTZ
+)
+-- INDEX (mailbox_id, created_at DESC) WHERE status='stored'; INDEX (expires_at) WHERE status='stored'
+
+voicemail_greetings (
+  id                SERIAL PRIMARY KEY,
+  greeting_uuid     UUID NOT NULL UNIQUE,
+  mailbox_id        INT NOT NULL REFERENCES voicemail_boxes(id) ON DELETE CASCADE,
+  customer_id       INT NOT NULL,
+  label             VARCHAR(120) NOT NULL DEFAULT 'Greeting',
+  duration_ms       INT NOT NULL DEFAULT 0,
+  size_bytes        INT NOT NULL,
+  status            VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','stored','failed','purged')),
+  object_key TEXT, ciphertext_crc32c BIGINT, wrapped_dek BYTEA, kek_version TEXT, iv BYTEA,
+  enc_algo          VARCHAR(32) NOT NULL DEFAULT 'AES-256-GCM',
+  created_by        INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+-- then: voicemail_boxes.active_greeting_id FK -> voicemail_greetings(id) ON DELETE SET NULL
+
+voicemail_access_log (            -- append-only audit; NO FKs so it survives purge/erase
+  id BIGSERIAL PRIMARY KEY,
+  customer_id INT, mailbox_id INT, message_id BIGINT, greeting_id INT,
+  action      VARCHAR(40) NOT NULL,  -- deposit | play | download | greeting_upload | greeting_play | greeting_fs_fetch
+                                     -- | message_delete | message_purge | mailbox_create | mailbox_delete
+                                     -- | pin_set | key_create | crypto_erase | retention_purge
+  actor_user_id INT, source VARCHAR(16) NOT NULL,   -- ui | freeswitch | system | admin
+  ip_address VARCHAR(64), user_agent VARCHAR(255), detail JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+```
+
+Grants: `api` gets ALL on the tables + sequences. `freeswitch` gets **nothing** on
+these tables (FS reads only the `number_routing` view and talks to the API).
+
+**`number_routing` view — 4th arm** (`CREATE OR REPLACE VIEW` in 54, same column
+list/types/order as `22_number_routing.sql`; keep the three existing arms
+byte-identical; re-GRANT SELECT to freeswitch, api):
+
+| column | voicemail arm value |
+|---|---|
+| did | `b.did` |
+| product_type | `'voicemail'::varchar(20)` |
+| customer_id | `b.customer_id` |
+| product_ref_id | `b.id` (mailbox id) |
+| product_enabled | `(b.status = 'active' AND c.voicemail_enabled)` |
+| customer_status | `c.status` |
+| product_name | `b.label::varchar(100)` |
+| all other columns | typed NULLs |
+
+Filter `WHERE b.status <> 'deleted'` (a deleted mailbox's DID is "not ours" again).
+Disabled/suspended ⇒ row present + `product_enabled=false` ⇒ FS hard-rejects 603.
+
+---
+
+## 2. Crypto, KMS, storage — `docker/api/src/services/voicemail/` (owner: backend-A)
+
+```
+services/voicemail/__init__.py
+services/voicemail/config.py    # env parsing, fail-closed checks
+services/voicemail/kms.py       # KmsProvider protocol, GcpKmsProvider, LocalKmsProvider, get_kms_provider()
+services/voicemail/storage.py   # ObjectStore protocol, GcsObjectStore, MemoryObjectStore (tests), get_object_store()
+services/voicemail/crypto.py    # seal()/open_sealed(), aad builders, crc32c
+services/voicemail/keys.py      # ensure_customer_key(customer_id) -> key row; crypto_erase_customer(customer_id)
+```
+
+Signatures (async unless noted):
+
+```python
+class VoicemailCryptoUnavailable(RuntimeError): ...   # KMS/GCS/config down -> callers map to 503
+class VoicemailIntegrityError(RuntimeError): ...      # AAD/tag/CRC mismatch -> 500 + log, never serve
+
+def message_aad(customer_id: int, mailbox_id: int, msg_uuid: str) -> bytes    # b"vm:{c}:{m}:{uuid}"
+def greeting_aad(customer_id: int, mailbox_id: int, greeting_uuid: str) -> bytes  # b"vmg:{c}:{m}:{uuid}"
+def message_object_key(customer_id, mailbox_id, msg_uuid) -> str     # "c/{c}/mb/{m}/m/{uuid}.enc"
+def greeting_object_key(customer_id, mailbox_id, greeting_uuid) -> str  # "c/{c}/mb/{m}/g/{uuid}.enc"
+
+@dataclass
+class Sealed:
+    object_key: str; ciphertext_crc32c: int; wrapped_dek: bytes; kek_version: str; iv: bytes; enc_algo: str
+
+async def seal_and_store(*, customer_id: int, object_key: str, aad: bytes, plaintext: bytes) -> Sealed
+    # ensure_customer_key -> fresh 32-byte DEK -> AES-256-GCM(iv=12 random bytes, aad) ->
+    # KMS wrap DEK (same aad as KMS additional_authenticated_data; verify KMS CRC32C fields) ->
+    # upload ciphertext with CRC32C -> scrub DEK bytearray -> return Sealed
+async def load_and_open(*, customer_id: int, object_key: str, aad: bytes, wrapped_dek: bytes,
+                        iv: bytes, ciphertext_crc32c: int) -> bytes
+    # download -> verify CRC32C -> KMS unwrap (aad) -> AES-GCM decrypt (aad) -> plaintext bytes
+async def delete_object(object_key: str) -> None          # idempotent (404 = ok)
+async def crypto_erase_customer(customer_id: int) -> dict # destroy ALL key versions, mark key row destroyed
+```
+
+- **GcpKmsProvider:** keyring `projects/{VOICEMAIL_KMS_PROJECT}/locations/{VOICEMAIL_KMS_LOCATION}/keyRings/{VOICEMAIL_KMS_KEYRING}`;
+  one key per customer `vm-cust-{customer_id}`, purpose ENCRYPT_DECRYPT,
+  protection SOFTWARE, rotation 365 d, `destroy_scheduled_duration` 24 h. Create
+  on first use (handle AlreadyExists), persist in `voicemail_customer_keys`.
+  Timeouts (≤5 s/op) + bounded retries on UNAVAILABLE/DEADLINE_EXCEEDED. Erase =
+  destroy every ENABLED/DISABLED version.
+- **Credentials:** Application Default Credentials (VM metadata SA) by default;
+  if `VOICEMAIL_IMPERSONATE_SA` is set, use `google.auth.impersonated_credentials`
+  for that SA (scope cloud-platform); `GOOGLE_APPLICATION_CREDENTIALS` (mounted key
+  file) also works through ADC. Document all three in the runbook.
+- **LocalKmsProvider (dev/CI only):** per-customer key = HKDF-SHA256(
+  `VOICEMAIL_LOCAL_MASTER_KEY` (base64 32 bytes), info=b"vm-cust-{id}"), wrap =
+  AES-256-GCM with the same AAD. Allowed ONLY when
+  `VOICEMAIL_ALLOW_LOCAL_KMS=true`; `docker-compose.services.yml` must NOT pass that
+  variable, so production can never select it. Erase = mark destroyed + refuse.
+- **Fail closed:** any missing config ⇒ `VoicemailCryptoUnavailable`. Never store
+  or return plaintext as a fallback.
+
+Env (services `.env`, passed through `docker-compose.services.yml` → `api`):
+`VOICEMAIL_KMS_PROVIDER` (default `gcpkms`), `VOICEMAIL_KMS_PROJECT`,
+`VOICEMAIL_KMS_LOCATION` (default `us-east1`), `VOICEMAIL_KMS_KEYRING` (default
+`voicemail-prod`), `VOICEMAIL_BUCKET` (default `voip-voicemail`),
+`VOICEMAIL_IMPERSONATE_SA` (optional), `VOICEMAIL_PLAYBACK_SECRET` (required for
+playback, ≥32 chars, must differ from JWT_SECRET_KEY), `INGEST_SHARED_SECRET`
+(required for FS endpoints, ≥32 chars).
+
+---
+
+## 3. Auth (owner: backend-A)
+
+- `auth/security.create_access_token` adds `"typ": "session"`. `JWTAuthMiddleware`
+  rejects a Bearer token whose `typ` is present and ≠ `"session"` (tokens with no
+  `typ` — issued before this deploy — stay valid until they expire).
+- `auth/ingest.py`: `require_ingest_secret` FastAPI dependency. Header
+  `X-Ingest-Secret`. `hmac.compare_digest`. **Unset/short secret ⇒ every call
+  rejected (503 + ERROR log)** — fail closed (defect 3). Never log the header.
+- `auth/playback.py`: `mint_playback_token(kind: 'message'|'greeting', obj_id: int,
+  customer_id: int, user_id: int, download: bool=False) -> str` and
+  `verify_playback_token(token, kind, obj_id) -> dict`. HS256 with
+  `VOICEMAIL_PLAYBACK_SECRET`, `aud="vm-playback"`, `typ="vm-playback"`, `exp` = now + 120 s,
+  claims `k`, `oid`, `cid`, `sub`, `dl`, `jti` (random). A playback token presented as a
+  Bearer must fail (different key AND typ).
+- `JWTAuthMiddleware` exemptions (exact matches, both `/v1/voicemail` and `/voicemail` prefixes):
+  - prefix `/v1/voicemail/fs/` and `/voicemail/fs/` (ingest-secret inside the router)
+  - regex `^/(v1/)?voicemail/(messages|greetings)/\d+/audio$` with method GET/HEAD
+    (playback token inside the router)
+
+---
+
+## 4. API surface — `docker/api/src/routers/voicemail.py` (owner: backend-B)
+
+Mounted at `/v1/voicemail` and `/voicemail` (same pattern as other routers). The UI
+calls `/api/v1/voicemail/...` (nginx strips `/api`). All JSON. Errors are
+`{"detail": "..."}`. Tenant isolation = `get_customer_filter` + 404-no-leak.
+
+**Scope rule.** Admin: `customer_id` query param selects the customer (required on
+create; optional on list ⇒ all customers). Tenant user: scoped to their own
+`customer_id`; a different `customer_id` param ⇒ 404. `support` role ⇒ 403
+(no customer). `readonly` tenant role: GET + playback only; mutations ⇒ 403.
+
+### 4.1 Summary and mailboxes
+| Method / path | Who | Body / query | Response |
+|---|---|---|---|
+| GET `/summary` | admin, tenant | `customer_id?` | `{enabled: bool, mailbox_count, unread_count, can_manage: bool}` (`can_manage` = admin) |
+| GET `/mailboxes` | admin, tenant | `customer_id?` | `[Mailbox]` |
+| POST `/mailboxes` | **admin** | `{customer_id, did, label?, timezone?, pin?}` | `201 Mailbox`. DID must be `did_inventory.status='available'` (409 otherwise). Claims it (`status='assigned'`, `customer_id`, `product_type='voicemail'`, `product_ref_id=box.id`, `assigned_at/by`), sets `customers.voicemail_enabled=true`, ensures the customer key exists (503 if KMS down — nothing committed). |
+| GET `/mailboxes/{id}` | admin, tenant | | `Mailbox` |
+| PATCH `/mailboxes/{id}` | admin, tenant(user) | `{label?, timezone?, greeting_mode?, active_greeting_id?}`; admin also `status?` ('active'\|'suspended') | `Mailbox` (422 if `greeting_mode='custom'` with no stored active greeting) |
+| PUT `/mailboxes/{id}/pin` | admin, tenant(user) | `{pin: "4–10 digits"}` | `204` |
+| DELETE `/mailboxes/{id}` | **admin** | | `204`. Purges messages+greetings (objects then rows), status='deleted', DID back to `available` (mirror `number_inventory` unassign). |
+| GET `/available-numbers` | **admin** | `q?` (digits), `limit≤50` | `[{did, city, state}]` from `did_inventory` where `status='available'` |
+
+`Mailbox` = `{id, customer_id, customer_name, did, label, status, timezone,
+greeting_mode, active_greeting_id, has_pin, retention_days, max_message_seconds,
+max_messages, max_bytes, message_count, unread_count, bytes_used, created_at}`
+(counts over `status='stored' AND deleted_at IS NULL`; `bytes_used` over all stored incl. trash).
+
+### 4.2 Messages
+| Method / path | Who | Notes |
+|---|---|---|
+| GET `/mailboxes/{id}/messages?folder=inbox\|saved\|trash&limit=50&offset=0` | admin, tenant | `{items: [Message], total, unread}`. inbox = stored, not deleted, not saved; saved = is_saved, not deleted; trash = deleted_at not null. Newest first. |
+| PATCH `/messages/{id}` | admin, tenant(user) | `{is_read?, is_saved?}` → `Message` |
+| DELETE `/messages/{id}` | admin, tenant(user) | move to trash → `Message` |
+| POST `/messages/{id}/restore` | admin, tenant(user) | → `Message` |
+| DELETE `/messages/{id}/purge` | admin, tenant(user) | permanent: object delete, row → status 'purged' (crypto fields nulled) → `204` |
+| POST `/messages/{id}/playback-token` | admin, tenant | `{download?: bool}` → `{url, expires_in: 120}` where `url` = `/api/v1/voicemail/messages/{id}/audio?t=<token>` (UI uses it verbatim as `<audio src>`). Marks `is_read=true`. |
+| GET/HEAD `/messages/{id}/audio?t=` | token | `audio/wav`, `Accept-Ranges: bytes`, Range ⇒ 206, `Cache-Control: no-store`, `Content-Disposition: inline` (or `attachment; filename="voicemail-<date>-<caller>.wav"` when `dl`). Bad/expired token ⇒ 401. |
+
+`Message` = `{id, mailbox_id, caller_id_number, caller_id_name, duration_ms,
+size_bytes, is_read, is_saved, deleted_at, created_at, expires_at}`.
+
+### 4.3 Greetings
+| Method / path | Who | Notes |
+|---|---|---|
+| GET `/mailboxes/{id}/greetings` | admin, tenant | `[Greeting]` |
+| POST `/mailboxes/{id}/greetings?label=..&activate=true` | admin, tenant(user) | **raw body** `Content-Type: audio/wav`, ≤ 5 MB, ≤ 120 s, PCM s16le mono 8000\|16000 Hz (validate RIFF/fmt/data; else 415/422). `activate=true` sets `active_greeting_id` + `greeting_mode='custom'`. → `201 Greeting` |
+| DELETE `/greetings/{id}` | admin, tenant(user) | purge object+row; if it was active ⇒ `greeting_mode='standard'`, `active_greeting_id=NULL` → `204` |
+| POST `/greetings/{id}/playback-token` | admin, tenant | `{url, expires_in}` (url `/api/v1/voicemail/greetings/{id}/audio?t=`) |
+| GET/HEAD `/greetings/{id}/audio?t=` | token | as message audio |
+
+`Greeting` = `{id, mailbox_id, label, duration_ms, size_bytes, is_active, created_at}`.
+
+### 4.4 Admin
+| Method / path | Notes |
+|---|---|
+| POST `/customers/{customer_id}/crypto-erase` | admin; body `{confirm: "ERASE <customer_id>"}`. Destroy all KMS key versions → every message/greeting of the customer status 'purged', objects deleted best-effort, boxes 'deleted', DIDs back to available, `voicemail_enabled=false`, audit `crypto_erase`. → `{mailboxes, messages, greetings}` counts |
+
+### 4.5 FreeSWITCH-facing (`X-Ingest-Secret`, JWT-exempt)
+| Method / path | Notes |
+|---|---|
+| GET `/fs/mailbox/{mailbox_id}` | `200 {mailbox_id, customer_id, did, status, accepting: bool, reason: null\|"full"\|"inactive", max_message_seconds, greeting: null\|{greeting_id, duration_ms}}`; `404` unknown/deleted. `accepting=false` when status≠active, voicemail disabled, message_count ≥ max_messages, or bytes_used ≥ max_bytes. `greeting` only when `greeting_mode='custom'` and the active greeting is stored. |
+| GET `/fs/greetings/{greeting_id}/audio` | `200 audio/wav` plaintext decrypted in RAM (for FS to write to its tmpfs, play, unlink). Audit `greeting_fs_fetch`. |
+| POST `/fs/deposit` | see §5. |
+
+### 4.6 Memory/disk rules (plan §3.2/3.3 — mandatory)
+- Bodies are read with a hard cap (Content-Length check ⇒ 413 before reading, and a
+  streaming byte counter for chunked bodies). Deposit cap 10 MB, greeting 5 MB.
+  Never use `request.form()` / `UploadFile` for audio.
+- `asyncio.Semaphore(20)` around deposit processing; when it can't be acquired
+  immediately ⇒ `503` + `Retry-After: 2`.
+- Playback: decrypt **once per token** (`jti`) into an in-process LRU (256 MB total,
+  120 s TTL); Range requests served from it; audit `play`/`download` **once per
+  token**, not per Range request. Audit write failure ⇒ 503, no audio (defect 10).
+- Plaintext never written to disk, never logged. `api` service gets
+  `tmpfs: /tmp:size=256m,mode=1777,noexec,nosuid,nodev` and `ulimits: core: 0`.
+
+### 4.7 Retention worker
+In-process asyncio task started from `main.py` lifespan, every 15 min, guarded by a
+PG advisory lock. Purges (object then row → 'purged') messages with
+`expires_at < now()` and trash older than 30 days; deletes `pending` rows older
+than 1 hour (orphan sweep: object delete best-effort first); audit
+`retention_purge` per batch. Never touches `voicemail_access_log`.
+
+### 4.8 Number inventory (`routers/number_inventory.py`)
+- `assign` allow-list gains `voicemail` (body `label?`): calls the same
+  `services/voicemail/mailboxes.create_mailbox(...)` the router uses.
+- `unassign` of a `voicemail` DID calls `mailboxes.delete_mailbox(...)`.
+- `reconcile` and `/my` include a voicemail arm (`voicemail_boxes` where status≠'deleted').
+
+---
+
+## 5. FS → API deposit contract (owners: telephony = client, backend-B = server)
+
+```
+POST http://{API_HOST}:{API_PORT}/v1/voicemail/fs/deposit
+Content-Type: audio/wav
+Content-Length: <n>                       (curl --data-binary @file sets it)
+X-Ingest-Secret: <secret>                 (curl -H @/run/revup/vm_ingest.header — never on argv)
+X-VM-Meta: <base64url(JSON), no padding>  (JSON below; only [A-Za-z0-9_-] on the wire)
+body: the recorded WAV bytes
+```
+
+`X-VM-Meta` JSON: `{"v":1, "msg_uuid":"<uuid4>", "mailbox_id":123, "did":"+1...",
+"caller_id_number":"...", "caller_id_name":"...", "duration_ms":12345,
+"call_uuid":"<fs uuid>", "fs_node":"east-fs-1", "zone":"east"}`
+
+Responses:
+| Code | Meaning | FS action |
+|---|---|---|
+| 200 `{"status":"stored","message_id":N}` | stored (also returned for a retry of an already-stored `msg_uuid` — idempotent) | unlink, done |
+| 400 | malformed meta/body | unlink, log ERROR, no retry |
+| 401 | bad/missing secret | unlink, log ERROR, no retry |
+| 404 | mailbox gone/deleted | unlink, log, no retry |
+| 409 | mailbox not accepting (full/inactive) | unlink, log, no retry |
+| 413 / 415 / 422 | too big / not WAV / bad WAV | unlink, log ERROR, no retry |
+| 503 (+Retry-After) / 5xx / curl error / timeout | transient | retry ≤ 3 attempts total, backoff 1 s, 2 s; then unlink + log ERROR "message lost" |
+
+Server-side: verifies mailbox exists/accepting, WAV header, duration ≤
+`max_message_seconds`+5 s, inserts the row as `pending` FIRST (msg_uuid
+UNIQUE — duplicate ⇒ return the existing row if `stored`), then seal+upload, then
+UPDATE to `stored` with crypto fields; failure ⇒ row `failed`, object delete
+best-effort, 503. Audit `deposit` (fail-closed: audit failure ⇒ 503).
+Empty/very short recordings (< 1 s of audio) are not deposited by FS.
+
+---
+
+## 6. FreeSWITCH (owner: telephony)
+
+- `TERMINATORS.voicemail = terminate_vvm` + a STEP-1 direct-dial arm (mailbox DID
+  dialed directly from the PSTN). On-net RCF `forward_to` = mailbox DID resolves via
+  `number_routing` (§1) with no carrier leg. `product_enabled=false` ⇒ 603
+  (existing hard_reject). CDR: `product_type=voicemail`, `customer_id` = mailbox owner.
+- Flow: answer → `GET /fs/mailbox/{id}` (timeout 3 s) → not accepting ⇒ play
+  `mailbox_full.wav`/`unavailable.wav` (or a reorder tone if missing) and hang up →
+  play custom greeting (fetched to tmpfs, unlinked right after playback) or
+  `default_greeting.wav` (tone-only if missing) → beep → `record` to
+  `/dev/shm/vm/<msg_uuid>.wav` (max `max_message_seconds`, silence-stop) → deposit
+  per §5 (also when the caller hangs up — the normal end) → unlink on EVERY path.
+  API lookup failure ⇒ proceed with defaults (300 s, default greeting) and still
+  deposit with retries.
+- Prompts: `docker/freeswitch/scripts/sounds/vm/{default_greeting,mailbox_full,unavailable}.wav`
+  (8 kHz mono PCM). Placeholders generated with espeak-ng are fine; the owner can
+  replace the files in place.
+- `docker-compose.media.yml` `freeswitch`: `tmpfs: /dev/shm/vm:size=512m,mode=0700,noexec,nosuid,nodev`;
+  `ulimits: core: 0`; mount `/opt/revup/secrets/vm_ingest.header` read-only at
+  `/run/revup/vm_ingest.header` (the file holds the single line
+  `X-Ingest-Secret: <secret>`, root:root 0600). Missing file ⇒ voicemail calls log
+  ERROR and play `unavailable` (never crash the router). Entrypoint sweeps
+  `/dev/shm/vm/*` at start; the Lua sweeps files older than 15 min opportunistically.
+- No untrusted value (caller name/number, DID) ever reaches a shell command line.
+
+---
+
+## 7. UI (owner: frontend)
+
+- `/voicemail` (existing `VisualVoicemailPage.tsx`, daylight styling) becomes the
+  real product: mailbox switcher, folders (Inbox/Saved/Trash), message list,
+  player (waveform optional, Range-capable `<audio src={url}>`), mark read/saved,
+  delete/restore/purge, greetings (record in-browser or upload any audio file →
+  decoded + resampled in the browser to 16 kHz or 8 kHz mono PCM16 WAV → raw POST),
+  set PIN, label/timezone. Encryption badge ("Encrypted at rest"). Copy trimmed to
+  what ships (D3): no transcription, notifications, API, prices (D5).
+- Admin (role admin), both in the admin console and in "View as Customer" preview
+  (`customer_id = null` admin — see `docker/ui/CLAUDE.md`): "New mailbox" flow
+  (customer = preview customer or picker; DID from `/available-numbers`; label; PIN),
+  suspend/resume, delete mailbox. Tenants never see creation.
+- Sidebar: Voicemail leaves "Coming Soon" when `GET /summary` says `enabled` or the
+  user is admin.
+- `docker/ui/nginx.conf`: a `location /api/v1/voicemail/` (before `/api/`) with the same
+  proxy settings plus `client_max_body_size 6m; client_body_buffer_size 6m;
+  proxy_request_buffering off; proxy_buffering off; proxy_max_temp_file_size 0;`
+  so neither uploads nor decrypted audio are ever buffered to nginx temp files.
+- Query keys include the customer scope (cf. PR #145).
+
+---
+
+## 8. Infra (owner: infra)
+
+`infra/voicemail/` (OpenTofu, pattern of `infra/backups/`): keyring
+`voicemail-prod` (us-east1), bucket CMEK key, bucket `voip-voicemail` (us-east1,
+CMEK default key, uniform access, public-access prevention, versioning off,
+soft-delete 7 d, `prevent_destroy`), service account `vm-api` with
+`roles/cloudkms.admin`-free least privilege: on the keyring
+`cloudkms.cryptoKeyEncrypterDecrypter` + a custom role for key create/get/list/
+version destroy; `storage.objectAdmin` on the bucket; GCS service agent
+encrypterDecrypter on the bucket key; Data Access audit logs for KMS + GCS.
+Plus `docs/runbooks/VOICEMAIL_GCP_SETUP.md` (gcloud equivalents, the services VM
+SA/scope swap, impersonation fallback).
