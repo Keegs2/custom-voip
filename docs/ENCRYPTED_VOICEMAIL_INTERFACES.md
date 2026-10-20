@@ -466,6 +466,34 @@ UPDATE to `stored` with crypto fields; failure ⇒ row `failed`, object delete
 best-effort, 503. Audit `deposit` (fail-closed: audit failure ⇒ 503).
 Empty/very short recordings (< 1 s of audio) are not deposited by FS.
 
+**As implemented by the FS client (telephony, 2026-10-20) — what the server receives:**
+
+- Wire request (curl 7.88 from `lib/vm_deposit.lua`; verified against a mock with
+  Debian bookworm curl 7.88.1): `POST /v1/voicemail/fs/deposit HTTP/1.1`, headers
+  `Host`, `User-Agent: curl/7.88.1`, `Accept: */*`, `X-Ingest-Secret`,
+  `Content-Type: audio/wav`, `X-VM-Meta`, `Content-Length`. **No `Expect:
+  100-continue`** (suppressed). Body = the WAV file bytes exactly.
+- Body format: what FreeSWITCH `record` writes with `record_sample_rate=8000` —
+  RIFF/WAVE, PCM s16le, mono, **8000 Hz**, ≤ 300 s ⇒ ≤ ~4.8 MB.
+- `X-VM-Meta` is base64url **without padding**: Python must re-pad before decoding
+  (`base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))`) and should reject any
+  character outside `[A-Za-z0-9_-]` (the stdlib decoder silently discards them).
+- JSON: keys are emitted sorted; `v` (1), `mailbox_id`, `duration_ms` are JSON
+  integers; every other field is a string (possibly `""` — e.g. no caller name).
+  FS truncates to the column widths before encoding (`caller_id_number` 40,
+  `caller_id_name` 100, `call_uuid` 64, `fs_node` 64, `zone` 16, `did` 20 code
+  points), strips control characters from all of them, and replaces invalid
+  UTF-8 with U+FFFD, so the JSON is always valid UTF-8 and within column sizes.
+  `call_uuid` is the FS channel uuid = the inbound SIP Call-ID (attacker-
+  controlled text — treat as opaque). `duration_ms` is computed from the WAV
+  data chunk. `msg_uuid` is a random UUIDv4 (from `/dev/urandom`).
+- Success requires a 2xx **whose body contains `"status":"stored"`**; a 2xx
+  without it is treated as transient and retried (idempotent on `msg_uuid`).
+  `message_id` is read from the body for the CDR (`vm_message_id`).
+- Codes not in the table above: `408`/`429` are retried like 5xx; any other
+  1xx/3xx/4xx is treated as permanent (no retry, logged). Redirects are never
+  followed.
+
 ---
 
 ## 6. FreeSWITCH (owner: telephony)
@@ -486,12 +514,67 @@ Empty/very short recordings (< 1 s of audio) are not deposited by FS.
   (8 kHz mono PCM). Placeholders generated with espeak-ng are fine; the owner can
   replace the files in place.
 - `docker-compose.media.yml` `freeswitch`: `tmpfs: /dev/shm/vm:size=512m,mode=0700,noexec,nosuid,nodev`;
-  `ulimits: core: 0`; mount `/opt/revup/secrets/vm_ingest.header` read-only at
+  `ulimits: core: 0`; the ingest header file is visible in the container at
   `/run/revup/vm_ingest.header` (the file holds the single line
   `X-Ingest-Secret: <secret>`, root:root 0600). Missing file ⇒ voicemail calls log
-  ERROR and play `unavailable` (never crash the router). Entrypoint sweeps
-  `/dev/shm/vm/*` at start; the Lua sweeps files older than 15 min opportunistically.
+  ERROR and play `unavailable` (never crash the router). The Lua sweeps files
+  older than 15 min opportunistically.
 - No untrusted value (caller name/number, DID) ever reaches a shell command line.
+
+**Deviations / refinements (telephony, 2026-10-20 — implemented in `inbound_router.lua`
+`terminate_vvm`, `lib/vm_box.lua`, `lib/vm_deposit.lua`, `lib/json.lua`):**
+
+1. **Secret mount = a dedicated host DIRECTORY, not the file.** Host path is
+   `/opt/revup/secrets/fs-voicemail/vm_ingest.header` (was
+   `/opt/revup/secrets/vm_ingest.header`); compose mounts
+   `./secrets/fs-voicemail:/run/revup:ro`, so the in-container path is unchanged.
+   Why: a short-syntax bind of a *missing host file* makes Docker create a
+   directory in its place (and `create_host_path: false` makes FS refuse to
+   start); a missing directory is just created empty, so FS always starts, and
+   a file added later is visible without a recreate. A dedicated sub-directory
+   keeps every other file under `/opt/revup/secrets` out of the FS container.
+   Git-ignored by the existing `secrets/*` rule.
+2. **Startup sweep lives in `startup.lua`, not the entrypoint.** The image
+   `ENTRYPOINT` is the freeswitch binary and `docker-compose.media.yml` has no
+   entrypoint override, so `entrypoint.sh` never runs in production; changing
+   that would need an image rebuild/startup-path change. `startup.lua` (bind-
+   mounted, `git pull`) deletes regular files older than 1 min at FS start (the
+   1-minute floor protects in-flight recordings if `reload mod_lua` re-runs it).
+   The tmpfs is created empty on every container start anyway.
+3. **Lookup outcomes.** `200 accepting=false` ⇒ `mailbox_full` (reason `full`) or
+   `unavailable`; **`404`/`401`/`403` ⇒ `unavailable` + hang up without recording**
+   (the deposit would be dropped by the same check); every other failure (curl
+   error/timeout, 5xx, non-JSON, missing `accepting`) ⇒ defaults (300 s, default
+   greeting) and deposit with retries, as specified.
+4. **Fail-closed preflight before answering:** API_HOST/API_PORT must validate,
+   the header file must hold exactly one `X-Ingest-Secret: <≥32 printable chars>`
+   line, and `/dev/shm/vm` must be a **tmpfs mount** (checked in
+   `/proc/self/mounts`) — otherwise answer, `unavailable`, hang up. FS never
+   records anywhere but that mount (D8).
+5. **Direct dial of a disabled/suspended mailbox ⇒ 603** (same as on-net). The
+   STEP-1 voicemail arm (`db.lookup_voicemail_did`, number_routing filtered to
+   `product_type='voicemail'`) is the LAST lookup and is unfiltered on
+   enabled/active like `resolve_destination`.
+6. **End of call:** a caller still connected when `record` returns (max length,
+   5 s silence, `#`) is hung up by FS *before* the deposit, so every deposit runs
+   on a hung-up channel (uniform path). FS stamps the CDR end time when the
+   state machine reaches CS_HANGUP — after the Lua returns — so a voicemail CDR's
+   `billsec`/`duration` include the deposit time (normally < 1 s; bounded at
+   ~50 s by the retry budget when the API is down). If `record` returns with < 1 s of audio
+   while the caller is still connected (tmpfs full, or `#` right after the beep),
+   `unavailable` is played first. `#` also skips the greeting.
+7. **Recording parameters:** `record <path> <max_message_seconds> 200 5` (energy
+   threshold 200, 5 s of silence ends the message), `record_sample_rate=8000`.
+8. **CDR breadcrumbs** (A-leg channel variables, no PII): `vm_mailbox_id`,
+   `vm_msg_uuid`, `vm_max_seconds`, `vm_greeting` (`custom|default|tone`),
+   `vm_duration_ms`, `vm_deposit_http`, `vm_deposit_attempts`, `vm_message_id`,
+   `vm_result` (`stored | rejected_<code> | lost | too_short | bad_recording |
+   record_failed | caller_gone | not_accepting_full | not_accepting_inactive |
+   unavailable_<404|401|403> | unavailable_config | error`). Note for billing (D5):
+   the CDR has `product_type=voicemail`, `direction=inbound`, `customer_id` =
+   mailbox owner; `rate_cdr()` rates by direction, so an answered voicemail call
+   is rated like any inbound minute unless the ingest/rating excludes
+   `product_type='voicemail'`.
 
 ---
 
