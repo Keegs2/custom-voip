@@ -50,6 +50,40 @@ services:
       # /v1/live-trunk-stats/report. Must match LIVE_TRUNK_STATS_TOKEN in the
       # SBCs' .env. Unset => the endpoint fail-closes (rejects all reports).
       - LIVE_TRUNK_STATS_TOKEN=${LIVE_TRUNK_STATS_TOKEN:-}
+      # Encrypted voicemail (docs/ENCRYPTED_VOICEMAIL_INTERFACES.md §2/§3).
+      # Per-customer Cloud KMS keys (SOFTWARE, keyring below) wrap per-message
+      # AES-256-GCM DEKs; only ciphertext reaches the GCS bucket. FAIL-CLOSED:
+      # missing/invalid KMS or bucket config => voicemail endpoints 503, never
+      # plaintext. The dev-only local KMS / in-memory store switches
+      # (VOICEMAIL_ALLOW_LOCAL_KMS, VOICEMAIL_STORAGE) are DELIBERATELY not
+      # passed through, so production can never select them.
+      - VOICEMAIL_KMS_PROVIDER=${VOICEMAIL_KMS_PROVIDER:-gcpkms}
+      - VOICEMAIL_KMS_PROJECT=${VOICEMAIL_KMS_PROJECT:-}
+      - VOICEMAIL_KMS_LOCATION=${VOICEMAIL_KMS_LOCATION:-us-east1}
+      - VOICEMAIL_KMS_KEYRING=${VOICEMAIL_KMS_KEYRING:-voicemail-prod}
+      - VOICEMAIL_BUCKET=${VOICEMAIL_BUCKET:-voip-voicemail}
+      # Optional: impersonate the dedicated vm-api SA from the VM's attached
+      # SA (fallback when the services VM cannot be stopped to swap its SA).
+      # Unset => Application Default Credentials (the VM's attached SA).
+      - VOICEMAIL_IMPERSONATE_SA=${VOICEMAIL_IMPERSONATE_SA:-}
+      # HS256 key for the 120 s playback URLs. >= 32 chars and MUST differ
+      # from JWT_SECRET_KEY. Unset/short/equal => playback 503 (fail-closed).
+      - VOICEMAIL_PLAYBACK_SECRET=${VOICEMAIL_PLAYBACK_SECRET:-}
+      # Shared secret FreeSWITCH sends as X-Ingest-Secret on the voicemail
+      # /fs/ endpoints (same value as /opt/revup/secrets/vm_ingest.header on
+      # every FS node). >= 32 chars. Unset/short => every FS call 503.
+      - INGEST_SHARED_SECRET=${INGEST_SHARED_SECRET:-}
+      # Optional ADC key file (path INSIDE the container). Only if the VM SA /
+      # impersonation cannot be used — the key file must then also be mounted
+      # read-only via a compose override. Empty = unset (VM metadata ADC).
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+    # Plaintext voicemail audio is RAM-only (build plan D8 / §3.2): anything
+    # that does spool to /tmp stays in RAM, and the API never core-dumps
+    # decrypted audio to disk.
+    tmpfs:
+      - /tmp:size=256m,mode=1777,noexec,nosuid,nodev
+    ulimits:
+      core: 0
     ports:
       - "8088:8000"
     networks:

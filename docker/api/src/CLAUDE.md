@@ -12,6 +12,8 @@ src/
     __init__.py
     security.py              # JWT creation/validation, bcrypt password hashing
     dependencies.py          # FastAPI Depends functions: get_current_user, require_admin
+    ingest.py                # require_ingest_secret — X-Ingest-Secret for FreeSWITCH voicemail /fs/ endpoints (fail-closed 503 when INGEST_SHARED_SECRET unset/short)
+    playback.py              # mint/verify 120 s voicemail playback tokens (separate key, aud+typ 'vm-playback', bound to kind+object id)
   middleware/
     __init__.py
     auth.py                  # JWTAuthMiddleware (Starlette BaseHTTPMiddleware)
@@ -52,6 +54,7 @@ src/
     ledger.py                # Append-only ledger (migration 37) — read by billing.py; no in-tree writer since the payments demo was removed
     call_pricing.py          # Rate-deck lookups shared with rates.py (quote_call_price now unused)
     reporting.py             # Customer Reporting pure logic (date/tz validation, buckets, missed reasons, grades, CSV)
+    voicemail/               # Encrypted voicemail crypto layer: AES-256-GCM envelope, per-customer Cloud KMS KEKs (keys.py), GCS ciphertext store, CRC32C, AAD (contract docs/ENCRYPTED_VOICEMAIL_INTERFACES.md §2)
 ```
 
 ## Retired / removed products (2026-09)
@@ -354,8 +357,8 @@ Module-level `client` variable. All convenience functions check `if not client: 
 - `JWT_SECRET_KEY` is **required** (raises `RuntimeError` at import time if missing)
 - `JWT_ALGORITHM = "HS256"`, `JWT_EXPIRE_MINUTES = 480` (8 hours)
 - `verify_password()` / `hash_password()` -- direct bcrypt usage
-- `create_access_token(data)` -- adds `exp` claim and signs
-- `decode_access_token(token)` -- validates and returns claims dict
+- `create_access_token(data)` -- adds `exp` + `typ: "session"` (callers cannot override `typ`) and signs
+- `decode_access_token(token)` -- validates and returns claims dict; rejects a token whose `typ` is present and != `"session"` (e.g. a voicemail playback token) and any token with an `aud`. Pre-`typ` tokens stay valid until they expire
 
 ### dependencies.py
 FastAPI `Depends` functions:
@@ -372,6 +375,7 @@ Starlette `BaseHTTPMiddleware`. Exempt paths are hardcoded in `EXEMPT_PATHS` set
 - `POST /v1/onboarding` and `POST /onboarding` (public intake form; GET/approve/reject still require admin)
 - Paths ending with `/cdrs/ingest` or `/cdrs/ingest/bulk`
 - `/ws/*` paths (WebSocket auth handled via query params)
+- Encrypted voicemail (`is_voicemail_exempt`, evaluated on `scope["path"]`; control chars / dot segments never exempt): prefixes `/v1/voicemail/fs/` + `/voicemail/fs/` (every route there MUST `Depends(require_ingest_secret)`), and GET/HEAD `^/(v1/)?voicemail/(messages|greetings)/\d+/audio$` (route verifies the `?t=` playback token)
 
 On auth failure, returns a `JSONResponse(status_code=401)` directly (never raises HTTPException from middleware).
 
