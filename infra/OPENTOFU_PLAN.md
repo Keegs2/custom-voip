@@ -2395,3 +2395,32 @@ import {
   lists the three FS-2 VMs) + the NOC dashboard instance lists — apply AFTER the VMs
   exist. Grafana FS panels that aggregate by `freeswitch_node`/`reporting_instance`
   labels pick the new nodes up automatically.
+
+---
+
+## 20. Standalone stacks (live, each with its own state prefix)
+
+These are applied today, separately from the `voip-region` blueprint above. Each is its own root module with its own prefix in `gs://revup-tofu-state`, so a plan in one can never touch another. Apply them from the workstation (`cd infra/<stack> && tofu init && tofu plan && tofu apply`).
+
+| Stack | State prefix | What it owns | Operator doc |
+|---|---|---|---|
+| `infra/backups/` | `voip-backups` | `gs://revup-db-backups` (versioned) and the daily disk-snapshot policy on `services` | `infra/backups/README.md`, `docs/runbooks/DB_RESTORE_RUNBOOK.md` |
+| `infra/monitoring/` | `voip-monitoring` | Uptime checks, VM and SBC-failover alert policies, notification channels, prober firewall rules | `infra/monitoring/README.md` |
+| `infra/voicemail/` | `voip-voicemail` | See the notes below the table | `infra/voicemail/README.md`, `docs/runbooks/VOICEMAIL_GCP_SETUP.md` |
+
+`infra/voicemail/` owns these resources for encrypted voicemail:
+
+- KMS key rings `voicemail-prod` and `voicemail-bucket`. The first holds the per-customer KEKs, which the API creates. The second holds the bucket CMEK key.
+- The bucket `gs://voip-voicemail`: CMEK, versioning off, 7-day soft delete.
+- The service account `vm-api` and the custom role `voicemailKeyLifecycle`.
+- Data Access audit logs for KMS and GCS.
+
+Notes for `infra/voicemail/`:
+
+- **KMS key rings and keys can never be deleted in GCP.** `prevent_destroy` is set on the rings, the bucket key, the bucket and the SA. Destroying the bucket key would make every stored voicemail unreadable.
+- Option A (attaching `vm-api` to the `services` VM) replaces that VM's identity for **all** of its workloads. The stack therefore also gives `vm-api` the services VM's operational grants:
+  - backup-bucket `objectAdmin`, for pgBackRest WAL archiving and pg_dump
+  - `logging.logWriter` and `monitoring.metricWriter`, for the Ops Agent
+  - `monitoring.viewer`, for Grafana
+- The swap needs a VM stop/start, and the VM holds the PG primary. Do not point `infra/backups`' `backup_writer_service_account` at `vm-api`: both stacks would then manage the same binding.
+- `google_project_iam_audit_config` is authoritative per service. Any future stack that manages audit config for `cloudkms` or `storage` must merge with this one, not compete with it.
