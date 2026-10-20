@@ -30,6 +30,18 @@
 --      below is load-bearing, not cosmetic. FreeSWITCH reads ONLY the
 --      number_routing view (which runs with the view owner's rights) and
 --      talks to the API for everything else.
+--   6. rate_cdr(): 05's definition + a voicemail clause — a CDR with
+--      product_type='voicemail' rates to ZERO and never debits the balance
+--      (decision D5, no voicemail billing in v1).
+--
+-- Added by the API workstream (backend-B) — also documented in the
+-- contract §1 "As built (backend-B)":
+--   * voicemail_messages.deposit_attempt_id / deposit_lease_until — the
+--     deposit lease/fencing token that makes msg_uuid retries idempotent
+--     and race-free across the 4 API worker processes;
+--   * idx_vm_messages_live_mailbox — every non-purged row of a mailbox;
+--   * uq_vm_access_log_playback_jti — "audit once per playback token"
+--     across worker processes (INSERT ... ON CONFLICT DO NOTHING).
 --
 -- Guards beyond the contract column list (documented in the contract §1):
 --   * voicemail_boxes.did must be canonical E.164 (same predicate as 31's
@@ -212,6 +224,14 @@ CREATE TABLE IF NOT EXISTS voicemail_messages (
     zone              VARCHAR(16),
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     purged_at         TIMESTAMPTZ,
+    -- Deposit lease (API, routers/voicemail.py + services/voicemail/deposit.py):
+    -- the attempt that owns a 'pending' row stamps its own fencing token and a
+    -- lease expiry. A retry of the same msg_uuid may take the row over only
+    -- after the lease expired (or the row is 'failed'), and the finalising
+    -- UPDATE matches the token — so two attempts can never both seal, and a
+    -- timed-out attempt's late upload can never land after a takeover's.
+    deposit_attempt_id  UUID,
+    deposit_lease_until TIMESTAMPTZ,
     CONSTRAINT voicemail_messages_box_customer_fk
         FOREIGN KEY (mailbox_id, customer_id)
         REFERENCES voicemail_boxes (id, customer_id) ON DELETE CASCADE,
@@ -234,6 +254,16 @@ CREATE INDEX IF NOT EXISTS idx_vm_messages_trash
     ON voicemail_messages (deleted_at) WHERE status = 'stored' AND deleted_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_vm_messages_unfinished
     ON voicemail_messages (created_at) WHERE status IN ('pending', 'failed');
+-- Every not-yet-purged row of a mailbox (any status): mailbox delete, the
+-- crypto-erase purge and the retention arm for deleted mailboxes / destroyed
+-- keys. The stored-only index above cannot serve pending/failed rows.
+CREATE INDEX IF NOT EXISTS idx_vm_messages_live_mailbox
+    ON voicemail_messages (mailbox_id) WHERE status <> 'purged';
+
+-- Columns added to voicemail_messages after the table shape above was first
+-- drafted (dev databases may hold an earlier 54): idempotent no-ops otherwise.
+ALTER TABLE voicemail_messages ADD COLUMN IF NOT EXISTS deposit_attempt_id UUID;
+ALTER TABLE voicemail_messages ADD COLUMN IF NOT EXISTS deposit_lease_until TIMESTAMPTZ;
 
 -- ---------------------------------------------------------------------------
 -- 3d. voicemail_greetings — custom greetings (ciphertext in GCS).
@@ -315,6 +345,14 @@ CREATE INDEX IF NOT EXISTS idx_vm_access_log_customer_created
     ON voicemail_access_log (customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_vm_access_log_message
     ON voicemail_access_log (message_id) WHERE message_id IS NOT NULL;
+-- "Audit once per playback token" across ALL API worker processes (uvicorn
+-- runs 4): the router inserts the play/download/greeting_play row with
+-- ON CONFLICT ((detail->>'jti')) WHERE <this predicate> DO NOTHING, so the
+-- many Range requests of one token (spread over workers) write exactly one
+-- row. Needs only INSERT (the api role has no UPDATE on this table).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_vm_access_log_playback_jti
+    ON voicemail_access_log ((detail->>'jti'))
+    WHERE action IN ('play', 'download', 'greeting_play');
 
 -- ---------------------------------------------------------------------------
 -- 4. number_routing — 22's three arms VERBATIM + the voicemail arm.
@@ -453,6 +491,125 @@ BEGIN
 
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'freeswitch') THEN
         GRANT SELECT ON number_routing TO freeswitch;
+    END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 6. rate_cdr(): voicemail CDRs rate to ZERO (decision D5 — no voicemail
+--    billing in v1). FreeSWITCH writes product_type='voicemail',
+--    direction='inbound', customer_id = mailbox owner for a call answered by
+--    a mailbox; without this clause rate_cdr() would charge it like any
+--    inbound minute and debit customers.balance.
+--    The LATEST definition is 05_schema_cdr.sql (no later migration
+--    redefined it — 23/28/29/37/38 only mention it). This is that function
+--    BYTE-FOR-BYTE plus the v_product_type declaration and the block between
+--    the '>>> 54_voicemail.sql' / '<<< 54_voicemail.sql' markers
+--    (tests/test_voicemail_billing.py strips exactly those and compares).
+--    plpgsql resolves cdrs/customers/get_rate at CALL time, so this also
+--    applies on a scratch DB without the cdrs hypertable. CREATE OR REPLACE
+--    keeps 05's EXECUTE grant; it is re-asserted (role-guarded) anyway.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION rate_cdr(p_uuid VARCHAR(64))
+RETURNS DECIMAL
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_customer_id INT;
+    v_direction VARCHAR;
+    v_destination VARCHAR;
+    v_duration_ms INT;
+    v_rate_table_id INT;
+    v_rate DECIMAL;
+    v_cost DECIMAL;
+    v_carrier_cost DECIMAL;
+    v_connection_fee DECIMAL;
+    v_min_duration INT;
+    v_increment INT;
+    v_billable_ms INT;
+    v_total_cost DECIMAL;
+    v_product_type VARCHAR;  -- 54_voicemail.sql (D5)
+BEGIN
+    -- Get CDR details
+    SELECT customer_id, direction, destination, duration_ms
+    INTO v_customer_id, v_direction, v_destination, v_duration_ms
+    FROM cdrs WHERE uuid = p_uuid AND rated_at IS NULL;
+
+    IF NOT FOUND THEN
+        RETURN NULL;
+    END IF;
+
+    -- >>> 54_voicemail.sql (decision D5 — no voicemail billing in v1) >>>
+    -- A voicemail CDR (product_type='voicemail', written by FreeSWITCH for a
+    -- call answered by a mailbox) is marked rated at ZERO and never touches
+    -- the customer balance. Returns 0 (not NULL: NULL means 'not found or
+    -- already rated' to POST /v1/cdrs/{uuid}/rate).
+    SELECT product_type INTO v_product_type
+    FROM cdrs WHERE uuid = p_uuid AND rated_at IS NULL LIMIT 1;
+    IF v_product_type = 'voicemail' THEN
+        UPDATE cdrs
+        SET billable_ms = 0,
+            rate_per_min = 0,
+            total_cost = 0,
+            carrier_cost = 0,
+            margin = 0,
+            rated_at = NOW()
+        WHERE uuid = p_uuid;
+        RETURN 0;
+    END IF;
+    -- <<< 54_voicemail.sql <<<
+
+    -- Get rate table
+    SELECT CASE WHEN v_direction = 'inbound' THEN inbound_rate_table_id ELSE outbound_rate_table_id END
+    INTO v_rate_table_id
+    FROM customer_rate_assignments WHERE customer_id = v_customer_id;
+
+    -- Default rate table if not assigned
+    v_rate_table_id := COALESCE(v_rate_table_id, 1);
+
+    -- Get rate
+    SELECT rate_per_min, cost_per_min, connection_fee, min_duration, increment
+    INTO v_rate, v_cost, v_connection_fee, v_min_duration, v_increment
+    FROM get_rate(v_rate_table_id, v_destination);
+
+    -- Default rate if no match
+    v_rate := COALESCE(v_rate, 0.01);
+    v_connection_fee := COALESCE(v_connection_fee, 0);
+    v_min_duration := COALESCE(v_min_duration, 0) * 1000;  -- Convert to ms
+    v_increment := COALESCE(v_increment, 6) * 1000;        -- Convert to ms
+
+    -- Calculate billable duration
+    v_billable_ms := GREATEST(v_duration_ms, v_min_duration);
+    v_billable_ms := CEIL(v_billable_ms::DECIMAL / v_increment) * v_increment;
+
+    -- Calculate cost
+    v_total_cost := v_connection_fee + (v_billable_ms / 60000.0 * v_rate);
+
+    -- Calculate carrier cost and margin
+    v_carrier_cost := v_billable_ms / 60000.0 * COALESCE(v_cost, 0);
+
+    -- Update CDR
+    UPDATE cdrs
+    SET billable_ms = v_billable_ms,
+        rate_per_min = v_rate,
+        total_cost = v_total_cost,
+        carrier_cost = v_carrier_cost,
+        margin = v_total_cost - v_carrier_cost,
+        rated_at = NOW()
+    WHERE uuid = p_uuid;
+
+    -- Update customer balance
+    UPDATE customers
+    SET balance = balance - v_total_cost
+    WHERE id = v_customer_id;
+
+    RETURN v_total_cost;
+END;
+$$;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'api') THEN
+        GRANT EXECUTE ON FUNCTION rate_cdr(VARCHAR) TO api;
     END IF;
 END $$;
 

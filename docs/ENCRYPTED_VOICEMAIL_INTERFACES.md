@@ -190,6 +190,23 @@ from 22 and keeps its three arms byte-identical.)
 - `SET LOCAL lock_timeout = '5s'`: the DDL fails fast instead of queueing call-path reads
   of `customers`/`number_routing` behind it (the lock replays on every replica). Re-run on timeout.
 
+**As built (backend-B, 2026-10-20) — additions to 54 (still idempotent; 54 was not yet deployed):**
+- `voicemail_messages.deposit_attempt_id UUID` + `deposit_lease_until TIMESTAMPTZ` — the deposit
+  lease/fencing token behind §5's idempotency (also `ADD COLUMN IF NOT EXISTS` for dev DBs that
+  ran an earlier 54).
+- `idx_vm_messages_live_mailbox` = `(mailbox_id) WHERE status <> 'purged'` (mailbox delete,
+  crypto-erase and the retention arms for deleted mailboxes / destroyed keys).
+- `uq_vm_access_log_playback_jti` = UNIQUE `((detail->>'jti')) WHERE action IN ('play',
+  'download','greeting_play')` — "audit once per playback token" across the 4 uvicorn worker
+  processes (`INSERT … ON CONFLICT … DO NOTHING`, INSERT privilege only).
+- Section 6: `rate_cdr()` re-created from its latest definition (05) byte-for-byte plus a
+  voicemail clause: a CDR with `product_type='voicemail'` is marked rated at **0** (billable 0,
+  no balance debit; returns 0) — decision D5. `tests/test_voicemail_billing.py` proves both the
+  textual identity and the unchanged rating of every other product.
+- Audit actions also used: `mailbox_update` (PATCH; detail = changed field names + status) and
+  `greeting_delete`. Retention writes `retention_purge`; mailbox delete / crypto-erase purges
+  write `message_purge` / `greeting_delete` with `detail.reason`.
+
 ---
 
 ## 2. Crypto, KMS, storage — `docker/api/src/services/voicemail/` (owner: backend-A)
@@ -361,7 +378,7 @@ create; optional on list ⇒ all customers). Tenant user: scoped to their own
 | GET `/mailboxes/{id}` | admin, tenant | | `Mailbox` |
 | PATCH `/mailboxes/{id}` | admin, tenant(user) | `{label?, timezone?, greeting_mode?, active_greeting_id?}`; admin also `status?` ('active'\|'suspended') | `Mailbox` (422 if `greeting_mode='custom'` with no stored active greeting) |
 | PUT `/mailboxes/{id}/pin` | admin, tenant(user) | `{pin: "4–10 digits"}` | `204` |
-| DELETE `/mailboxes/{id}` | **admin** | | `204`. Purges messages+greetings (objects then rows), status='deleted', DID back to `available` (mirror `number_inventory` unassign). |
+| DELETE `/mailboxes/{id}` | **admin** | | `204`. Purges messages+greetings (objects then rows), status='deleted', DID back to `available` (mirror `number_inventory` unassign). Does **not** change `customers.voicemail_enabled` (only crypto-erase clears it — lead decision 2026-10-20). |
 | GET `/available-numbers` | **admin** | `q?` (digits), `limit≤50` | `[{did, city, state}]` from `did_inventory` where `status='available'` |
 
 `Mailbox` = `{id, customer_id, customer_name, did, label, status, timezone,
@@ -375,7 +392,7 @@ max_messages, max_bytes, message_count, unread_count, bytes_used, created_at}`
 | GET `/mailboxes/{id}/messages?folder=inbox\|saved\|trash&limit=50&offset=0` | admin, tenant | `{items: [Message], total, unread}`. inbox = stored, not deleted, not saved; saved = is_saved, not deleted; trash = deleted_at not null. Newest first. |
 | PATCH `/messages/{id}` | admin, tenant(user) | `{is_read?, is_saved?}` → `Message` |
 | DELETE `/messages/{id}` | admin, tenant(user) | move to trash → `Message` |
-| POST `/messages/{id}/restore` | admin, tenant(user) | → `Message` |
+| POST `/messages/{id}/restore` | admin, tenant(user) | → `Message`. Clears `deleted_at` only — `is_saved` is NOT changed (lead decision 2026-10-20). |
 | DELETE `/messages/{id}/purge` | admin, tenant(user) | permanent: object delete, row → status 'purged' (crypto fields nulled) → `204` |
 | POST `/messages/{id}/playback-token` | admin, tenant | `{download?: bool}` → `{url, expires_in: 120}` where `url` = `/api/v1/voicemail/messages/{id}/audio?t=<token>` (UI uses it verbatim as `<audio src>`). Marks `is_read=true`. |
 | GET/HEAD `/messages/{id}/audio?t=` | token | `audio/wav`, `Accept-Ranges: bytes`, Range ⇒ 206, `Cache-Control: no-store`, `Content-Disposition: inline` (or `attachment; filename="voicemail-<date>-<caller>.wav"` when `dl`). Bad/expired token ⇒ 401. |
@@ -430,6 +447,96 @@ than 1 hour (orphan sweep: object delete best-effort first); audit
   `services/voicemail/mailboxes.create_mailbox(...)` the router uses.
 - `unassign` of a `voicemail` DID calls `mailboxes.delete_mailbox(...)`.
 - `reconcile` and `/my` include a voicemail arm (`voicemail_boxes` where status≠'deleted').
+
+### 4.9 As built (backend-B, 2026-10-20) — refinements of §4.1–4.8
+Code: `routers/voicemail.py` (HTTP + scoping) over `services/voicemail/{mailboxes,deposit,
+greetings,audio,plaintext_cache,retention,wav,meta,body,audit}.py`.
+
+**Errors / scope.** Every `detail` the handlers raise is one short sentence the UI shows
+verbatim (e.g. "That number is not available.", "Greeting must be a mono 8 or 16 kHz 16-bit
+PCM WAV."). Only FastAPI's own body-shape validation (a JSON field of the wrong type) keeps
+FastAPI's list-shaped 422. Out-of-range / unknown ids are a 404 (never a 422/500).
+- A tenant whose customer has `voicemail_enabled=false` gets `GET /mailboxes` → `[]`,
+  `GET /summary` → `{enabled:false, mailbox_count:0, unread_count:0, can_manage:false}`, and
+  404 on every per-id route (lead decision). Admins still see such mailboxes.
+- `GET /summary` for an admin WITHOUT `customer_id` = platform-wide counts with `enabled:true`;
+  with an unknown `customer_id` → 404.
+- `readonly` may mint playback tokens (that marks the message read — part of playback).
+- Mailbox lists are ordered `customer name, label, id`; messages `created_at DESC, id DESC`;
+  greetings `created_at DESC, id DESC`.
+
+**Mailboxes.** `POST /mailboxes` 409s: DID not `available` / not in inventory ("That number is
+not available."), DID still routed by a product table (inventory drift: "That number is already
+in use."), inactive customer, and a crypto-erased customer ("…permanently erased and can't be
+turned back on." — the destroyed key row is permanent). 422: DID / label (1–120 chars) /
+timezone (IANA) / PIN (4–10 ASCII digits). The KMS key is ensured before the claim transaction
+(503, nothing committed). `PATCH` accepts `{greeting_mode:'custom', active_greeting_id}` in one
+request (greeting must be a STORED greeting of this mailbox, else 422), `{greeting_mode:
+'standard'}` alone (the active id is kept for a one-click switch back), `{label?, timezone?}`,
+admin `{status}` (tenant status → 403); an empty body is a no-op 200. `DELETE /mailboxes/{id}`
+commits status 'deleted' + DID 'available' + audit first, then purges inline for ≤ 20 s; any
+leftover (GCS down) is finished by the retention worker (rows of a deleted mailbox are never
+visible). `GET /available-numbers` also excludes DIDs already present in `number_routing`;
+`limit` 1–50.
+
+**Messages.** `GET …/messages` `limit` 1–200 (default 50), `unread` = unread in that folder.
+`POST /messages/{id}/playback-token` and `/greetings/{id}/playback-token` accept a missing
+body, `{}` or (messages) `{download}`. Minting an already-read message is a single SELECT (no
+write). The audit row (`play`/`download`/`greeting_play`) is written at the FIRST audio fetch of
+a token, once per token across all worker processes (so one mint that is played = one row;
+the UI's re-mints = one row each). Decrypt happens once per token **per worker process** (≤ 4
+decrypts per token in the worst case). `HEAD …/audio` is answered from the row's `size_bytes`
+(no decrypt, no audit). Range: single `bytes=a-b|a-|-n` → 206; unsatisfiable → 416
+`bytes */size`; multi-range/malformed → ignored (full 200). Audio responses also carry
+`X-Content-Type-Options: nosniff`. A token is bound to (kind, object, owner `cid`): a token
+whose `cid` is not the object's owner → 404. Integrity failure → 500, nothing served, no audit
+row. `DELETE /messages/{id}/purge` deletes the object first (503 if the store is down, row
+untouched), then the row.
+
+**Greetings.** At most **20** (stored + pending) greetings per mailbox → 409 "This mailbox
+already has 20 greetings. Delete one first." (bounded storage; not in the original contract).
+Upload is strict (no header leniency): 415 not RIFF/WAVE or non-WAV `Content-Type`; 422 format
+/ truncated data / > 120 s; 413 > 5 MB (Content-Length or streamed count). `label` blank ⇒
+"Greeting". Uploads are 3 at a time per process (503 + Retry-After otherwise).
+`GET /fs/greetings/{id}/audio` serves from a per-process plaintext cache (30 s TTL, 16 MB) keyed
+by greeting id + ciphertext CRC, so a burst of calls to one mailbox costs one KMS decrypt;
+every fetch still writes its `greeting_fs_fetch` audit row (audit failure → 503, no audio).
+
+**Crypto-erase** returns `{customer_id, mailboxes, messages, greetings, deferred, key_status,
+versions_destroyed}` (`deferred` = rows left for the retention worker; `-1` = unknown because the inline purge itself failed — the erase is committed and the worker finishes it). Confirm mismatch → 422
+"Type ERASE <id> to confirm."; unknown customer → 404. Idempotent: a re-run finishes a partial
+erase.
+
+**Memory (§4.6), per uvicorn worker process (4 workers):** deposits 5 concurrent (≈ 20 total),
+greeting uploads 3, playback LRU 64 MB (≈ 256 MB total, TTL = token's remaining life ≤ 120 s),
+FS-greeting cache 16 MB / 30 s, and at most 6 concurrent decrypts (cache misses; more ⇒ 503 +
+`Retry-After: 5`, the FS greeting fetch then falls back to the default greeting). Bodies are
+read into one pre-sized `bytearray` (zeroed after use); never `request.form()`/`UploadFile`.
+
+**Retention (§4.7).** Every worker starts the task (first run 30–90 s after start, then every
+15 min); a transaction-scoped advisory lock (`pg_try_advisory_xact_lock`, PgBouncer-safe) lets
+one sweep at a time. Arms: messages — expired, trash > 30 d, `pending` > 1 h without a live
+lease, `failed` > 10 min (grace so FreeSWITCH's retries can take a failed row over), any
+non-purged row of a deleted mailbox or of a crypto-erased customer; greetings — `pending` > 1 h,
+`failed` > 10 min, deleted mailbox, erased customer. Rows are marked `purged` (crypto fields
+nulled, `purged_at` on messages), **not deleted** — the msg_uuid stays reserved (a very late
+deposit retry gets 409) and the history stays queryable. Each batch: `SELECT … FOR UPDATE SKIP
+LOCKED` → object deletes → guarded UPDATE → one `retention_purge` audit row per mailbox, in one
+transaction. Needs no KMS. Store/DB trouble is logged and retried next run. `VOICEMAIL_RETENTION_
+ENABLED=false` disables the task (default on).
+
+**Customer delete** (`DELETE /v1/customers/{id}`, minimal change): a customer with a live
+mailbox or an active voicemail key → 409 "This customer has voicemail. Erase their voicemail
+first (POST /v1/voicemail/customers/{id}/crypto-erase)."; after an erase the key row is a
+permanent tombstone (54's `ON DELETE RESTRICT`), so → 409 "…can't be deleted. Close it
+instead." (never a ForeignKeyViolation 500).
+
+**Number inventory (§4.8).** `assign` with `product_type=voicemail` (optional `label`) accepts
+`available` or `reserved` DIDs like every other product and uses `create_mailbox` (KMS-first,
+same 409/422/503 semantics); the response is the existing assign shape with `product_ref_id` =
+mailbox id. `unassign` of a voicemail DID deletes the live mailbox via `delete_mailbox` (no live
+mailbox ⇒ the plain inventory reset). `/my` and `reconcile` gain a voicemail arm, built only
+once migration 54's tables exist. Customers still cannot `request` a voicemail DID.
 
 ---
 
@@ -493,6 +600,64 @@ Empty/very short recordings (< 1 s of audio) are not deposited by FS.
 - Codes not in the table above: `408`/`429` are retried like 5xx; any other
   1xx/3xx/4xx is treated as permanent (no retry, logged). Redirects are never
   followed.
+
+**As implemented by the server (backend-B, 2026-10-20) — `services/voicemail/deposit.py`:**
+
+- Check order (cheapest first): ingest secret (401/503) → `X-VM-Meta` (400) → `Content-Type`
+  `audio/wav` (415; `audio/x-wav`/`audio/wave` also accepted) → `Content-Length` ≤ 10 MB (413
+  before reading) → a per-process concurrency slot (5 per worker ⇒ ≈ 20; none free ⇒ 503 +
+  `Retry-After: 2`) → body (streamed counter for chunked, 413) → WAV (415/422) → claim → seal +
+  upload → finalize.
+- `X-VM-Meta`: any character outside `[A-Za-z0-9_-]` (incl. `=` padding), > 8192 chars, a
+  length ≡ 1 mod 4, non-UTF-8, non-JSON, a non-object, duplicate keys, > 32 keys ⇒ 400. `v` must
+  be the JSON integer 1; `msg_uuid` a UUID (canonicalised lower-case — an upper-case retry is
+  the same message); `mailbox_id` a positive int32; `duration_ms` (optional) a non-negative
+  int32; JSON booleans are not integers. String fields are optional, must be strings within the
+  column widths (code points), lone surrogates ⇒ 400; control characters are replaced by a
+  space and `""` is stored as NULL. Unknown keys are ignored (never stored).
+- WAV: same strict format as greetings (PCM s16le mono 8000|16000 Hz) but the data-chunk size is
+  read like FS's `wav_duration_ms`: 0 / 0xFFFFFFFF / larger than the body ⇒ the bytes present
+  (odd tail byte dropped). The STORED `duration_ms` is the server's measurement from the data
+  chunk; `meta.duration_ms` is informational. Duration > `max_message_seconds` + 5 s ⇒ 422.
+- Mailbox: unknown/deleted ⇒ 404; status ≠ active or voicemail disabled ⇒ 409 "(inactive)";
+  live messages ≥ `max_messages` or stored bytes ≥ `max_bytes` ⇒ 409 "(full)" (soft limit: the
+  check is at claim time, concurrent deposits may overshoot by the in-flight ones). A
+  crypto-erased customer ⇒ 404.
+- **Idempotency + leases.** The row is inserted `pending` FIRST with a fencing token
+  (`deposit_attempt_id`) and a 30 s lease (`deposit_lease_until`), under `SELECT … FOR UPDATE`
+  on the msg_uuid. Duplicate msg_uuid: `stored` ⇒ 200 with the existing id (checked BEFORE the
+  accepting/quota checks, so a lost-200 retry always succeeds); `pending` with a live lease ⇒
+  503 + `Retry-After: 2`; `failed`, or `pending` whose lease expired ⇒ take over (new token +
+  lease, re-seal, same object key overwritten); `purged` ⇒ 409; the msg_uuid of another
+  mailbox ⇒ 409. The finalising UPDATE matches the token, so only the lease holder can mark
+  the row stored; concurrent duplicates seal exactly once.
+- **Deadline.** The request answers within 11 s of arrival. A seal + upload that is still
+  running then is **not cancelled** (its KMS/GCS calls run on worker threads asyncio cannot
+  stop; a cancelled-but-alive upload could later overwrite a takeover's object and leave a
+  stored row whose ciphertext no longer matches). FS gets 503; a background task keeps waiting
+  for that SAME seal, renewing the attempt's lease (120 s, renewed every 60 s), so FS's retries
+  get 503 meanwhile, and then finalizes the row (stored + audited) — or marks it `failed` if
+  the seal fails. A slow-but-successful upload is therefore KEPT even when FS has exhausted its
+  retries (FS logs "message lost" although the message is in the mailbox); a retry that
+  arrives after the late finalize gets the idempotent 200. The body buffer and the concurrency
+  slot stay held until the background task ends. A clean failure (KMS/GCS raised, no thread
+  left) marks the row `failed` at once ⇒ FS's next attempt takes it over. The object of a
+  failed/abandoned attempt is deleted by the retention worker (never inline: an inline delete
+  could race a takeover's upload).
+- **Audit (fail-closed).** The `deposit` audit row is inserted in the SAME transaction as the
+  UPDATE to `stored`; if that transaction fails the row is marked `failed` (fenced) and the
+  response is 503 — a stored row without its audit row cannot exist.
+- The processing runs in a task the handler awaits via `asyncio.shield`: if FS disconnects
+  (curl `--max-time`), the deposit still completes and FS's retry gets the idempotent 200.
+- Mailbox deleted while uploading ⇒ 404; the row stays `pending` until its lease ends, then the
+  retention worker purges row + object.
+- Success body: `{"status":"stored","message_id":N}` (compact JSON — verified against the real
+  `vm_deposit.classify` in `tests/test_voicemail_deposit.py`).
+- **Billing (D5):** the voicemail call's CDR (`product_type='voicemail'`, `direction=inbound`)
+  is ingested unchanged (`cdrs.product_type` VARCHAR(10), no CHECK) and `rate_cdr()` rates it to
+  0 (§1 as-built). The Equinox CDR export still ships the row with its `billed_seconds`
+  (`answer_time` + `billable_ms`) — the external biller must skip `product_type='voicemail'`
+  until pricing is decided (export format untouched on purpose).
 
 ---
 
