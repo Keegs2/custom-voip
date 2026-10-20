@@ -182,7 +182,10 @@ There is **no standalone login page** — the login form lives in the sidebar on
 public homepage (`DashboardPage`). `LoginPage.tsx` still exists but is orphaned.
 
 **Logout:** clears localStorage, nulls state (incl. customer view + preview
-customer), navigates to `/` (the public home).
+customer), clears the React Query cache, navigates to `/` (the public home).
+Login also clears the cache before the new identity renders — tenant query keys
+(`['my-customer', …]`, `['my-team']`) are not customer-scoped, so without this a
+second login on the same tab was served the previous tenant's data.
 
 **Customer preview (admin "View as Customer").** The admin user has
 `customer_id = null` / `account_type = null`, so customer pages must never read

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { login as apiLogin, getMe } from '../api/auth';
 import { ApiError } from '../api/client';
 import type { User } from '../types/auth';
@@ -84,6 +85,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(AUTH_TOKEN_KEY));
@@ -133,10 +135,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /* ── Login ───────────────────────────────────────────────── */
   const login = useCallback(async (email: string, password: string): Promise<void> => {
     const response = await apiLogin(email, password);
+    // Drop any cached server state before the new identity renders. Tenant
+    // query keys (e.g. ['my-customer', 'summary'], ['my-team']) are not
+    // customer-scoped, so a previous session's entries would otherwise be
+    // served as this user's data until staleTime passes.
+    queryClient.clear();
     localStorage.setItem(AUTH_TOKEN_KEY, response.access_token);
     setToken(response.access_token);
     setUser(response.user);
-  }, []);
+  }, [queryClient]);
 
   /* ── Logout ──────────────────────────────────────────────── */
   const logout = useCallback(() => {
@@ -145,8 +152,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setCustomerViewMode(false);
     setPreviewCustomer(null);
+    // Same reason as login: never leave one session's cached data behind.
+    queryClient.clear();
     navigate('/', { replace: true });
-  }, [navigate]);
+  }, [navigate, queryClient]);
 
   /* ── Refresh user ────────────────────────────────────────── */
   const refreshUser = useCallback(async (): Promise<void> => {
