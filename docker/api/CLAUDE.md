@@ -49,6 +49,10 @@ CMD: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --ht
 | `passlib[bcrypt]>=1.7.4` | Password hashing utilities |
 | `bcrypt>=4.0.0` | bcrypt implementation |
 | `python-multipart>=0.0.6` | Form data parsing (CDR ingest) |
+| `google-cloud-kms>=3.0.0` | Encrypted voicemail: per-customer KEKs (`services/voicemail/kms.py`) |
+| `google-cloud-storage>=3.0.0` | Encrypted voicemail: ciphertext objects (`services/voicemail/storage.py`) |
+| `google-crc32c>=1.5.0` | CRC32C integrity on every KMS/GCS call |
+| `cryptography>=42.0.0` | AES-256-GCM envelope + HKDF (dev local KMS) |
 
 ## Environment Variables
 
@@ -71,6 +75,12 @@ CMD: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --ht
 | `ENABLE_DOCS` | `true` | Set `false` to disable Swagger UI / ReDoc |
 | `API_CALLING_ENABLED` | _(unset = OFF)_ | **API Calling is RETIRED (2026-09).** ON only if exactly `true` (trimmed, case-insensitive; `1`/`yes`/`on` are OFF). Read live by `config.api_calling_enabled()` (`src/config.py`); the `/v1/calls` mount decision is made at import. See "API Calling — RETIRED" below. Mirrors the FreeSWITCH env var + UI `config/features.ts` |
 | `CDR_B_LEG_ROWS` | _(unset = ON)_ | **CDR A/B leg split** (`docs/CDR_LEG_SPLIT_CONTRACT.md`). ON unless exactly `false` (trimmed, case-insensitive). ON: a carrier B-leg CDR (`cdr_leg=B` + `cdr_carrier_leg=true`) inserts its own `leg='B'` row. OFF: B-legs never insert (pre-split behavior; they only feed the answered-carrier-leg STIR UPDATE). Read live by `config.cdr_b_leg_rows_enabled()`. The per-zone cutover switch is FreeSWITCH `log-b-leg` (`json_cdr.conf.xml`), not this |
+| `VOICEMAIL_KMS_PROVIDER` | `gcpkms` | Encrypted voicemail KEK provider. Only `gcpkms` in production (`local` is dev/CI and needs `VOICEMAIL_ALLOW_LOCAL_KMS=true`, which compose never passes) |
+| `VOICEMAIL_KMS_PROJECT` / `_LOCATION` / `_KEYRING` | _(required)_ / `us-east1` / `voicemail-prod` | Keyring holding one SOFTWARE key `vm-cust-<id>` per customer. Missing/invalid ⇒ voicemail endpoints 503 (fail-closed) |
+| `VOICEMAIL_BUCKET` | `voip-voicemail` | GCS bucket for ciphertext only |
+| `VOICEMAIL_IMPERSONATE_SA` | _(unset)_ | Optional SA to impersonate from ADC (else the VM's attached SA / `GOOGLE_APPLICATION_CREDENTIALS`) |
+| `VOICEMAIL_PLAYBACK_SECRET` | _(required for playback)_ | HS256 key for 120 s playback URLs; ≥ 32 chars, must differ from `JWT_SECRET_KEY` (else 503) |
+| `INGEST_SHARED_SECRET` | _(required for FS voicemail)_ | `X-Ingest-Secret` FreeSWITCH sends on `/v1/voicemail/fs/*`; ≥ 32 chars; unset/short ⇒ every call 503 (fail-closed) |
 
 The payments-demo vars (`PAYMENTS_DEMO_MODE`, `PAYMENTS_DEMO_FAKE_ORIGINATE`, `PAYMENTS_DEMO_*`, `PAYMENT_PROVIDER`, `AUTO_RECHARGE_MAX_FAILURES`) are gone with the demo — remove them from any VM `.env`; nothing reads them.
 
@@ -126,9 +136,10 @@ Redis is used for:
 - FreeSWITCH paths exempt: anything starting with `/freeswitch/`, or ending with `/cdrs/ingest` or `/cdrs/ingest/bulk`
 - Public onboarding exempt: `POST /v1/onboarding` and `POST /onboarding` (unauthenticated intake form submission). Only the POST method is exempt — GET/approve/reject still require admin.
 - WebSocket paths exempt: anything starting with `/ws/`
+- Encrypted voicemail exempt (auth inside the router): `/v1/voicemail/fs/*` + `/voicemail/fs/*` (X-Ingest-Secret) and GET/HEAD `/(v1/)voicemail/(messages|greetings)/<id>/audio` (playback token). Bearer tokens whose `typ` is not `session` are rejected everywhere.
 - CORS preflight (`OPTIONS`) always passes through
 
-JWT claims contain: `sub` (user ID), `email`, `role`, `customer_id`.
+JWT claims contain: `sub` (user ID), `email`, `role`, `customer_id`, `typ` (`"session"`).
 
 ## CORS Configuration
 

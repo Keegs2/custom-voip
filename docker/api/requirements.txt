@@ -27,3 +27,13 @@ bcrypt>=4.0.0
 # Utilities
 python-multipart>=0.0.6
 tzdata>=2024.1  # IANA zones for zoneinfo (cdr_activity tz validation) even if the image lacks /usr/share/zoneinfo
+
+# Encrypted voicemail (services/voicemail): per-customer Cloud KMS keys wrap
+# per-message AES-256-GCM DEKs; ciphertext objects live in GCS; CRC32C
+# end-to-end integrity on every KMS + GCS call. All ship manylinux wheels for
+# python:3.12-slim (grpcio/protobuf come in via google-cloud-kms) — no extra
+# apt build deps beyond the builder's existing build-essential/libffi-dev.
+google-cloud-kms>=3.0.0
+google-cloud-storage>=3.0.0
+google-crc32c>=1.5.0
+cryptography>=42.0.0

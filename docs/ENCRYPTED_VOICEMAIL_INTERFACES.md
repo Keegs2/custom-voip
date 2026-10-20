@@ -162,6 +162,34 @@ byte-identical; re-GRANT SELECT to freeswitch, api):
 Filter `WHERE b.status <> 'deleted'` (a deleted mailbox's DID is "not ours" again).
 Disabled/suspended ⇒ row present + `product_enabled=false` ⇒ FS hard-rejects 603.
 
+**As built (backend-A, 2026-10-20) — additive guards; the names are load-bearing for the
+router's 409/422 mapping.** (No later migration had redefined `number_routing`; 54 starts
+from 22 and keeps its three arms byte-identical.)
+- Index/constraint names: `uq_voicemail_boxes_did_live` (UNIQUE `did` WHERE
+  `status <> 'deleted'`; also the voicemail arm's point-lookup index),
+  `idx_voicemail_boxes_customer`, `voicemail_boxes_did_e164_chk` (`did ~ '^\+[1-9]\d{1,14}$'`,
+  same predicate as 31), `idx_vm_messages_mailbox_created`, `idx_vm_messages_expires`, plus
+  retention helpers `idx_vm_messages_trash` (`deleted_at` WHERE stored AND trashed) and
+  `idx_vm_messages_unfinished` (`created_at` WHERE status IN ('pending','failed')),
+  `idx_vm_greetings_mailbox`, `idx_vm_access_log_customer_created`, `idx_vm_access_log_message`.
+- Tenant consistency: `voicemail_messages_box_customer_fk` / `voicemail_greetings_box_customer_fk`
+  = `(mailbox_id, customer_id) → voicemail_boxes(id, customer_id) ON DELETE CASCADE`
+  (`voicemail_boxes_id_customer_key` UNIQUE backs it). A row's `customer_id` MUST equal its
+  mailbox's customer — it is an AAD input and the tenant filter.
+- `voicemail_boxes_active_greeting_fk` = `(active_greeting_id, id) → voicemail_greetings(id,
+  mailbox_id) ON DELETE SET NULL (active_greeting_id)` (PG ≥ 15) **replaces** the plain FK:
+  the active greeting must belong to the SAME mailbox (FK violation ⇒ map to 422).
+  Deleting the greeting nulls only `active_greeting_id`; the router still resets `greeting_mode`.
+- `voicemail_{messages,greetings}_stored_complete_chk`: `status='stored'` requires
+  `object_key, ciphertext_crc32c, wrapped_dek, kek_version, iv` NOT NULL — set them in the
+  SAME UPDATE that sets `'stored'`. `*_iv_len_chk`: `iv` NULL or 12 bytes. No CHECK on 'purged'.
+- Grants: `api` = ALL on keys/boxes/messages/greetings but **only SELECT + INSERT on
+  `voicemail_access_log`** (append-only: UPDATE/DELETE/TRUNCATE denied). `freeswitch`,
+  `grafana_ro` (24's `ALTER DEFAULT PRIVILEGES` would otherwise give it SELECT on every new
+  table) and PUBLIC get nothing; `number_routing` re-granted to `freeswitch`, `api`.
+- `SET LOCAL lock_timeout = '5s'`: the DDL fails fast instead of queueing call-path reads
+  of `customers`/`number_routing` behind it (the lock replays on every replica). Re-run on timeout.
+
 ---
 
 ## 2. Crypto, KMS, storage — `docker/api/src/services/voicemail/` (owner: backend-A)
@@ -227,6 +255,53 @@ Env (services `.env`, passed through `docker-compose.services.yml` → `api`):
 playback, ≥32 chars, must differ from JWT_SECRET_KEY), `INGEST_SHARED_SECRET`
 (required for FS endpoints, ≥32 chars).
 
+**As built (backend-A, 2026-10-20) — exact public API**, all re-exported from
+`services.voicemail` (the file list above says `seal()/open_sealed()`; the implemented names
+are the signature names `seal_and_store`/`load_and_open`). Extra module: `errors.py`.
+- Exceptions: the two above plus subclasses `VoicemailKeyDestroyed(VoicemailCryptoUnavailable)`
+  (customer crypto-erased — permanent, still a 503 for parent-class handlers) and
+  `VoicemailObjectNotFound(VoicemailIntegrityError)` (row says stored, object missing).
+- Builders accept `str` or `uuid.UUID` and CANONICALISE the uuid (lower-case, hyphenated), so
+  the deposit-time AAD (FS string) equals the playback-time AAD (DB `uuid` column).
+  `ValueError` on non-positive/bool ids or a bad uuid. `crc32c(data) -> int` is exported.
+- `Sealed` is `@dataclass(frozen=True)` with exactly the fields above.
+- `seal_and_store`: `object_key`, `aad` and `customer_id` must name the same object (else
+  `ValueError`); empty/non-bytes plaintext ⇒ `ValueError`; unknown customer ⇒ `LookupError`
+  (no KMS key created); erased ⇒ `VoicemailKeyDestroyed`. The DEK is wrapped BEFORE the upload
+  (KMS down ⇒ nothing uploaded).
+- `load_and_open`: download → CRC32C vs the row → KMS unwrap (AAD) → GCM decrypt (AAD).
+  Mismatched/malformed row data or no key row ⇒ `VoicemailIntegrityError`; erased ⇒
+  `VoicemailKeyDestroyed`. `delete_object`: `ValueError` for a key outside
+  `c/{c}/mb/{m}/{m|g}/{uuid}.enc`.
+- `keys.py`: "key row" = `@dataclass(frozen=True) CustomerKey(customer_id, provider, key_ref,
+  status, created_at, destroyed_at)`. `ensure_customer_key(customer_id, *, conn=None) ->
+  CustomerKey`; `get_customer_key(customer_id, *, conn=None) -> CustomerKey | None`;
+  `crypto_erase_customer(customer_id, *, conn=None) -> {customer_id, provider, key_ref,
+  status: 'destroyed'|'no_key', already_destroyed: bool, versions_destroyed: [version names]}`.
+  `ensure` writes the `key_create` audit row (source `system`) in the key-row transaction; the
+  router writes `crypto_erase`. Erase marks the row destroyed FIRST (committed — every worker
+  refuses at once), then destroys every ENABLED/DISABLED version, re-lists to verify, then
+  clears the rotation schedule (failure = WARNING only). Idempotent/resumable; never pass a
+  `conn` that is inside an open transaction to erase. DB errors ⇒ `VoicemailCryptoUnavailable`.
+- `get_kms_provider(name: str | None = None)` / `get_object_store()` (per-process cache).
+  `KmsProvider`: `ensure_key(customer_id) -> key_ref`, `wrap_dek(*, customer_id, key_ref, dek,
+  aad) -> (wrapped, kek_version)`, `unwrap_dek(*, customer_id, key_ref, wrapped_dek, aad) ->
+  bytearray`, `destroy_key(*, customer_id, key_ref | None) -> [version names]`.
+  `ObjectStore`: `put(key, data, *, crc32c)`, `get(key) -> bytes`, `delete(key)`.
+- Timeouts (FS deposit timeout must cover them): KMS 5 s per RPC, ≤ 3 attempts on
+  UNAVAILABLE/DEADLINE_EXCEEDED (backoff 0.2 s, 0.6 s); GCS (5 s connect, 20 s read) per
+  request, ≤ 3 attempts on 429/5xx/connection errors. Library-level retries are disabled.
+- Dev/CI env (never in compose): `VOICEMAIL_ALLOW_LOCAL_KMS=true`, `VOICEMAIL_KMS_PROVIDER=local`,
+  `VOICEMAIL_LOCAL_MASTER_KEY=<base64 of 32 bytes>`, `VOICEMAIL_STORAGE=memory` (default `gcs`).
+  Both local backends are also refused when `ENV` or `ENVIRONMENT` = `production`. Local
+  `kek_version` = `local:<id>/v<n>`; `LocalKmsProvider.rotate()` simulates rotation (v1 KEK =
+  HKDF info `b"vm-cust-<id>"` exactly; v≥2 info `b"vm-cust-<id>:v<n>"`).
+- Runtime IAM actually used: KMS (keyring `voicemail-prod`) `cloudkms.cryptoKeys.{create,get,
+  update}`, `cloudkms.cryptoKeyVersions.{list,destroy}` (`get` granted, unused today),
+  `roles/cloudkms.cryptoKeyEncrypterDecrypter`; GCS (bucket) `storage.objects.{create,get,
+  delete}` via `roles/storage.objectAdmin`. Never `storage.buckets.get` (handle via
+  `client.bucket(name)`). No version create/enable/disable/restore, no IAM-policy reads.
+
 ---
 
 ## 3. Auth (owner: backend-A)
@@ -247,6 +322,22 @@ playback, ≥32 chars, must differ from JWT_SECRET_KEY), `INGEST_SHARED_SECRET`
   - prefix `/v1/voicemail/fs/` and `/voicemail/fs/` (ingest-secret inside the router)
   - regex `^/(v1/)?voicemail/(messages|greetings)/\d+/audio$` with method GET/HEAD
     (playback token inside the router)
+
+**As built (backend-A, 2026-10-20):**
+- The `typ` check lives in `decode_access_token` itself (so every caller gets it): `typ`
+  present and ≠ `"session"` — including JSON `null` — ⇒ `JWTError` ⇒ middleware 401. A token
+  carrying `aud` is rejected by python-jose (no audience expected for sessions).
+- `auth/playback.py` also exports `PlaybackTokenError` (⇒ 401) and `PlaybackNotConfigured`
+  (subclass of `VoicemailCryptoUnavailable` ⇒ 503: secret unset, < 32 chars or equal to
+  `JWT_SECRET_KEY`). Claim types: `oid`/`cid` int, `sub` = `str(user_id)`, `dl` bool, `jti`
+  str, plus `iat`; verify also requires `exp − iat ≤ 120`. `customer_id` is the object OWNER
+  (also when an admin previews a customer).
+- `auth/ingest.py` also exports `INGEST_SECRET_HEADER` and `ingest_secret_configured()`.
+  401 detail `"invalid or missing ingest secret"`, 503 detail `"ingest authentication is not
+  configured"`.
+- `middleware/auth.is_voicemail_exempt(path, method)` is evaluated on `scope["path"]` (the
+  router's view — `request.url.path` silently drops tab/CR/LF, so the two can disagree) and
+  refuses any control character and any `.`/`..` segment. Regex is `re.ASCII` + `fullmatch`.
 
 ---
 
