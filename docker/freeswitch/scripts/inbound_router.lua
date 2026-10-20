@@ -915,8 +915,34 @@ local function lookup_trunk_did()
     return nil
 end
 
+-- Try voicemail mailbox DID (encrypted voicemail v1: dedicated-DID mailboxes,
+-- build plan D6). LAST in the cascade, so it can never shadow a revenue
+-- product, and RCF/API/trunk calls never run it: the query only executes for
+-- a DID that all three lookups missed (i.e. a call that would otherwise be a
+-- 404). db.lookup_voicemail_did reads the number_routing view's voicemail arm
+-- and is UNFILTERED on enabled/active (like resolve_destination) — a
+-- suspended/disabled mailbox is rejected 603 by terminate_vvm, not 404.
+local function lookup_voicemail_did()
+    if not db or not db.lookup_voicemail_did then return nil end
+
+    local vm_row = db.lookup_voicemail_did(normalized_did)
+    if vm_row then
+        freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Voicemail DID hit\n")
+        return {
+            product_type = "voicemail",
+            customer_id = tonumber(vm_row.customer_id),
+            product_ref_id = tonumber(vm_row.product_ref_id),   -- mailbox id
+            product_enabled = (vm_row.product_enabled == "t" or vm_row.product_enabled == true),
+            customer_status = vm_row.customer_status,
+            traffic_grade = vm_row.traffic_grade or "standard",
+        }
+    end
+
+    return nil
+end
+
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 1: DID lookup for " .. tostring(normalized_did) .. "\n")
--- RCF-V1: Execute lookups in order: RCF -> API -> Trunk
+-- RCF-V1: Execute lookups in order: RCF -> API -> Trunk -> Voicemail
 -- UCaaS extension routing removed — not needed for RCF-only deployment
 local routing = lookup_rcf()
 if not routing then
@@ -924,6 +950,9 @@ if not routing then
 end
 if not routing then
     routing = lookup_trunk_did()
+end
+if not routing then
+    routing = lookup_voicemail_did()
 end
 
 -- No match found
@@ -2182,13 +2211,97 @@ local function terminate_trunk(dest, ctx)
     end
 end
 
+-- ================================================================
+-- Terminator: Voicemail  (dest = terminal mailbox row, ctx = state)
+-- ================================================================
+-- Encrypted voicemail v1 (docs/ENCRYPTED_VOICEMAIL_INTERFACES.md §6, build
+-- plan D6/D8). Reached two ways, both through dispatch_terminal (which has
+-- already set customer_id = mailbox owner, product_type = voicemail and the
+-- on-net CDR set):
+--   * DIRECT: a mailbox DID dialed from the PSTN (STEP-1 voicemail arm;
+--     on_net=false, hops=0).
+--   * ON-NET: an RCF forward_to (or chain) whose terminal is a mailbox DID —
+--     resolved by the number_routing voicemail arm in the chain loop; NO
+--     carrier B-leg is ever built (this terminator never bridges).
+-- Answers on-platform and hands the call to lib/vm_box.lua (answer -> API
+-- mailbox lookup -> greeting -> beep -> record to the /dev/shm/vm tmpfs ->
+-- hang up -> deposit to the API -> unlink). The module is loaded LAZILY here so
+-- RCF/trunk calls never read or parse it.
+-- Emits ZERO carrier legs by construction, so no cdr_b_leg_block (no B row).
+local function terminate_vvm(dest, ctx)
+    local uuid = ctx.uuid
+    -- The DID was found and Lua owns the call from here: never let the
+    -- dialplan fallback mask an early exit with its 503/404.
+    set_var("lua_routed", "true")
+
+    -- Disabled/suspended mailbox -> 603. The on-net chain loop already
+    -- rejected this case before dispatch; the DIRECT arm is unfiltered on
+    -- purpose so it lands here (number is ours -> 603, never 404).
+    if (not dest.product_enabled) or (dest.customer_status ~= "active") then
+        hard_reject("CALL_REJECTED", string.format(
+            "[%s] Voicemail mailbox DID %s is disabled/suspended "
+            .. "(product_enabled=%s customer_status=%s) — 603",
+            uuid, tostring(dest.did), tostring(dest.product_enabled),
+            tostring(dest.customer_status)))
+        return
+    end
+
+    local mailbox_id = tonumber(dest.product_ref_id)
+    if not mailbox_id or mailbox_id < 1 or mailbox_id ~= math.floor(mailbox_id) then
+        hard_reject("NORMAL_TEMPORARY_FAILURE", string.format(
+            "[%s] Voicemail DID %s has no valid mailbox id (%s) — 503",
+            uuid, tostring(dest.did), tostring(dest.product_ref_id)))
+        return
+    end
+
+    local vm_box = load_module("vm_box")
+    if not vm_box or type(vm_box.run) ~= "function" then
+        hard_reject("NORMAL_TEMPORARY_FAILURE", string.format(
+            "[%s] Voicemail module unavailable — 503 for mailbox %d", uuid, mailbox_id))
+        return
+    end
+
+    -- Presented caller: the composed identity (design §5 "last false hop
+    -- wins"). Direct dial: the original caller. On-net: a masking RCF hop
+    -- (pass_caller_id=false) shows its DID, exactly like terminate_trunk.
+    local caller_number = ctx.presented_cid or ""
+    local caller_name = ctx.presented_name or ""
+    if caller_name == caller_number then
+        caller_name = ""   -- the router defaults an absent name to the number
+    end
+
+    freeswitch.consoleLog("INFO", string.format(
+        "[%s] Voicemail: mailbox=%d did=%s customer=%s on_net=%s hops=%s\n",
+        uuid, mailbox_id, tostring(dest.did), tostring(dest.customer_id),
+        tostring(ctx.on_net), tostring(ctx.hops)))
+
+    local ok, err = pcall(vm_box.run, session, {
+        uuid          = uuid,
+        mailbox_id    = mailbox_id,
+        did           = dest.did,
+        caller_number = caller_number,
+        caller_name   = caller_name,
+        call_uuid     = uuid,
+        fs_node       = get_var("fs_node", ""),
+        zone          = get_var("fs_zone", fs_zone),
+    })
+    if not ok then
+        -- vm_box.run is internally pcall-guarded (and unlinks its tmpfs files
+        -- on every path); this is belt-and-braces only.
+        freeswitch.consoleLog("ERR", string.format(
+            "[%s] Voicemail flow raised: %s\n", uuid, tostring(err)))
+        pcall(function() session:hangup("NORMAL_TEMPORARY_FAILURE") end)
+    end
+end
+
 -- Product-agnostic dispatch map (design §2/§8). A future product enrolls by
 -- adding a UNION-ALL arm to number_routing + a terminator here — detection,
 -- the hop loop, loop/limit/reject, and CDR emission stay untouched.
 local TERMINATORS = {
-    rcf   = terminate_rcf,
-    api   = terminate_api,
-    trunk = terminate_trunk,
+    rcf       = terminate_rcf,
+    api       = terminate_api,
+    trunk     = terminate_trunk,
+    voicemail = terminate_vvm,
 }
 
 -- Set common CDR/terminal channel vars on the resolved TERMINAL destination,
@@ -2250,8 +2363,13 @@ local first_dest = {
     did             = normalized_did,
     product_type    = product_type,
     customer_id     = customer_id,
-    product_enabled = true,        -- STEP 1 lookups already filtered enabled/active
-    customer_status = "active",
+    -- STEP 1 rcf/api/trunk lookups already filtered enabled/active (their
+    -- routing tables carry neither field -> true / "active", unchanged). The
+    -- voicemail arm is UNFILTERED, so its flags flow through and
+    -- terminate_vvm hard-rejects a disabled/suspended mailbox (603).
+    product_enabled = (routing.product_enabled ~= false),
+    customer_status = routing.customer_status or "active",
+    product_ref_id  = routing.product_ref_id,   -- voicemail: mailbox id (nil otherwise)
     forward_to      = forward_to,
     pass_caller_id  = pass_caller_id,
     ring_timeout    = ring_timeout,

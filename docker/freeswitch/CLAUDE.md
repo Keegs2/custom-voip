@@ -2,7 +2,7 @@
 
 ## What This Is
 
-FreeSWITCH media server for the RevUp voice platform. Stripped to Remote Call Forwarding (RCF) only -- no UCaaS, WebRTC, voicemail, conferencing, or IVR. Runs as a B2BUA bridging inbound DID calls to outbound PSTN destinations through Bandwidth carriers via a Kamailio SBC.
+FreeSWITCH media server for the RevUp voice platform. Stripped to Remote Call Forwarding (RCF) only -- no UCaaS, WebRTC, mod_voicemail, conferencing, or IVR. Runs as a B2BUA bridging inbound DID calls to outbound PSTN destinations through Bandwidth carriers via a Kamailio SBC. Exception: the Lua-only **encrypted voicemail** deposit path (dedicated-DID mailboxes; `scripts/CLAUDE.md` "Encrypted voicemail") answers, records to a RAM tmpfs and uploads to the API — mod_voicemail stays unbuilt.
 
 ## Architecture Position
 
@@ -68,6 +68,8 @@ This solves the GCE hairpin NAT problem: when FreeSWITCH sends packets to its ow
 
 **Requires `NET_ADMIN` capability** in docker-compose.
 
+**entrypoint.sh does NOT run in production** (see the next paragraph), so per-start housekeeping that must deploy with `git pull` lives in `scripts/startup.lua` (mod_lua startup script) — e.g. the encrypted-voicemail `/dev/shm/vm` sweep.
+
 **IMPORTANT — entrypoint wiring**: The Dockerfile `ENTRYPOINT` is
 `/usr/local/freeswitch/bin/freeswitch` directly (the `ENTRYPOINT` line near the end) — it does NOT invoke
 `entrypoint.sh`. The script is `COPY`'d into the image (`COPY entrypoint.sh`) but is never the
@@ -129,8 +131,10 @@ interval: 30s, timeout: 10s, start_period: 45s, retries: 3
 ```yaml
 limits: cpus 8, memory 16G
 reservations: cpus 4, memory 8G
-ulimits: nofile 65536, core unlimited
+ulimits: nofile 65536, core 0
 ```
+
+`core: 0` (was unlimited) is deliberate — encrypted voicemail D8: plaintext audio is in FS memory and the `/dev/shm/vm` tmpfs, and a core dump (the build uses `-g`) would copy it to persistent disk. Re-enable only temporarily, in a window, for crash triage.
 
 Also needs `SYS_NICE` capability for real-time scheduling.
 
@@ -163,6 +167,17 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 - `./docker/freeswitch/conf` mounted to `/usr/local/freeswitch/conf` (config hot-reload)
 - `./docker/freeswitch/scripts` mounted to `/usr/local/freeswitch/scripts` (script hot-reload)
 - `freeswitch_logs` named volume at `/var/log/freeswitch`
+- `./secrets/fs-voicemail` mounted READ-ONLY at `/run/revup` — holds only `vm_ingest.header` (single line `X-Ingest-Secret: <INGEST_SHARED_SECRET>`, root:root 0600), read by curl via `-H @file`. The directory (not the file) is mounted so a node without the secret still starts FS (Docker auto-creates a missing directory; voicemail calls then play `unavailable`), and a file added later is visible without a recreate. Git-ignored (`secrets/*`).
+- `tmpfs: /dev/shm/vm:size=512m,mode=0700,noexec,nosuid,nodev` — the ONLY place plaintext voicemail audio is written (Lua refuses to record unless it is a real tmpfs mount). FS runs as root in this image (no USER / `-u`), so `mode=0700` root-owned is correct.
+
+### Encrypted voicemail — operator steps per FS node (all 6 nodes, FS-2 first)
+
+Everything is `git pull` + container recreate — **no image rebuild** (Lua, prompts and compose are bind-mounted / compose-level; `curl` and `find` are already in the runtime image).
+1. `sudo install -d -m 0700 -o root -g root /opt/revup/secrets/fs-voicemail`
+2. `sudo sh -c 'umask 077; read -r S; printf "X-Ingest-Secret: %s\n" "$S" > /opt/revup/secrets/fs-voicemail/vm_ingest.header'` — then paste the services VM's `INGEST_SHARED_SECRET` and press Enter (keeps it out of shell history and argv).
+3. `sudo stat -c '%a %U:%G' /opt/revup/secrets/fs-voicemail/vm_ingest.header` → `600 root:root`.
+4. In the window: `cd /opt/revup && sudo git pull && sudo docker compose -f docker-compose.media.yml up -d freeswitch` (recreate drops this node's calls; host-net orphan gotcha: `sudo killall -9 freeswitch` if ports stay held).
+5. Verify: `sudo docker exec voip-freeswitch sh -c 'grep " /dev/shm/vm " /proc/self/mounts; ulimit -c; test -r /run/revup/vm_ingest.header && echo header-ok'` → a `tmpfs ... mode=700` line, `0`, `header-ok`; and the FS log line `Voicemail:  tmpfs /dev/shm/vm mounted, swept`.
 
 ## Network Ports
 
@@ -256,4 +271,5 @@ docker/freeswitch/
   lab/                    # Call-quality acceptance lab: SIPp + netem + evaluator (lab/README.md)
   conf/                   # FreeSWITCH configuration (see conf/CLAUDE.md)
   scripts/                # Lua routing scripts (see scripts/CLAUDE.md)
+    sounds/vm/            # Voicemail prompts (8 kHz mono PCM16 WAV, bind-mounted)
 ```
