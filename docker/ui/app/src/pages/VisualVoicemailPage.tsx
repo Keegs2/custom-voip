@@ -1,235 +1,161 @@
 /**
- * VisualVoicemailPage — the Visual Voicemail product's portal page.
+ * /voicemail — Visual Voicemail. Picks who the page is for and hands off to
+ * a KEYED view (switching account or mode remounts instead of changing hook
+ * order — React #310):
  *
- * The product launches ahead of the flow-builder line, so this page is a
- * quiet daylight header plus a composed coming-soon presentation: a
- * positioning hero with a miniature inbox vignette (pure CSS, no backend),
- * an icon-led capability grid, and a quiet pilot-list closing line. Shared
- * primitives come from the DAYLIGHT CONSOLE system (`dl-*` in index.css);
- * page-scoped styles are `dlx6-*` in dl-voicemail.css.
+ *   tenant (user / readonly)          → CustomerVoicemail, own account
+ *                                        (readonly: listen + download only)
+ *   admin in "View as Customer"       → CustomerVoicemail on the preview
+ *                                        customer, with the staff controls
+ *                                        (New mailbox, suspend/resume, delete)
+ *                                     → PreviewPrompt until one is picked
+ *   admin (normal view)               → AdminVoicemailConsole: All customers
+ *                                        or one (`?customer=<id>`)
+ *   support / login with no account   → their productHome (the API answers
+ *                                        403 for support)
  *
- * React #310: every hook is called unconditionally at the top, before any
- * early return.
+ * The product UI lives in pages/voicemail/ (VoicemailWorkspace and friends);
+ * styles are `vm-*` in styles/dl-voicemail.css on the daylight `dl-*` system.
  */
-
-import { useAuth } from '../contexts/AuthContext';
-import { IconVoicemail } from '../components/icons/ProductIcons';
-import {
-  FileText,
-  Send,
-  Phone,
-  SlidersHorizontal,
-  Lock,
-  Braces,
-  Play,
-} from 'lucide-react';
+import { useCallback, useId, useMemo } from 'react';
+import { Navigate, useSearchParams } from 'react-router-dom';
+import { useAuth, type EffectiveCustomer } from '../contexts/AuthContext';
+import { productHome } from '../utils/productHome';
+import { PreviewPrompt } from './dashboard/PreviewPrompt';
+import { useAdminCustomers, type CustomerRow } from './dashboard/adminData';
+import { VoicemailWorkspace } from './voicemail/VoicemailWorkspace';
+import { staffScope, tenantScope } from './voicemail/voicemailData';
 import '../styles/dl-voicemail.css';
 
-/* ─── Capability catalogue — what ships with the launch release ─── */
-
-interface Capability {
-  icon: React.ReactNode;
-  title: string;
-  line: string;
-}
-
-const CAPABILITIES: Capability[] = [
-  {
-    icon: <FileText size={17} strokeWidth={1.7} />,
-    title: 'Automatic transcription',
-    line: 'Read messages at a glance — every voicemail becomes searchable text.',
-  },
-  {
-    icon: <Send size={17} strokeWidth={1.7} />,
-    title: 'Instant delivery',
-    line: 'Email and webhook notifications the moment a message lands, with the audio and transcript attached.',
-  },
-  {
-    icon: <Phone size={17} strokeWidth={1.7} />,
-    title: 'Works with your numbers',
-    line: 'Attach mailboxes to the CRAG numbers you already run — RCF or trunk — or add new ones.',
-  },
-  {
-    icon: <SlidersHorizontal size={17} strokeWidth={1.7} />,
-    title: 'Per-mailbox controls',
-    line: 'Custom greetings, PIN access, and retention windows, set individually for every mailbox.',
-  },
-  {
-    icon: <Lock size={17} strokeWidth={1.7} />,
-    title: 'Private by design',
-    line: 'Messages encrypted at rest, with access controlled per user on your account.',
-  },
-  {
-    icon: <Braces size={17} strokeWidth={1.7} />,
-    title: 'API access',
-    line: 'Retrieve messages and transcripts programmatically for your own apps and workflows.',
-  },
-];
-
-/* ─── Static waveform for the vignette — deterministic bar heights ─── */
-
-const WAVE_HEIGHTS = [5, 9, 14, 11, 16, 8, 13, 17, 10, 15, 7, 12, 16, 9, 14, 6, 11, 15, 8, 12, 5, 9, 13, 7];
-const WAVE_PLAYED = 10; // bars rendered as "already played" (azure)
-
-function Waveform() {
-  return (
-    <div className="dlx6-wave" aria-hidden="true">
-      {WAVE_HEIGHTS.map((h, i) => (
-        <i key={i} className={i < WAVE_PLAYED ? 'dlx6-on' : undefined} style={{ height: h }} />
-      ))}
-    </div>
-  );
-}
-
-/* ─── Inbox vignette — a miniature of the product, no live data ─── */
-
-function InboxVignette() {
-  return (
-    <div>
-      <div className="dlx6-vignette" aria-hidden="true">
-        <div className="dlx6-vg-head">
-          <IconVoicemail size={14} />
-          <span className="dlx6-vg-title">Voicemail — Main Line</span>
-          <span className="dlx6-vg-count">2 new</span>
-        </div>
-
-        {/* Unread, playing */}
-        <div className="dlx6-msg dlx6-msg-unread">
-          <span className="dlx6-play dlx6-play-solid">
-            <Play size={11} strokeWidth={2.4} fill="currentColor" />
-          </span>
-          <div className="dlx6-msg-main">
-            <div className="dlx6-msg-top">
-              <span className="dlx6-msg-from">(617) 555-0134</span>
-              <span className="dlx6-msg-when">Today · 2:41 PM</span>
-            </div>
-            <Waveform />
-            <div className="dlx6-msg-snippet">
-              &ldquo;Hi, this is Dana calling back about Thursday&rsquo;s inspection at the Franklin Street site&hellip;&rdquo;
-            </div>
-          </div>
-          <span className="dlx6-msg-dur">0:42</span>
-        </div>
-
-        {/* Unread */}
-        <div className="dlx6-msg dlx6-msg-unread">
-          <span className="dlx6-play">
-            <Play size={11} strokeWidth={2.4} fill="currentColor" />
-          </span>
-          <div className="dlx6-msg-main">
-            <div className="dlx6-msg-top">
-              <span className="dlx6-msg-from">(508) 555-0198</span>
-              <span className="dlx6-msg-when">Today · 9:03 AM</span>
-            </div>
-            <div className="dlx6-msg-snippet">
-              &ldquo;Morning — the service crew is on site and the gate code isn&rsquo;t working. Could someone&hellip;&rdquo;
-            </div>
-          </div>
-          <span className="dlx6-msg-dur">1:17</span>
-        </div>
-
-        {/* Read */}
-        <div className="dlx6-msg dlx6-msg-read">
-          <span className="dlx6-play">
-            <Play size={11} strokeWidth={2.4} fill="currentColor" />
-          </span>
-          <div className="dlx6-msg-main">
-            <div className="dlx6-msg-top">
-              <span className="dlx6-msg-from">(774) 555-0210</span>
-              <span className="dlx6-msg-when">Yesterday</span>
-            </div>
-            <div className="dlx6-msg-snippet">
-              &ldquo;Just confirming next week&rsquo;s delivery window — no need to call back if it still&hellip;&rdquo;
-            </div>
-          </div>
-          <span className="dlx6-msg-dur">0:29</span>
-        </div>
-      </div>
-      <p className="dlx6-vg-caption">Product preview — final interface may vary</p>
-    </div>
-  );
-}
-
-/* ─── Page ─── */
-
 export function VisualVoicemailPage() {
-  // ── ALL hooks unconditionally at the top — React #310 guard ──
+  const { user, isAdmin, isActualAdmin, isSupport, customerViewMode, effectiveCustomer } = useAuth();
+  if (isSupport) return <Navigate to={productHome(user, isAdmin)} replace />;
+  if (!isAdmin && effectiveCustomer) {
+    return (
+      <CustomerVoicemail
+        key={`vm-customer-${effectiveCustomer.id}-${isActualAdmin ? 'staff' : 'tenant'}`}
+        customer={effectiveCustomer}
+        staff={isActualAdmin}
+      />
+    );
+  }
+  if (isActualAdmin && customerViewMode) return <PreviewPrompt />;
+  if (isAdmin) return <AdminVoicemailConsole />;
+  return <Navigate to={productHome(user, isAdmin)} replace />;
+}
+
+/* ─── Customer view (tenant, or staff previewing one) ─────── */
+
+function CustomerVoicemail({ customer, staff }: { customer: EffectiveCustomer; staff: boolean }) {
   const { user } = useAuth();
+  const scope = useMemo(() => (staff ? staffScope(customer.id) : tenantScope(customer.id)), [staff, customer.id]);
+  const createFor = useMemo(() => ({ id: customer.id, name: customer.name }), [customer.id, customer.name]);
+  // Tenant roles: 'user' edits; 'readonly' listens and downloads only.
+  const canEdit = staff || user?.role === 'user';
 
   return (
-    <div className="dl-scope">
-      <div className="dl-shell">
-        {/* Quiet page header — breadcrumb, calm title, one-line description */}
-        <header className="dl-header fx-load">
-          <div className="dl-header-id">
-            <div className="dl-crumb">
-              <span>Visual Voicemail</span>
-              <span className="dl-crumb-sep" aria-hidden="true">/</span>
-              <span>Granite CRAG</span>
-            </div>
-            <h1 className="dl-title">
-              {user?.customer_name ? `${user.customer_name}'s Visual Voicemail` : 'Visual Voicemail'}
-            </h1>
-            <p className="dl-sub">
-              See, play, and read your voicemail — on the numbers you already run on CRAG.
-            </p>
-          </div>
-          <div className="dl-tag" style={{ padding: '6px 14px', fontSize: '0.68rem' }}>
-            Coming soon
-          </div>
-        </header>
+    <VoicemailWorkspace
+      scope={scope}
+      viewer={staff ? 'preview' : 'tenant'}
+      canEdit={canEdit}
+      canManage={staff}
+      crumb={customer.name || 'Your account'}
+      tag={staff ? 'Staff preview' : null}
+      createFor={staff ? createFor : null}
+      showCustomer={false}
+    />
+  );
+}
 
-        {/* Hero — positioning copy beside the inbox vignette */}
-        <div className="dl-panel fx-load fx-load-d1" style={{ marginBottom: 'var(--rcf-stack)' }}>
-          <div className="dlx6-hero">
-            <div>
-              <h2 className="dlx6-hero-title">Voicemail, designed into the platform</h2>
-              <p className="dlx6-hero-copy">
-                Not an answering service bolted on the side. Mailboxes attach directly to the
-                CRAG numbers you already forward and trunk — and every message lands in a
-                visual inbox you can scan, play, and search like email.
-              </p>
-              <ul className="dlx6-ticks">
-                <li>See and play messages from any browser or device</li>
-                <li>Manage voicemail like email — no dial-in menus, no cassette metaphors</li>
-                <li>Keep your existing numbers; add mailboxes when you need them</li>
-              </ul>
-            </div>
-            <InboxVignette />
-          </div>
-        </div>
+/* ─── Admin console (normal view) ─────────────────────────── */
 
-        {/* Capability grid — what ships with the launch */}
-        <div className="dl-panel fx-load fx-load-d2">
-          <div className="dl-panel-head">
-            <span className="dl-panel-title">What&rsquo;s coming</span>
-            <span className="dl-tag">Launch release</span>
-            <p className="dl-panel-sub">
-              Every capability below ships with the launch — no new hardware, no number changes.
-            </p>
-          </div>
-          <div className="dlx6-caps">
-            {CAPABILITIES.map((cap, i) => (
-              <div
-                key={cap.title}
-                className="dlx6-cap fx-load"
-                style={{ animationDelay: `${0.24 + i * 0.05}s` }}
-              >
-                <span className="dlx6-cap-chip" aria-hidden="true">{cap.icon}</span>
-                <div>
-                  <h3 className="dlx6-cap-title">{cap.title}</h3>
-                  <p className="dlx6-cap-line">{cap.line}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+/** `?customer=` → 'all' (absent / 'all' / junk) or a customer id. */
+function parseScope(raw: string | null): number | 'all' {
+  if (!raw || !/^\d{1,9}$/.test(raw)) return 'all';
+  const id = Number(raw);
+  return id > 0 ? id : 'all';
+}
 
-        {/* Quiet closing line */}
-        <p className="dlx6-close fx-load fx-load-d3">
-          Want early access? Your account team can add you to the pilot list.
-        </p>
-      </div>
+function AdminVoicemailConsole() {
+  // ── ALL hooks unconditionally at the top (React #310) ──
+  const [params, setParams] = useSearchParams();
+  const customers = useAdminCustomers(true);
+  const value = parseScope(params.get('customer'));
+  const scope = useMemo(() => staffScope(value), [value]);
+
+  const select = useCallback(
+    (next: number | 'all') => {
+      setParams((prev) => {
+        const p = new URLSearchParams(prev);
+        if (next === 'all') p.delete('customer');
+        else p.set('customer', String(next));
+        return p;
+      });
+    },
+    [setParams],
+  );
+
+  // ── Derived (after all hooks) ──
+  const name =
+    typeof value === 'number' ? (customers.data?.find((c) => c.id === value)?.name ?? `Customer #${value}`) : null;
+
+  return (
+    <VoicemailWorkspace
+      key={scope.key}
+      scope={scope}
+      viewer="admin"
+      canEdit
+      canManage
+      crumb={name ?? 'All customers'}
+      tag="Staff"
+      createFor={typeof value === 'number' && name ? { id: value, name } : null}
+      showCustomer={value === 'all'}
+      tools={
+        <ScopePicker
+          value={value}
+          onChange={select}
+          customers={customers.data ?? []}
+          loading={customers.isLoading}
+        />
+      }
+    />
+  );
+}
+
+function ScopePicker({
+  value,
+  onChange,
+  customers,
+  loading,
+}: {
+  value: number | 'all';
+  onChange: (next: number | 'all') => void;
+  customers: readonly CustomerRow[];
+  loading: boolean;
+}) {
+  const id = useId();
+  const listed = value === 'all' || customers.some((c) => c.id === value);
+  return (
+    <div className="vm-scope-pick">
+      <label className="dl-flabel" htmlFor={id}>
+        Viewing
+      </label>
+      <select
+        id={id}
+        className="dl-input vm-scope-select"
+        value={String(value)}
+        onChange={(e) => onChange(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+      >
+        <option value="all">All customers</option>
+        {!listed && typeof value === 'number' && <option value={value}>{`Customer #${value}`}</option>}
+        {loading && customers.length === 0 && <option disabled>Loading customers…</option>}
+        {customers.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+            {c.status !== 'active' ? ` (${c.status})` : ''}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
