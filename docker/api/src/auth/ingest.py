@@ -50,7 +50,7 @@ async def require_ingest_secret(request: Request) -> None:
         logger.error(
             "INGEST_SHARED_SECRET is unset or shorter than %d characters — rejecting "
             "FreeSWITCH voicemail call to %s (fail closed). Set it in the services "
-            ".env and in /opt/revup/secrets/vm_ingest.header on every FS node.",
+            ".env and in /opt/revup/secrets/fs-voicemail/vm_ingest.header on every FS node.",
             MIN_SECRET_CHARS, request.url.path)
         raise HTTPException(status_code=503, detail="ingest authentication is not configured")
 

@@ -243,7 +243,7 @@ SA key creation is blocked by `iam.managed.disableServiceAccountKeyCreation` (1.
 
 ## 6. Secrets for the app deploy (generate only)
 
-1. `openssl rand -hex 32` → 64 hex characters. This is `INGEST_SHARED_SECRET`. It goes in the services `.env` and in all 6 FS nodes' `/opt/revup/secrets/vm_ingest.header`.
+1. `openssl rand -hex 32` → 64 hex characters. This is `INGEST_SHARED_SECRET`. It goes in the services `.env` and in all 6 FS nodes' `/opt/revup/secrets/fs-voicemail/vm_ingest.header`.
 2. `openssl rand -hex 32` → a **different** value. This is `VOICEMAIL_PLAYBACK_SECRET`, for the services `.env` only.
 
 Both must differ from each other and from `JWT_SECRET_KEY`. Never commit or paste them. Installing them is part of the app deploy runbook.

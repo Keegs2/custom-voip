@@ -70,7 +70,7 @@ services:
       # from JWT_SECRET_KEY. Unset/short/equal => playback 503 (fail-closed).
       - VOICEMAIL_PLAYBACK_SECRET=${VOICEMAIL_PLAYBACK_SECRET:-}
       # Shared secret FreeSWITCH sends as X-Ingest-Secret on the voicemail
-      # /fs/ endpoints (same value as /opt/revup/secrets/vm_ingest.header on
+      # /fs/ endpoints (same value as /opt/revup/secrets/fs-voicemail/vm_ingest.header on
       # every FS node). >= 32 chars. Unset/short => every FS call 503.
       - INGEST_SHARED_SECRET=${INGEST_SHARED_SECRET:-}
       # Optional ADC key file (path INSIDE the container). Only if the VM SA /
