@@ -525,3 +525,73 @@ def test_key_row_constraints(mig_db):
             await conn.close()
 
     _run(go())
+
+
+# ---------------------------------------------------------------------------
+# Additions by the API workstream (backend-B): deposit lease columns, the
+# live-rows index, once-per-token playback audit, rate_cdr() voicemail clause.
+# ---------------------------------------------------------------------------
+def test_deposit_lease_columns_and_live_index(mig_db):
+    async def go():
+        conn = await _owner(mig_db["pg"])
+        try:
+            cols = {r["column_name"]: r["data_type"] for r in await conn.fetch(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = 'voicemail_messages' "
+                "AND column_name IN ('deposit_attempt_id', 'deposit_lease_until')")}
+            assert cols == {"deposit_attempt_id": "uuid",
+                            "deposit_lease_until": "timestamp with time zone"}
+            idx = await conn.fetchval(
+                "SELECT pg_get_indexdef('idx_vm_messages_live_mailbox'::regclass)")
+            assert "(mailbox_id)" in idx and "purged" in idx
+        finally:
+            await conn.close()
+
+    _run(go())
+
+
+def test_playback_audit_unique_per_token(mig_db):
+    async def go():
+        api = await _as(mig_db["pg"], "api")
+        try:
+            sql = ("INSERT INTO voicemail_access_log (action, source, detail) "
+                   "VALUES ($1::varchar, 'ui', $2::jsonb) "
+                   "ON CONFLICT ((detail->>'jti')) "
+                   "WHERE action IN ('play', 'download', 'greeting_play') "
+                   "DO NOTHING RETURNING id")
+            assert await api.fetchval(sql, "play", '{"jti": "tok-1"}') is not None
+            # Same token again (another worker process / Range request): no row.
+            assert await api.fetchval(sql, "play", '{"jti": "tok-1"}') is None
+            assert await api.fetchval(sql, "download", '{"jti": "tok-1"}') is None
+            assert await api.fetchval(sql, "play", '{"jti": "tok-2"}') is not None
+            # Without ON CONFLICT the duplicate is a unique violation.
+            with pytest.raises(asyncpg.UniqueViolationError):
+                await api.execute(
+                    "INSERT INTO voicemail_access_log (action, source, detail) "
+                    "VALUES ('greeting_play', 'ui', '{\"jti\": \"tok-2\"}')")
+            # Other actions are never constrained (even carrying a jti).
+            for _ in range(2):
+                await api.execute(
+                    "INSERT INTO voicemail_access_log (action, source, detail) "
+                    "VALUES ('deposit', 'freeswitch', '{\"jti\": \"tok-1\"}')")
+                await api.execute(
+                    "INSERT INTO voicemail_access_log (action, source) VALUES ('play', 'ui')")
+        finally:
+            await api.close()
+
+    _run(go())
+
+
+def test_rate_cdr_redefined_with_api_execute(mig_db):
+    async def go():
+        conn = await _owner(mig_db["pg"])
+        try:
+            src = await conn.fetchval(
+                "SELECT prosrc FROM pg_proc WHERE proname = 'rate_cdr'")
+            assert "v_product_type = 'voicemail'" in src
+            assert await conn.fetchval(
+                "SELECT has_function_privilege('api', 'rate_cdr(character varying)', 'EXECUTE')")
+        finally:
+            await conn.close()
+
+    _run(go())

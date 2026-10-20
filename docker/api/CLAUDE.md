@@ -81,6 +81,7 @@ CMD: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --ht
 | `VOICEMAIL_IMPERSONATE_SA` | _(unset)_ | Optional SA to impersonate from ADC (else the VM's attached SA / `GOOGLE_APPLICATION_CREDENTIALS`) |
 | `VOICEMAIL_PLAYBACK_SECRET` | _(required for playback)_ | HS256 key for 120 s playback URLs; ≥ 32 chars, must differ from `JWT_SECRET_KEY` (else 503) |
 | `INGEST_SHARED_SECRET` | _(required for FS voicemail)_ | `X-Ingest-Secret` FreeSWITCH sends on `/v1/voicemail/fs/*`; ≥ 32 chars; unset/short ⇒ every call 503 (fail-closed) |
+| `VOICEMAIL_RETENTION_ENABLED` | _(unset = ON)_ | Voicemail retention worker (lifespan task in every worker, one sweep at a time via a PG advisory xact lock). `false` disables it |
 
 The payments-demo vars (`PAYMENTS_DEMO_MODE`, `PAYMENTS_DEMO_FAKE_ORIGINATE`, `PAYMENTS_DEMO_*`, `PAYMENT_PROVIDER`, `AUTO_RECHARGE_MAX_FAILURES`) are gone with the demo — remove them from any VM `.env`; nothing reads them.
 
@@ -305,8 +306,8 @@ Read-only ELI5 reports over `cdrs`; whole minutes only, no costs/seconds/interna
 | `POST` | `/v1/numbers/reconcile` | Admin | Reconcile did_inventory against product tables (rcf/api/trunk) without hitting Bandwidth (never clobbers `source`/`carrier_trunk_id`) |
 | `POST` | `/v1/numbers/add` | Admin | Manual DID intake: batch of 1-500 DIDs owned by `carrier` (REQUIRED, lowercased — must have ≥1 ENABLED carrier_trunks row, else 404 "unknown carrier"); `carrier_trunk_id` OPTIONAL (must belong to that carrier + be enabled, else 422) → status `available`, `source='manual'`, `carrier` set, trunk nullable. Envelope: `{added, skipped_existing, invalid, count}` (TED UI contract) |
 | `PUT` | `/v1/numbers/{did}/carrier-trunk` | Admin | Re-associate a DID with a carrier trunk (`carrier_trunk_id: int\|null`). Setting a trunk also syncs `d.carrier` to that trunk's carrier; null clears only the trunk (`d.carrier` left as-is); returns the updated inventory item |
-| `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record; `product_type` `api` → 422 while API Calling is retired) |
-| `POST` | `/v1/numbers/{did}/unassign` | Admin | Unassign DID (removes product record) |
+| `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record; `product_type` `api` → 422 while API Calling is retired; `voicemail` (+ optional `label`) creates a mailbox via `services/voicemail/mailboxes.create_mailbox`, `product_ref_id` = mailbox id) |
+| `POST` | `/v1/numbers/{did}/unassign` | Admin | Unassign DID (removes product record; a voicemail DID deletes its mailbox via `delete_mailbox`) |
 | `GET` | `/v1/numbers/available` | User | Browse available DIDs with filters |
 | `GET` | `/v1/numbers/my` | User | Customer's assigned numbers (includes `status`, e.g. `release_requested`) |
 | `POST` | `/v1/numbers/{did}/request` | User | Reserve a number for admin review |
@@ -314,6 +315,30 @@ Read-only ELI5 reports over `cdrs`; whole minutes only, no costs/seconds/interna
 | `POST` | `/v1/numbers/{did}/cancel-release` | User (tenant-scoped) | Cancel a pending release request: back to `assigned` (also the admin DENY action) |
 
 **Release workflow (request-based):** customers cannot unassign directly. Customer `POST /{did}/request-release` → status `release_requested` → admin approves via `POST /{did}/unassign` (accepts `assigned`, `reserved`, AND `release_requested`) or denies via `POST /{did}/cancel-release`. Status list lives in `34_release_requested_status.sql`.
+
+### Voicemail (encrypted, contract `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md` §4/§5)
+Scope: admin (`customer_id` param picks the customer), tenant `user` (own customer; cross-tenant → 404), `readonly` (reads + playback only), `support` → 403. `/fs/*` = `X-Ingest-Secret` (JWT-exempt); `…/audio` = `?t=` playback token (JWT-exempt GET/HEAD).
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/v1/voicemail/summary` | admin, tenant | `{enabled, mailbox_count, unread_count, can_manage}` |
+| `GET`/`POST` | `/v1/voicemail/mailboxes` | tenant / **admin** (POST) | List (ordered customer, label, id) / create on an `available` DID (201; 409 DID; 503 KMS down, nothing committed) |
+| `GET`/`PATCH`/`DELETE` | `/v1/voicemail/mailboxes/{id}` | tenant / writer / **admin** (DELETE 204) | Mailbox; PATCH label/timezone/greeting_mode+active_greeting_id/(admin) status |
+| `PUT` | `/v1/voicemail/mailboxes/{id}/pin` | writer | 4–10 digit PIN (bcrypt) → 204 |
+| `GET` | `/v1/voicemail/available-numbers` | **admin** | `[{did, city, state}]` (q digits, limit ≤ 50) |
+| `GET` | `/v1/voicemail/mailboxes/{id}/messages` | tenant | `?folder=inbox\|saved\|trash&limit&offset` → `{items, total, unread}` newest first |
+| `PATCH`/`DELETE` | `/v1/voicemail/messages/{id}` | writer | read/saved flags; DELETE = move to trash |
+| `POST` | `/v1/voicemail/messages/{id}/restore` | writer | clear `deleted_at` (is_saved unchanged) |
+| `DELETE` | `/v1/voicemail/messages/{id}/purge` | writer | object then row → 204 |
+| `POST` | `/v1/voicemail/messages/{id}/playback-token` | tenant (incl. readonly) | `{url, expires_in:120}`; marks read |
+| `GET`/`HEAD` | `/v1/voicemail/messages/{id}/audio?t=` | token | `audio/wav`, Range/206/416, no-store; audit once per token |
+| `GET`/`POST` | `/v1/voicemail/mailboxes/{id}/greetings` | tenant / writer | list / raw `audio/wav` upload (≤ 5 MB, ≤ 120 s, `?label&activate`) → 201 |
+| `DELETE` | `/v1/voicemail/greetings/{id}` | writer | purge; active → standard → 204 |
+| `POST` | `/v1/voicemail/greetings/{id}/playback-token` | tenant | `{url, expires_in}` |
+| `GET`/`HEAD` | `/v1/voicemail/greetings/{id}/audio?t=` | token | as message audio |
+| `POST` | `/v1/voicemail/customers/{id}/crypto-erase` | **admin** | `{confirm: "ERASE <id>"}` → counts |
+| `GET` | `/v1/voicemail/fs/mailbox/{id}` | ingest secret | `{mailbox_id, customer_id, did, status, accepting, reason, max_message_seconds, greeting}` |
+| `GET` | `/v1/voicemail/fs/greetings/{id}/audio` | ingest secret | plaintext greeting WAV (audit `greeting_fs_fetch`) |
+| `POST` | `/v1/voicemail/fs/deposit` | ingest secret | raw WAV + `X-VM-Meta` → `{"status":"stored","message_id":N}` |
 
 ### Carriers (Admin only)
 Carrier gateway management — backed by `carrier_gateways` (Bandwidth Dallas/LA).
