@@ -10,12 +10,15 @@
  * azure light-line along the bottom edge (account-dashboard.css). The
  * switcher is a segmented pill driven by products.ts: available products are
  * pressable, the rest are dimmed with a "Soon" tag (aria-disabled, still
- * focusable so the roadmap is discoverable by keyboard).
+ * focusable so the roadmap is discoverable by keyboard). A product with its
+ * own page that the account has switched on (`products.links`, e.g. Visual
+ * Voicemail) is a plain link to that page instead.
  *
  * Used by every dashboard audience (tenant, staff preview, admin) and by the
  * admin /rcf console, which passes no switcher and its own metrics.
  */
 import type { CSSProperties, ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import type { AccountType, CustomerStatus } from '../../types/customer';
 import { DASHBOARD_PRODUCTS, isProductAvailable, type DashboardProductId } from './products';
 
@@ -36,6 +39,13 @@ export interface ProductSwitch {
   accountType: AccountType | null;
   active: DashboardProductId | null;
   onSelect: (id: DashboardProductId) => void;
+  /**
+   * Products with their own page (products.ts `href`) that are switched on
+   * for this account, with the route each opens — e.g. Visual Voicemail →
+   * /voicemail when GET /v1/voicemail/summary says `enabled`. Rendered as a
+   * link (no "Soon", never the active panel). Absent = none.
+   */
+  links?: Partial<Record<DashboardProductId, string>>;
 }
 
 export interface DashboardHeaderProps {
@@ -117,6 +127,17 @@ export function DashboardHeader({
           <div className="ad-switch-scroll">
             <div className="ad-switch" role="group" aria-label="Product">
               {DASHBOARD_PRODUCTS.map((p) => {
+                const linkTo = p.href ? products.links?.[p.id] : undefined;
+                if (linkTo) {
+                  return (
+                    <Link key={p.id} to={linkTo} className="ad-switch-opt ad-switch-opt-link" title={`Open ${p.label}`}>
+                      {p.label}
+                      <svg className="ad-switch-go" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M5 11 11 5M11 5H6M11 5v5" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </Link>
+                  );
+                }
                 const available = isProductAvailable(p, products.accountType);
                 const active = p.id === products.active;
                 return (

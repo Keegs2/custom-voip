@@ -39,6 +39,7 @@ import { QuickActionsCard, RequestsCard, TeamCard } from './AccountCards';
 import { adminCustomerActions, customerQuickActions } from './quickActions';
 import { rcfConsoleHref } from './adminLinks';
 import { DASHBOARD_PRODUCTS, isProductAvailable, type DashboardProductId } from './products';
+import { staffScope, tenantScope, useVoicemailSummary } from '../voicemail/voicemailData';
 import {
   RCF_LIST_CAP,
   fmtMonthYear,
@@ -88,6 +89,14 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
   const recent = useRecentCalls(customer.id);
   const team = useAccountTeam(scope);
   const dids = useAccountDids(scope);
+  // Visual Voicemail is switched on per account: the same summary query and
+  // cache key as the sidebar (tenant = own account, no customer_id; staff =
+  // this customer's id). Support has no voicemail access (API 403).
+  const voicemailScope = useMemo(
+    () => (staff ? staffScope(customer.id) : tenantScope(customer.id)),
+    [staff, customer.id],
+  );
+  const voicemail = useVoicemailSummary(voicemailScope, user?.role !== 'support');
 
   const closeOverlay = useCallback(() => setOverlay(null), []);
   const openNumbers = useCallback(() => setOverlay('numbers'), []);
@@ -138,6 +147,11 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
       : { state: 'loading' };
 
   const accountName = summary.data?.name ?? (customer.name || (admin ? `Customer #${customer.id}` : 'Your account'));
+  const voicemailOn = voicemail.data?.enabled === true;
+  // Admins land on the voicemail console scoped to this customer.
+  const productLinks = voicemailOn
+    ? { voicemail: admin ? `/voicemail?customer=${customer.id}` : '/voicemail' }
+    : undefined;
   const totalNumbers = numberFeed.state === 'ready' ? numberFeed.value.total : null;
   const numbersHref = admin ? rcfConsoleHref(customer.id) : '/rcf';
 
@@ -167,7 +181,7 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
           since={fmtMonthYear(summary.data?.created_at)}
           tag={viewer === 'preview' ? 'Staff preview' : admin ? 'Staff' : null}
           scope={scopePicker}
-          products={{ accountType, active: activeProduct, onSelect: setPickedProduct }}
+          products={{ accountType, active: activeProduct, onSelect: setPickedProduct, links: productLinks }}
           action={headerAction}
           secondary={secondary}
         />
@@ -241,8 +255,12 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
               </h2>
               <p className="ad-quiet">
                 {admin
-                  ? `${accountName} doesn’t have call forwarding. SIP Trunking and Visual Voicemail get their own dashboard soon — the tools below still work.`
-                  : 'This account doesn’t have call forwarding. SIP Trunking and Visual Voicemail get their own dashboard soon — until then, use the sidebar to reach them.'}
+                  ? voicemailOn
+                    ? `${accountName} doesn’t have call forwarding. Visual Voicemail is on — open it from the switcher above. SIP Trunking gets its own dashboard soon; the tools below still work.`
+                    : `${accountName} doesn’t have call forwarding. SIP Trunking and Visual Voicemail get their own dashboard soon — the tools below still work.`
+                  : voicemailOn
+                    ? 'This account doesn’t have call forwarding. Visual Voicemail is on — open it from the switcher above or the sidebar. SIP Trunking gets its own dashboard soon.'
+                    : 'This account doesn’t have call forwarding. SIP Trunking and Visual Voicemail get their own dashboard soon — until then, use the sidebar to reach them.'}
               </p>
             </section>
             {admin && (
