@@ -65,6 +65,7 @@ The route table, in nginx match order:
 | `/grafana/*` | `grafana:3000` | Homer 10 / SIP visualization dashboard. Strips `X-Frame-Options` for embedding. Must come before `/api/`. |
 | `/ws/verto/*` | `http://10.142.0.100:8082/` | FreeSWITCH `mod_verto` WebSocket (wss→ws unwrap). **⚠ HARDCODED East SBC-1 IP (`10.142.0.100`)** — this is East-specific and would break in West/Central zones during multi-datacenter expansion. Needs to become an env-driven upstream. |
 | `/api/ws/*` | FastAPI WebSocket (`api:8000`) with Upgrade headers | strips `/api` prefix |
+| `/api/v1/voicemail/*` | FastAPI backend, same rewrite/headers as `/api/` | **unbuffered**: `client_max_body_size 6m`, `client_body_buffer_size 6m`, `proxy_request_buffering off`, `proxy_buffering off`, `proxy_max_temp_file_size 0` — greeting uploads and decrypted playback audio never touch nginx temp files (voicemail plan D8). Sits before `/api/`. |
 | `/api/*` | FastAPI backend (`api:8000`), strips `/api` prefix | uses `$http_host` to preserve port |
 | `/docs`, `/redoc`, `/openapi.json` | FastAPI docs direct | |
 | `/api/sipp/*` | SIPp runner (`sipp:8001`), rewritten to `/sipp/*` | variable upstream (`resolver`) |
@@ -115,7 +116,8 @@ QueryClient defaults:
 /api-dids                 ApiDidsPage — RETIRED: ProductHomeRedirect while API_CALLING_ENABLED=false
 /trunks                   TrunksPage
 /ivr                      IvrBuilderPage (placeholder)
-/voicemail                VisualVoicemailPage (coming-soon preview)
+/voicemail                VisualVoicemailPage (lazy) — Visual Voicemail (§17): tenant inbox, admin preview,
+                          admin console (?customer=ID | All customers); support → productHome
 /reporting                ReportingPage (lazy; RequireReportingAccess — rcf/trunk/hybrid + admin)
 /docs/guides/:product?    GuidesPage        (/documentation, /docs/rcf redirect here)
 /docs/api/:product?       ApiDocsPage       (/docs/integration redirects here)
@@ -285,6 +287,11 @@ return { items: raw.items ?? [], total: raw.total ?? raw.items?.length ?? 0 };
 | `didInventory.ts` | `/dids` (inventory) | `listDidInventory`, `listAvailableDids`, `getDidStats`, `listMyDids`, `syncDidInventory`, `assignDid`, `unassignDid`, `requestDid` |
 | `onboarding.ts` | `/onboarding` | `submitOnboardingRequest`, `listOnboardingRequests`, `getOnboardingRequest`, `verifyBilling`, `approveOnboarding`, `rejectOnboarding` |
 | `sbc.ts` | (SBC stats) | `getSbcStats(minutes)` — per-SBC call distribution for the admin `SbcDistribution` panel |
+| `voicemail.ts` | `/v1/voicemail` | Visual Voicemail, typed 1:1 to `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md` §4.1–4.4 (summary, mailboxes, available-numbers, messages, playback tokens, greetings incl. raw-WAV upload, crypto-erase). See §17. |
+
+`apiRequestRaw<T>(method, path, body, contentType)` (client.ts) is the raw-body
+sibling of `apiRequest` (same auth / 401 / ApiError handling) — used for the
+voicemail greeting upload (`audio/wav` bytes, never multipart).
 
 ---
 
@@ -560,6 +567,11 @@ prefix-match `/docs/guides/:product`, `/docs/api/:product`); the same
 `isSoonItemActive()` drives the row's muted active style and the group's
 auto-open. Coming Soon rows show to every non-support user regardless of
 `account_type`. Support sees only its Support tools (no Products/Coming Soon).
+**Visual Voicemail is live per ACCOUNT**: it moves from Coming Soon into
+Products (with an unread badge) when `GET /v1/voicemail/summary` (same cache
+key as the page; tenant = no customer_id, admin preview = the preview
+customer) says `enabled`, and always for admins in normal view. A failed
+summary call leaves it in Coming Soon (still linked).
 Products holds only live products, filtered by the EFFECTIVE account type
 (`effectiveCustomer.account_type`, falling back to `user.account_type`; admins in
 normal view see all) — today just RCF (`rcf`, `hybrid`); the Products group
@@ -788,7 +800,8 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 RCF customers (`account_type: 'rcf'`) land on **Dashboard** (`/dashboard`, the
 card overview — top-level sidebar item) and get RCF (`/rcf`, the full numbers
 manager) under Products and Reporting under Insights. Coming Soon (darkened, last) lists SIP Trunking (NOT a link for them —
-`linkAccountTypes` limits the link to admins and trunk/hybrid), Visual Voicemail,
+`linkAccountTypes` limits the link to admins and trunk/hybrid), Visual Voicemail
+(until voicemail is enabled on the account — then it is under Products),
 Guides and API Reference. Products are filtered in `Sidebar.tsx` against
 the effective account type (`allProductNavItems`) — an admin previewing an RCF
 customer in "View as Customer" sees exactly this nav, scoped to that customer.
@@ -964,3 +977,47 @@ Contract: `docs/CALL_QUALITY_ACCURACY_PLAN.md` (§B.3 column semantics, §C.3
   sound". No averages of MOS/loss/jitter anywhere — shares
   and percentiles only. Tenants keep the existing redaction (no FS raw values,
   no packet/byte counters, no money).
+
+---
+
+## 17. Visual Voicemail (`/voicemail`, encrypted voicemail v1)
+
+Contract: `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md` §4 (API) + §7 (UI); plan
+`docs/ENCRYPTED_VOICEMAIL_BUILD_PLAN.md`. v1 copy is trimmed to what ships —
+**no transcription, notifications, voicemail API or prices** (D3/D5), web
+retrieval only (D7; the PIN is stored for a future dial-in).
+
+- **Route entry** `pages/VisualVoicemailPage.tsx` (lazy): tenant →
+  `CustomerVoicemail` (own account; `readonly` = play + download only);
+  admin in customer view → same view on the PREVIEW customer with staff
+  controls (`PreviewPrompt` until one is picked); admin normal view →
+  `AdminVoicemailConsole` (`?customer=<id>`, absent = All customers, light
+  "Viewing" select); support → productHome. Views are keyed by scope.
+- **Body** `pages/voicemail/VoicemailWorkspace.tsx`: daylight header (Unread /
+  Messages / Mailboxes, `EncryptionBadge`, New mailbox for staff), mailbox
+  switcher (grouped by customer on All customers), suspended banner, tabs
+  **Messages** (`InboxView`: Inbox/Saved/Trash with counts, `MessageList`,
+  `ReadingPane` + `Player`) and **Greeting & settings** (`MailboxSettings`:
+  `GreetingsPanel`, details, PIN, storage, staff Administration = suspend /
+  resume / delete with typed number). States: loading, 503 → "temporarily
+  unavailable", tenant not enabled → `VoicemailIntro`, no mailboxes (staff
+  get the create CTA). Times render in the MAILBOX timezone (`format.ts`).
+- **Scope + cache** (`voicemailData.ts`): tenant key `self:<own id>` with no
+  customer_id; staff `c:<id>` with `customer_id`; console All = `all`. Every
+  mutation invalidates `['voicemail']`. The sidebar shares the summary key.
+- **Playback** (`useAudioPlayer.ts`): nothing is minted until Play (minting
+  marks read). The `{url}` from `POST …/playback-token` is used verbatim as
+  `<audio src>`; re-minted when ~100 s old (token = 120 s); a media error
+  (e.g. a Range request after expiry → 401) is recovered once by minting and
+  seeking back. Download = token with `download: true` + an `<a download>`.
+- **Greetings** (`GreetingDialog.tsx` + `audio/`): record (Web Audio PCM via
+  AudioWorklet, ScriptProcessor fallback; auto-stop 2:00) or upload any audio
+  file (`decodeAudioData`) → mono → 16 kHz (OfflineAudioContext) → PCM16 WAV
+  → limits (≤ 120 s, ≤ 5,000,000 B) → local preview → raw `audio/wav` POST
+  (`?label=&activate=`). `audio/wav.ts` is pure; its self-test runs with
+  `node src/pages/voicemail/audio/wav.assert.ts` (Node type stripping).
+- **Admin create** (`NewMailboxDialog.tsx`): customer fixed (preview / console
+  customer) or picked; DID from `GET /available-numbers?q=`; name, timezone,
+  optional PIN. 409 = number taken (list refreshes); 503 = nothing created.
+- Styles `styles/dl-voicemail.css` (`vm-`), container queries on `.vm-body`;
+  dialogs are `VmDialog` (light portal, `.dl-scope` root). Brand blues only.

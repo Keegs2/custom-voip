@@ -120,6 +120,54 @@ export async function apiRequest<T>(
   return response.json() as Promise<T>;
 }
 
+/**
+ * Raw-body sibling of apiRequest for endpoints that take a binary body
+ * instead of JSON (the voicemail greeting upload posts `audio/wav` bytes —
+ * never multipart). Same auth header, 401 redirect, ApiError and 204
+ * handling as apiRequest; the JSON response is parsed the same way.
+ */
+export async function apiRequestRaw<T>(
+  method: 'POST' | 'PUT',
+  path: string,
+  body: Blob | ArrayBuffer,
+  contentType: string,
+): Promise<T> {
+  const url = `${API_BASE}${path}`;
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': contentType,
+  };
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(url, { method, headers, body });
+
+  if (response.status === 401) {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.location.replace('/');
+    throw new ApiError(401, 'Session expired. Please sign in again.');
+  }
+
+  if (!response.ok) {
+    let errorBody: unknown;
+    try {
+      errorBody = await response.json();
+    } catch {
+      errorBody = await response.text().catch(() => 'Unknown error');
+    }
+    throw new ApiError(response.status, extractErrorMessage(errorBody), errorBody);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json() as Promise<T>;
+}
+
 /** A binary download fetched through the authenticated API client. */
 export interface ApiBinaryResult {
   blob: Blob;
