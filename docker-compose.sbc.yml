@@ -84,10 +84,21 @@ services:
       - E164_EGRESS=${E164_EGRESS:-off}
       # Toll-free ingress enforcement (DEFAULT ON): carrier ingress only —
       # TF origination trunks accept ONLY 8YY R-URIs, every other carrier
-      # accepts NO 8YY R-URIs (404). Set TF_INGRESS_ENFORCE=off in .env to
-      # compile it out (byte-identical pre-TF logic). See kamailio.cfg
-      # route[TF_INGRESS_CHECK].
+      # accepts NO 8YY R-URIs (404). TF_INGRESS_ENFORCE=off compiles it out
+      # (byte-identical pre-TF logic) — emergency rollback only. See
+      # kamailio.cfg route[TF_INGRESS_CHECK].
       - TF_INGRESS_ENFORCE=${TF_INGRESS_ENFORCE:-on}
+      # TF_TEST_TNS: comma-separated 10-digit NANP test TNs (DEFAULT EMPTY =
+      # no exemption) admitted from the toll-free origination trunks even
+      # though they are not 8YY (rule=tf-test-tn-exempt). entrypoint.sh drops
+      # any malformed entry with a WARNING. DEPLOY (each SBC .env, standby
+      # first, then --force-recreate kamailio): REPLACE the old
+      # `TF_INGRESS_ENFORCE=off` line with
+      #   TF_TEST_TNS=5595335873,5595335908
+      # (Sinch 8XX-T test TNs: ATL 5595335873, DEN 5595335908). When real TFNs
+      # are live: DELETE the TF_TEST_TNS line, recreate kamailio, and disable
+      # the two test rcf_numbers rows.
+      - TF_TEST_TNS=${TF_TEST_TNS:-}
       # UDP MTU / oversized-INVITE UDP->TCP fallback (core udp_mtu +
       # udp_mtu_try_proto=TCP). DEFAULT 0 = OFF (dark). The param is GLOBAL
       # (also affects FS- and PBX-bound UDP sends) and Bandwidth TCP support is
@@ -103,9 +114,11 @@ services:
       # entrypoint forces it off with a warning otherwise. Enable on BOTH SBCs
       # of a zone. The 6 SBC public IPs MUST STAY whitelisted at the carriers
       # (direct-IP failover INVITEs + OPTIONS probes still use them). Bandwidth
-      # already lists the VIPs as origination hosts; Sinch TERM trunk groups
-      # must have them registered first. Mechanism + caveats: kamailio.cfg
-      # route[TO_CARRIER] Step 9.
+      # already lists the VIPs as origination hosts. Applies to BANDWIDTH
+      # destinations only: Sinch termination INVITEs always keep the SBC's
+      # own public IP (Sinch maps trunk group by source IP; on the redundant
+      # .25 TERM IPs the VIP is the inbound-only 8XX-T orig TG). Mechanism +
+      # caveats: kamailio.cfg route[TO_CARRIER] Step 9.
       - VIP_EGRESS=${VIP_EGRESS:-off}
       # STIR/SHAKEN outbound signing (secsipid). DARK BY DEFAULT (off). When
       # STIR_SHAKEN_SIGN=on, Kamailio signs the outbound Identity/PASSporT in
@@ -161,6 +174,14 @@ services:
       # Atlanta LD=ATLNGAQSGR2_7214 (INT), Denver TF=DNVTCOZIGR2_3282 (OSAO 8YY).
       - SINCH_LD_IP=${SINCH_LD_IP:-206.146.98.26}
       - SINCH_TF_IP=${SINCH_TF_IP:-206.146.100.26}
+      # Sinch REDUNDANT TERMINATION signaling IPs (all zones — dispatcher
+      # keepalive groups 11-12 ONLY, NIC-sourced probes; egress table-driven).
+      # Built by Sinch on the SAME IPs as the 8XX-T TF orig trunks above.
+      # Denver LD (INT, DENSBX21) = carrier_trunks sinch/denver-ld,
+      # Atlanta TF (OSAO 8YY, ATLSBX21) = sinch/atlanta-tf. Production
+      # defaults — NO .env edits needed.
+      - SINCH_LD2_IP=${SINCH_LD2_IP:-206.146.100.25}
+      - SINCH_TF2_IP=${SINCH_TF2_IP:-206.146.98.25}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro

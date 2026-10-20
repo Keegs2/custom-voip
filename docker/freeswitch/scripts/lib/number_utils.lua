@@ -123,7 +123,8 @@ end
 -- bare 10-digit, 11-digit with leading 1, +1 E.164; formatting characters
 -- are ignored (same digit-collapse as to_e164). EVERYTHING else — non-8YY
 -- NANP, international, unparseable/empty — is 'ld'. The consumer
--- (inbound_router.lua trunk filter) treats 'ld' as the unrestricted default
+-- (lib/term_trunks.lua trunk filter, used by inbound_router / trunk_outbound /
+-- api_outbound) treats 'ld' as the unrestricted default
 -- class, so misparse can never route an LD call onto a tollfree-only trunk.
 --
 -- Assigned toll-free NPAs (SMS/800 registry): 800, 833, 844, 855, 866, 877,
@@ -131,7 +132,7 @@ end
 -- until the registry activates them (add here when that happens). Lua
 -- patterns have no alternation/{n} quantifiers, so the NPA rides a closed
 -- set lookup instead of a regex.
--- KEEP IN SYNC: inbound_router.lua TOLLFREE_NPAS_FALLBACK and the Kamailio
+-- KEEP IN SYNC: lib/term_trunks.lua TOLLFREE_NPAS_FALLBACK and the Kamailio
 -- SBC toll-free ingress classifier (kamailio.cfg route[TF_CLASSIFY], gated
 -- by TF_INGRESS_ENFORCE) must use this SAME NPA set — a mismatch would
 -- admit a TF call on one side that the other rejects/misroutes.

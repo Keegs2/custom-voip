@@ -1,8 +1,15 @@
 """Carrier trunk registry — admin CRUD over `carrier_trunks` (migration 40).
 
-One row per carrier signaling IP (Bandwidth Dallas/LA, Sinch Denver/Chicago).
-The Kamailio SBCs consume this table directly via sqlops as a DB-backed trust
-fallback for unknown-source INVITEs:
+One row per carrier trunk (Bandwidth Dallas/LA, Sinch origination +
+termination trunk groups). Uniqueness (migration 53): at most ONE ingress row
+(direction inbound|both) and ONE egress row (direction outbound|both) per
+source_ip — partial unique indexes carrier_trunks_ingress_ip_key /
+carrier_trunks_egress_ip_key replaced 40's UNIQUE(source_ip), because Sinch
+runs an inbound 8XX-T origination trunk and an outbound redundant termination
+trunk on the same IP (206.146.98.25 / 206.146.100.25). A 'both' row takes both
+slots. (carrier, pop) stays UNIQUE. Every reader that looks a row up BY IP
+must therefore filter direction. The Kamailio SBCs consume this table directly
+via sqlops as a DB-backed trust fallback for unknown-source INVITEs:
 
     SELECT carrier, pop, cps_limit FROM carrier_trunks
     WHERE source_ip = '$si'::inet
@@ -41,7 +48,8 @@ replicas the SBCs read.
 
 Endpoints (mounted at /v1/carrier-trunks and /carrier-trunks):
   * GET    ""            — list (filters: carrier, direction, enabled)
-  * POST   ""            — create (409 on duplicate source_ip / carrier+pop)
+  * POST   ""            — create (409 on a second ingress or egress row for
+                            the same source_ip, or duplicate carrier+pop)
   * GET    /{trunk_id}   — detail
   * PUT    /{trunk_id}   — partial update (carrier itself is immutable)
   * DELETE /{trunk_id}   — delete
@@ -245,11 +253,26 @@ class CarrierTrunkUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 409 mapping — one distinct detail per named UNIQUE constraint (migration 40).
+# 409 mapping — one distinct detail per named unique index/constraint:
+#   carrier_trunks_ingress_ip_key  (53) one inbound|both row per source_ip
+#   carrier_trunks_egress_ip_key   (53) one outbound|both row per source_ip
+#   carrier_trunks_source_ip_key   (40) legacy UNIQUE(source_ip) — only on a
+#                                       DB that has not had 53 applied yet
+#   carrier_trunks_carrier_pop_key (40) UNIQUE (carrier, pop)
 # ---------------------------------------------------------------------------
 
 def _conflict_409(exc: asyncpg.UniqueViolationError) -> HTTPException:
     constraint = exc.constraint_name or ""
+    if constraint == "carrier_trunks_ingress_ip_key":
+        return HTTPException(
+            status_code=409,
+            detail="source_ip already has an ingress trunk (direction inbound "
+                   "or both) — one inbound/both row per IP")
+    if constraint == "carrier_trunks_egress_ip_key":
+        return HTTPException(
+            status_code=409,
+            detail="source_ip already has an egress trunk (direction outbound "
+                   "or both) — one outbound/both row per IP")
     if "source_ip" in constraint:
         return HTTPException(status_code=409, detail="source_ip already exists")
     if "carrier_pop" in constraint:
@@ -310,7 +333,9 @@ async def list_carrier_trunks(
 async def create_carrier_trunk(
     body: CarrierTrunkCreate, admin: dict = Depends(require_admin),
 ):
-    """Create a carrier trunk. 409 on duplicate source_ip or (carrier, pop)."""
+    """Create a carrier trunk. 409 when the IP already has a row in the same
+    direction slot (ingress = inbound|both, egress = outbound|both) or on a
+    duplicate (carrier, pop). One inbound + one outbound row per IP is fine."""
     try:
         row = await db.fetch_one(
             f"""
@@ -361,7 +386,8 @@ async def update_carrier_trunk(
     exclude_unset (not exclude_none) so the nullable fields (trunk_group,
     test_tn, notes, priority_east/west/central) can be explicitly cleared with
     null — clearing a zone override reverts that zone to the global priority.
-    409 when the new source_ip or (carrier, pop) collides with another row.
+    409 when the new source_ip/direction lands in an ingress or egress slot
+    another row already holds for that IP, or (carrier, pop) collides.
     """
     update_data = body.model_dump(exclude_unset=True)
     if not update_data:

@@ -99,7 +99,7 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 | `EXTERNAL_SIP_IP` | `auto-nat` | Public IP for Via/Contact/SDP headers. MUST be set in production. |
 | `EXTERNAL_RTP_IP` | `auto-nat` | Public IP for SDP c= line. Usually same as EXTERNAL_SIP_IP. |
 | `SBC_PROXY_IP` | `127.0.0.1` | Primary Kamailio SBC IP. Outbound bridges go to sofia/external/dest@SBC_PROXY_IP:5060 |
-| `SBC_PROXY_IP_FAILOVER` | `$SBC_PROXY_IP` | Secondary SBC IP for the 4-attempt failover loop in inbound_router.lua (freeswitch.xml:71 -> `sbc_proxy_ip_failover` global). Defaults to SBC_PROXY_IP if unset. |
+| `SBC_PROXY_IP_FAILOVER` | `$SBC_PROXY_IP` | Secondary SBC IP for the SBC×trunk failover loops: inbound_router.lua (RCF) and the 8YY `carrier_trunks` loop in trunk_outbound.lua / api_outbound.lua (freeswitch.xml:71 -> `sbc_proxy_ip_failover` global). Defaults to SBC_PROXY_IP if unset. The non-8YY trunk/API Bandwidth bridges still use SBC_PROXY_IP only. |
 | `HOMER_IP` | `127.0.0.1` | Homer HEP capture endpoint IP |
 | `DB_HOST` | `postgres` | PostgreSQL host (via PgBouncer) |
 | `DB_PORT` | `6432` | PgBouncer port (NOT 5432) |
@@ -157,6 +157,8 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 10. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
 
 11. **Termination traffic-class filter (strict toll-free, 2026-10)**: `inbound_router.lua` filters the cached `carrier_trunks` termination list per call by `classify_destination(forward_to)` (NANP 8YY by NPA → `tollfree`, else `ld`). `ld` → trunks of class `any` or `ld` (none → full list, never strand LD). `tollfree` → ONLY `tollfree` trunks (Sinch OSAO denver-tf); `any`/`ld` (Bandwidth, Sinch atlanta-ld) are never eligible, and with no enabled `tollfree` trunk the call FAILS CLOSED: ERR log, `term_class_blocked=tollfree` (CDR variables), `NO_ROUTE_DESTINATION` (SIP 404) + `lua_routed=true`. The 4-trunk attempt cap applies AFTER the filter (cache bounded at 16 rows), so a 5th outbound row can never truncate the only tollfree trunk. The LEGACY fail-open loop (DB blip / zero rows) is class-blind and can still send 8YY via Bandwidth — deliberate. Prod has no `any` rows (owner relabels them `ld`, migration 52 header). The NPA set must match Kamailio `route[TF_CLASSIFY]` (`TF_INGRESS_ENFORCE`) — pinned by `tests/test_classify_destination.py`; behavior pinned by `tests/lua/onnet_router_harness.lua` [13a-f].
+
+12. **Shared termination lib + trunk/API 8YY egress (2026-10, Sinch close-out)**: the carrier_trunks fetch/60s cache/validation, class coercion, `classify_destination`, class filter, post-filter cap, trunk-major attempt builder and the X-Carrier-IP dial-string builder live in `scripts/lib/term_trunks.lua` (loaded via `loadfile`, no Redis). `inbound_router.lua` delegates to it with byte-identical output (vars, dial strings, hangups, log lines — verified against the pre-extraction script); if the lib fails to load, RCF takes the legacy fail-open loop (same as a DB blip). `trunk_outbound.lua` and `api_outbound.lua` (direct-bridge path; webhook calls untouched) send NANP 8YY destinations ONLY over enabled `traffic_class='tollfree'` rows — same SQL, same process-wide cache entry (`term_trunks_<zone>`, shared by all three scripts), per-zone priority (`FS_ZONE`), trunk-major × {`SBC_PROXY_IP`, `SBC_PROXY_IP_FAILOVER`} with the cached TCP pre-check, `X-Carrier-IP`/`X-Carrier-Label`, `carrier_used=<carrier>-<pop>`, `term_trunks_source`. They FAIL CLOSED on every miss — no tollfree row, DB error/zero rows, or lib missing → `term_class_blocked=tollfree` + `NO_ROUTE_DESTINATION` + `lua_routed=true`, never Bandwidth (asymmetric with the RCF legacy fail-open on purpose: these products never had an 8YY route). Non-8YY trunk/API calls never consult carrier_trunks and are byte-identical to before. Ordering with the redundant rows (migration 53): LD = Bandwidth (10/20, west swaps) → sinch/atlanta-ld (30) → sinch/denver-ld (35); 8YY = sinch/denver-tf (40) → sinch/atlanta-tf (45). The redundant rows share source IPs with the inbound 8XX-T orig rows; FS's SELECT filters `direction IN ('outbound','both')` and the cache is an ordered list (never IP-keyed), so nothing collapses. See `scripts/CLAUDE.md` "lib/term_trunks.lua".
 
 ## Volumes (docker-compose.media.yml)
 
@@ -255,5 +257,5 @@ docker/freeswitch/
   patches/                # FS source patches, pinned to FREESWITCH_REF (quality patch v1)
   lab/                    # Call-quality acceptance lab: SIPp + netem + evaluator (lab/README.md)
   conf/                   # FreeSWITCH configuration (see conf/CLAUDE.md)
-  scripts/                # Lua routing scripts (see scripts/CLAUDE.md)
+  scripts/                # Lua routing scripts (see scripts/CLAUDE.md); scripts/lib/term_trunks.lua = shared carrier_trunks termination
 ```

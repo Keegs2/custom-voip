@@ -26,6 +26,10 @@ do
 end
 
 local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
+-- SBC-2 / ILB-bypass fallback for the 8YY (toll-free) carrier_trunks loop
+-- only (same default as inbound_router.lua). The non-8YY Bandwidth path
+-- below still targets SBC_PROXY_IP alone, exactly as before.
+local sbc_proxy_ip_failover = os.getenv("SBC_PROXY_IP_FAILOVER") or sbc_proxy_ip
 local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 
 -- Per-attempt progress timeout in seconds (progress_timeout on each carrier
@@ -92,6 +96,13 @@ local db = load_module("db_client")
 local number_utils = load_module("number_utils")
 if not number_utils then
     freeswitch.consoleLog("ERR", "[api_outbound] number_utils failed to load — falling back to legacy inline normalization\n")
+end
+-- Shared carrier_trunks termination selection (same cache/SQL/filter/dial
+-- builder as inbound_router.lua). Used ONLY for NANP 8YY destinations on
+-- the direct-bridge path; if it fails to load, 8YY fails closed.
+local term_trunks_lib = load_module("term_trunks")
+if not term_trunks_lib then
+    freeswitch.consoleLog("ERR", "[api_outbound] term_trunks failed to load — 8YY destinations will fail closed\n")
 end
 
 -- Ensure session exists
@@ -695,6 +706,18 @@ if callback_url then
     set_var("api_callback_url", callback_url)
 end
 
+-- NANP 8YY (toll-free) classification for the direct-bridge path below.
+-- Same contract as trunk_outbound.lua / inbound_router.lua: 8YY egresses
+-- ONLY over enabled carrier_trunks 'tollfree' rows and FAILS CLOSED
+-- (NO_ROUTE_DESTINATION) without one — never Bandwidth. Webhook-controlled
+-- calls are not affected here (the webhook engine decides what to <Dial>).
+local api_dest_class = "ld"
+if term_trunks_lib then
+    api_dest_class = term_trunks_lib.classify_destination(normalized_dest, number_utils)
+elseif number_utils and number_utils.classify_destination then
+    api_dest_class = number_utils.classify_destination(normalized_dest)
+end
+
 -- Check if this is a webhook-controlled call
 -- If webhook_url is set, hand off to voice_webhook.lua after bridge connects
 if webhook_url then
@@ -722,6 +745,55 @@ if webhook_url then
     pcall(function()
         session:execute("lua", "voice_webhook.lua")
     end)
+elseif api_dest_class == "tollfree" then
+    -- ============================================================
+    -- 8YY direct bridge: carrier_trunks 'tollfree' rows ONLY
+    -- ============================================================
+    -- Selection, attempt order (trunk-major x {SBC_PROXY_IP,
+    -- SBC_PROXY_IP_FAILOVER}), cached TCP pre-check, X-Carrier-IP /
+    -- X-Carrier-Label selector, carrier_used / term_trunks_source
+    -- attribution: lib/term_trunks.lua, identical to the RCF loop.
+    -- Per-attempt vars are THIS script's (origination caller-ID pair,
+    -- progress_timeout, call_timeout=60, SOA off). No [cdr_*] leg block —
+    -- the API product never carried one (retired path, no B rows).
+    -- Failure semantics after attempts are this script's: log only, no
+    -- explicit hangup (same as the Bandwidth path).
+    set_var("lua_routed", "true")
+    local tf_trunks, tf_source = nil, "fallback"
+    if term_trunks_lib then
+        tf_trunks, tf_source = term_trunks_lib.select_tollfree(
+            term_trunks_lib.zone(), db, "api_outbound")
+    end
+    set_var("term_trunks_source", tf_source)
+
+    if not tf_trunks then
+        freeswitch.consoleLog("ERR", string.format(
+            "[%s] No enabled 'tollfree' termination trunk for 8YY %s (customer %d, source=%s) — failing closed NO_ROUTE_DESTINATION (8YY never terminates via Bandwidth)\n",
+            uuid, normalized_dest, customer_id or 0, tf_source))
+        set_var("term_class_blocked", "tollfree")
+        hangup("NO_ROUTE_DESTINATION",
+            "[" .. uuid .. "] 8YY termination blocked: no tollfree trunk enabled")
+        return
+    end
+
+    local tf_disposition = term_trunks_lib.run_attempts({
+        session = session, get_var = get_var, set_var = set_var,
+        tag = "api_outbound", uuid = uuid,
+        attempts = term_trunks_lib.build_attempts(
+            tf_trunks, sbc_proxy_ip, sbc_proxy_ip_failover),
+        lead_vars = string.format(
+            "origination_caller_id_number=%s,origination_caller_id_name=%s,progress_timeout=%d,call_timeout=60,ignore_early_media=false,sip_enable_soa=false",
+            outbound_caller_id, outbound_caller_name, bridge_progress_timeout),
+        call_id = sip_call_id,
+        dest = normalized_dest,  -- full +E.164, same as the Bandwidth path
+        stir_reset = stir_outcome_reset,
+        stir_capture = stir_outcome_capture,
+    })
+    if tf_disposition ~= "SUCCESS" then
+        freeswitch.consoleLog("WARNING", string.format(
+            "[%s] API 8YY bridges failed: disposition=%s cause=%s\n",
+            uuid, tf_disposition, get_var("last_bridge_hangup_cause", tf_disposition)))
+    end
 else
     -- No webhook - simple bridge to destination
     -- Execute bridge

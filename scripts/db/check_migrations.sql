@@ -1,4 +1,4 @@
--- Read-only: reports which hand-applied migrations (22..51) are present on this database.
+-- Read-only: reports which hand-applied migrations (22..53) are present on this database.
 -- Run on the East primary: sudo -u postgres psql -d voip -f /opt/revup/scripts/db/check_migrations.sql
 -- Init scripts only run on first initdb; every later migration is applied by hand, so check before assuming.
 -- 43 is a one-shot data backfill (jitter units) — if MISSING, read its header before running; never re-run it.
@@ -19,5 +19,7 @@ WITH c AS (SELECT table_name t, column_name col FROM information_schema.columns 
 ('48_cdr_call_legs', EXISTS(SELECT 1 FROM c WHERE t='cdrs' AND col='leg')),
 ('49_cdr_call_legs_index_cagg', to_regclass('public.idx_cdrs_call_id') IS NOT NULL),
 ('50_cdr_quality_accuracy', EXISTS(SELECT 1 FROM c WHERE t='cdrs' AND col='quality_status') AND EXISTS(SELECT 1 FROM pg_proc WHERE proname='cdr_refresh_call_quality')),
-('51_cdr_quality_no_media', EXISTS(SELECT 1 FROM pg_proc WHERE proname='cq_leg_status' AND pronargs=5))
+('51_cdr_quality_no_media', EXISTS(SELECT 1 FROM pg_proc WHERE proname='cq_leg_status' AND pronargs=5)),
+('52_sinch_tf_origination', CASE WHEN to_regclass('public.carrier_trunks') IS NULL THEN false ELSE (xpath('/row/n/text()', query_to_xml('SELECT count(*) AS n FROM carrier_trunks WHERE carrier=''sinch'' AND pop IN (''atlanta-tf-orig'',''denver-tf-orig'')', false, true, '')))[1]::text::int = 2 END),
+('53_sinch_redundant_termination', to_regclass('public.carrier_trunks_ingress_ip_key') IS NOT NULL AND to_regclass('public.carrier_trunks_egress_ip_key') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='carrier_trunks_source_ip_key') AND EXISTS(SELECT 1 FROM c WHERE t='carrier_trunk_health' AND col='trunk_enabled'))
 ) SELECT m AS migration, CASE WHEN ok THEN 'applied' ELSE '*** MISSING ***' END AS status FROM chk;

@@ -1,5 +1,9 @@
 -- Trunk Outbound Handler - SIP Trunk Customer Outbound Calls
 local sbc_proxy_ip = os.getenv("SBC_PROXY_IP") or "127.0.0.1"
+-- SBC-2 / ILB-bypass fallback for the 8YY (toll-free) carrier_trunks loop
+-- only (same default as inbound_router.lua). The non-8YY Bandwidth path
+-- below still targets SBC_PROXY_IP alone, exactly as before.
+local sbc_proxy_ip_failover = os.getenv("SBC_PROXY_IP_FAILOVER") or sbc_proxy_ip
 local external_sip_ip = os.getenv("EXTERNAL_SIP_IP") or "auto"
 
 -- Per-attempt progress timeout in seconds (progress_timeout on each carrier
@@ -65,6 +69,14 @@ local db = load_module("db_client")
 local number_utils = load_module("number_utils")
 if not number_utils then
     freeswitch.consoleLog("ERR", "[trunk_outbound] number_utils failed to load — falling back to legacy inline normalization\n")
+end
+-- Shared carrier_trunks termination selection (same cache/SQL/filter/dial
+-- builder as inbound_router.lua). Used ONLY for NANP 8YY destinations; if it
+-- fails to load, 8YY fails closed (NO_ROUTE_DESTINATION) and every other
+-- destination is unaffected.
+local term_trunks_lib = load_module("term_trunks")
+if not term_trunks_lib then
+    freeswitch.consoleLog("ERR", "[trunk_outbound] term_trunks failed to load — 8YY destinations will fail closed\n")
 end
 
 -- Ensure session exists
@@ -868,6 +880,92 @@ set_var("transfer_ringback", "%(2000,4000,440,480)")
 -- Setting it here ensures FS does not run SDP offer/answer processing
 -- sip_enable_soa=false disables SDP Offer/Answer engine. Must be exported.
 -- sip_enable_soa=false is in B-leg bridge string only
+
+-- ================================================================
+-- NANP 8YY (toll-free) egress — carrier_trunks 'tollfree' rows ONLY
+-- ================================================================
+-- Same contract as inbound_router.lua's RCF termination loop for 8YY:
+--   * selection = lib/term_trunks.lua (same SQL, 60s process-wide cache
+--     shared with inbound_router, per-zone priority via FS_ZONE, STRICT
+--     traffic_class='tollfree' filter, 4-trunk cap post-filter);
+--   * trunk-major attempts {SBC_PROXY_IP, SBC_PROXY_IP_FAILOVER} x trunk,
+--     cached TCP pre-check per attempt, X-Carrier-IP/X-Carrier-Label
+--     selector (Kamailio TO_CARRIER Step 1a validates it against an
+--     enabled outbound carrier_trunks row and disables its own carrier
+--     flip — this loop owns failover);
+--   * carrier_used = "<carrier>-<pop>" of the winning attempt,
+--     term_trunks_source = db|fallback breadcrumb;
+--   * FAIL CLOSED — no enabled tollfree trunk, DB/cache unresolvable, or
+--     lib missing => term_class_blocked=tollfree + NO_ROUTE_DESTINATION
+--     (404) + lua_routed=true. NEVER Bandwidth: unlike the RCF legacy
+--     fail-open loop, the trunk product never had an 8YY route to fall
+--     back to, so there is nothing to fail open TO.
+-- Per-attempt dial vars are THIS script's (sip_enable_soa=false,
+-- call_timeout=60, progress_timeout, X-CID, [cdr_*] leg block); caller-ID,
+-- Diversion, X-Original-CID, X-Attestation and media vars set above apply
+-- unchanged. Every non-8YY destination skips this block entirely and runs
+-- the original Bandwidth primary/secondary code below, byte-for-byte.
+local dest_class = "ld"
+if term_trunks_lib then
+    dest_class = term_trunks_lib.classify_destination(normalized_dest, number_utils)
+elseif number_utils and number_utils.classify_destination then
+    dest_class = number_utils.classify_destination(normalized_dest)
+end
+if dest_class == "tollfree" then
+    set_var("continue_on_fail", "true")
+    set_var("hangup_after_bridge", "true")
+    set_var("lua_routed", "true")
+
+    local tf_trunks, tf_source = nil, "fallback"
+    if term_trunks_lib then
+        tf_trunks, tf_source = term_trunks_lib.select_tollfree(
+            term_trunks_lib.zone(), db, "trunk_outbound")
+    end
+    set_var("term_trunks_source", tf_source)
+
+    if not tf_trunks then
+        freeswitch.consoleLog("ERR", string.format(
+            "[%s] No enabled 'tollfree' termination trunk for 8YY %s (trunk %s, source=%s) — failing closed NO_ROUTE_DESTINATION (8YY never terminates via Bandwidth)\n",
+            uuid, normalized_dest, tostring(trunk_id), tf_source))
+        set_var("term_class_blocked", "tollfree")
+        hangup("NO_ROUTE_DESTINATION",
+            "[" .. uuid .. "] 8YY termination blocked: no tollfree trunk enabled")
+        return
+    end
+
+    local tf_attempts = term_trunks_lib.build_attempts(
+        tf_trunks, sbc_proxy_ip, sbc_proxy_ip_failover)
+    freeswitch.consoleLog("INFO", string.format(
+        "[%s] Trunk Bridge (8YY): trunk=%s -> %s via %d tollfree attempt(s) (outbound_cid=%s, effective_cid=%s)\n",
+        uuid, trunk_id, normalized_dest, #tf_attempts, outbound_did_10, original_cid or outbound_did_10))
+
+    local tf_disposition = term_trunks_lib.run_attempts({
+        session = session, get_var = get_var, set_var = set_var,
+        tag = "trunk_outbound", uuid = uuid,
+        attempts = tf_attempts,
+        lead_vars = string.format(
+            "ignore_early_media=false,sip_enable_soa=false,progress_timeout=%d,call_timeout=60",
+            bridge_progress_timeout),
+        call_id = sip_call_id,
+        dest = normalized_dest,  -- full +E.164, same as the Bandwidth path
+        leg_block = cdr_b_leg_block,  -- CDR leg split: [cdr_*], attempt = launched count
+        stir_reset = stir_outcome_reset,
+        stir_capture = stir_outcome_capture,
+    })
+
+    if tf_disposition ~= "SUCCESS" then
+        freeswitch.consoleLog("WARNING", string.format(
+            "[%s] All 8YY bridges failed for trunk %s -> %s (disposition=%s last_cause=%s)\n",
+            uuid, trunk_id, normalized_dest, tf_disposition,
+            get_var("last_bridge_hangup_cause", tf_disposition)))
+        hangup("NORMAL_TEMPORARY_FAILURE",
+            "[" .. uuid .. "] Trunk 8YY bridge failed, returning 503 (tollfree carrier unreachable)")
+        return
+    end
+
+    freeswitch.consoleLog("INFO", "[" .. uuid .. "] Trunk outbound complete (8YY)\n")
+    return
+end
 
 -- Build dial string using external profile to ensure public IP in Via/Contact/SDP.
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
