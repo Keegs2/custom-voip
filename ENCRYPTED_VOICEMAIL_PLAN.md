@@ -1,5 +1,7 @@
 # Plan: Encrypted-at-Rest Voicemail for Granite CRAG
 
+> **SUPERSEDED 2026-10-20** by `docs/ENCRYPTED_VOICEMAIL_BUILD_PLAN.md` (per-customer Cloud KMS *software* keys, no HSM/FIPS in v1, port of the `unified` branch). Kept for history.
+
 ## Context
 
 Government agency customers need encrypted-at-rest voicemail. ALL voicemail is encrypted — there is no "standard" unencrypted path. Every message uses AES-256-GCM envelope encryption with per-customer Cloud KMS keys (Cloud HSM backed, FIPS 140-2 Level 3).
