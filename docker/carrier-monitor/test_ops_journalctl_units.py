@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_ops_journalctl_units.py — offline self-check for host.journalctl's unit allow-list.
+test_ops_journalctl_units.py — offline self-check for the ops-agent's host reads.
 
 Runs with NO live host and NO journal. It monkeypatches `_run_argv` so a run captures
 the argv it WOULD execute, and forces JOURNAL_AVAILABLE where needed, then asserts:
@@ -14,7 +14,12 @@ the argv it WOULD execute, and forces JOURNAL_AVAILABLE where needed, then asser
   * unknown units, injection attempts and template instances are rejected,
   * the build-time forbidden-pattern scan stays clean when rendered for EVERY known
     unit (the import-time audit only renders one representative unit),
-  * the "journal unavailable" path returns exit 125 without executing anything,
+  * the "journal unavailable" path returns exit 125 without executing anything, and
+    the probe names the cause (binary missing / machine-id not mounted / no
+    persistent journal for this machine-id),
+  * the image installs journalctl and keeps ops_agent.py as the entrypoint, and all
+    three production compose files mount the host journal + machine-id read-only,
+  * KNOWN_CONTAINERS holds voip-vmalert and only names compose really uses,
   * host.journalctl remains a read command available on every role.
 
 Run either way:
@@ -23,6 +28,8 @@ Run either way:
 """
 
 import os
+import re
+import tempfile
 from pathlib import Path
 
 # Pin a deterministic role/env BEFORE importing the module (role is detected once
@@ -228,6 +235,183 @@ def test_journalctl_is_read_only_and_all_roles():
     assert not oc.is_mutating("host.journalctl")
     for role in oc.VALID_ROLES:
         assert oc.is_valid_for_role("host.journalctl", role)
+
+
+# --------------------------------------------------------------------------- #
+# 6) The journal probe names the cause.
+# --------------------------------------------------------------------------- #
+
+_MACHINE_ID = "0123456789abcdef0123456789abcdef"
+
+
+class _Probe:
+    """Point the probe at a temp machine-id file + journal dir; fake the binary."""
+
+    def __init__(self, binary=True, machine_id=_MACHINE_ID, machine_dir=True):
+        self.binary = binary
+        self.machine_id = machine_id
+        self.machine_dir = machine_dir
+
+    def __enter__(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        journal = root / "journal"
+        journal.mkdir()
+        id_file = root / "machine-id"
+        if self.machine_id is not None:
+            id_file.write_text(self.machine_id + "\n", encoding="ascii")
+        if self.machine_dir:
+            (journal / _MACHINE_ID).mkdir()
+        self._orig = (oc._HOST_JOURNAL_DIR, oc._MACHINE_ID_FILE, oc.shutil.which)
+        oc._HOST_JOURNAL_DIR = str(journal)
+        oc._MACHINE_ID_FILE = str(id_file)
+        real_which = self._orig[2]
+        oc.shutil.which = (
+            lambda name, *a, **k: "/usr/bin/journalctl"
+            if name == "journalctl" and self.binary
+            else (None if name == "journalctl" else real_which(name, *a, **k))
+        )
+        return self
+
+    def __exit__(self, *exc):
+        oc._HOST_JOURNAL_DIR, oc._MACHINE_ID_FILE, oc.shutil.which = self._orig
+        self._tmp.cleanup()
+        return False
+
+
+def test_probe_available_with_persistent_host_journal():
+    with _Probe():
+        assert oc._journal_unavailable_reason() is None
+        assert oc._journal_available() is True
+
+
+def test_probe_binary_missing():
+    with _Probe(binary=False):
+        assert "binary missing" in oc._journal_unavailable_reason()
+
+
+def test_probe_machine_id_not_mounted():
+    with _Probe(machine_id=None):
+        assert "machine-id not mounted" in oc._journal_unavailable_reason()
+    with _Probe(machine_id=""):                      # empty file baked in an image
+        assert "machine-id not mounted" in oc._journal_unavailable_reason()
+
+
+def test_probe_volatile_journal():
+    # The compose bind mount of an absent host dir shows up empty; or another
+    # machine's journal is there but not this machine-id's.
+    with _Probe(machine_dir=False):
+        reason = oc._journal_unavailable_reason()
+        assert "no persistent host journal" in reason
+        assert "ls " in reason                       # the one-line VM check
+
+
+def test_unavailable_message_carries_reason():
+    orig = oc.JOURNAL_UNAVAILABLE_REASON
+    oc.JOURNAL_UNAVAILABLE_REASON = "journalctl binary missing from this image"
+    try:
+        with _Capture(journal_available=False):
+            res = oc.run_command(
+                "host.journalctl", {"unit": "revup-asr-guard"}, oc.ROLE_SERVICES
+            )
+    finally:
+        oc.JOURNAL_UNAVAILABLE_REASON = orig
+    assert res["exit_code"] == 125
+    assert "journalctl binary missing from this image" in res["stderr"]
+
+
+# --------------------------------------------------------------------------- #
+# 7) Image + compose wiring for host.journalctl.
+# --------------------------------------------------------------------------- #
+
+DOCKERFILE = Path(__file__).resolve().parent / "Dockerfile"
+# (compose file, service key) of every production ops agent. The DB VMs run no
+# ops agent (docker-compose.db.yml), so they serve no host reads.
+OPS_AGENT_SERVICES = (
+    ("docker-compose.sbc.yml", "carrier-monitor"),
+    ("docker-compose.media.yml", "ops-agent"),
+    ("docker-compose.services.yml", "ops-agent"),
+)
+
+
+def _service_block(compose_name, service):
+    text = (REPO_ROOT / compose_name).read_text(encoding="utf-8")
+    m = re.search(
+        rf"^  {re.escape(service)}:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|^\S|\Z)",
+        text, re.MULTILINE | re.DOTALL,
+    )
+    assert m, f"service {service!r} not found in {compose_name}"
+    return m.group(1)
+
+
+def test_dockerfile_installs_journalctl_and_keeps_agent_entrypoint():
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    install = [ln for ln in text.splitlines() if "apt-get install" in ln and "kamailio" in ln]
+    assert install and "--no-install-recommends" in install[0], install
+    assert re.search(r"\bsystemd\b", install[0]), "systemd (journalctl) not installed"
+    assert "command -v journalctl" in text, "no build-time journalctl check"
+    entry = [ln for ln in text.splitlines() if ln.startswith("ENTRYPOINT")]
+    assert entry == ['ENTRYPOINT ["python3", "/usr/local/bin/ops_agent.py"]'], entry
+    # systemd is a binary source only, never the init: no CMD/ENTRYPOINT runs it.
+    for ln in text.splitlines():
+        if ln.startswith(("CMD", "ENTRYPOINT")):
+            assert "systemd" not in ln and "init" not in ln, ln
+
+
+def test_every_ops_agent_mounts_host_journal_read_only():
+    for compose_name, service in OPS_AGENT_SERVICES:
+        block = _service_block(compose_name, service)
+        assert "build: ./docker/carrier-monitor" in block, (compose_name, service)
+        for mount in ("- /var/log/journal:/var/log/journal:ro",
+                      "- /etc/machine-id:/etc/machine-id:ro"):
+            assert mount in block, f"{compose_name} {service}: missing {mount!r}"
+
+
+def test_db_compose_runs_no_ops_agent():
+    text = (REPO_ROOT / "docker-compose.db.yml").read_text(encoding="utf-8")
+    assert "docker/carrier-monitor" not in text
+
+
+# --------------------------------------------------------------------------- #
+# 8) Container allow-list.
+# --------------------------------------------------------------------------- #
+
+def _compose_container_names():
+    names = set()
+    for path in REPO_ROOT.glob("docker-compose*.yml"):
+        names |= set(re.findall(r"^\s+container_name:\s*(\S+)\s*$",
+                                path.read_text(encoding="utf-8"), re.MULTILINE))
+    return names
+
+
+def test_vmalert_container_is_known_and_matches_compose():
+    assert "voip-vmalert" in oc.KNOWN_CONTAINERS
+    block = _service_block("docker-compose.services.yml", "vmalert")
+    assert "container_name: voip-vmalert" in block
+
+
+def test_every_known_container_exists_in_compose():
+    missing = oc.KNOWN_CONTAINERS - _compose_container_names()
+    assert not missing, f"KNOWN_CONTAINERS names no compose container: {sorted(missing)}"
+
+
+def test_docker_logs_argv_for_vmalert():
+    with _Capture() as cap:
+        oc.run_command(
+            "host.docker_logs", {"container": "voip-vmalert", "tail": 50},
+            oc.ROLE_SERVICES,
+        )
+    assert cap.argv == ["docker", "logs", "--tail", "50", "voip-vmalert"]
+
+
+def test_docker_logs_rejects_unknown_container():
+    for name in ("vmalert", "voip-vmalert ", "voip-vmalert;id", "--follow"):
+        try:
+            with _Capture():
+                oc.run_command("host.docker_logs", {"container": name}, oc.ROLE_SERVICES)
+        except ValueError:
+            continue
+        raise AssertionError(f"host.docker_logs accepted {name!r}")
 
 
 # --------------------------------------------------------------------------- #

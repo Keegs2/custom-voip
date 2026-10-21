@@ -1136,6 +1136,20 @@ and fsdisp metrics exporter (:9104); media role exports ESL gauges (:9103).
 Writes require step-up; dangerous-tier verbs additionally require
 `crag.admin.dangerous`.
 
+`host.journalctl` reads the HOST journal: the image carries the `journalctl`
+binary (Debian `systemd` package, binary only — `ops_agent.py` stays PID 1) and
+all three compose roles bind-mount `/var/log/journal` and `/etc/machine-id`
+read-only. Units are a closed list (`KNOWN_UNITS`: docker, pgbouncer, postgresql,
+guest agent, journald, and the revup guard/watchdog/backup units that page via
+`revup-alert`). It can only read a PERSISTENT journal
+(`/var/log/journal/<machine-id>/`); otherwise every call answers exit 125
+"unavailable" with the reason. Check on a VM (single line): `ls /var/log/journal`
+— a 32-hex machine-id directory there means reads work. Nothing in this repo
+configures journald, and the runbooks' own `journalctl -u …` steps work with a
+volatile journal too, so persistence is not guaranteed by the repo. Note: if the
+directory is absent, Docker creates it (empty) for the bind mount, and journald's
+default `Storage=auto` then turns persistent at its next restart/reboot.
+
 ### 10.4 Maintenance tool (CRAG FLEET → Maintenance, LIVE 2026-09-03/04)
 
 | Property | Behavior |

@@ -340,6 +340,9 @@ KNOWN_CONTAINERS = frozenset({
     "voip-qryn",
     "voip-heplify-server",
     "voip-grafana",
+    # services VM: evaluates docker/vmalert/rules; the vmalert pager pages
+    # "vmalert API unreachable" when it stops answering.
+    "voip-vmalert",
 })
 
 # Known systemd units the operator may want tailed FROM THE HOST journal. Kept to
@@ -457,27 +460,51 @@ def _run_esl(verb: str, timeout: float):
 # --------------------------------------------------------------------------- #
 # journalctl availability probe (best-effort in a container).
 #
-# journalctl works in a container only if the host journal is mounted read-only
-# (/var/log/journal + /etc/machine-id) AND the journalctl binary is present. We
-# detect that at import: binary on PATH and a persistent journal dir present. If
-# not available, host.journalctl returns a clean "unavailable" result (ok=False,
-# a descriptive stderr) instead of failing the request — docker_logs still covers
-# container logs. This is the documented, safe-feasible behavior.
+# journalctl works in a container only if the journalctl binary is present (the
+# image installs it — see the Dockerfile) AND the host journal is mounted
+# read-only (/var/log/journal + /etc/machine-id, all three production compose
+# files). journalctl reads the LOCAL machine's files, i.e.
+# /var/log/journal/<machine-id>/, so that exact directory is what we probe. It
+# exists only when the VM keeps a PERSISTENT journal; on a VM whose journal is
+# volatile (/run/log/journal only), the bind mount shows an empty directory and
+# the probe reports why. One-line check on the VM: `ls /var/log/journal`.
+#
+# Detected ONCE at import. If not available, host.journalctl returns a clean
+# "unavailable" result (ok=False, exit 125, the reason on stderr) instead of
+# failing the request — docker_logs still covers container logs.
 # --------------------------------------------------------------------------- #
 
-def _journal_available() -> bool:
+_HOST_JOURNAL_DIR = "/var/log/journal"
+_MACHINE_ID_FILE = "/etc/machine-id"
+_MACHINE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _journal_unavailable_reason():
+    """None when host.journalctl can read the host journal here, else why not."""
     if not shutil.which("journalctl"):
-        return False
-    # A mounted persistent host journal shows up as /var/log/journal/<machine-id>.
+        return "journalctl binary missing from this image"
     try:
-        return os.path.isdir("/var/log/journal") and any(
-            os.scandir("/var/log/journal")
+        with open(_MACHINE_ID_FILE, encoding="ascii") as fh:
+            machine_id = fh.read().strip()
+    except (OSError, UnicodeDecodeError):
+        machine_id = ""
+    if not _MACHINE_ID_RE.match(machine_id):
+        return f"host {_MACHINE_ID_FILE} not mounted"
+    if not os.path.isdir(os.path.join(_HOST_JOURNAL_DIR, machine_id)):
+        return (
+            f"no persistent host journal at {_HOST_JOURNAL_DIR}/<machine-id> "
+            "(not mounted, or the VM journal is volatile: run `ls "
+            f"{_HOST_JOURNAL_DIR}` on the VM)"
         )
-    except OSError:
-        return False
+    return None
 
 
-JOURNAL_AVAILABLE = _journal_available()
+def _journal_available() -> bool:
+    return _journal_unavailable_reason() is None
+
+
+JOURNAL_UNAVAILABLE_REASON = _journal_unavailable_reason()
+JOURNAL_AVAILABLE = JOURNAL_UNAVAILABLE_REASON is None
 
 
 def _journalctl_run(params, timeout):
@@ -496,12 +523,13 @@ def _journalctl_run(params, timeout):
     if not JOURNAL_AVAILABLE:
         # Graceful, documented degradation — not an error the console must handle
         # as a crash. exit_code 125 == "unavailable in this deployment".
+        reason = JOURNAL_UNAVAILABLE_REASON or "host journal not readable"
         return (
             False,
             125,
             "",
-            "host.journalctl unavailable in this container "
-            "(host journal not mounted; use host.docker_logs for container logs)",
+            f"host.journalctl unavailable in this container ({reason}; "
+            "use host.docker_logs for container logs)",
         )
     return _run_argv(argv, timeout)
 
