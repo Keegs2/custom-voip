@@ -54,8 +54,8 @@ notifications:
 
 - `host` — the VM name (`labels."compute.googleapis.com/resource_name"`, set by the Ops Agent).
 - `kind` — the first word of the page, qualified for families that emit several
-  conditions from one VM: `unit-failed unit=<unit>`, `vmalert <alertname>` /
-  `vmalert API`, `HA standby <ip> is` / `HA standby <ip> lag`,
+  conditions from one VM: `unit-failed unit=<unit>`,
+  `vmalert <alertname> FIRING zone=<zone>` / `vmalert API`, `HA standby <ip> is` / `HA standby <ip> lag`,
   `replication-slot slot=<slot> wal_status` / `... retained_bytes`; otherwise the
   first word (`ASR`, `FreeSWITCH`, `test`, `TEST`).
 

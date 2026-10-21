@@ -551,11 +551,13 @@ resource "google_monitoring_alert_policy" "cpu_high" {
 #     host = the VM name; kind = the page's first word, qualified for families
 #     that emit several different conditions from one VM, so each condition is
 #     its own rule:
-#       unit-failed unit=<unit>          (each failed backup/guard unit)
-#       vmalert <alertname> | vmalert API (each vmalert rule; pager API loss)
-#       HA standby <ip> is | ... lag       (standby disconnected vs lagging)
+#       unit-failed unit=<unit>                 each failed backup/guard unit
+#       vmalert <alertname> FIRING zone=<zone>  each rule in each zone (the
+#                                               pager keys alerts name|zone)
+#       vmalert API                             pager lost the vmalert API
+#       HA standby <ip> is | HA standby <ip> lag   disconnected vs lagging
 #       replication-slot slot=<s> wal_status | ... retained_bytes
-#       ASR | FreeSWITCH | test | TEST    (everything else: first word)
+#       ASR | FreeSWITCH | test | TEST          everything else: first word
 #     The kind regex is checked offline against every page text the scripts
 #     emit: python3 infra/monitoring/test_revup_alert_extractors.py
 #   - notification_rate_limit 900 s (was 1800 s for the whole policy). Before
@@ -583,7 +585,7 @@ resource "google_monitoring_alert_policy" "revup_alert_log" {
       filter = "resource.type=\"gce_instance\" AND logName:\"syslog\" AND (jsonPayload.message=~\"revup-alert[^@ :]*: \" OR textPayload=~\"revup-alert[^@ :]*: \")"
       label_extractors = {
         host = "EXTRACT(labels.\"compute.googleapis.com/resource_name\")"
-        kind = "REGEXP_EXTRACT(jsonPayload.message, \"revup-alert[^@ :]*: +((?:vmalert |unit-failed unit=|HA standby [^ ]+ |replication-slot slot=[^ ]+ )?[^ =]+)\")"
+        kind = "REGEXP_EXTRACT(jsonPayload.message, \"revup-alert[^@ :]*: +((?:vmalert [^ ]+ FIRING zone=|vmalert |unit-failed unit=|HA standby [^ ]+ |replication-slot slot=[^ ]+ )?[^ =]+)\")"
       }
     }
   }
