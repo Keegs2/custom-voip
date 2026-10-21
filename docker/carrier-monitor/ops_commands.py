@@ -346,6 +346,36 @@ KNOWN_CONTAINERS = frozenset({
 # infrastructure units relevant to this platform. journalctl-from-a-container is
 # best-effort (see JOURNAL_AVAILABLE); when unavailable we report cleanly rather
 # than fail. docker_logs covers per-container logs regardless.
+#
+# The revup-* units are the on-VM watchdogs, guards and backup jobs that page
+# through the `revup-alert` syslog tag (infra/monitoring revup_alert_log). Their
+# journals hold the page line itself (guards/watchdogs log it from inside the
+# unit) or the failure output a "unit-failed unit=<unit>" page points at (backup
+# jobs, via OnFailure=revup-alert@%p.service). Names come from the unit files the
+# installers copy into /etc/systemd/system:
+#   scripts/backup/systemd/          (install_backup_timers.sh, services VM)
+#   scripts/fs-watchdog/systemd/     (install_fs_watchdog.sh, media VMs)
+#   scripts/vmalert-pager/systemd/   (install_vmalert_pager.sh, services VM)
+# The revup-alert@ relay template is deliberately NOT listed: its instances only
+# repeat the page line, and a template would need an open-ended instance name.
+# test_ops_journalctl_units.py fails if a new revup-*.service lands in those
+# directories without being added here.
+_REVUP_PAGING_UNITS = (
+    # scripts/backup/systemd — guards (each logs its own revup-alert line)
+    "revup-asr-guard",
+    "revup-replication-guard",
+    "revup-slot-wal-guard",
+    # scripts/backup/systemd — backup jobs (paged as unit-failed via OnFailure)
+    "revup-pgdump",
+    "revup-cdr-archive",
+    "revup-pgbackrest-full",
+    "revup-pgbackrest-diff",
+    # scripts/fs-watchdog/systemd — FreeSWITCH container/ESL watchdog
+    "revup-fs-watchdog",
+    # scripts/vmalert-pager/systemd — vmalert -> revup-alert relay
+    "revup-vmalert-pager",
+)
+
 KNOWN_UNITS = frozenset({
     "docker",
     "docker.service",
@@ -357,6 +387,9 @@ KNOWN_UNITS = frozenset({
     "google-guest-agent.service",
     "systemd-journald",
     "systemd-journald.service",
+    # Both spellings, like the units above (journalctl -u accepts either).
+    *_REVUP_PAGING_UNITS,
+    *(f"{unit}.service" for unit in _REVUP_PAGING_UNITS),
 })
 
 
