@@ -81,5 +81,7 @@ host) for development/testing — not the production layout.
   Never `gcloud scp`. Repo path on VMs is `/opt/revup`; all commands need `sudo`.
 - **`.env` is not in git** (secrets). Each VM has its own `/opt/revup/.env`; see
   `GCP_DEPLOYMENT_PLAN.md` for the per-VM variable list.
-- **Type-check the UI before pushing:** `cd docker/ui/app && npx tsc --noEmit`.
+- **Type-check the UI before pushing:** `cd docker/ui/app && npm run build` (`tsc -b && vite build`;
+  `tsc --noEmit` checks nothing here because `tsconfig.json` is a solution file). CI
+  (`.github/workflows/ci.yml`) runs it and the API/Lua tests on every PR; see `CLAUDE.md` → CI.
 - **Live RCF test DID:** `+16174544217` → forwards to `+17744045256`.

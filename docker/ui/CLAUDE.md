@@ -899,10 +899,13 @@ times due to hooks placed after conditional early returns.
 5. **Add a nav item** to `allProductNavItems` or admin items in `Sidebar.tsx` if
    the page needs sidebar navigation. Include `accountTypes` filter if relevant.
 
-6. **Run the type check** before pushing:
+6. **Run the type check** before pushing (CI runs the same on every PR):
    ```bash
-   cd docker/ui/app && npx tsc --noEmit
+   cd docker/ui/app && npm run build   # tsc -b && vite build
    ```
+   Not `npx tsc --noEmit`: `tsconfig.json` is a solution file (`"files": []`
+   plus references), so that command type-checks nothing and always passes.
+   `npx tsc -b` alone is the type-check without the Vite bundle.
 
 ---
 
