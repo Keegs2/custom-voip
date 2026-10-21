@@ -44,13 +44,37 @@ resource "google_monitoring_notification_channel" "sms" {
   }
 }
 
+# Every policy in this module notifies local.channels. The Pub/Sub channel(s)
+# (var.pubsub_notification_channel_ids) feed topic monitoring-alerts, which
+# TED's CRAG Ops intake reads; they are owned outside this module, so they are
+# referenced by id exactly like the Slack channels. Before this variable existed
+# the channel was attached in the console only, and every `tofu apply` removed it.
 locals {
   channels = concat(
     [google_monitoring_notification_channel.email.id],
     google_monitoring_notification_channel.pagerduty[*].id,
     google_monitoring_notification_channel.sms[*].id,
     var.slack_channel_ids,
+    var.pubsub_notification_channel_ids,
   )
+}
+
+# ----------------------------------------------------------------------------
+# Policy user labels
+# ----------------------------------------------------------------------------
+# Every policy carries system=crag plus a component, so a consumer of the SHARED
+# monitoring-alerts topic (TED's CRAG Ops intake) selects CRAG incidents from
+# incident.policy_user_labels instead of a list of policy names. GCM allows only
+# lowercase letters, digits, "_" and "-" in label keys and values.
+#   component : sip-vip | api | ui | vm | disk | memory | cpu | sbc | watchdog
+#   zone      : east | west | central — only on policies pinned to ONE zone
+#               (SIP VIPs, SBC pairs). Multi-VM policies take the zone from the
+#               incident's resource labels instead.
+#   sbc_role  : primary | standby — SBC failover-state policies only
+locals {
+  policy_labels = {
+    system = "crag"
+  }
 }
 
 # ----------------------------------------------------------------------------
@@ -214,37 +238,48 @@ resource "google_monitoring_uptime_check_config" "ui" {
 # Each front door carries its own severity + headline + summary. SIP VIPs and
 # the API are CRITICAL (calls / provisioning). The operator UI is WARNING —
 # unreachable UI blocks admin access but does NOT affect live calls.
+# component/zone become the policy's user labels (see "Policy user labels").
 locals {
   uptime_checks = {
     "SIP VIP East unreachable" = {
-      check_id = google_monitoring_uptime_check_config.sip_vip.uptime_check_id
-      severity = "CRITICAL"
-      subject  = "[CRITICAL] SIP front door DOWN (East) — inbound calls are failing"
-      content  = "The East SIP VIP (34.24.133.82:5060) is unreachable from Google's probers — inbound RCF calls into East are failing right now.\nIMPACT: the carrier cannot deliver calls into this region.\nDO: check the East NLB backend health, then `sudo docker ps` on both East SBCs, then Homer. SLOs: infra/monitoring/SLOS.md"
+      check_id  = google_monitoring_uptime_check_config.sip_vip.uptime_check_id
+      severity  = "CRITICAL"
+      component = "sip-vip"
+      zone      = "east"
+      subject   = "[CRITICAL] SIP front door DOWN (East) — inbound calls are failing"
+      content   = "The East SIP VIP (34.24.133.82:5060) is unreachable from Google's probers — inbound RCF calls into East are failing right now.\nIMPACT: the carrier cannot deliver calls into this region.\nDO: check the East NLB backend health, then `sudo docker ps` on both East SBCs, then Homer. SLOs: infra/monitoring/SLOS.md"
     }
     "SIP VIP West unreachable" = {
-      check_id = google_monitoring_uptime_check_config.sip_vip_west.uptime_check_id
-      severity = "CRITICAL"
-      subject  = "[CRITICAL] SIP front door DOWN (West) — inbound calls are failing"
-      content  = "The West SIP VIP (35.252.214.40:5060) is unreachable from Google's probers — inbound RCF calls into West are failing right now.\nIMPACT: the carrier cannot deliver calls into this region.\nDO: check the West NLB backend health, then `sudo docker ps` on both West SBCs, then Homer. SLOs: infra/monitoring/SLOS.md"
+      check_id  = google_monitoring_uptime_check_config.sip_vip_west.uptime_check_id
+      severity  = "CRITICAL"
+      component = "sip-vip"
+      zone      = "west"
+      subject   = "[CRITICAL] SIP front door DOWN (West) — inbound calls are failing"
+      content   = "The West SIP VIP (35.252.214.40:5060) is unreachable from Google's probers — inbound RCF calls into West are failing right now.\nIMPACT: the carrier cannot deliver calls into this region.\nDO: check the West NLB backend health, then `sudo docker ps` on both West SBCs, then Homer. SLOs: infra/monitoring/SLOS.md"
     }
     "SIP VIP Central unreachable" = {
-      check_id = google_monitoring_uptime_check_config.sip_vip_central.uptime_check_id
-      severity = "CRITICAL"
-      subject  = "[CRITICAL] SIP front door DOWN (Central) — inbound calls are failing"
-      content  = "The Central SIP VIP (35.253.133.230:5060) is unreachable from Google's probers — inbound RCF calls into Central are failing right now.\nIMPACT: the carrier cannot deliver calls into this region.\nDO: check the Central NLB backend health, then `sudo docker ps` on both Central SBCs, then Homer. SLOs: infra/monitoring/SLOS.md"
+      check_id  = google_monitoring_uptime_check_config.sip_vip_central.uptime_check_id
+      severity  = "CRITICAL"
+      component = "sip-vip"
+      zone      = "central"
+      subject   = "[CRITICAL] SIP front door DOWN (Central) — inbound calls are failing"
+      content   = "The Central SIP VIP (35.253.133.230:5060) is unreachable from Google's probers — inbound RCF calls into Central are failing right now.\nIMPACT: the carrier cannot deliver calls into this region.\nDO: check the Central NLB backend health, then `sudo docker ps` on both Central SBCs, then Homer. SLOs: infra/monitoring/SLOS.md"
     }
     "API backend /health failing" = {
-      check_id = google_monitoring_uptime_check_config.api_health.uptime_check_id
-      severity = "CRITICAL"
-      subject  = "[CRITICAL] API backend DOWN — provisioning + CDR ingest affected"
-      content  = "The services-VM API /health probe is failing — the REST API is down. Live calls still route (FreeSWITCH reads PG directly), but provisioning, the portal backend, and CDR ingest are affected (FreeSWITCH buffers CDRs to disk and retries).\nDO: `sudo docker compose -f docker-compose.services.yml ps api` on the services VM and check its logs. SLOs: infra/monitoring/SLOS.md"
+      check_id  = google_monitoring_uptime_check_config.api_health.uptime_check_id
+      severity  = "CRITICAL"
+      component = "api"
+      zone      = ""
+      subject   = "[CRITICAL] API backend DOWN — provisioning + CDR ingest affected"
+      content   = "The services-VM API /health probe is failing — the REST API is down. Live calls still route (FreeSWITCH reads PG directly), but provisioning, the portal backend, and CDR ingest are affected (FreeSWITCH buffers CDRs to disk and retries).\nDO: `sudo docker compose -f docker-compose.services.yml ps api` on the services VM and check its logs. SLOs: infra/monitoring/SLOS.md"
     }
     "Operator UI unreachable" = {
-      check_id = google_monitoring_uptime_check_config.ui.uptime_check_id
-      severity = "WARNING"
-      subject  = "[WARNING] Operator portal (UI) unreachable — calls unaffected"
-      content  = "The operator UI is unreachable from Google's probers. Live calls are UNAFFECTED; this only blocks admin/portal access.\nDO: `sudo docker compose -f docker-compose.services.yml ps ui` on the services VM; check nginx + the TLS cert. Keep an eye on it — escalate if it persists."
+      check_id  = google_monitoring_uptime_check_config.ui.uptime_check_id
+      severity  = "WARNING"
+      component = "ui"
+      zone      = ""
+      subject   = "[WARNING] Operator portal (UI) unreachable — calls unaffected"
+      content   = "The operator UI is unreachable from Google's probers. Live calls are UNAFFECTED; this only blocks admin/portal access.\nDO: `sudo docker compose -f docker-compose.services.yml ps ui` on the services VM; check nginx + the TLS cert. Keep an eye on it — escalate if it persists."
     }
   }
 }
@@ -283,6 +318,14 @@ resource "google_monitoring_alert_policy" "uptime" {
     subject   = each.value.subject
     content   = each.value.content
   }
+
+  # zone = "" (API/UI: probes of the services VM, not of a zone) is left out.
+  user_labels = merge(local.policy_labels, {
+    for key, value in {
+      component = each.value.component
+      zone      = each.value.zone
+    } : key => value if value != ""
+  })
 }
 
 # ----------------------------------------------------------------------------
@@ -323,6 +366,8 @@ resource "google_monitoring_alert_policy" "vm_down" {
     subject   = "[CRITICAL] Production VM DOWN — $${metadata.system_labels.name} ($${resource.label.zone})"
     content   = "No hypervisor metrics for 5 minutes from $${metadata.system_labels.name} ($${resource.label.zone}) — the instance is stopped, crashed, or lost by the project.\nIMPACT: an SBC = the zone runs on its standby SBC (NLB failover); a media VM = the zone's Kamailio dispatcher flips NEW calls to the other FS within the probe window, but established calls on the dead FS DROP (media anchored — docs/FS_MEDIA_HA_RUNBOOK.md); BOTH media VMs = ALL in-zone calls fail (zone VIP darkens, Bandwidth retries other zones); the services VM = ALL new-call DID lookups fail + portal/API dark.\nDO: check the instance in the GCP console. If it is running, the Ops Agent or the Docker stack is down (`sudo docker ps`)."
   }
+
+  user_labels = merge(local.policy_labels, { component = "vm" })
 }
 
 # ----------------------------------------------------------------------------
@@ -367,6 +412,8 @@ resource "google_monitoring_alert_policy" "disk_used" {
     subject   = "[CRITICAL] Disk almost full on $${metadata.system_labels.name} — over ${var.disk_percent_threshold}% used"
     content   = "A real filesystem on $${metadata.system_labels.name} (device $${metric.label.device}) crossed ${var.disk_percent_threshold}% used.\nIMPACT: PG hitting a full disk = full new-call outage; ClickHouse/qryn stop ingesting.\nDO (services VM, in order): replication-slot WAL (`journalctl -t revup-backup | grep slot-wal`), pg_wal size, ClickHouse volume, /var/backups/revup."
   }
+
+  user_labels = merge(local.policy_labels, { component = "disk" })
 }
 
 # WARNING — a filesystem is filling; triage before it becomes critical.
@@ -402,6 +449,8 @@ resource "google_monitoring_alert_policy" "disk_warning" {
     subject   = "[WARNING] Disk filling on $${metadata.system_labels.name} — over ${var.disk_warn_percent_threshold}% used"
     content   = "A real filesystem on $${metadata.system_labels.name} (device $${metric.label.device}) crossed ${var.disk_warn_percent_threshold}% used and is trending toward full — keep an eye on it (this fires before the critical page at ${var.disk_percent_threshold}%).\nDO: find what is growing — replication-slot WAL, ClickHouse volume, or /var/backups/revup on the services VM."
   }
+
+  user_labels = merge(local.policy_labels, { component = "disk" })
 }
 
 # ----------------------------------------------------------------------------
@@ -439,6 +488,8 @@ resource "google_monitoring_alert_policy" "memory_used" {
     subject   = "[WARNING] High memory on $${metadata.system_labels.name} — over ${var.memory_percent_threshold}% for 10m"
     content   = "Sustained high memory on $${metadata.system_labels.name} (over ${var.memory_percent_threshold}% used for 10 minutes) — keep an eye on it.\nNOTE: FreeSWITCH under memory pressure degrades media before it OOMs; on the services VM suspect ClickHouse/qryn first (qryn runs a 4 GB heap)."
   }
+
+  user_labels = merge(local.policy_labels, { component = "memory" })
 }
 
 # ----------------------------------------------------------------------------
@@ -476,14 +527,49 @@ resource "google_monitoring_alert_policy" "cpu_high" {
     subject   = "[WARNING] High CPU on $${metadata.system_labels.name} — over ${var.cpu_utilization_threshold * 100}% for 15m"
     content   = "Sustained CPU saturation on $${metadata.system_labels.name} (over ${var.cpu_utilization_threshold * 100}% for 15 minutes) — a capacity ceiling or a runaway process. Keep an eye on it.\nDO: per PRODUCTION_ARCHITECTURE.md §13, trigger capacity planning at 70% of rated load; 90% sustained is an incident."
   }
+
+  user_labels = merge(local.policy_labels, { component = "cpu" })
 }
 
 # ----------------------------------------------------------------------------
 # revup-alert log-match — the on-VM paging hook.
 # Anything on any VM can page by writing one syslog line:
 #     logger -p user.err -t revup-alert -- "what broke"
-# Used today by: backup unit failures (revup-alert@.service) and the
-# replication-slot WAL watchdog. Requires the Ops Agent (ships syslog).
+# Used today by: backup unit failures (revup-alert@.service), the replication
+# and replication-slot WAL guards, the ASR guard (scripts/backup/), the
+# FreeSWITCH watchdog (scripts/fs-watchdog/) and the vmalert pager
+# (scripts/vmalert-pager/). Requires the Ops Agent (ships syslog, raw line in
+# jsonPayload.message, e.g. "... revup-alert: ASR 23% over 15m ...").
+#
+# Matching + grouping:
+#   - The filter matches the logger TAG ("revup-alert:" or "revup-alert[pid]:"),
+#     not the bare word, so systemd's own lines about the relay unit
+#     ("Starting revup-alert@revup-pgdump.service ...") no longer count as pages.
+#   - label_extractors split incidents and notifications per (host, kind):
+#     "Each combination of extracted values is treated as a separate rule for
+#     the purposes of triggering notifications" (AlertPolicy LogMatch API ref).
+#     host = the VM name; kind = the page's first word, qualified for families
+#     that emit several different conditions from one VM, so each condition is
+#     its own rule:
+#       unit-failed unit=<unit>          (each failed backup/guard unit)
+#       vmalert <alertname> | vmalert API (each vmalert rule; pager API loss)
+#       HA standby <ip> is | ... lag       (standby disconnected vs lagging)
+#       replication-slot slot=<s> wal_status | ... retained_bytes
+#       ASR | FreeSWITCH | test | TEST    (everything else: first word)
+#     The kind regex is checked offline against every page text the scripts
+#     emit: python3 infra/monitoring/test_revup_alert_extractors.py
+#   - notification_rate_limit 900 s (was 1800 s for the whole policy). Before
+#     the extractors the policy was one rule, so after any page a second,
+#     different watchdog line (another guard, another VM) could go unnotified
+#     for up to 30 minutes. Now the
+#     limit only spaces out repeats of the SAME (host, kind): the guards re-emit
+#     every 5-15 min while a condition persists, so 900 s (the slowest guard's
+#     cadence) gives at most 4 notifications/hour per condition, and bounds the
+#     delay to 15 min even if per-combination limiting behaves differently from
+#     the API reference.
+# Log-based incidents never notify on close (notification prompts are always
+# [OPENED]); they auto-close 24 h after the last matching line. Closure is not
+# recovery — re-check the condition named in the line.
 # ----------------------------------------------------------------------------
 resource "google_monitoring_alert_policy" "revup_alert_log" {
   display_name          = "On-VM watchdog page (backups · replication · slot-WAL · ASR)"
@@ -494,20 +580,26 @@ resource "google_monitoring_alert_policy" "revup_alert_log" {
   conditions {
     display_name = "syslog contains revup-alert"
     condition_matched_log {
-      filter = "resource.type=\"gce_instance\" AND logName:\"syslog\" AND (jsonPayload.message:\"revup-alert\" OR textPayload:\"revup-alert\")"
+      filter = "resource.type=\"gce_instance\" AND logName:\"syslog\" AND (jsonPayload.message=~\"revup-alert[^@ :]*: \" OR textPayload=~\"revup-alert[^@ :]*: \")"
+      label_extractors = {
+        host = "EXTRACT(labels.\"compute.googleapis.com/resource_name\")"
+        kind = "REGEXP_EXTRACT(jsonPayload.message, \"revup-alert[^@ :]*: +((?:vmalert |unit-failed unit=|HA standby [^ ]+ |replication-slot slot=[^ ]+ )?[^ =]+)\")"
+      }
     }
   }
 
   alert_strategy {
     auto_close = "86400s"
     notification_rate_limit {
-      period = "1800s"
+      period = "900s"
     }
   }
 
   documentation {
     mime_type = "text/markdown"
-    subject   = "[CRITICAL] On-VM watchdog page — $${resource.label.zone}"
-    content   = "An on-VM watchdog fired a page in $${resource.label.zone}. The matched syslog line IN THIS INCIDENT names the exact condition — a failed backup unit, replication-slot WAL, ASR collapse, or replication lag.\nDO: read that line, then — backups: `journalctl -u <unit>`; slot-WAL: `scripts/backup/slot_wal_guard.sh` header; ASR: carrier/route/Homer.\nNOTE: if this policy hit its daily incident cap, a real condition is firing repeatedly (NOT a leftover test) — fix the root cause named in the line."
+    subject   = "[CRITICAL] On-VM watchdog page — $${log.extracted_label.kind} on $${log.extracted_label.host} ($${resource.label.zone})"
+    content   = "An on-VM watchdog fired a page on $${log.extracted_label.host} in $${resource.label.zone}: kind \"$${log.extracted_label.kind}\". The matched syslog line IN THIS INCIDENT names the exact condition — a failed unit (unit-failed), replication lag/disconnect (HA standby), replication-slot WAL, ASR collapse, FreeSWITCH down, or a firing vmalert rule.\nDO: read that line, then — failed unit: `journalctl -u <unit>`; slot-WAL: `scripts/backup/slot_wal_guard.sh` header; ASR: carrier/route/Homer; FreeSWITCH: docs/FS_MEDIA_HA_RUNBOOK.md §5; vmalert: docker/vmalert/rules.\nNOTE: each (host, kind) is its own incident. This incident auto-closes 24 h after the last matching line and never sends a CLOSED notification — closure is NOT recovery. If this policy hit its daily incident cap, a real condition is firing repeatedly (NOT a leftover test) — fix the root cause named in the line."
   }
+
+  user_labels = merge(local.policy_labels, { component = "watchdog" })
 }
