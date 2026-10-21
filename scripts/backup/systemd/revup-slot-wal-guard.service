@@ -1,8 +1,10 @@
 # Replication-slot retained-WAL watchdog (see slot_wal_guard.sh header).
-# Emits its own specific revup-alert lines; OnFailure adds the generic one.
+# Emits its own specific revup-alert lines (and exits 0 — the page IS its job);
+# OnFailure adds the generic one only if the guard itself errors.
 # Placement: /etc/systemd/system/ (installed by install_backup_timers.sh)
 [Unit]
 Description=revup replication-slot WAL watchdog
+OnFailure=revup-alert@%p.service
 
 [Service]
 Type=oneshot
