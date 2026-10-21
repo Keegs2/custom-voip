@@ -1,0 +1,117 @@
+# CI for every pull request into RCF-V1 and every push to it, including draft
+# PRs opened by bots. It only reads the repository: no secrets, no write-scoped
+# token, no deploy. Never add `pull_request_target`, repository secrets, or
+# write permissions here; PR code (human- or model-written) runs in this job.
+# What runs and why: CLAUDE.md, section "CI".
+name: CI
+
+on:
+  pull_request:
+    branches: [RCF-V1]
+  push:
+    branches: [RCF-V1]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # A new push to a PR cancels its running check; RCF-V1 runs always finish so
+  # every merged commit gets a result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  api-tests:
+    name: api-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # Throwaway clusters for the DB-backed tests (vanilla PostgreSQL 16, no
+      # TimescaleDB, as the tests expect).
+      TEST_PG_BIN: /usr/lib/postgresql/16/bin
+      # Production FreeSWITCH mod_lua is built against Lua 5.3
+      # (docker/freeswitch/Dockerfile), so the routing scripts are tested on 5.3.
+      LUA: lua5.3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12" # docker/api/Dockerfile: python:3.12-slim-bookworm
+          cache: pip
+          cache-dependency-path: |
+            docker/api/requirements.txt
+            tests/requirements.txt
+
+      - name: Install PostgreSQL 16 and Lua 5.3
+        id: system
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends postgresql-16 lua5.3
+          "$TEST_PG_BIN/initdb" --version
+          "$TEST_PG_BIN/psql" --version
+          "$LUA" -v
+
+      - name: Install Python dependencies
+        run: python -m pip install --prefer-binary -r tests/requirements.txt
+
+      - name: pytest
+        id: pytest
+        run: python -m pytest tests -q -rsx --junitxml="$RUNNER_TEMP/pytest-results.xml"
+
+      # The DB and Lua tests skip silently when a tool is missing; a skip here
+      # means a test did not run, so it fails the job.
+      - name: Fail on skipped tests
+        if: ${{ !cancelled() && steps.pytest.outcome != 'skipped' }}
+        run: python .github/scripts/check_no_skips.py "$RUNNER_TEMP/pytest-results.xml"
+
+      - name: Lua harnesses (tests/lua)
+        if: ${{ !cancelled() && steps.system.outcome == 'success' }}
+        run: |
+          shopt -s nullglob
+          harnesses=(tests/lua/*_harness.lua)
+          if [ "${#harnesses[@]}" -eq 0 ]; then
+            echo "::error::no tests/lua/*_harness.lua found"
+            exit 1
+          fi
+          status=0
+          for h in "${harnesses[@]}"; do
+            echo "::group::$h"
+            if "$LUA" "$h"; then ok=1; else ok=0; fi
+            echo "::endgroup::"
+            if [ "$ok" -eq 0 ]; then
+              echo "::error file=$h::$h failed"
+              status=1
+            fi
+          done
+          exit "$status"
+
+      - name: vmalert-pager tests
+        if: ${{ !cancelled() && steps.system.outcome == 'success' }}
+        run: bash scripts/vmalert-pager/test/run_tests.sh
+
+  ui-build:
+    name: ui-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: docker/ui/app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20" # docker/ui/Dockerfile: node:20-alpine
+          cache: npm
+          cache-dependency-path: docker/ui/app/package-lock.json
+
+      - run: npm ci
+
+      # tsc -b (type-checks both tsconfig projects) && vite build — the same
+      # command the Docker image build runs.
+      - run: npm run build
