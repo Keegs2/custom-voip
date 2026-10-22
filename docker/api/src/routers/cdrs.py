@@ -710,12 +710,15 @@ _CALL_LEG_COLUMNS = ("leg", "call_id", "leg_attempt")
 # Rate limit for the fallback log lines: one ERROR per interval per worker per
 # tier, the rest at DEBUG — a busy zone in the deploy window must not flood
 # logs with one stack per call, but the condition must stay visible.
+# "Never logged" is -inf, not 0.0: time.monotonic() counts from boot, so on a
+# host up for less than the interval a 0.0 start held back the first ERROR.
 _PRE47_LOG_INTERVAL_SEC = 300.0
-_pre47_last_logged_mono = 0.0
+_NEVER_LOGGED = float("-inf")
+_pre47_last_logged_mono = _NEVER_LOGGED
 _pre47_fallback_count = 0
-_pre48_last_logged_mono = 0.0
+_pre48_last_logged_mono = _NEVER_LOGGED
 _pre48_fallback_count = 0
-_pre50_last_logged_mono = 0.0
+_pre50_last_logged_mono = _NEVER_LOGGED
 _pre50_fallback_count = 0
 
 
@@ -854,7 +857,7 @@ async def _execute_cdr_insert(call_uuid: str, params: tuple, *,
 # ---------------------------------------------------------------------------
 _REFRESH_CALL_QUALITY_SQL = (
     "SELECT cdr_refresh_call_quality($1::varchar, $2::timestamptz) AS n")
-_refresh_last_logged_mono = 0.0
+_refresh_last_logged_mono = _NEVER_LOGGED
 _refresh_failure_count = 0
 
 

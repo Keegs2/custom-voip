@@ -86,14 +86,27 @@ def _a_leg_vars(uuid, **overrides):
 
 
 def _reset_fallback_rate_limit():
-    cdrs._pre47_last_logged_mono = 0.0
+    cdrs._pre47_last_logged_mono = cdrs._NEVER_LOGGED
     cdrs._pre47_fallback_count = 0
-    cdrs._pre48_last_logged_mono = 0.0
+    cdrs._pre48_last_logged_mono = cdrs._NEVER_LOGGED
     cdrs._pre48_fallback_count = 0
-    cdrs._pre50_last_logged_mono = 0.0
+    cdrs._pre50_last_logged_mono = cdrs._NEVER_LOGGED
     cdrs._pre50_fallback_count = 0
-    cdrs._refresh_last_logged_mono = 0.0
+    cdrs._refresh_last_logged_mono = cdrs._NEVER_LOGGED
     cdrs._refresh_failure_count = 0
+
+
+class _JustBootedTime:
+    """`time` as seen by cdrs on a host booted 12 s ago: time.monotonic()
+    counts from boot, so it is still below the 300 s log interval."""
+
+    def __getattr__(self, name):
+        import time
+        return getattr(time, name)
+
+    @staticmethod
+    def monotonic():
+        return 12.0
 
 
 # ===========================================================================
@@ -228,6 +241,22 @@ def test_ingest_falls_back_to_pre47_insert_with_fake_db(monkeypatch, caplog):
     assert not [rec for rec in caplog.records if rec.levelno == logging.ERROR]
     assert any(rec.levelno == logging.DEBUG and "pre-47 fallback" in rec.getMessage()
                for rec in caplog.records)
+
+
+def test_first_fallback_logs_error_on_a_freshly_booted_host(monkeypatch, caplog):
+    """Right after a VM boots, time.monotonic() is below the log interval; the
+    first fallback must still log at ERROR, not be held back as if one had
+    just been logged (the rate limit used to start at 0.0)."""
+    fake = _FakeExecute()
+    monkeypatch.setattr(db, "execute", fake)
+    monkeypatch.setattr(cdrs, "time", _JustBootedTime())
+    _reset_fallback_rate_limit()
+    with caplog.at_level(logging.DEBUG, logger="routers.cdrs"):
+        r = asyncio.run(cdrs._process_cdr_body({"variables": _a_leg_vars("fake-boot")}))
+    assert r["status"] == "ok" and len(fake.cdr_inserts) == 2
+    errs = [rec for rec in caplog.records
+            if rec.levelno == logging.ERROR and "migration-47" in rec.getMessage()]
+    assert len(errs) == 1
 
 
 def test_other_undefined_column_is_not_swallowed(monkeypatch):
