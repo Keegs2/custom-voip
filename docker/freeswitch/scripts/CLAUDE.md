@@ -101,6 +101,22 @@ list); plan: `docs/ENCRYPTED_VOICEMAIL_BUILD_PLAN.md` (D6/D8, §3.1). Tests:
   /dev/shm/vm/<msg_uuid>.wav <max> 200 10` at 8 kHz (energy threshold 200;
   10 s of continuous silence ends the message; `#` ends / skips greeting) →
   hang up a still-connected caller → deposit → unlink → rate-limited sweep.
+- **Recording jitter buffer (owner decision O6).** Just before `answer`,
+  `vm_box` sets `rtp_timer_name=soft` and `jitterbuffer_msec=60:200` on the
+  A-leg. FS reads both only when the answer creates the RTP session
+  (`switch_core_media_activate_rtp`), so they must be set before it. Nothing
+  earlier on the direct or on-net route pre-answers. The timer is needed
+  because neither sofia profile sets `rtp-timer-name`, and mod_sofia has no
+  default, so RTP reads are otherwise paced by packet arrival. A jitter buffer
+  read that way grows by one frame per lost packet until it is flushed.
+  Effect: caller audio is written in sequence order, and a lost or late packet
+  becomes 20 ms of PLC (fading to silence within 50 ms) instead of being
+  dropped, so the WAV keeps real time. The greeting and beep are clocked at
+  20 ms. There is no SDP change (no `suppress_cng`). This applies to the
+  voicemail leg only: the RCF and trunk bridges relay media, and FS pauses a
+  jitter buffer during a bridge anyway. To check a voicemail CDR, look for
+  `rtp_use_timer_name=soft` and `rtp_audio_in_jitter_packet_count` > 0.
+  Source refs are in `vm_box.lua` "RECORDING MEDIA PATH".
 - **Post-hangup deposit.** The `lua` app runs in the session thread; a caller
   BYE makes `record` return and `session:ready()` false, but the script keeps
   running and the state machine only proceeds to hangup/CDR/destroy after it

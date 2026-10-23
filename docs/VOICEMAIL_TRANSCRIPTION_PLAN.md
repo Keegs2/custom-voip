@@ -1250,7 +1250,12 @@ The telephony agent reviewing audio quality owns any change here. These are the 
    - Good for STT: the tail, now up to 10 s, is trimmed server-side with the same 200 threshold.
    - A caller can now pause up to 10 s mid-message (was 5 s), for example while looking up a number, without being cut off.
 6. **Wideband:** if an on-net leg ever negotiates G.722 (16 kHz), forcing 8000 throws the extra bandwidth away. Recording at the leg's native rate (8000 or 16000) is better. The API and STT already accept both.
-7. **Packet loss and jitter:** `record` writes what it reads, so lost packets become gaps. If the quality review shows meaningful loss on carrier legs, a jitter buffer on the voicemail A-leg (e.g. `jitterbuffer_msec`) would give STT more continuous audio.
+7. **Packet loss and jitter — BUILT (owner decision O6).** Before the answer, `vm_box.lua` sets `rtp_timer_name=soft` and `jitterbuffer_msec=60:200` on the voicemail A-leg. FS reads both only when the answer creates the RTP session.
+   - Before this change, the platform's RTP reads were paced by packet arrival, because neither sofia profile sets `rtp-timer-name`. `record` simply never saw a lost packet: the audio on either side was spliced together, so the WAV was shorter than the call. Reordered packets were written in arrival order.
+   - Now caller audio is written in sequence order (a buffer of 60 ms that grows up to 200 ms under jitter). A lost or late packet becomes 20 ms of FreeSWITCH packet-loss concealment, which fades to silence within 50 ms. The WAV keeps real time, which gives STT continuous audio with correct timing.
+   - The timer is required, not optional. A jitter buffer read on packet arrival grows by one frame per lost packet until it is flushed.
+   - No SDP or codec change (no `suppress_cng`; G.711 and 8000 Hz stay). The 200/10 silence stop still scores one 20 ms frame at a time; with the timer it counts wall-clock time even if RTP stops. RFC 2833 `#` bypasses the buffer.
+   - No other RCF-V1 leg terminates media: RCF and trunk bridges relay it, and FS pauses a jitter buffer during a bridge anyway. Source references are in `vm_box.lua` "RECORDING MEDIA PATH".
 8. **DTMF:** `#` ends the recording. With RFC 2833 the tone is not in the audio. With in-band DTMF a short tone tail is harmless to STT.
 9. **Length:** the 300 s cap and the 1 s minimum deposit are fine. Pieces are handled server-side.
 
