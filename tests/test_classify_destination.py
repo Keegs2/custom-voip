@@ -115,7 +115,9 @@ print("OK")
 # ---------------------------------------------------------------------------
 import re  # noqa: E402
 
-INBOUND_ROUTER = REPO / "docker" / "freeswitch" / "scripts" / "inbound_router.lua"
+# The FreeSWITCH egress fallback NPA set lives in the shared termination lib
+# (used by inbound_router.lua, trunk_outbound.lua and api_outbound.lua).
+TERM_TRUNKS_LIB = REPO / "docker" / "freeswitch" / "scripts" / "lib" / "term_trunks.lua"
 KAMAILIO_CFG = REPO / "docker" / "kamailio" / "kamailio.cfg"
 
 
@@ -138,7 +140,7 @@ def _kamailio_tf_regex():
 def test_tollfree_npa_sets_in_sync():
     want = set(TOLLFREE_NPAS)
     assert _lua_npa_table(NUMBER_UTILS.read_text(), "TOLLFREE_NPAS") == want
-    assert _lua_npa_table(INBOUND_ROUTER.read_text(), "TOLLFREE_NPAS_FALLBACK") == want
+    assert _lua_npa_table(TERM_TRUNKS_LIB.read_text(), "TOLLFREE_NPAS_FALLBACK") == want
     rx = _kamailio_tf_regex()
     alt = re.search(r"8\(([0-9|]+)\)", rx)
     assert alt, rx

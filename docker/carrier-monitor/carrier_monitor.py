@@ -141,13 +141,16 @@ BACKOFF_MAX = _get_int("BACKOFF_MAX", 120, minimum=1)
 #   setid 4,5   = Bandwidth TC1/TC2 PoPs (UNUSED)                 -> EXCLUDED
 #   setid 6,7   = Sinch Denver / Chicago (live, origination-only) -> reported
 #   setid 8,9   = Sinch Atlanta LD / Denver TF (termination-only) -> reported
+#   setid 10    = peer SBC liveness (NOT a carrier)               -> EXCLUDED
+#   setid 11,12 = Sinch Denver LD / Atlanta TF, REDUNDANT termination
+#                 (same IPs as the 8XX-T TF orig trunks)          -> reported
 #
 # duid -> friendly name mapping (the dispatcher RPC does not carry a friendly
 # name, only the duid attribute we set in dispatcher.list). Any carrier duid
 # not in this map still gets reported with a derived fallback name.
 # --------------------------------------------------------------------------- #
 
-CARRIER_SETIDS = frozenset({2, 3, 6, 7, 8, 9})
+CARRIER_SETIDS = frozenset({2, 3, 6, 7, 8, 9, 11, 12})
 FS_SETID = 1  # FreeSWITCH — explicitly excluded from carrier reporting
 
 DUID_NAMES = {
@@ -161,6 +164,8 @@ DUID_NAMES = {
     "sinch-chicago": "Sinch Chicago",
     "sinch-atlanta-ld": "Sinch Atlanta LD",
     "sinch-denver-tf": "Sinch Denver TF",
+    "sinch-denver-ld": "Sinch Denver LD",
+    "sinch-atlanta-tf": "Sinch Atlanta TF",
 }
 
 

@@ -229,14 +229,17 @@ async def get_carrier_status(admin: dict = Depends(require_admin)):
     """Return aggregated carrier-trunk health (admin-only; UI/debug).
 
     Reads the `carrier_trunk_health` view: one row per carrier duid with
-    up_sbcs/total_sbcs, the usable is_up (up on >=1 SBC), staleness, and a
-    collapsed status ('up' | 'down' | 'stale').
+    up_sbcs/total_sbcs, the usable is_up (up on >=1 SBC), staleness, a
+    collapsed status ('up' | 'down' | 'stale' | 'passive'), and trunk_enabled
+    (migration 53: the carrier_trunks.enabled flag behind the duid — a probe
+    reading 'down' on a trunk that is not enabled yet is expected, not an
+    outage).
     """
     rows = await db.fetch_all(
         """
         SELECT duid, name, ip, setid,
                up_sbcs, total_sbcs, is_up,
-               last_updated, stale, status
+               last_updated, stale, status, trunk_enabled
         FROM carrier_trunk_health
         ORDER BY setid NULLS LAST, duid
         """

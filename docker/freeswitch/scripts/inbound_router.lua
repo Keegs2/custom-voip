@@ -456,15 +456,14 @@ end
 -- termination on a DB blip. The caller records the decision in the
 -- term_trunks_source channel variable (db|fallback) which lands in
 -- the CDR variables (same plain-channel-var path as inbound_carrier).
-local TERM_TRUNKS_TTL = 60
+-- (TTL 60s and the 16-row cache cap: lib/term_trunks.lua M.TTL / M.CACHE_MAX.)
 -- Cap at 4 trunks (x 2 SBCs = 8 bridge attempts) to bound worst-case
 -- PDD across a fully-failing attempt sweep. Applied AFTER the per-call
 -- traffic-class filter (strict-TF 2026-10): capping the raw list first
 -- could truncate the only 'tollfree' trunk once >4 outbound rows exist,
 -- and 8YY now FAILS CLOSED without one. The cached list itself is bounded
--- separately (TERM_TRUNKS_CACHE_MAX) so the global-var payload stays small.
+-- separately (lib/term_trunks.lua M.CACHE_MAX) so the global-var payload stays small.
 local TERM_TRUNKS_MAX = 4
-local TERM_TRUNKS_CACHE_MAX = 16
 
 -- Deployment zone selects the per-zone priority override column
 -- (priority_east/west/central). Validated against the closed set;
@@ -507,174 +506,37 @@ do
     set_var("fs_zone", fs_zone)
 end
 
--- Sanitize a carrier/pop token for cache/dial-string/header safety:
--- keep [A-Za-z0-9_.-] only. Row values are admin-provisioned closed
--- vocabulary (TED), so this is belt-and-suspenders, not lossy.
-local function term_token(s)
-    return tostring(s or ""):gsub("[^%w%._%-]", "")
-end
-
--- Coerce a trunk traffic_class to the closed {any, ld, tollfree} set.
--- Anything else (NULL from a pre-44 replica, an unexpected future value)
--- becomes 'any' — the unrestricted class — so a schema/value surprise can
--- only ever WIDEN a trunk's eligibility back to pre-44 behavior, never
--- strand a call.
-local function term_class(s)
-    if s == "ld" or s == "tollfree" then
-        return s
-    end
-    return "any"
+-- The trunk-list fetch/cache/validation, class coercion and destination
+-- classifier live in lib/term_trunks.lua (shared with trunk_outbound.lua /
+-- api_outbound.lua 8YY egress — ONE implementation, same process-wide
+-- "term_trunks_<zone>" cache entry and format). These local wrappers keep
+-- the call sites below unchanged; log lines keep the "[inbound_router]"
+-- tag, so output is byte-identical to the pre-extraction script.
+--
+-- FAIL-OPEN if the lib itself cannot load (bad deploy): get_termination_trunks
+-- returns nil, i.e. exactly the DB-blip path — the legacy hardcoded Bandwidth
+-- loop runs. classify_destination is only consulted on the table-driven path
+-- (which requires the lib), so it needs no separate fallback.
+local term_trunks_lib = load_module("term_trunks")
+if not term_trunks_lib then
+    freeswitch.consoleLog("ERR", "[inbound_router] term_trunks failed to load — RCF termination uses the legacy fallback attempts\n")
 end
 
 -- classify_destination(number) -> 'tollfree' | 'ld' for the trunk class
--- filter. Delegates to the shared pure impl (number_utils — unit-tested);
--- the inline fallback is the identical algorithm (same pattern as
--- normalize_did/to_10digit above: number_utils failing to load must not
--- change routing behavior).
--- KEEP IN SYNC: number_utils.TOLLFREE_NPAS and the Kamailio SBC's
--- toll-free ingress classifier (kamailio.cfg route[TF_CLASSIFY] regex,
--- TF_INGRESS_ENFORCE) use this SAME NPA set.
-local TOLLFREE_NPAS_FALLBACK = {
-    ["800"] = true, ["833"] = true, ["844"] = true, ["855"] = true,
-    ["866"] = true, ["877"] = true, ["888"] = true,
-}
+-- filter (number_utils.classify_destination, inline fallback in the lib).
+-- KEEP IN SYNC: number_utils.TOLLFREE_NPAS, lib/term_trunks.lua fallback
+-- set, and the Kamailio SBC's route[TF_CLASSIFY] regex use the SAME NPAs.
 local function classify_destination(number)
-    if number_utils and number_utils.classify_destination then
-        return number_utils.classify_destination(number)
-    end
-    local d = tostring(number or ""):gsub("%D", "")
-    if #d == 11 and d:sub(1, 1) == "1" then
-        d = d:sub(2)
-    end
-    if #d == 10 and TOLLFREE_NPAS_FALLBACK[d:sub(1, 3)] then
-        return "tollfree"
-    end
-    return "ld"
-end
-
--- Parse the serialized cache payload back into the trunk list.
--- Any malformed segment invalidates the WHOLE payload (nil) — never
--- bridge from a half-parsed trunk list.
-local function parse_term_trunks(payload)
-    local trunks = {}
-    for seg in payload:gmatch("[^;]+") do
-        local carrier, pop, ip, class = seg:match("^([%w%._%-]+),([%w%._%-]*),(%d+%.%d+%.%d+%.%d+),(%a+)$")
-        if not carrier then
-            -- 3-field pre-44 cache entry (one stale generation across a
-            -- rolling Lua deploy): parses as class 'any'.
-            carrier, pop, ip = seg:match("^([%w%._%-]+),([%w%._%-]*),(%d+%.%d+%.%d+%.%d+)$")
-            class = "any"
-        end
-        if not carrier then
-            return nil
-        end
-        trunks[#trunks + 1] = {
-            carrier = carrier, pop = pop, term_ip = ip,
-            traffic_class = term_class(class),
-        }
-    end
-    if #trunks == 0 then
-        return nil
-    end
-    return trunks
+    return term_trunks_lib.classify_destination(number, number_utils)
 end
 
 -- get_termination_trunks(zone): ordered trunk list from carrier_trunks,
 -- or nil => the caller MUST use the legacy hardcoded fallback attempts.
 local function get_termination_trunks(zone)
-    local cache_key = "term_trunks_" .. zone
-    local now = os.time()
-
-    -- Cache check — fresh entries (TTL 60s) never touch the DB.
-    local cached = freeswitch.getGlobalVariable(cache_key)
-    if cached and cached ~= "" then
-        local ts, payload = cached:match("^(%d+)|(.+)$")
-        ts = tonumber(ts)
-        if ts and payload then
-            local age = now - ts
-            if age >= 0 and age < TERM_TRUNKS_TTL then
-                if payload == "FALLBACK" then
-                    return nil  -- negative-cached miss; re-fetch after TTL
-                end
-                local trunks = parse_term_trunks(payload)
-                if trunks then
-                    return trunks
-                end
-                -- Unparsable cache: fail open NOW; negative-cache so the
-                -- next post-TTL fetch rebuilds it cleanly.
-                freeswitch.consoleLog("WARNING", string.format(
-                    "[inbound_router] term_trunks cache unparsable for zone %s — using legacy fallback attempts\n",
-                    zone))
-                freeswitch.setGlobalVariable(cache_key, string.format("%d|FALLBACK", now))
-                return nil
-            end
-        end
-    end
-
-    -- Cache miss/expired: one DB fetch via db_client (same connection and
-    -- error style as the DID lookups).
-    local rows = nil
-    if db and db.get_termination_trunks then
-        local ok, res = pcall(function() return db.get_termination_trunks(zone) end)
-        if ok then
-            rows = res
-        else
-            freeswitch.consoleLog("ERR", string.format(
-                "[inbound_router] get_termination_trunks(%s) raised: %s\n",
-                zone, tostring(res)))
-        end
-    end
-
-    if type(rows) ~= "table" then
-        -- DB error (or db_client unavailable): FAIL OPEN. Negative-cache so
-        -- a sustained outage costs ~1 failed query/minute, not one per call.
-        freeswitch.consoleLog("WARNING", string.format(
-            "[inbound_router] carrier_trunks lookup failed for zone %s — using legacy fallback attempts\n",
-            zone))
-        freeswitch.setGlobalVariable(cache_key, string.format("%d|FALLBACK", now))
+    if not term_trunks_lib then
         return nil
     end
-
-    -- Validate + serialize. Rows with an empty carrier or non-IPv4 term_ip
-    -- are dropped (WARN); rows beyond TERM_TRUNKS_CACHE_MAX are ignored
-    -- (WARN). The 4-trunk attempt cap is applied per call, post-filter.
-    local parts = {}
-    local capped = false
-    for _, row in ipairs(rows) do
-        local carrier = term_token(row.carrier)
-        local pop = term_token(row.pop)
-        local ip = tostring(row.term_ip or "")
-        if carrier == "" or not ip:match("^%d+%.%d+%.%d+%.%d+$") then
-            freeswitch.consoleLog("WARNING", string.format(
-                "[inbound_router] carrier_trunks row carrier=%s pop=%s term_ip=%s is unusable — skipped\n",
-                tostring(row.carrier), tostring(row.pop), ip))
-        elseif #parts >= TERM_TRUNKS_CACHE_MAX then
-            if not capped then
-                freeswitch.consoleLog("WARNING", string.format(
-                    "[inbound_router] carrier_trunks returned more than %d outbound rows for zone %s — extra rows ignored (cache cap)\n",
-                    TERM_TRUNKS_CACHE_MAX, zone))
-                capped = true
-            end
-        else
-            parts[#parts + 1] = carrier .. "," .. pop .. "," .. ip .. ","
-                .. term_class(row.traffic_class)
-        end
-    end
-
-    if #parts == 0 then
-        -- Zero usable rows: FAIL OPEN to the legacy attempts.
-        freeswitch.consoleLog("WARNING", string.format(
-            "[inbound_router] no enabled outbound carrier_trunks rows for zone %s — using legacy fallback attempts\n",
-            zone))
-        freeswitch.setGlobalVariable(cache_key, string.format("%d|FALLBACK", now))
-        return nil
-    end
-
-    local payload = table.concat(parts, ";")
-    freeswitch.setGlobalVariable(cache_key, string.format("%d|%s", now, payload))
-    -- Return by re-parsing what was serialized, so cached and fresh calls
-    -- yield the identical validated shape.
-    return parse_term_trunks(payload)
+    return term_trunks_lib.get(zone, db, "inbound_router")
 end
 
 -- Get call details
@@ -1673,18 +1535,9 @@ local function terminate_rcf(dest, ctx)
         freeswitch.consoleLog("DEBUG", string.format(
             "[%s] Destination %s classified as %s for trunk selection\n",
             uuid, forward_to, dest_class))
-        local eligible_trunks = {}
-        for _, trunk in ipairs(term_trunks) do
-            local ok
-            if dest_class == "tollfree" then
-                ok = trunk.traffic_class == "tollfree"
-            else
-                ok = trunk.traffic_class == "any" or trunk.traffic_class == dest_class
-            end
-            if ok then
-                eligible_trunks[#eligible_trunks + 1] = trunk
-            end
-        end
+        -- Shared filter (lib/term_trunks.lua filter_for_class — the same
+        -- rule trunk_outbound/api_outbound apply to 8YY).
+        local eligible_trunks = term_trunks_lib.filter_for_class(term_trunks, dest_class)
         if #eligible_trunks == 0 then
             if dest_class == "tollfree" then
                 freeswitch.consoleLog("ERR", string.format(
@@ -1706,30 +1559,14 @@ local function terminate_rcf(dest, ctx)
             freeswitch.consoleLog("WARNING", string.format(
                 "[%s] %d eligible %s trunks — trying the first %d (8-attempt cap)\n",
                 uuid, #eligible_trunks, dest_class, TERM_TRUNKS_MAX))
-            local capped_list = {}
-            for i = 1, TERM_TRUNKS_MAX do
-                capped_list[i] = eligible_trunks[i]
-            end
-            eligible_trunks = capped_list
+            eligible_trunks = term_trunks_lib.cap(eligible_trunks, TERM_TRUNKS_MAX)
         end
 
         -- Trunk-major attempt table: for each trunk (already in
         -- eff_priority order) try the primary SBC, then the failover SBC.
-        local bridge_attempts = {}
-        for _, trunk in ipairs(eligible_trunks) do
-            local carrier_label = trunk.carrier
-            if trunk.pop and trunk.pop ~= "" then
-                carrier_label = trunk.carrier .. "-" .. trunk.pop
-            end
-            bridge_attempts[#bridge_attempts + 1] = {
-                sbc = sbc_proxy_ip, ip = trunk.term_ip, carrier_label = carrier_label,
-                label = "SBC-1 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
-            }
-            bridge_attempts[#bridge_attempts + 1] = {
-                sbc = sbc_proxy_ip_failover, ip = trunk.term_ip, carrier_label = carrier_label,
-                label = "SBC-2 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
-            }
-        end
+        -- (lib/term_trunks.lua build_attempts — label "<carrier>-<pop>".)
+        local bridge_attempts = term_trunks_lib.build_attempts(
+            eligible_trunks, sbc_proxy_ip, sbc_proxy_ip_failover)
         local total_attempts = #bridge_attempts
 
         for i, attempt in ipairs(bridge_attempts) do
@@ -1752,19 +1589,18 @@ local function terminate_rcf(dest, ctx)
                 -- cdr_b_leg_block above) scopes the B-row vars to THIS B
                 -- channel only.
                 carrier_legs_launched = carrier_legs_launched + 1
-                local attempt_dial = string.format(
-                    "{ignore_early_media=false,progress_timeout=%d,call_timeout=%d,sip_h_X-Carrier-IP=%s,sip_h_X-Carrier-Label=%s" ..
-                    ",sip_h_X-CID=%s" ..
-                    ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
-                    "}%ssofia/external/%s@%s:5060",
-                    bridge_progress_timeout,
-                    ring_timeout,
-                    attempt.ip,
-                    attempt.carrier_label,
+                -- Shared builder (lib/term_trunks.lua dial_string) renders
+                -- "{<lead>,sip_h_X-Carrier-IP=..,sip_h_X-Carrier-Label=..,
+                -- sip_h_X-CID=..,<inert timer trio>}[cdr_*]sofia/external/
+                -- <forward_to>@<sbc>:5060" — byte-identical to the former
+                -- inline format (harness-verified against the pre-change script).
+                local attempt_dial = term_trunks_lib.dial_string(
+                    string.format("ignore_early_media=false,progress_timeout=%d,call_timeout=%d",
+                        bridge_progress_timeout, ring_timeout),
+                    attempt,
                     sip_call_id,
                     cdr_b_leg_block(carrier_legs_launched),
-                    forward_to,
-                    attempt.sbc
+                    forward_to
                 )
 
                 -- carrier_used reflects the WINNING attempt (same semantics

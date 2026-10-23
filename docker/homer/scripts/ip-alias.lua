@@ -28,8 +28,16 @@ local aliases = {
     -- Sinch origination (inbound to us)
     ["206.146.100.24"] = "Sinch-Denver",
     ["206.146.101.39"] = "Sinch-Chicago",
-    ["206.146.98.25"]  = "Sinch-Atlanta-TF-Orig",  -- TG ATLNGAQSGR2_7284 (8XX-T, 8YY only)
-    ["206.146.100.25"] = "Sinch-Denver-TF-Orig",   -- TG DNVTCOZIGR2_3327 (8XX-T, 8YY only)
+
+    -- Sinch DUAL-ROLE IPs: each hosts an 8XX-T toll-free ORIGINATION trunk
+    -- (inbound, registered to our zone VIPs) AND a REDUNDANT TERMINATION
+    -- trunk (outbound, registered to our SBC public IPs). One IP = one HEP
+    -- address, so the alias names both roles; tell them apart in the ladder
+    -- by direction (Sinch -> VIP = orig, SBC public IP -> Sinch = term).
+    --   98.25:  orig TG ATLNGAQSGR2_7284 (8YY only) + redundant OSAO 8YY term (ATLSBX21, dispatcher group 12)
+    --   100.25: orig TG DNVTCOZIGR2_3327 (8YY only) + redundant INT LD term (DENSBX21, dispatcher group 11)
+    ["206.146.98.25"]  = "Sinch-Atlanta-TF-Orig+TF-Term",
+    ["206.146.100.25"] = "Sinch-Denver-TF-Orig+LD-Term",
 
     -- Sinch termination (outbound from us; DIFFERENT IPs from origination)
     ["206.146.98.26"]  = "Sinch-Atlanta-LD",  -- TG ATLNGAQSGR2_7214 (INT LD)

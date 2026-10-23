@@ -130,8 +130,15 @@ Every SIP request enters here. Processing order:
      `atlanta-tf-orig`/`denver-tf-orig`) -> trusted. Static ON PURPOSE: as
      DB-only rows they would run pike/SCANNER_DETECT and be auto-blocked
      (>30 INVITEs/min) within minutes, after which even BYE/ACK are dropped.
-     No dispatcher probe group (origination-only). Not to be confused with
-     `SINCH_TF_IP` (206.146.100.26, the OSAO 8YY TERMINATION trunk).
+     Not to be confused with `SINCH_TF_IP` (206.146.100.26, the OSAO 8YY
+     TERMINATION trunk). **Shared IPs (2026-10):** Sinch built the REDUNDANT
+     termination trunk groups on these same two IPs (Denver LD on .100.25,
+     Atlanta TF on .98.25 — dispatcher groups 11/12, §5). Sinch picks the
+     trunk group from OUR source IP (8XX-T orig TGs = our zone VIPs, TERM TGs
+     = the 6 SBC public IPs). Nothing double-handles on our side: this static
+     trust admits the probe replies / in-dialog requests / 8XX-T INVITEs from
+     them; ingress attribution stays `atlanta-tf-orig`/`denver-tf-orig`;
+     egress validation (§4.3 Step 1a) filters `direction IN ('outbound','both')`.
    - Internal networks: Docker `172.28.0.0/16`, loopback `127.0.0.0/8`,
      `GCE_INTERNAL_NETWORK` `10.142.0.0/20`, and `VOIP_SUBNET` `192.168.10.0/24`
      (the FS media subnet) -> trusted
@@ -218,6 +225,27 @@ Handles BYE, re-INVITE, ACK, UPDATE, etc. for established calls. (CANCEL never g
    - `tc2` -> TC2 Dallas `67.231.1.188` (`BANDWIDTH_TC2_DAL`)
    - Default / unknown header -> this zone's primary PoP.
    - Remove `X-Carrier` before sending to carrier.
+   - **Step 1a — table-driven egress (`X-Carrier-IP`, takes precedence):** sent
+     by `inbound_router.lua` (RCF, every table-driven attempt) and — 2026-10 —
+     by `trunk_outbound.lua` / `api_outbound.lua` for NANP 8YY destinations
+     only. Validated as this zone's `BANDWIDTH_IP_1/2` (fast path) or by a
+     sqlops point lookup `carrier_trunks WHERE host(source_ip)=X AND direction
+     IN ('outbound','both') AND enabled LIMIT 1`. The direction filter is
+     load-bearing since migration 53: `source_ip` is unique PER DIRECTION (one
+     ingress + one egress row per IP), and the Sinch .25 IPs carry an enabled
+     inbound 8XX-T row next to a (seeded disabled) outbound redundant-term
+     row — the inbound row can never validate egress. Validated ⇒ flags 8+9
+     (FS owns failover). Not validated (unknown / disabled / malformed / DB
+     error): non-8YY falls back to the legacy primary mapping (unchanged);
+     **an 8YY R-URI (`route[TF_CLASSIFY]`, compiled in regardless of
+     `TF_INGRESS_ENFORCE`) is FAIL-CLOSED — stateful `503 Toll-Free Trunk
+     Unavailable`** (t_newtran + t_reply, so dlg_manage's dialog closes like
+     any failed B-leg). FS's attempt loop treats it as a per-attempt failure
+     and moves on (ends NO_ROUTE_DESTINATION) — toll-free never reaches
+     Bandwidth, even when an operator disables the trunk inside FS's 60 s
+     trunk-cache window. Runtime-verified 2026-10 (docker harness): 8YY with a
+     disabled-egress/enabled-ingress shared IP, an unknown IP, and a malformed
+     value → 503, no carrier INVITE; non-8YY same inputs → Bandwidth fallback.
    - **Per-zone (env-driven):** `BANDWIDTH_IP_1`/`BANDWIDTH_IP_2` are now templated
      from `BANDWIDTH_PRIMARY_IP`/`BANDWIDTH_SECONDARY_IP` (default = East Dallas/LA).
      West swaps them so each zone egresses to its nearest PoP first. The fixed-PoP
@@ -330,24 +358,49 @@ Carrier ingress only — the static carrier branch and route[CARRIER_TRUST].
 Customer trunks (TRUNK_AUTH) and FS-originated traffic are never checked.
 `route[TF_CLASSIFY]` matches `$rU` against
 `^[+]?1?8(00|33|44|55|66|77|88)[0-9]{7}(;.*)?$` (trailing user params tolerated) — the SAME NPA set as FS
-`number_utils.TOLLFREE_NPAS` / `inbound_router.lua TOLLFREE_NPAS_FALLBACK`
+`lib/number_utils.lua TOLLFREE_NPAS` / `lib/term_trunks.lua TOLLFREE_NPAS_FALLBACK`
 (pinned by `tests/test_classify_destination.py`; change all three together).
 Toll-free RCF DIDs are identified purely by NPA — there is no column.
 
 | Source | R-URI user | Result |
 |---|---|---|
 | TF orig trunk (`SINCH_TF_ATL_IP`/`SINCH_TF_DEN_IP`, or a DB row with `traffic_class='tollfree'`) | 8YY | admitted |
-| TF orig trunk | non-8YY | `404 Not Found`, `L_WARN` rule=tf-trunk-non-8yy |
+| TF orig trunk | non-8YY listed in `TF_TEST_TNS` | admitted, `L_INFO` rule=tf-test-tn-exempt |
+| TF orig trunk | non-8YY (not listed) | `404 Not Found`, `L_WARN` rule=tf-trunk-non-8yy |
 | Any other carrier (Bandwidth, Sinch Denver/Chicago, DB rows `traffic_class != 'tollfree'`) | 8YY | `404 Not Found`, `L_WARN` rule=8yy-on-non-tf-carrier |
 | Any other carrier | non-8YY | admitted |
 
 404 = what the platform already answers for an unprovisioned DID: terminal
 per-number, not in either carrier's reroute set (unlike 5xx/408), so no retry
 storm; stateless `sl_send_reply`, no dialog, no dedup key. `TF_INGRESS_ENFORCE=off`
-(exactly "off") compiles every block out — byte-identical pre-TF logic.
+(exactly "off") compiles the ingress-check blocks out (pre-TF ingress logic).
 **Rollout risk:** any 8YY DID still delivered by Bandwidth is rejected once
-this is on — move the 8YY RespOrg routing to the Sinch TF trunks first, or
-deploy with `TF_INGRESS_ENFORCE=off` and flip it after cutover.
+this is on — move the 8YY RespOrg routing to the Sinch TF trunks first.
+`route[TF_CLASSIFY]` itself is compiled in unconditionally (it also backs the
+§4.3 Step 1a 8YY fail-closed guard); only `route[TF_INGRESS_CHECK]` and its
+call sites are gated.
+
+**Test-TN allowlist `TF_TEST_TNS` (2026-10).** Sinch's 8XX-T test TNs
+(5595335873 ATL, 5595335908 DEN) are not 8YY, which is why every SBC ran
+`TF_INGRESS_ENFORCE=off`. `TF_TEST_TNS` (comma list, default empty) exempts
+ONLY rule tf-trunk-non-8yy for the listed TNs. entrypoint.sh validates each
+entry strictly (exactly 10 digits, NPA/NXX 2-9; `+1`/11-digit/garbage/`*`
+dropped with a WARNING, duplicates collapsed; `set -f` so no globbing) and
+renders `#!define TF_TEST_TNS_RE "^[+]?1?(tn1|tn2)(;.*)?$"` — the SAME
+normalization as TF_CLASSIFY applied to `$rU`. Empty / all-invalid ⇒ a comment,
+the `#!ifdef TF_TEST_TNS_RE` arm compiles out (behaviorally identical to no
+list). Inert (logged NOTE) with `TF_INGRESS_ENFORCE=off`. Runtime-verified on
+the 5.8 image (TF source `5595335873`, `+15595335873`, `15595335908`,
+`5595335873;npdi` admitted; `5595335874`, `55953358731`, `25595335873` 404;
+8YY from a non-TF carrier still 404; empty list ⇒ all non-8YY 404).
+
+**DEPLOY (per SBC `.env`, standby first, then `--force-recreate kamailio`):**
+REPLACE the line `TF_INGRESS_ENFORCE=off` with
+`TF_TEST_TNS=5595335873,5595335908`. Confirm in `docker logs voip-kamailio`:
+`TF_INGRESS_ENFORCE=on, TF_TEST_TNS=5595335873,5595335908`. **When real TFNs
+are live:** DELETE the `TF_TEST_TNS` line, recreate kamailio, and disable the
+two test `rcf_numbers` rows. `TF_INGRESS_ENFORCE=off` stays available as the
+emergency rollback only.
 
 ### 4.7 route[NAT_DETECT]
 
@@ -413,7 +466,7 @@ Tracks INVITE floods per source IP. >30 INVITEs/minute from untrusted source = b
 
 **File**: `dispatcher.list`
 
-Seven dispatcher groups:
+Dispatcher groups (10 is the optional peer-SBC liveness group, §8.12):
 
 | Group | Destination(s) | Purpose |
 |---|---|---|
@@ -424,13 +477,36 @@ Seven dispatcher groups:
 | 5 | sip:67.231.1.188 + sip:67.231.4.138 | Bandwidth TC2 Dallas + LA keepalive/health ONLY |
 | 6 | sip:206.146.100.24:5060 (`__SINCH_DENVER_IP__`, duid=sinch-denver) | Sinch Denver (origination-only) keepalive/health ONLY |
 | 7 | sip:206.146.101.39:5060 (`__SINCH_CHICAGO_IP__`, duid=sinch-chicago) | Sinch Chicago (origination-only) keepalive/health ONLY |
+| 8 | sip:206.146.98.26:5060 (`__SINCH_LD_IP__`, duid=sinch-atlanta-ld) | Sinch Atlanta LD termination keepalive/health ONLY |
+| 9 | sip:206.146.100.26:5060 (`__SINCH_TF_IP__`, duid=sinch-denver-tf) | Sinch Denver TF (OSAO 8YY) termination keepalive/health ONLY |
+| 11 | sip:206.146.100.25:5060 (`__SINCH_LD2_IP__`, duid=sinch-denver-ld) | Sinch Denver LD **redundant** termination (DENSBX21) keepalive/health ONLY |
+| 12 | sip:206.146.98.25:5060 (`__SINCH_TF2_IP__`, duid=sinch-atlanta-tf) | Sinch Atlanta TF (OSAO 8YY) **redundant** termination (ATLSBX21) keepalive/health ONLY |
 
-Groups 2-7 are NOT used for call routing (that's route[TO_CARRIER] via $rd/$du —
-and Sinch is origination-only, never a TO_CARRIER destination anyway).
+**Groups 11/12 share their IPs with the 8XX-T TF ORIGINATION trunks** (static
+trust `SINCH_TF_DEN_IP`/`SINCH_TF_ATL_IP`). They are templated exactly like
+8/9 — NO `socket=`/`ping_from=`: the probe must leave from the SBC's own
+public IP, because Sinch maps trunk group by our source IP and a VIP source on
+.25 is the inbound-only 8XX-T orig TG. Replies and any inbound request from
+these IPs are covered by the existing static trust (no double handling); the
+replies land on the NIC socket (`$Ri` = SBC_INTERNAL_IP), so the §8.12 peer
+hand-off (keyed on the external VIP bind) never touches them. The matching
+`carrier_trunks` rows (`sinch/denver-ld` ld p35, `sinch/atlanta-tf` tollfree
+p45, migration 53) are seeded `enabled=false`; the probes run regardless (NAT
+pinhole + visibility before enable). Until Sinch builds the TGs the probes
+may read down (or "up" if Sinch answers 500 — 500 is in
+`ds_ping_reply_codes`); the NOC greys them out via
+`carrier_trunk_health.trunk_enabled = false`. No pager/alert rule keys on
+dispatcher state (checked `infra/monitoring`, `docker/vmalert/rules`), so a
+down probe on a disabled trunk cannot page.
+
+Groups 2-9 and 11-12 are NOT used for call routing (that's route[TO_CARRIER] via $rd/$du —
+Sinch termination egress is table-driven via X-Carrier-IP, §4.3 Step 1a).
 They exist solely for:
 - **NAT keepalive**: OPTIONS every 5s keeps GCE's UDP NAT pinhole open.
 - **Health monitoring**: Detects carrier unreachability. The carrier-monitor
-  sidecar reports groups 2, 3, 6-9 (`CARRIER_SETIDS`) to the East API.
+  sidecar reports groups 2, 3, 6-9, 11-12 (`CARRIER_SETIDS` in
+  `docker/carrier-monitor/carrier_monitor.py`; `carrier_trunk_health`
+  filters the same setids since migration 53) to the East API.
 
 **Probe egress / on-the-wire source IP (verified against config + 5.8 socket
 selection):** for every group EXCEPT 6/7 no destination carries a `socket=`
@@ -472,14 +548,31 @@ clones `force_send_socket` into failure-route re-relays — the whole INVITE
 transaction leaves from the VIP. INVITEs that arrived on the SBC's direct VPC
 IP (FreeSWITCH's `SBC_PROXY_IP_FAILOVER` attempts, direct-IP ESL originates,
 ops tests) keep today's own-public-IP egress with symmetric replies, and the
-probes (groups 2-5/8-9) stay NIC-sourced so the STANDBY's carrier health stays
+probes (groups 2-5/8-9/11-12) stay NIC-sourced so the STANDBY's carrier health stays
 readable — therefore the **6 SBC public IPs must STAY whitelisted** at the
 carriers; the win is that steady-state INVITEs join the VIP class. Residual: the
 ILB/external-NLB split-brain window of one health-check interval during a flip
 (already "setups in flight are lost" territory); a `VIP_EGRESS tripwire` WARN in
 `failure_route[CARRIER_FAILURE]` (local 408 with no reply at all) flags it.
-Enable on both SBCs of a zone. Full source citations are in the `$fs` comment
-block in `kamailio.cfg`. NB: the receive-socket pv is `$Ri` (there is no `$Rip`
+Enable on both SBCs of a zone. **Bandwidth destinations only (2026-10):** the
+`$fs` assignment is additionally gated on `$dd` being `BANDWIDTH_IP_1/2` or in
+`BANDWIDTH_NET_1/2`; every other carrier-bound INVITE — in practice every
+`X-Carrier-IP` Sinch termination destination (98.26, 100.26, and the
+redundant 98.25 / 100.25), from RCF, trunk or API B-legs alike — keeps the
+NIC socket (own public IP) even when it arrived on the signaling VIP, with an
+INFO `VIP_EGRESS: non-Bandwidth carrier` log. Reason: Sinch selects the trunk
+group by our source IP; its TERM TGs know only the SBC public IPs, and on .25
+the VIP IS the inbound-only 8XX-T orig TG. Runtime-verified (docker harness,
+dedicated mode, VIP_EGRESS=on): signaling-VIP ingress → Bandwidth-IP INVITE
+sourced from the VIP, non-Bandwidth table-driven INVITE sourced from the NIC;
+direct-IP ingress → both NIC. **Residual (NOT changed, verify live):** the
+FS-originated in-dialog requests (ACK-for-2xx, BYE, re-INVITE) still egress
+from the external VIP via the rr `r2` double-pop for EVERY carrier, Sinch
+included — already the case for the live 98.26/100.26 trunks. Whether Sinch
+matches an in-dialog request from the VIP to a TERM dialog on .25 (where the
+VIP maps to the orig TG) must be confirmed on the first redundant-trunk test
+call (Homer: 200 OK to our BYE from 206.146.x.25). Full source citations are
+in the `$fs` comment block in `kamailio.cfg`. NB: the receive-socket pv is `$Ri` (there is no `$Rip`
 in 5.8).
 
 **Sinch ORIGINATION groups 6-7 — VIP-sourced probes + standby reads Inactive
@@ -555,8 +648,12 @@ Set in `.env` file on each SBC VM. Passed via `docker-compose.sbc.yml`.
 | `SINCH_CHICAGO_IP` | No (default 206.146.101.39) | — | Sinch Chicago origination PoP (Trunk Group CHCGIL24GR4_7412, test TN 5305480846). Static inbound trust + attribution + dispatcher group 7 keepalive. Origination-only — never an egress target. |
 | `SINCH_TF_ATL_IP` | No (default 206.146.98.25) | — | Sinch Atlanta TOLL-FREE origination (8XX-T, TG ATLNGAQSGR2_7284, SBX ATLSBX21, pop `atlanta-tf-orig`). Static inbound trust + attribution + TF-only ingress class. No dispatcher group. |
 | `SINCH_TF_DEN_IP` | No (default 206.146.100.25) | — | Sinch Denver TOLL-FREE origination (8XX-T, TG DNVTCOZIGR2_3327, SBX DENSBX21, pop `denver-tf-orig`). Static inbound trust + attribution + TF-only ingress class. No dispatcher group. |
-| `TF_INGRESS_ENFORCE` | No (default on) | off | Toll-free ingress class split (§4.6.2): TF orig trunks accept only 8YY R-URIs, every other carrier accepts no 8YY R-URIs (404). Only exactly `off` disables (compiles out, byte-identical). |
-| `VIP_EGRESS` | No (default off) | on | Carrier-bound INVITE egress from the external NLB VIP for INVITEs received on the signaling ILB VIP (`if ($Ri == "SIGNALING_VIP") { $fs = "udp:ADVERTISE_IP:5060"; }` in `route[TO_CARRIER]` Step 9, compiled in via `#!define VIP_EGRESS` + `SBC_SIGVIP_DEDICATED`). on/true/1 = ON, anything else = OFF; entrypoint forces OFF (warning) when `SBC_SIGNALING_VIP` is unset. Direct-IP ingress keeps own-public-IP egress — the 6 SBC public IPs stay whitelisted. Enable on both SBCs of a zone. See "Carrier-bound INVITE egress" in §5 Dispatcher Configuration. |
+| `SINCH_LD_IP` / `SINCH_TF_IP` | No (defaults 206.146.98.26 / 206.146.100.26) | — | Sinch Atlanta LD / Denver TF termination — dispatcher groups 8/9 ONLY (egress is table-driven). |
+| `SINCH_LD2_IP` | No (default 206.146.100.25) | — | Sinch Denver LD REDUNDANT termination (DENSBX21) — dispatcher group 11 ONLY. Validated dotted-quad; garbage ⇒ WARNING + default. Same IP as `SINCH_TF_DEN_IP`. |
+| `SINCH_TF2_IP` | No (default 206.146.98.25) | — | Sinch Atlanta TF (OSAO 8YY) REDUNDANT termination (ATLSBX21) — dispatcher group 12 ONLY. Validated dotted-quad; garbage ⇒ WARNING + default. Same IP as `SINCH_TF_ATL_IP`. |
+| `TF_TEST_TNS` | No (default empty) | 5595335873,5595335908 | Toll-free ingress test-TN allowlist (§4.6.2): listed non-8YY TNs are admitted from TF orig trunks (rule=tf-test-tn-exempt). Strict 10-digit NANP validation; garbage dropped with WARNING. Delete once real TFNs are live. |
+| `TF_INGRESS_ENFORCE` | No (default on) | off | Toll-free ingress class split (§4.6.2): TF orig trunks accept only 8YY R-URIs, every other carrier accepts no 8YY R-URIs (404). Only exactly `off` disables (compiles out the ingress check; `route[TF_CLASSIFY]` stays for the Step 1a 8YY egress guard). Emergency rollback only — use `TF_TEST_TNS` for test TNs. |
+| `VIP_EGRESS` | No (default off) | on | Carrier-bound INVITE egress from the external NLB VIP for INVITEs received on the signaling ILB VIP (`if ($Ri == "SIGNALING_VIP") { $fs = "udp:ADVERTISE_IP:5060"; }` in `route[TO_CARRIER]` Step 9, compiled in via `#!define VIP_EGRESS` + `SBC_SIGVIP_DEDICATED`). on/true/1 = ON, anything else = OFF; entrypoint forces OFF (warning) when `SBC_SIGNALING_VIP` is unset. Direct-IP ingress keeps own-public-IP egress — the 6 SBC public IPs stay whitelisted. BANDWIDTH destinations only: Sinch (any non-Bandwidth) INVITEs always keep own-public-IP egress. Enable on both SBCs of a zone. See "Carrier-bound INVITE egress" in §5 Dispatcher Configuration. |
 
 ## 7. SIP Call Flows
 
@@ -1210,14 +1307,17 @@ current production IPs). To add a NEW static carrier IP:
    condition (they are parallel — keep them in sync), plus an
    `X-Inbound-Carrier`/`X-Inbound-PoP` attribution arm and (for a non-Bandwidth
    carrier) an `X-Inbound-TC` arm.
-3. Add a dispatcher group in `dispatcher.list` for keepalive (groups 6-7 are
-   Sinch; next free group is 8):
+3. Add a dispatcher group in `dispatcher.list` for keepalive (6-9 and 11-12
+   are Sinch, 10 is the peer SBC; next free group is 13):
    ```
-   8 sip:1.2.3.4:5060 0 0 weight=100;duid=carrier-pop
+   13 sip:1.2.3.4:5060 0 0 weight=100;duid=carrier-pop
    ```
    Add the setid to `CARRIER_SETIDS` + a `DUID_NAMES` entry in
-   `docker/carrier-monitor/carrier_monitor.py` if it should be reported, and an
-   alias in `docker/homer/scripts/ip-alias.lua`.
+   `docker/carrier-monitor/carrier_monitor.py` if it should be reported (and
+   the setid to the `carrier_trunk_health` view's filter + its duid to the
+   view's `trunk_map` — a postgres migration), and an alias in
+   `docker/homer/scripts/ip-alias.lua` (mirrored byte-for-byte in
+   `docker/api/src/routers/homer_pcap.py` `HEP_IP_ALIASES` — a test enforces it).
 4. TERMINATION carriers only: add an `X-Carrier` routing case in TO_CARRIER's
    switch and the in-trunk failover case (and its return IP) in CARRIER_FAILURE.
    Origination-only carriers (Sinch) get NEITHER — egress stays Bandwidth.

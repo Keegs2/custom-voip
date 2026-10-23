@@ -185,7 +185,7 @@ __FS2_DISPATCHER_LINE__
 # safety net. Side effect: one dispatcher:dst-down event per standby boot
 # for each of these two duids (a single dsmon gen bump + one carrier-monitor
 # snapshot — harmless, no flapping; the monitor reports plain snapshots).
-# Do NOT copy these attrs to groups 2/3/8/9 — Bandwidth + Sinch TERM answer
+# Do NOT copy these attrs to groups 2/3/8/9/11/12 — Bandwidth + Sinch TERM answer
 # 200 on the SBC-public-IP path today; leave the proven path alone.
 6 sip:__SINCH_DENVER_IP__:5060 0 0 weight=100;duid=sinch-denver;socket=udp:__ADVERTISE_IP__:5060;ping_from=sip:ping@__ADVERTISE_IP__
 
@@ -207,7 +207,7 @@ __FS2_DISPATCHER_LINE__
 # Sinch side). NOTE: a DIFFERENT IP from the group-6/7 origination PoPs.
 # Same keepalive/health-monitoring purpose as Groups 2-3: OPTIONS probes
 # keep the GCE UDP NAT pinhole open and give the carrier-monitor sidecar
-# up/down visibility (CARRIER_SETIDS includes 8-9).
+# up/down visibility (CARRIER_SETIDS includes 8-9 and 11-12).
 # NEVER used for call routing here — egress selection is table-driven
 # (carrier_trunks -> FS X-Carrier-IP -> route[TO_CARRIER] Step 1a).
 # IP templated by entrypoint.sh from SINCH_LD_IP (default 206.146.98.26
@@ -224,11 +224,43 @@ __FS2_DISPATCHER_LINE__
 9 sip:__SINCH_TF_IP__:5060 0 0 weight=100;duid=sinch-denver-tf
 
 # ============================================================
+# Group 11: Sinch Termination - Denver LD, REDUNDANT (DENSBX21)
+# ============================================================
+# Sinch's REDUNDANT "INT" Long Distance termination trunk group, built on
+# DENSBX21 (50 sessions, media 206.146.100.16/28) — the redundant partner of
+# group 8 (Atlanta LD). carrier_trunks row sinch/denver-ld (outbound, 'ld',
+# priority 35, seeded enabled=false; the owner flips it on once Sinch
+# confirms the build + trunk group ID). Same termination-only/keepalive
+# notes as Group 8: NIC-sourced OPTIONS (NO socket=/ping_from= attrs), so
+# the probe leaves from THIS SBC's own public IP — the address Sinch's TERM
+# trunk groups are registered to. Sinch picks the trunk group from OUR
+# source IP, and this IP ALSO hosts the 8XX-T toll-free ORIGINATION trunk
+# (SINCH_TF_DEN_IP, registered to our zone VIPs): a VIP-sourced probe here
+# would be read as the inbound-only orig TG. Do NOT add socket=/ping_from.
+# The same IP is statically trusted in kamailio.cfg as SINCH_TF_DEN_IP —
+# that trust covers the probe REPLIES and any inbound request from it; the
+# probe itself is pure dispatcher state (no double handling).
+# IP templated by entrypoint.sh from SINCH_LD2_IP (default 206.146.100.25).
+11 sip:__SINCH_LD2_IP__:5060 0 0 weight=100;duid=sinch-denver-ld
+
+# ============================================================
+# Group 12: Sinch Termination - Atlanta TF, REDUNDANT (ATLSBX21)
+# ============================================================
+# Sinch's REDUNDANT "OSAO" toll-free (8YY-only) termination trunk group,
+# built on ATLSBX21 (50 sessions, media 206.146.98.16/28) — the redundant
+# partner of group 9 (Denver TF). carrier_trunks row sinch/atlanta-tf
+# (outbound, 'tollfree', priority 45, seeded enabled=false). Same notes as
+# Group 11: NIC-sourced (own public IP), never socket=/ping_from= — this IP
+# ALSO hosts the 8XX-T orig trunk (SINCH_TF_ATL_IP, static trust).
+# IP templated by entrypoint.sh from SINCH_TF2_IP (default 206.146.98.25).
+12 sip:__SINCH_TF2_IP__:5060 0 0 weight=100;duid=sinch-atlanta-tf
+
+# ============================================================
 # Group 10: Peer SBC liveness (peer reply hand-off — SBC_PEER_HANDOFF only)
 # ============================================================
 # The OTHER SBC of this zone's active/standby pair (its VPC IP, from
 # SBC_PEER_INTERNAL_IP). NOT a carrier: carrier-monitor's CARRIER_SETIDS
-# ({2,3,6,7,8,9}) excludes it, and the :5060 port keeps it out of the FS
+# ({2,3,6,7,8,9,11,12}) excludes it, and the :5060 port keeps it out of the FS
 # (:5080) event-route match; kamailio.cfg's event routes match it by EXACT
 # URI to maintain peerhealth=>up, the liveness gate of the reply_route peer
 # hand-off (CLAUDE.md §8.12). Same OPTIONS probing as group 1
