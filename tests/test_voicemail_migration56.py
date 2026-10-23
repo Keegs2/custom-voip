@@ -25,20 +25,32 @@ Proves on an ephemeral local PostgreSQL 16:
   * EXPLAIN: the worker's discovery, claim, due/lease reaper, budget and
     mailbox statements (plan §6/§9) ride the new indexes.
 
-The statements under EXPLAIN are the plan's §6/§9 SQL; phase 2's
-``transcription/queue.py`` owns the canonical text (the worker suite runs the
-real module against this schema).
+The worker statements under EXPLAIN are imported from
+``services/voicemail/transcription/queue.py`` (the canonical text — no copy
+to drift); the two §9 mailbox statements belong to the API
+(``mailboxes.py``) and are spelled out here.
 
 Run:  JWT_SECRET_KEY=x python3 -m pytest tests/test_voicemail_migration56.py -q
 """
 import asyncio
+import os
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
+
 asyncpg = pytest.importorskip("asyncpg", reason="asyncpg required for migration tests")
+
+_API_SRC = Path(__file__).resolve().parents[1] / "docker" / "api" / "src"
+if str(_API_SRC) not in sys.path:
+    sys.path.insert(0, str(_API_SRC))
+
+from services.voicemail.transcription import queue  # noqa: E402
 
 from voicemail_db import (  # noqa: E402
     CHECK_MIGRATIONS,
@@ -666,63 +678,13 @@ def test_stats_view_counts_only(mig_db):
 # ---------------------------------------------------------------------------
 # The worker's statements ride the new indexes (plan §6 / §9)
 # ---------------------------------------------------------------------------
-DISCOVERY_SQL = """
-INSERT INTO voicemail_transcripts (message_id, mailbox_id, customer_id, status, language)
-SELECT m.id, m.mailbox_id, m.customer_id,
-       CASE WHEN b.transcription_enabled THEN 'pending' ELSE 'disabled' END,
-       b.transcription_language
-  FROM voicemail_messages m
-  JOIN voicemail_boxes b ON b.id = m.mailbox_id
- WHERE m.status = 'stored'
-   AND m.created_at >= now() - make_interval(secs => $1::int)
-   AND b.status <> 'deleted'
-   AND NOT EXISTS (SELECT 1 FROM voicemail_transcripts t WHERE t.message_id = m.id)
- ORDER BY m.created_at
- LIMIT $2::int
-ON CONFLICT (message_id) DO NOTHING
-"""
+DISCOVERY_SQL = queue.DISCOVER_RECENT_SQL
+CATCHUP_SQL = queue.DISCOVER_ALL_SQL
+CLAIM_SQL = queue.CLAIM_SQL
+REAPER_SQL = queue.REAP_SQL
+BUDGET_SQL = queue.BUDGET_SQL
 
-CLAIM_SQL = """
-WITH pick AS (
-    SELECT t.message_id
-      FROM voicemail_transcripts t
-      JOIN voicemail_messages m        ON m.id = t.message_id
-      JOIN voicemail_boxes b           ON b.id = t.mailbox_id
-      JOIN customers c                 ON c.id = t.customer_id
-      JOIN voicemail_customer_keys k   ON k.customer_id = t.customer_id
-     WHERE t.status = 'pending' AND t.next_attempt_at <= now()
-       AND m.status = 'stored' AND m.deleted_at IS NULL
-       AND b.status <> 'deleted' AND b.transcription_enabled
-       AND c.voicemail_enabled AND k.status = 'active'
-     ORDER BY t.next_attempt_at, t.message_id
-     LIMIT 1
-     FOR UPDATE OF t SKIP LOCKED
-)
-UPDATE voicemail_transcripts t
-   SET status = 'processing', attempts = t.attempts + 1, attempt_id = $1::uuid,
-       lease_until = now() + make_interval(secs => $2::int),
-       language = b.transcription_language, error_code = NULL, updated_at = now()
-  FROM pick, voicemail_boxes b
- WHERE t.message_id = pick.message_id AND b.id = t.mailbox_id
-RETURNING t.message_id, t.mailbox_id, t.customer_id, t.language, t.attempts
-"""
-
-REAPER_SQL = """
-UPDATE voicemail_transcripts t
-   SET status = CASE WHEN t.attempts >= $1::int THEN 'failed' ELSE 'pending' END,
-       error_code = 'lease_expired', lease_until = NULL, attempt_id = NULL,
-       next_attempt_at = now() + interval '1 minute', updated_at = now()
- WHERE t.message_id IN (SELECT message_id FROM voicemail_transcripts
-                         WHERE status = 'processing' AND lease_until < now()
-                         ORDER BY lease_until LIMIT 50
-                         FOR UPDATE SKIP LOCKED)
-"""
-
-BUDGET_SQL = """
-SELECT COALESCE(sum(billed_ms), 0) FROM voicemail_transcripts
- WHERE status IN ('done', 'empty') AND completed_at >= now() - interval '24 hours'
-"""
-
+# §9 / §10 (the API's statements in mailboxes.py / transcripts.py).
 MAILBOX_DELETE_SQL = "DELETE FROM voicemail_transcripts WHERE mailbox_id = $1::int"
 MAILBOX_DISABLE_SQL = ("UPDATE voicemail_transcripts SET status = 'disabled', updated_at = now() "
                        "WHERE mailbox_id = $1::int AND status = 'pending'")
@@ -735,7 +697,9 @@ MAILBOX_DISABLE_SQL = ("UPDATE voicemail_transcripts SET status = 'disabled', up
     (BUDGET_SQL, (), "idx_vm_transcripts_completed"),
     (MAILBOX_DELETE_SQL, (1,), "idx_vm_transcripts_mailbox"),
     (MAILBOX_DISABLE_SQL, (1,), "idx_vm_transcripts_mailbox"),
-], ids=["discovery", "claim", "reaper", "budget", "mailbox_delete", "mailbox_disable"])
+    (CATCHUP_SQL, (1000,), "idx_vm_messages_stored_created"),
+], ids=["discovery", "claim", "reaper", "budget", "mailbox_delete", "mailbox_disable",
+        "catchup"])
 def test_worker_statements_use_the_new_indexes(mig_db, sql, args, index):
     async def go():
         conn = await _connect(mig_db["pg"], "postgres")

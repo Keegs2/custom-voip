@@ -24,6 +24,7 @@ from routers import (
 )
 from middleware.auth import JWTAuthMiddleware
 from services.voicemail import retention as voicemail_retention
+from services.voicemail.transcription import worker as transcription_worker
 from utils.access_log import install_access_log_redaction
 
 # Configure logging
@@ -68,14 +69,23 @@ async def lifespan(app: FastAPI):
         retention_task = asyncio.create_task(voicemail_retention.run_forever(),
                                              name="voicemail-retention")
 
+    # Voicemail transcription worker (docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §6):
+    # one per uvicorn worker, started ONLY when VOICEMAIL_TRANSCRIPTION_ENABLED
+    # is exactly "true" (off = no task, nothing is ever sent to Google). Never
+    # raises out of its loop; cancelled below like retention — in-flight jobs
+    # are abandoned and re-queued by the lease reaper.
+    transcription_task = transcription_worker.start_if_enabled()
+
     yield
 
     # Cleanup
     logger.info("Shutting down...")
-    if retention_task is not None:
-        retention_task.cancel()
+    for task in (transcription_task, retention_task):
+        if task is None:
+            continue
+        task.cancel()
         try:
-            await retention_task
+            await task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
     await close_db()

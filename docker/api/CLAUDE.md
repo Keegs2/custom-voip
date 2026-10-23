@@ -53,6 +53,7 @@ CMD: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --ht
 | `google-cloud-storage>=3.0.0` | Encrypted voicemail: ciphertext objects (`services/voicemail/storage.py`) |
 | `google-crc32c>=1.5.0` | CRC32C integrity on every KMS/GCS call |
 | `cryptography>=42.0.0` | AES-256-GCM envelope + HKDF (dev local KMS) |
+| `google-cloud-speech>=2.38.0,<3` | Voicemail transcription: Speech-to-Text V2 sync `Recognize`, `us` endpoint (`services/voicemail/transcription/gcp_stt.py`, imported lazily) |
 
 ## Environment Variables
 
@@ -82,6 +83,15 @@ CMD: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --ht
 | `VOICEMAIL_PLAYBACK_SECRET` | _(required for playback)_ | HS256 key for 120 s playback URLs; ≥ 32 chars, must differ from `JWT_SECRET_KEY` (else 503) |
 | `INGEST_SHARED_SECRET` | _(required for FS voicemail)_ | `X-Ingest-Secret` FreeSWITCH sends on `/v1/voicemail/fs/*`; ≥ 32 chars; unset/short ⇒ every call 503 (fail-closed) |
 | `VOICEMAIL_RETENTION_ENABLED` | _(unset = ON)_ | Voicemail retention worker (lifespan task in every worker, one sweep at a time via a PG advisory xact lock). `false` disables it |
+| `VOICEMAIL_TRANSCRIPTION_ENABLED` | _(unset = OFF)_ | **Voicemail transcription kill switch** (`docs/VOICEMAIL_TRANSCRIPTION_PLAN.md` §12). ON only if exactly `true` (trimmed, case-insensitive). ON: the lifespan starts `transcription.worker` in every uvicorn worker (one discoverer at a time via `pg_try_advisory_xact_lock('vm_trx')`). OFF: no worker task, `summary.transcription_available=false`, nothing is sent to Google; existing transcripts stay readable (KMS only). Each mailbox is also opt-in (`voicemail_boxes.transcription_enabled`, default false, admin-only) |
+| `VOICEMAIL_STT_PROJECT` | = `VOICEMAIL_KMS_PROJECT` | Project of the implicit recognizer `projects/<p>/locations/us/recognizers/_` (billing). Same project-id regex as KMS |
+| `VOICEMAIL_STT_LOCATION` | `us` | **Only `us` is accepted** (US-only processing, endpoint `us-speech.googleapis.com`); anything else ⇒ transcription unavailable + ERROR |
+| `VOICEMAIL_STT_MODEL` | `telephony` | `telephony` \| `chirp_3` (chirp_3 stores confidence NULL) |
+| `VOICEMAIL_STT_CONCURRENCY` | `1` | Jobs per worker process, 1-4 (the dedicated `vm-stt` pool has 2 × this threads) |
+| `VOICEMAIL_STT_DAILY_MINUTES_CAP` | `1000` | Rolling 24 h billed-minutes breaker (≈ $16/day at $0.016/min), 1-100000; at the cap no job is claimed (they stay `pending`) |
+| `VOICEMAIL_TRANSCRIPTION_POLL_S` | `10` | Worker tick, 2-60 s (±20 % jitter; first tick 20-40 s after start) |
+| `VOICEMAIL_STT_PROVIDER` / `VOICEMAIL_STT_FAKE_MODE` / `VOICEMAIL_STT_FAKE_TEXT` | _(dev/CI only — NOT in compose)_ | `VOICEMAIL_STT_PROVIDER=fake` selects the deterministic in-process fake; refused unless `VOICEMAIL_ALLOW_LOCAL_KMS=true` and `ENV`/`ENVIRONMENT` ≠ `production`. `FAKE_MODE` = `ok` (default) / `empty` / `transient` / `unavailable` / `rejected` / `slow`; `FAKE_TEXT` default `This is a test transcript.` |
+| `GOOGLE_SDK_PYTHON_LOGGING_SCOPE` / `GRPC_TRACE` | _(must stay unset)_ | Client-library / gRPC debug logging could dump audio or transcripts: if either is set (non-empty), transcription is unavailable |
 
 The payments-demo vars (`PAYMENTS_DEMO_MODE`, `PAYMENTS_DEMO_FAKE_ORIGINATE`, `PAYMENTS_DEMO_*`, `PAYMENT_PROVIDER`, `AUTO_RECHARGE_MAX_FAILURES`) are gone with the demo — remove them from any VM `.env`; nothing reads them.
 

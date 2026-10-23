@@ -10,9 +10,17 @@ and transcript text exist only in RAM (D8).
 
     config    env parsing, the platform flag, ``available()`` (plan §12)
     document  the transcript JSON document that gets sealed (plan §5)
+    chunking  <= 55 s pieces cut at quiet points, silence trimmed (plan §7)
+    provider  the STT contract + ``get_stt_provider()`` (plan §8)
+    gcp_stt   Google Speech-to-Text V2 sync Recognize, ``us`` (plan §8.1)
+    fake_stt  deterministic dev/CI provider (plan §8.2)
+    queue     the worker's SQL over ``voicemail_transcripts`` (plan §6)
+    worker    the lifespan worker: discover, claim, transcribe, seal (plan §6)
+    smoke     ``python -m services.voicemail.transcription.smoke`` (plan §8.3)
 
-Importing this package needs no GCP credentials, imports no Google library and
-makes no network call.
+Importing this package (or any of those modules) needs no GCP credentials,
+imports no Google library and makes no network call; only ``config`` and
+``document`` are imported eagerly.
 
     from services.voicemail.transcription import config, document
     config.available()            # summary.transcription_available

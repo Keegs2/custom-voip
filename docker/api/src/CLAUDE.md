@@ -57,6 +57,7 @@ src/
     reporting.py             # Customer Reporting pure logic (date/tz validation, buckets, missed reasons, grades, CSV)
     voicemail/               # Encrypted voicemail crypto layer: AES-256-GCM envelope, per-customer Cloud KMS KEKs (keys.py), GCS ciphertext store, CRC32C, AAD (contract docs/ENCRYPTED_VOICEMAIL_INTERFACES.md §2)
                              #   + product logic (§4/§5): mailboxes.py (create/delete/erase/purge, shared with number_inventory), deposit.py (FS deposit: leases, idempotency, deadline), greetings.py, audio.py + plaintext_cache.py (decrypt-once LRU, Range), retention.py (lifespan sweep), wav.py, meta.py (X-VM-Meta), body.py (capped raw body), audit.py (fail-closed access log)
+      voicemail/transcription/  # Transcription v1.1 (docs/VOICEMAIL_TRANSCRIPTION_PLAN.md): config.py (flag, available(), env), document.py (sealed JSON), chunking.py (<= 55 s pieces), provider.py + gcp_stt.py (Speech-to-Text V2, us, lazy) + fake_stt.py (dev/CI), queue.py (§6 worker SQL), worker.py (lifespan worker), smoke.py (`python -m services.voicemail.transcription.smoke`)
 ```
 
 ## Retired / removed products (2026-09)
@@ -185,6 +186,7 @@ Tests: `tests/test_reports.py` (ephemeral PG 16).
 2. `schema_check.run_startup_check()` -- probes `information_schema.columns` for `cdrs.stir_outcome` / `stir_eff_actual` (47) and `leg` / `call_id` / `leg_attempt` (48), all bound by the ingest INSERT. Missing → logs **CRITICAL** with the exact remedy per migration file (`sudo -u postgres psql -d voip -f …/47_cdr_stir_outcome.sql`, `sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f …/48_cdr_call_legs.sql`); DB unreachable → WARNING. Never raises — the API keeps serving.
 3. `init_redis()` -- creates redis-py async client with retry logic (5 attempts, 2s backoff)
 4. Voicemail retention task (`services/voicemail/retention.run_forever`, unless `VOICEMAIL_RETENTION_ENABLED=false`)
+5. Voicemail transcription worker (`services/voicemail/transcription/worker.start_if_enabled`) — ONLY when `VOICEMAIL_TRANSCRIPTION_ENABLED` is exactly `true`; one per uvicorn worker, cancelled at shutdown like retention (in-flight jobs are abandoned; the lease reaper re-queues them). See `docs/VOICEMAIL_TRANSCRIPTION_PLAN.md` §6
 - Before all of that, at import AND at the top of the lifespan: `utils.access_log.install_access_log_redaction()` — a filter on the `uvicorn.access` logger ONLY that rewrites `t=<value>` (the voicemail playback token) to `t=<redacted>`. Import time matters: each `--workers 4` child runs uvicorn's `configure_logging()` and then imports `main`, so the filter survives uvicorn's dictConfig in every worker. Test: `tests/test_access_log_redaction.py` (incl. a fresh-process worker simulation).
 
 ### Shutdown
