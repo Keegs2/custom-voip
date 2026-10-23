@@ -143,10 +143,30 @@ When a forwarded/placed destination is a number the platform **owns** (any produ
 
 ## Testing
 
-- **Type-check before push:** `tsc --noEmit` — unused imports break Docker build
+- **Type-check before push:** `cd docker/ui/app && npm run build` (`tsc -b && vite build`, the same command the Docker build and CI run) — unused imports break the Docker build. Do NOT use `tsc --noEmit`: `tsconfig.json` is a solution file (`"files": []` + references), so it type-checks zero files and always passes.
+- **API / Lua tests:** `TEST_PG_BIN=/opt/homebrew/opt/postgresql@16/bin python3 -m pytest tests -q -rs` (deps: `pip install -r tests/requirements.txt`), then `lua tests/lua/<name>_harness.lua` from the repo root. Without PostgreSQL 16 binaries or a `lua` interpreter the DB/Lua tests SKIP silently — read the `-rs` summary.
+- **CI** runs all of the above on every PR into `RCF-V1` — see [CI](#ci) below.
 - **Do not push until tested** — user confirms locally first
 - **Live call test DID:** +16174544217 (RCF). Its `forward_to` is changed for testing — check `rcf_numbers` before relying on a target (was +17744045256; forwarding to +18004444444 via Sinch Denver-TF on 2026-09-24).
 - **Sinch test TNs (origination):** 5305480845 (Denver), 5305480846 (Chicago) — use them for anything that depends on Sinch session timers/refreshes.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every pull request into `RCF-V1` (drafts and bot-opened PRs included) and on every push to `RCF-V1`. It only verifies; deploys stay `git pull` on the VMs.
+
+| Job | Runs |
+|-----|------|
+| `api-tests` | Python 3.12 + `tests/requirements.txt`; vanilla PostgreSQL 16 (`TEST_PG_BIN=/usr/lib/postgresql/16/bin`, no TimescaleDB); Lua 5.3 (what production mod_lua is built against). `pytest tests -q -rsx`, then `.github/scripts/check_no_skips.py` **fails the job if any test skipped or xfailed** — the DB/Lua tests skip silently when a tool is missing, which would otherwise pass green without running. Then every `tests/lua/*_harness.lua` and `scripts/vmalert-pager/test/run_tests.sh`. |
+| `ui-build` | Node 20, `npm ci && npm run build` in `docker/ui/app` (the Docker image build's commands). |
+
+CI executes PR code, including model-written code from the CRAG Ops agent, so it must stay a read-only sandbox:
+
+- **Never give CI repository secrets**, environments, cloud credentials, or a write-scoped `GITHUB_TOKEN`. Keep top-level `permissions: contents: read`. Nothing in CI may reach production (VMs, DB, carrier or GCP APIs).
+- Trigger only on `pull_request` / `push`. Never `pull_request_target` or `workflow_run` — they run PR code with the base repository's token and secrets.
+- Pin every third-party action to a full commit SHA with a `# vX.Y.Z` comment; `actions/checkout` keeps `persist-credentials: false`.
+- A PR's own copy of `.github/` is what CI runs for that PR — review changes there as changes to the gate itself.
+- A new test must run in CI, not skip. If it needs a new tool, install it in the workflow.
+- `npm run lint` is not in CI yet: it fails on existing code (19 errors as of 2026-10-21).
 
 ## Multi-VM SIP Architecture — Hard-Won Lessons
 

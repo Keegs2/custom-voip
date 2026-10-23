@@ -1,0 +1,5 @@
+# Test-only dependencies for tests/ (CI installs this file; see .github/workflows/ci.yml).
+# The API's own runtime requirements, plus the test runner.
+-r ../docker/api/requirements.txt
+pytest==9.1.1
+pytest-asyncio==1.4.0  # tests/test_cdr_export.py uses @pytest.mark.asyncio
