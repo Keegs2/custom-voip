@@ -61,7 +61,7 @@ notifications:
 
 Each (host, kind) is its own incident and its own notification rate limit
 (900 s). Before, one page suppressed every other page for 30 minutes. The
-incident subject reads `[CRITICAL] On-VM watchdog page — <kind> on <host> (<zone>)`.
+incident subject reads `CRAG · Watchdog page: <kind> on <host> (<zone>)` (Google prefixes `[ALERT - Critical]`). The body leads with the page type and VM, then lists every page type in plain words with what to do; `test`/`TEST` says "No action needed". The raw page line stays on the incident page only: an extractor for it would join the grouping key and re-notify on every re-emit.
 Log-based incidents (this policy and the six SBC failover policies) send no
 notification when they close; they auto-close 24 h after the last matching line,
 so closure is not recovery.
@@ -91,7 +91,7 @@ and syslog shipping (which carries the `revup-alert` lines). On the
 
 ## Test the pipeline end-to-end (do this after apply)
 
-- On any VM with the agent: `logger -p user.err -t revup-alert -- "test page — ignore"` → expect an email (and PagerDuty incident) within ~2–5 min. The subject must read `On-VM watchdog page — test on <that VM> (<zone>)`. No incident at all means the tag filter does not match this VM's syslog format; a subject with an empty kind or host means an extractor missed. Either way, revert the `revup_alert_log` change and re-apply before relying on watchdog paging.
+- On any VM with the agent: `logger -p user.err -t revup-alert -- "test page — ignore"` → expect an email (and PagerDuty incident) within ~2–5 min. The subject must read `CRAG · Watchdog page: test on <that VM> (<zone>)`. No incident at all means the tag filter does not match this VM's syslog format; a subject with an empty kind or host means an extractor missed. Either way, revert the `revup_alert_log` change and re-apply before relying on watchdog paging.
 - After the first apply with `pubsub_notification_channel_ids`: confirm the channel is listed on a policy in Cloud Console → Monitoring → Alerting, and that the test page above reaches `monitoring-alerts` with `incident.policy_user_labels.system = "crag"` (TED's Discord relay logs non-`[TED NEXT]` incidents as skipped, which shows they arrived).
 - `sudo systemctl stop google-cloud-ops-agent && sleep 660 && sudo systemctl start google-cloud-ops-agent` is NOT a VM-down test (hypervisor metrics continue); to test VM-down semantics use a scratch VM, not production.
 
