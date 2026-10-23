@@ -2,6 +2,8 @@
 
 This is the ordered command list for the owner. GCP setup comes first and is in `docs/runbooks/VOICEMAIL_GCP_SETUP.md`. This runbook starts once GCP is done. Every command is one line. Run them in order, on the machine named in **bold**.
 
+If the code went out in the all-open-PRs maintenance (`docs/runbooks/MAINTENANCE_2026-10_ALL_OPEN_PRS.md`), migration 54 and the pulls are already done. Follow that runbook's §5, which says which steps here to skip.
+
 What ships:
 - **Migration 54:** the voicemail tables plus the `voicemail` arm of `number_routing`.
 - **API:** `/v1/voicemail/*` and the retention worker.
