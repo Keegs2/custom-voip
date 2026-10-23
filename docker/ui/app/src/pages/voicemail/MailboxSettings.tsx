@@ -2,20 +2,26 @@
  * MailboxSettings — the "Greeting & settings" tab for one mailbox:
  *
  *   Greeting (GreetingsPanel, full width)
- *   Details: name + timezone            PIN: set / change (masked, 4–10 digits)
- *   Storage: messages / space / retention (read-only)
+ *   Details: name + timezone            Transcription (v1.1, see below)
+ *   PIN: set / change (masked)          Storage: messages / space / retention
  *   Administration (staff only): suspend / resume, delete mailbox (typed)
  *
  * Mount KEYED by mailbox id so the forms start from that mailbox's values.
  * Readonly tenants see values, not inputs. No prices anywhere (D5).
+ *
+ * Transcription — owner decision O2: ONLY a platform admin (`canManage`,
+ * incl. "View as Customer") may switch it on/off, change its language or
+ * transcribe earlier messages. Tenants (`user` and `readonly`) get a
+ * read-only line while it is on, and no panel at all while it is off.
  */
 import { useId, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, PauseCircle, PlayCircle, Trash2 } from 'lucide-react';
-import type { Mailbox, MailboxUpdate } from '../../types/voicemail';
-import { deleteMailbox, setMailboxPin, updateMailbox } from '../../api/voicemail';
+import { FileText, KeyRound, PauseCircle, PlayCircle, Trash2 } from 'lucide-react';
+import type { Mailbox, MailboxUpdate, TranscriptionLanguage } from '../../types/voicemail';
+import { TRANSCRIPTION_LANGUAGES } from '../../types/voicemail';
+import { backfillTranscripts, deleteMailbox, setMailboxPin, updateMailbox } from '../../api/voicemail';
 import { useToast } from '../../components/ui/ToastContext';
-import { invalidateVoicemail, vmErrorText, type VoicemailScope } from './voicemailData';
+import { invalidateVoicemail, transcriptErrorText, vmErrorText, type VoicemailScope } from './voicemailData';
 import { GreetingsPanel } from './GreetingsPanel';
 import { ConfirmDialog } from './VmDialog';
 import { formatBytes, formatPhone, nationalDigits, PIN_PATTERN, TIMEZONES } from './format';
@@ -25,14 +31,30 @@ export interface MailboxSettingsProps {
   mailbox: Mailbox;
   canEdit: boolean;
   canManage: boolean;
+  /** summary.transcription_available. */
+  transcriptionAvailable: boolean;
   onDeleted: () => void;
 }
 
-export function MailboxSettings({ scope, mailbox, canEdit, canManage, onDeleted }: MailboxSettingsProps) {
+export function MailboxSettings({
+  scope,
+  mailbox,
+  canEdit,
+  canManage,
+  transcriptionAvailable,
+  onDeleted,
+}: MailboxSettingsProps) {
+  // Plan §11.4: shown when transcription is live, or this mailbox already has
+  // it on. O2: tenants only while it is on (read-only).
+  const transcriptionOn = mailbox.transcription_enabled === true;
+  const showTranscription = canManage ? transcriptionAvailable || transcriptionOn : transcriptionOn;
   return (
     <div className="vm-settings">
       <GreetingsPanel scope={scope} mailbox={mailbox} canEdit={canEdit} />
       <DetailsPanel mailbox={mailbox} canEdit={canEdit} />
+      {showTranscription && (
+        <TranscriptionPanel mailbox={mailbox} canManage={canManage} available={transcriptionAvailable} />
+      )}
       <PinPanel mailbox={mailbox} canEdit={canEdit} />
       <StoragePanel mailbox={mailbox} />
       {canManage && <AdminPanel mailbox={mailbox} onDeleted={onDeleted} />}
@@ -126,6 +148,177 @@ function DetailsPanel({ mailbox, canEdit }: { mailbox: Mailbox; canEdit: boolean
             <span className="dl-kv-label">Timezone</span>
             <span className="dl-kv-value">{zones.find((z) => z.id === mailbox.timezone)?.label ?? mailbox.timezone}</span>
           </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ─── Transcription (v1.1) ────────────────────────────────── */
+
+/** Where the audio goes — shown to everyone who sees the panel. */
+const TRANSCRIPTION_DISCLOSURE =
+  'Transcripts are created by Google Cloud Speech-to-Text in the United States. Audio is sent over an encrypted connection, processed in memory and not kept by Google. Transcripts are encrypted at rest like your recordings and deleted with the message.';
+
+function languageName(id: string | null | undefined): string {
+  return TRANSCRIPTION_LANGUAGES.find((l) => l.id === id)?.label ?? id ?? TRANSCRIPTION_LANGUAGES[0].label;
+}
+
+function TranscriptionPanel({ mailbox, canManage, available }: { mailbox: Mailbox; canManage: boolean; available: boolean }) {
+  // ── ALL hooks unconditionally at the top (React #310) ──
+  const queryClient = useQueryClient();
+  const { toastOk, toastErr } = useToast();
+  const savedOn = mailbox.transcription_enabled === true;
+  const savedLanguage: TranscriptionLanguage = mailbox.transcription_language ?? 'en-US';
+  const [on, setOn] = useState(savedOn);
+  const [language, setLanguage] = useState<TranscriptionLanguage>(savedLanguage);
+  const langId = useId();
+  const headId = `vm-tx-${mailbox.id}`;
+
+  const save = useMutation({
+    mutationFn: (body: MailboxUpdate) => updateMailbox(mailbox.id, body),
+    onSuccess: (_mb, body) => {
+      if (body.transcription_enabled === true) toastOk('Transcription is on — new messages will be transcribed.');
+      else if (body.transcription_enabled === false) toastOk('Transcription is off for this mailbox.');
+      else toastOk('Transcription language saved.');
+    },
+    onSettled: () => invalidateVoicemail(queryClient),
+  });
+
+  const backfill = useMutation({
+    mutationFn: () => backfillTranscripts(mailbox.id),
+    onSuccess: ({ queued }) =>
+      toastOk(
+        queued === 0
+          ? 'No earlier messages to transcribe.'
+          : `Transcribing ${queued} earlier message${queued === 1 ? '' : 's'}.`,
+      ),
+    onError: (err) => toastErr(transcriptErrorText(err, 'Earlier messages couldn’t be queued. Try again.')),
+    onSettled: () => invalidateVoicemail(queryClient),
+  });
+
+  // ── Derived (after all hooks) ──
+  const dirty = on !== savedOn || language !== savedLanguage;
+  const paused = savedOn && !available;
+  const languages = TRANSCRIPTION_LANGUAGES.some((l) => l.id === savedLanguage)
+    ? TRANSCRIPTION_LANGUAGES
+    : [...TRANSCRIPTION_LANGUAGES, { id: savedLanguage, label: savedLanguage }];
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!dirty || save.isPending) return;
+    const body: MailboxUpdate = {};
+    if (on !== savedOn) body.transcription_enabled = on;
+    if (language !== savedLanguage) body.transcription_language = language;
+    save.mutate(body);
+  };
+
+  return (
+    <section className="dl-panel vm-settings-panel vm-tx-settings" aria-labelledby={headId}>
+      <div className="dl-panel-head">
+        <span id={headId} className="dl-panel-title">
+          Transcription
+        </span>
+        <span className={`dl-tag${savedOn ? '' : ' dl-tag-slate'}`}>{savedOn ? 'On' : 'Off'}</span>
+        <p className="dl-panel-sub">A written transcript next to each new message, so you can read it instead of listening.</p>
+      </div>
+
+      {canManage ? (
+        <form className="dl-panel-body vm-form" onSubmit={submit}>
+          {paused && (
+            <div className="dl-banner dl-banner-warn" role="status">
+              Transcription is paused.
+            </div>
+          )}
+          <div className="vm-field">
+            <span className="dl-flabel" id={`${headId}-switch`}>
+              Transcribe new messages
+            </span>
+            <div className="vm-seg" role="group" aria-labelledby={`${headId}-switch`}>
+              <button
+                type="button"
+                aria-pressed={!on}
+                className={`vm-seg-opt${!on ? ' vm-seg-on' : ''}`}
+                onClick={() => setOn(false)}
+                disabled={save.isPending}
+              >
+                Off
+              </button>
+              <button
+                type="button"
+                aria-pressed={on}
+                className={`vm-seg-opt${on ? ' vm-seg-on' : ''}`}
+                onClick={() => setOn(true)}
+                // Switching on needs transcription live (the API answers 409 otherwise).
+                disabled={save.isPending || (!available && !savedOn)}
+              >
+                On
+              </button>
+            </div>
+          </div>
+          <div className="vm-field">
+            <label className="dl-flabel" htmlFor={langId}>
+              Language
+            </label>
+            <select
+              id={langId}
+              className="dl-input vm-input-full"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value as TranscriptionLanguage)}
+              disabled={save.isPending}
+            >
+              {languages.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="dl-help">{TRANSCRIPTION_DISCLOSURE}</p>
+          <p className="dl-help">Only Granite staff can change this setting.</p>
+          {save.isError && (
+            <div className="dl-banner dl-banner-err" role="alert">
+              {transcriptErrorText(save.error, 'The transcription setting couldn’t be saved.')}
+            </div>
+          )}
+          <div className="vm-form-actions">
+            <button type="submit" className="dl-btn dl-btn-primary vm-btn-sm" disabled={!dirty || save.isPending}>
+              {save.isPending ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+          {savedOn && available && (
+            <div className="vm-tx-backfill">
+              <div>
+                <strong>Earlier messages</strong>
+                <p className="dl-help">Transcribes up to 200 of the newest messages that arrived while this was off.</p>
+              </div>
+              <button
+                type="button"
+                className="dl-btn dl-btn-ghost vm-btn-sm"
+                disabled={backfill.isPending}
+                onClick={() => backfill.mutate()}
+              >
+                {backfill.isPending ? <span className="vm-spin" aria-hidden="true" /> : <FileText size={14} aria-hidden="true" />}
+                Transcribe earlier messages
+              </button>
+            </div>
+          )}
+        </form>
+      ) : (
+        <div className="dl-panel-body">
+          {paused && (
+            <div className="dl-banner dl-banner-warn vm-gap-bottom" role="status">
+              Transcription is paused.
+            </div>
+          )}
+          <div className="dl-kv">
+            <span className="dl-kv-label">Transcription</span>
+            <span className="dl-kv-value">
+              {savedOn ? 'On' : 'Off'} — {languageName(savedLanguage)}
+            </span>
+          </div>
+          <p className="dl-help vm-gap-top">{TRANSCRIPTION_DISCLOSURE}</p>
+          <p className="dl-help">Your Granite account team manages this setting.</p>
         </div>
       )}
     </section>

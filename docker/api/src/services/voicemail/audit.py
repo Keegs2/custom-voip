@@ -10,6 +10,15 @@ deposit | play | download | greeting_upload | greeting_play |
 greeting_fs_fetch | greeting_delete | message_delete | message_purge |
 mailbox_create | mailbox_update | mailbox_delete | pin_set | key_create |
 crypto_erase | retention_purge.
+Transcription v1.1 (docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §10.4; ``detail``
+never carries transcript text):
+transcribe (system, worker — a transcript stored, same transaction) |
+transcript_view (ui/admin — full text ``{"kind":"full"}`` or a snippet batch
+``{"kind":"snippets","message_ids":[...]}``, committed BEFORE the text is
+returned) | transcript_request (ui/admin — retry ``{"kind":"retry","force":…}``
+or backfill ``{"kind":"backfill","count":n}``) | transcript_requeue (admin —
+``{"error_code":…,"count":n}``). Mailbox transcription settings stay
+``mailbox_update``.
 Sources: ui | freeswitch | system | admin.
 """
 from __future__ import annotations

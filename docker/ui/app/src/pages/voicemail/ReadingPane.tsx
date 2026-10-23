@@ -1,7 +1,8 @@
 /**
  * ReadingPane — the open message: who called, when (mailbox timezone), the
- * player, and the actions for its folder. Mutation controls render only when
- * the viewer can edit (readonly tenants get play + download).
+ * player, its transcript (v1.1, TranscriptPanel) and the actions for its
+ * folder. Mutation controls render only when the viewer can edit (readonly
+ * tenants get play + download).
  *
  *   inbox / saved:  Mark read|unread · Save|Move to Inbox · Download · Delete
  *   trash:          Restore · Download · Delete forever
@@ -11,16 +12,25 @@ import { ArchiveRestore, Bookmark, BookmarkMinus, Download, Lock, Mail, MailOpen
 import type { Mailbox, VoicemailFolder, VoicemailMessage } from '../../types/voicemail';
 import { getMessagePlaybackToken } from '../../api/voicemail';
 import { Player } from './Player';
+import { TranscriptPanel } from './TranscriptPanel';
+import type { VoicemailScope } from './voicemailData';
 import { callerSubtitle, callerTitle, formatDate, formatDurationMs, formatFullWhen, formatPhone } from './format';
 
 export type MessageActionKind = 'read' | 'save' | 'trash' | 'restore' | 'purge';
 
 export interface ReadingPaneProps {
+  scope: VoicemailScope;
   message: VoicemailMessage;
   mailbox: Mailbox;
   folder: VoicemailFolder;
   timeZone: string | undefined;
   canEdit: boolean;
+  /** Platform admin (incl. "View as Customer") — transcription switch, owner decision O2. */
+  canManage: boolean;
+  /** summary.transcription_available. */
+  transcriptionAvailable: boolean;
+  /** Switches the workspace to "Greeting & settings". */
+  onOpenSettings: () => void;
   /** The action in flight for this message, if any. */
   pending: MessageActionKind | 'download' | null;
   onAction: (kind: MessageActionKind, value?: boolean) => void;
@@ -32,17 +42,22 @@ export interface ReadingPaneProps {
 const TRASH_DAYS = 30;
 
 export function ReadingPane({
+  scope,
   message,
   mailbox,
   folder,
   timeZone,
   canEdit,
+  canManage,
+  transcriptionAvailable,
+  onOpenSettings,
   pending,
   onAction,
   onDownload,
   onPlaybackMinted,
 }: ReadingPaneProps) {
   const mint = useCallback(() => getMessagePlaybackToken(message.id), [message.id]);
+  const markRead = useCallback(() => onAction('read', true), [onAction]);
   const title = callerTitle(message);
   const sub = callerSubtitle(message);
   const busy = pending !== null;
@@ -85,6 +100,18 @@ export function ReadingPane({
         durationMs={message.duration_ms}
         label={`message from ${title}`}
         onMinted={onPlaybackMinted}
+      />
+
+      <TranscriptPanel
+        scope={scope}
+        message={message}
+        mailbox={mailbox}
+        folder={folder}
+        canEdit={canEdit}
+        canManage={canManage}
+        transcriptionAvailable={transcriptionAvailable}
+        onMarkRead={markRead}
+        onOpenSettings={onOpenSettings}
       />
 
       <div className="vm-actions" role="group" aria-label="Message actions">

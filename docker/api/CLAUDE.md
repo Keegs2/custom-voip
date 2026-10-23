@@ -53,6 +53,7 @@ CMD: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --ht
 | `google-cloud-storage>=3.0.0` | Encrypted voicemail: ciphertext objects (`services/voicemail/storage.py`) |
 | `google-crc32c>=1.5.0` | CRC32C integrity on every KMS/GCS call |
 | `cryptography>=42.0.0` | AES-256-GCM envelope + HKDF (dev local KMS) |
+| `google-cloud-speech>=2.38.0,<3` | Voicemail transcription: Speech-to-Text V2 sync `Recognize`, `us` endpoint (`services/voicemail/transcription/gcp_stt.py`, imported lazily) |
 
 ## Environment Variables
 
@@ -82,6 +83,15 @@ CMD: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --ht
 | `VOICEMAIL_PLAYBACK_SECRET` | _(required for playback)_ | HS256 key for 120 s playback URLs; ≥ 32 chars, must differ from `JWT_SECRET_KEY` (else 503) |
 | `INGEST_SHARED_SECRET` | _(required for FS voicemail)_ | `X-Ingest-Secret` FreeSWITCH sends on `/v1/voicemail/fs/*`; ≥ 32 chars; unset/short ⇒ every call 503 (fail-closed) |
 | `VOICEMAIL_RETENTION_ENABLED` | _(unset = ON)_ | Voicemail retention worker (lifespan task in every worker, one sweep at a time via a PG advisory xact lock). `false` disables it |
+| `VOICEMAIL_TRANSCRIPTION_ENABLED` | _(unset = OFF)_ | **Voicemail transcription kill switch** (`docs/VOICEMAIL_TRANSCRIPTION_PLAN.md` §12). ON only if exactly `true` (trimmed, case-insensitive). ON: the lifespan starts `transcription.worker` in every uvicorn worker (one discoverer at a time via `pg_try_advisory_xact_lock('vm_trx')`). OFF: no worker task, `summary.transcription_available=false`, nothing is sent to Google; existing transcripts stay readable (KMS only). Each mailbox is also opt-in (`voicemail_boxes.transcription_enabled`, default false, admin-only) |
+| `VOICEMAIL_STT_PROJECT` | = `VOICEMAIL_KMS_PROJECT` | Project of the implicit recognizer `projects/<p>/locations/us/recognizers/_` (billing). Same project-id regex as KMS |
+| `VOICEMAIL_STT_LOCATION` | `us` | **Only `us` is accepted** (US-only processing, endpoint `us-speech.googleapis.com`); anything else ⇒ transcription unavailable + ERROR |
+| `VOICEMAIL_STT_MODEL` | `telephony` | `telephony` \| `chirp_3` (chirp_3 stores confidence NULL) |
+| `VOICEMAIL_STT_CONCURRENCY` | `1` | Jobs per worker process, 1-4 (the dedicated `vm-stt` pool has 2 × this threads) |
+| `VOICEMAIL_STT_DAILY_MINUTES_CAP` | `1000` | Rolling 24 h billed-minutes breaker (≈ $16/day at $0.016/min), 1-100000; at the cap no job is claimed (they stay `pending`) |
+| `VOICEMAIL_TRANSCRIPTION_POLL_S` | `10` | Worker tick, 2-60 s (±20 % jitter; first tick 20-40 s after start) |
+| `VOICEMAIL_STT_PROVIDER` / `VOICEMAIL_STT_FAKE_MODE` / `VOICEMAIL_STT_FAKE_TEXT` | _(dev/CI only — NOT in compose)_ | `VOICEMAIL_STT_PROVIDER=fake` selects the deterministic in-process fake; refused unless `VOICEMAIL_ALLOW_LOCAL_KMS=true` and `ENV`/`ENVIRONMENT` ≠ `production`. `FAKE_MODE` = `ok` (default) / `empty` / `transient` / `unavailable` / `rejected` / `slow`; `FAKE_TEXT` default `This is a test transcript.` |
+| `GOOGLE_SDK_PYTHON_LOGGING_SCOPE` / `GRPC_TRACE` | _(must stay unset)_ | Client-library / gRPC debug logging could dump audio or transcripts: if either is set (non-empty), transcription is unavailable |
 
 The payments-demo vars (`PAYMENTS_DEMO_MODE`, `PAYMENTS_DEMO_FAKE_ORIGINATE`, `PAYMENTS_DEMO_*`, `PAYMENT_PROVIDER`, `AUTO_RECHARGE_MAX_FAILURES`) are gone with the demo — remove them from any VM `.env`; nothing reads them.
 
@@ -320,12 +330,12 @@ Read-only ELI5 reports over `cdrs`; whole minutes only, no costs/seconds/interna
 Scope: admin (`customer_id` param picks the customer), tenant `user` (own customer; cross-tenant → 404), `readonly` (reads + playback only), `support` → 403. `/fs/*` = `X-Ingest-Secret` (JWT-exempt); `…/audio` = `?t=` playback token (JWT-exempt GET/HEAD).
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/v1/voicemail/summary` | admin, tenant | `{enabled, mailbox_count, unread_count, can_manage}` |
-| `GET`/`POST` | `/v1/voicemail/mailboxes` | tenant / **admin** (POST) | List (ordered customer, label, id) / create on an `available` DID (201; 409 DID; 503 KMS down, nothing committed) |
-| `GET`/`PATCH`/`DELETE` | `/v1/voicemail/mailboxes/{id}` | tenant / writer / **admin** (DELETE 204) | Mailbox; PATCH label/timezone/greeting_mode+active_greeting_id/(admin) status |
+| `GET` | `/v1/voicemail/summary` | admin, tenant | `{enabled, mailbox_count, unread_count, can_manage, transcription_available}` (the last = platform flag on AND STT config valid, same for every caller) |
+| `GET`/`POST` | `/v1/voicemail/mailboxes` | tenant / **admin** (POST) | List (ordered customer, label, id) / create on an `available` DID (201; 409 DID; 503 KMS down, nothing committed). POST also takes `transcription_enabled` (default false; true while unavailable → 409) + `transcription_language` (`en-US`\|`es-US`\|`fr-CA`, else 422) |
+| `GET`/`PATCH`/`DELETE` | `/v1/voicemail/mailboxes/{id}` | tenant / writer / **admin** (DELETE 204) | Mailbox (+ `transcription_enabled`, `transcription_language`); PATCH label/timezone/greeting_mode+active_greeting_id/(admin) status/(**admin**, O2) `transcription_enabled`+`transcription_language` — any non-admin sending either → 403; off→on while unavailable → 409; bad language → 422; `false` flips the mailbox's `pending` transcripts to `disabled` in the same transaction. DELETE also deletes the mailbox's transcripts immediately |
 | `PUT` | `/v1/voicemail/mailboxes/{id}/pin` | writer | 4–10 digit PIN (bcrypt) → 204 |
 | `GET` | `/v1/voicemail/available-numbers` | **admin** | `[{did, city, state}]` (q digits, limit ≤ 50) |
-| `GET` | `/v1/voicemail/mailboxes/{id}/messages` | tenant | `?folder=inbox\|saved\|trash&limit&offset` → `{items, total, unread}` newest first |
+| `GET` | `/v1/voicemail/mailboxes/{id}/messages` | tenant | `?folder=inbox\|saved\|trash&limit&offset` → `{items, total, unread}` newest first. Every Message (here and on PATCH/DELETE/restore) carries `transcript: {status, confidence}` — LEFT JOIN, one query, never decrypts; no row yet → `pending` if the mailbox transcribes else `disabled` |
 | `PATCH`/`DELETE` | `/v1/voicemail/messages/{id}` | writer | read/saved flags; DELETE = move to trash |
 | `POST` | `/v1/voicemail/messages/{id}/restore` | writer | clear `deleted_at` (is_saved unchanged) |
 | `DELETE` | `/v1/voicemail/messages/{id}/purge` | writer | object then row → 204 |
@@ -335,7 +345,13 @@ Scope: admin (`customer_id` param picks the customer), tenant `user` (own custom
 | `DELETE` | `/v1/voicemail/greetings/{id}` | writer | purge; active → standard → 204 |
 | `POST` | `/v1/voicemail/greetings/{id}/playback-token` | tenant | `{url, expires_in}` |
 | `GET`/`HEAD` | `/v1/voicemail/greetings/{id}/audio?t=` | token | as message audio |
-| `POST` | `/v1/voicemail/customers/{id}/crypto-erase` | **admin** | `{confirm: "ERASE <id>"}` → counts |
+| `POST` | `/v1/voicemail/customers/{id}/crypto-erase` | **admin** | `{confirm: "ERASE <id>"}` → counts (transcripts deleted in the erase transaction) |
+| `GET` | `/v1/voicemail/messages/{id}/transcript` | tenant (incl. readonly) | `{message_id, status, language, model, confidence, text, segments, completed_at, can_retry}`; text only when `done`, decrypted under 4 per-process slots (2 s wait → 503) and returned only after a committed `transcript_view` audit (audit failure → 503, no text); integrity → 500; KMS down → 503 + Retry-After; does NOT mark read; `Cache-Control: no-store` |
+| `POST` | `/v1/voicemail/messages/{id}/transcript/retry` | writer (`force` **admin**) | optional `{force}` → 202 `{message_id, status:"pending"}`; 409 sentences (unavailable / mailbox off / trashed / in progress / already done) |
+| `GET` | `/v1/voicemail/mailboxes/{id}/transcript-snippets?ids=` | tenant | ≤ 50 ids → `{items:[{message_id, status, snippet}], unavailable}`; foreign ids omitted; one `transcript_view` audit per batch; never 5xx (failures → `snippet:null`, `unavailable:true`); `no-store` |
+| `POST` | `/v1/voicemail/mailboxes/{id}/transcripts/backfill` | **admin** (O2) | 202 `{queued}` — newest 200 stored, untrashed messages: missing → `pending`, `disabled` → `pending`; 409 unavailable / mailbox off |
+| `GET` | `/v1/voicemail/transcription/status` | **admin** | ops JSON (plan §13) from the table + config only (never the worker's in-process breaker): counts, oldest due pending age, failed_by_code, billed_minutes_24h + budget_exhausted (the worker's `BUDGET_SQL` vs `daily_cap_ms`), daily cap, config_problems |
+| `POST` | `/v1/voicemail/transcription/requeue` | **admin** | `{error_code?, limit? (1-500, default 500)}` → `{requeued}` — only claimable `failed` rows (mailbox on, message stored + untrashed). `error_code` ∈ the codes a FAILED row can carry (transient `stt_unavailable stt_timeout decrypt_unavailable seal_unavailable db lease_expired internal`, permanent `stt_rejected bad_wav integrity key_destroyed message_gone`), else 422 — deferral codes only ever sit on `pending` rows |
 | `GET` | `/v1/voicemail/fs/mailbox/{id}` | ingest secret | `{mailbox_id, customer_id, did, status, accepting, reason, max_message_seconds, greeting}` |
 | `GET` | `/v1/voicemail/fs/greetings/{id}/audio` | ingest secret | plaintext greeting WAV (audit `greeting_fs_fetch`) |
 | `POST` | `/v1/voicemail/fs/deposit` | ingest secret | raw WAV + `X-VM-Meta` → `{"status":"stored","message_id":N}` |

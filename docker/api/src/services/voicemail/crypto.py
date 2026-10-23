@@ -20,6 +20,15 @@
 Failures: VoicemailCryptoUnavailable (-> 503) when KMS/GCS/DB/config is down;
 VoicemailIntegrityError (-> 500, never serve) on any authentication/CRC/format
 failure; VoicemailKeyDestroyed (a VoicemailCryptoUnavailable) after erase.
+
+Transcripts (v1.1, docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §5) use the same
+envelope with AAD ``vmt:{customer}:{mailbox}:{msg_uuid}`` — distinct from
+``vm:`` and ``vmg:``, so a transcript blob or wrapped DEK replayed against the
+audio (or the reverse) fails authentication. The ciphertext is small
+(<= 64 KiB + tag) and lives on the ``voicemail_transcripts`` row, so there is
+no object store and no CRC32C: the GCM tag authenticates it. Sealing a
+transcript NEVER creates a customer key (the background worker may only use a
+key that already exists and is active).
 """
 from __future__ import annotations
 
@@ -42,10 +51,22 @@ IV_BYTES = GCM_NONCE_BYTES
 #: Sanity ceiling for one plaintext (deposit cap 10 MB, greeting 5 MB).
 MAX_PLAINTEXT_BYTES = 16 * 1024 * 1024 - 16
 
+#: AAD prefix of a sealed transcript (audio is ``vm``, greetings ``vmg``).
+TRANSCRIPT_AAD_PREFIX = "vmt"
+#: Ceiling for one transcript plaintext (the JSON document) in bytes; the
+#: ciphertext is at most this + the 16-byte GCM tag (migration 56's
+#: voicemail_transcripts_ct_len_chk: 17..65552).
+MAX_TRANSCRIPT_PLAINTEXT = 65_536
+_GCM_TAG_BYTES = 16
+_MIN_TRANSCRIPT_CIPHERTEXT = 1 + _GCM_TAG_BYTES
+_MAX_TRANSCRIPT_CIPHERTEXT = MAX_TRANSCRIPT_PLAINTEXT + _GCM_TAG_BYTES
+
 __all__ = [
     "ENC_ALGO", "Sealed", "crc32c",
     "message_aad", "greeting_aad", "message_object_key", "greeting_object_key",
     "seal_and_store", "load_and_open", "delete_object",
+    "TRANSCRIPT_AAD_PREFIX", "MAX_TRANSCRIPT_PLAINTEXT", "SealedBlob",
+    "transcript_aad", "seal_transcript", "open_transcript",
 ]
 
 
@@ -81,6 +102,13 @@ def greeting_aad(customer_id: int, mailbox_id: int, greeting_uuid: str) -> bytes
     """``b"vmg:{customer}:{mailbox}:{greeting_uuid}"``."""
     return (f"vmg:{_pos_int(customer_id, 'customer_id')}:{_pos_int(mailbox_id, 'mailbox_id')}:"
             f"{_canonical_uuid(greeting_uuid)}").encode("ascii")
+
+
+def transcript_aad(customer_id: int, mailbox_id: int, msg_uuid: str | _uuid.UUID) -> bytes:
+    """``b"vmt:{customer}:{mailbox}:{msg_uuid}"`` — the transcript of message
+    ``msg_uuid`` (same validation / canonicalisation as :func:`message_aad`)."""
+    return (f"{TRANSCRIPT_AAD_PREFIX}:{_pos_int(customer_id, 'customer_id')}:"
+            f"{_pos_int(mailbox_id, 'mailbox_id')}:{_canonical_uuid(msg_uuid)}").encode("ascii")
 
 
 def message_object_key(customer_id: int, mailbox_id: int, msg_uuid: str) -> str:
@@ -211,3 +239,101 @@ async def delete_object(object_key: str) -> None:
     """Delete a ciphertext object. Idempotent: a missing object is success."""
     validate_object_key(object_key)
     await get_object_store().delete(object_key)
+
+
+# ---------------------------------------------------------------------------
+# Transcripts (v1.1) — the sealed blob lives on the voicemail_transcripts row
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class SealedBlob:
+    """What the transcription worker persists on the voicemail_transcripts row."""
+
+    ciphertext: bytes      # AES-256-GCM output incl. the 16-byte tag
+    wrapped_dek: bytes
+    kek_version: str
+    iv: bytes              # 12 bytes
+    enc_algo: str          # "AES-256-GCM"
+
+
+async def seal_transcript(*, customer_id: int, mailbox_id: int, msg_uuid: str | _uuid.UUID,
+                          plaintext: bytes | bytearray | memoryview) -> SealedBlob:
+    """Encrypt a transcript document under a fresh DEK wrapped with the
+    customer's EXISTING, ACTIVE KEK. The ``vmt:`` AAD is built here from the
+    ids, so a caller cannot pass a mismatched one.
+
+    Never creates a key: ``get_customer_key`` + ``_require_active``, never
+    ``ensure_customer_key`` (the background worker must not mint KMS keys or
+    key rows; a customer without one has no stored messages to transcribe).
+
+    Raises ValueError (non-positive ids / bad uuid / plaintext empty, not
+    bytes-like or > MAX_TRANSCRIPT_PLAINTEXT), VoicemailKeyDestroyed (the
+    customer was crypto-erased), VoicemailCryptoUnavailable (KMS / DB / config
+    down), VoicemailIntegrityError (no key row for the customer; KMS response
+    CRC checks).
+    """
+    aad = transcript_aad(customer_id, mailbox_id, msg_uuid)
+    if not isinstance(plaintext, (bytes, bytearray, memoryview)):
+        raise ValueError("plaintext must be bytes")
+    if len(plaintext) == 0:
+        raise ValueError("plaintext is empty")
+    if len(plaintext) > MAX_TRANSCRIPT_PLAINTEXT:
+        raise ValueError("transcript plaintext too large")
+
+    key = await get_customer_key(customer_id)
+    if key is None:
+        raise VoicemailIntegrityError("no voicemail key exists for this customer")
+    _require_active(key)
+    provider = get_kms_provider(key.provider)
+
+    dek = bytearray(os.urandom(DEK_BYTES))
+    try:
+        wrapped, kek_version = await provider.wrap_dek(
+            customer_id=customer_id, key_ref=key.key_ref, dek=dek, aad=aad)
+        iv = os.urandom(IV_BYTES)
+        # AESGCM takes any buffer: no extra immutable copy of the plaintext.
+        ciphertext = AESGCM(dek).encrypt(iv, plaintext, aad)
+    finally:
+        _zero(dek)
+    return SealedBlob(ciphertext=ciphertext, wrapped_dek=wrapped, kek_version=kek_version,
+                      iv=iv, enc_algo=ENC_ALGO)
+
+
+async def open_transcript(*, customer_id: int, mailbox_id: int, msg_uuid: str | _uuid.UUID,
+                          ciphertext: bytes, wrapped_dek: bytes, iv: bytes) -> bytes:
+    """Decrypt a sealed transcript (row fields) of message ``msg_uuid``.
+
+    Row shapes are validated first (iv 12 bytes, ciphertext 17..65552 bytes,
+    wrapped DEK non-empty), then the customer's key must exist and be active,
+    then KMS unwraps the DEK under the ``vmt:`` AAD and AES-GCM decrypts under
+    the same AAD. A blob or wrapped DEK moved from another message / mailbox /
+    customer, or from the audio (``vm:``), fails here.
+
+    Raises VoicemailIntegrityError (-> 500, never serve: malformed row data, no
+    key row, GCM tag / AAD mismatch, KMS InvalidArgument), VoicemailKeyDestroyed
+    (crypto-erased), VoicemailCryptoUnavailable (-> 503: KMS / DB down),
+    ValueError (non-positive ids / bad uuid — a programming error).
+    """
+    aad = transcript_aad(customer_id, mailbox_id, msg_uuid)
+    if not isinstance(iv, (bytes, bytearray, memoryview)) or len(iv) != IV_BYTES:
+        raise VoicemailIntegrityError("stored transcript IV is malformed")
+    if (not isinstance(ciphertext, (bytes, bytearray, memoryview))
+            or not _MIN_TRANSCRIPT_CIPHERTEXT <= len(ciphertext) <= _MAX_TRANSCRIPT_CIPHERTEXT):
+        raise VoicemailIntegrityError("stored transcript ciphertext is malformed")
+    if not isinstance(wrapped_dek, (bytes, bytearray, memoryview)) or len(wrapped_dek) == 0:
+        raise VoicemailIntegrityError("stored transcript wrapped DEK is malformed")
+
+    key = await get_customer_key(customer_id)
+    if key is None:
+        raise VoicemailIntegrityError("no voicemail key exists for this customer")
+    _require_active(key)
+    provider = get_kms_provider(key.provider)
+
+    dek = await provider.unwrap_dek(customer_id=customer_id, key_ref=key.key_ref,
+                                    wrapped_dek=bytes(wrapped_dek), aad=aad)
+    try:
+        return AESGCM(dek).decrypt(bytes(iv), bytes(ciphertext), aad)
+    except InvalidTag as exc:
+        raise VoicemailIntegrityError(
+            "AES-GCM authentication failed (AAD mismatch or tampered transcript)") from exc
+    finally:
+        _zero(dek)

@@ -94,7 +94,7 @@ const SIDE_PRODUCTS: Product[] = [
     : []),
   {
     name: 'Visual Voicemail',
-    desc: 'Platform-native mailboxes with transcription and API retrieval — designed in, not bolted on.',
+    desc: 'Platform-native mailboxes — every message can arrive with a written transcript alongside the audio.',
     status: 'roadmap',
   },
 ];

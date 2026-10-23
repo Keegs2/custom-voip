@@ -158,7 +158,10 @@ def test_refill_script_form():
 
 def test_check_migrations_and_claude_md_know_55():
     chk = CHECK_MIGRATIONS.read_text()
-    assert chk.splitlines()[0].startswith("-- Read-only: reports which hand-applied migrations (22..55)")
+    # The header's range must cover 55 (later migrations extend it).
+    m = re.match(r"-- Read-only: reports which hand-applied migrations \(22\.\.(\d+)\)",
+                 chk.splitlines()[0])
+    assert m and int(m.group(1)) >= 55
     assert "('55_cdr_refresh_call_quality_fix'," in chk
     assert re.search(r"^\| `55_cdr_refresh_call_quality_fix\.sql` \|", PG_CLAUDE_MD.read_text(), re.M)
 

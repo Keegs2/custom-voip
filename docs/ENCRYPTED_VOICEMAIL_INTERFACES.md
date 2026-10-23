@@ -725,15 +725,20 @@ Empty/very short recordings (< 1 s of audio) are not deposited by FS.
    `product_type='voicemail'`) is the LAST lookup and is unfiltered on
    enabled/active like `resolve_destination`.
 6. **End of call:** a caller still connected when `record` returns (max length,
-   5 s silence, `#`) is hung up by FS *before* the deposit, so every deposit runs
+   10 s silence, `#`) is hung up by FS *before* the deposit, so every deposit runs
    on a hung-up channel (uniform path). FS stamps the CDR end time when the
    state machine reaches CS_HANGUP — after the Lua returns — so a voicemail CDR's
    `billsec`/`duration` include the deposit time (normally < 1 s; bounded at
    ~50 s by the retry budget when the API is down). If `record` returns with < 1 s of audio
    while the caller is still connected (tmpfs full, or `#` right after the beep),
    `unavailable` is played first. `#` also skips the greeting.
-7. **Recording parameters:** `record <path> <max_message_seconds> 200 5` (energy
-   threshold 200, 5 s of silence ends the message), `record_sample_rate=8000`.
+7. **Recording parameters:** `record <path> <max_message_seconds> 200 10` (energy
+   threshold 200, 10 s of continuous silence ends the message — was 5 s, changed
+   2026-10-23 by owner decision O5 in `docs/VOICEMAIL_TRANSCRIPTION_PLAN.md`),
+   `record_sample_rate=8000`. Before the answer, the A-leg also gets
+   `rtp_timer_name=soft` + `jitterbuffer_msec=60:200` (owner decision O6). A lost or
+   late caller packet becomes 20 ms of packet-loss concealment instead of being
+   dropped, so the WAV keeps real time. The SDP and codec are unchanged.
 8. **CDR breadcrumbs** (A-leg channel variables, no PII): `vm_mailbox_id`,
    `vm_msg_uuid`, `vm_max_seconds`, `vm_greeting` (`custom|default|tone`),
    `vm_duration_ms`, `vm_deposit_http`, `vm_deposit_attempts`, `vm_message_id`,
@@ -782,3 +787,72 @@ version destroy; `storage.objectAdmin` on the bucket; GCS service agent
 encrypterDecrypter on the bucket key; Data Access audit logs for KMS + GCS.
 Plus `docs/runbooks/VOICEMAIL_GCP_SETUP.md` (gcloud equivalents, the services VM
 SA/scope swap, impersonation fallback).
+
+---
+
+## 9. Transcription (v1.1), as built (2026-10-23)
+
+Design and full contract: `docs/VOICEMAIL_TRANSCRIPTION_PLAN.md`. Its §0.1
+owner decisions win over everything else in it. Deploy:
+`docs/runbooks/VOICEMAIL_TRANSCRIPTION_DEPLOY.md`.
+
+### Engine and data flow
+- **Engine:** Google Speech-to-Text V2 synchronous `Recognize` with **inline** audio:
+  - location `us` (`us-speech.googleapis.com`), implicit recognizer `_`;
+  - model `telephony` (env `VOICEMAIL_STT_MODEL=chirp_3` switches it), LINEAR16 at the WAV's native 8 kHz;
+  - one request per ≤ 55 s piece, cut at the quietest 300 ms between 40 and 55 s;
+  - leading and trailing silence are trimmed by the FS threshold (200); all-silent audio → `empty`, with no call made.
+- **D8:** audio is decrypted in RAM only (`open_message` → `chunking` → provider). No temp file, no GCS object, and text is never logged.
+- **Storage:** the transcript document (JSON) is sealed with the customer KEK.
+  - Each transcript gets a fresh DEK and AAD `vmt:{customer}:{mailbox}:{msg_uuid}` (`crypto.seal_transcript` / `open_transcript`). It never creates a key.
+  - It is stored in Postgres in `voicemail_transcripts.ciphertext` (migration 56).
+- **Queue:** the `voicemail_transcripts` rows are the queue.
+  - **Discovery:** one process at a time (advisory xact lock); the mailbox's switch at discovery decides `pending` vs `disabled`.
+  - **Claims and finalize:** claims use a MATERIALIZED CTE with `FOR UPDATE SKIP LOCKED`, and the finalize is fenced by `attempt_id`.
+  - **Recovery and retries:** a 600 s lease plus a reaper; backoff of 60 s / 5 min / 30 min / 2 h, with at most 5 attempts.
+  - **Breakers:** quota and permission errors defer the job and open a per-process breaker, and a rolling 24 h billed-minute cap (default 1000) blocks claims.
+- **`deposit.py` and the FS deposit contract (§5) are unchanged.** The worker discovers stored messages by polling (`VOICEMAIL_TRANSCRIPTION_POLL_S`, default 10).
+- **Lifecycle:** every way a message, mailbox or customer goes away also removes or destroys its transcript:
+  - a purge trigger on `voicemail_messages`;
+  - `ON DELETE CASCADE`;
+  - explicit DELETEs in `delete_mailbox` and `erase_customer`;
+  - a retention orphan step.
+
+### Switches
+- **Platform:** `VOICEMAIL_TRANSCRIPTION_ENABLED` is on only when exactly `true`. When off, no worker task runs, `summary.transcription_available=false`, and enabling a mailbox returns 409.
+- **Per mailbox:** `voicemail_boxes.transcription_enabled` defaults to **false** for every mailbox (O1; a future paid add-on).
+  - Only `admin` may change it or `transcription_language` (O2): a non-admin PATCH of either field → 403.
+  - Turning it off flips the mailbox's `pending` rows to `disabled`.
+
+### API (additive; `/v1/voicemail`)
+- **Changed shapes:**
+  - Mailbox gains `transcription_enabled` and `transcription_language`.
+  - Every Message gains `transcript {status, confidence}`, from a LEFT JOIN that never decrypts.
+  - `GET /summary` gains `transcription_available`.
+- **New endpoints:**
+  - `GET /messages/{id}/transcript` (tenant incl. readonly): decrypts through 4 slots per process and commits a `transcript_view` audit before returning (fail-closed 503).
+  - `GET /mailboxes/{id}/transcript-snippets?ids=` (≤ 50 ids, one audit row per batch, never a 5xx).
+  - `POST /messages/{id}/transcript/retry` (writer; `force` is admin-only).
+  - `POST /mailboxes/{id}/transcripts/backfill` (admin, ≤ 200).
+  - `GET /transcription/status` and `POST /transcription/requeue` (admin).
+- **Headers:** transcript and snippet responses carry `Cache-Control: no-store`.
+- **New audit actions:** `transcribe` (system, same transaction as the result, with `billed_ms`), `transcript_view`, `transcript_request`, `transcript_requeue`.
+
+### UI
+- Inbox snippet line, cached per id for the session and never persisted.
+- `TranscriptPanel` in the reading pane, covering every status.
+- Admin-only switch, language and "Transcribe earlier messages" in Greeting & settings.
+- Tenants see a read-only "On — English (US)" line, or nothing when the switch is off.
+- Marketing copy no longer claims "searchable" transcripts or API retrieval.
+
+### FreeSWITCH (`lib/vm_box.lua`, recording leg only)
+- Silence stop `record … 200 10` (O5).
+- `rtp_timer_name=soft` + `jitterbuffer_msec=60:200` are set just before `session:answer()` (O6).
+  - **Why both:** neither sofia profile sets an RTP timer, and a buffer without a timer grows with every loss and then flushes.
+  - **No SDP change:** `suppress_cng` is not set.
+- RCF and trunk legs are untouched. See the "RECORDING MEDIA PATH" header in `vm_box.lua` for the source references.
+
+### GCP (owner-run, shared project, additive)
+- `speech.googleapis.com` is enabled.
+- `vm-api` holds `roles/speech.client` (2026-10-23).
+- No Speech Data Access audit logging is configured.

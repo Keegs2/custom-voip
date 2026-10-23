@@ -37,3 +37,10 @@ google-cloud-kms>=3.0.0
 google-cloud-storage>=3.0.0
 google-crc32c>=1.5.0
 cryptography>=42.0.0
+
+# Voicemail transcription (services/voicemail/transcription, docs/
+# VOICEMAIL_TRANSCRIPTION_PLAN.md §2.6): Speech-to-Text V2 synchronous
+# Recognize at us-speech.googleapis.com (google.cloud.speech_v2). Imported
+# lazily, only when a job runs with the platform flag on. Shares grpcio /
+# google-api-core / protobuf with google-cloud-kms.
+google-cloud-speech>=2.38.0,<3.0.0
