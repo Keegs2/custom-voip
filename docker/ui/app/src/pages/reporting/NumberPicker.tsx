@@ -1,11 +1,15 @@
 /**
  * Number multi-select — a button that opens a checklist of the customer's
- * numbers (`/reports/my-numbers`). No selection = "All numbers" (the API
- * then reports on every number). Closes on Escape, outside click, or
- * focus leaving the picker; the button reflects the current selection.
+ * numbers (`/reports/my-numbers`, every product: call forwarding,
+ * voicemail, SIP trunk, …). No selection = "All numbers" (the API then
+ * reports on every number). When the list spans more than one product each
+ * option carries a product tag (config/products.ts). Closes on Escape,
+ * outside click, or focus leaving the picker; the button reflects the
+ * current selection.
  */
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
+import { productTag } from '../../config/products';
 import type { MyNumber } from '../../types/reports';
 import { fmtPhone } from './reportFormat';
 
@@ -36,6 +40,7 @@ export function NumberPicker({ options, selected, onChange, loading, failed }: N
   }, [open]);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const mixed = useMemo(() => new Set(options.map((o) => o.product)).size > 1, [options]);
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return options;
@@ -133,10 +138,11 @@ export function NumberPicker({ options, selected, onChange, loading, failed }: N
             {visible.map((o) => (
               <label key={o.number} className="rpt-numpick-opt">
                 <input type="checkbox" checked={selectedSet.has(o.number)} onChange={() => toggle(o.number)} />
-                <span style={{ minWidth: 0 }}>
+                <span style={{ minWidth: 0, flex: 1 }}>
                   <span className="rpt-numpick-num">{fmtPhone(o.number)}</span>
                   {o.name && <span className="rpt-numpick-name">{o.name}</span>}
                 </span>
+                {mixed && <span className="rpt-prodtag">{productTag(o.product)}</span>}
               </label>
             ))}
           </div>

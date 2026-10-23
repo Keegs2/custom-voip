@@ -6,6 +6,12 @@
  * The admin's All customers view swaps Team for a leading Customers card
  * and reads the platform-wide feeds (`scope: 'platform'`); the copy follows.
  *
+ * Numbers counts EVERY product's numbers (call forwarding, voicemail, SIP
+ * trunk, …); when the account has more than one product its context line is
+ * the mix ("11 forwarding · 1 voicemail · 1 SIP trunk"). Forwarding stays
+ * call forwarding only. A call-forwarding-only account reads exactly as
+ * before.
+ *
  * Each card: a 3px top edge in the metric's tone, an icon in a soft tinted
  * chip, a label, a big tabular value and one small context line; the three
  * call metrics add a 7-day sparkline from GET /cdrs/activity's daily points.
@@ -23,13 +29,21 @@ import { goodShareColor } from '../calls/quality';
 import { fmtPct1, fmtShareFloor } from '../rcf/activityFormat';
 import { GREEN } from '../rcf/theme';
 import { BRAND_AZURE as AZURE, BRAND_AZURE_DEEP as AZURE_DEEP, BRAND_COBALT as COBALT } from '../../styles/brand';
+import { mixSentence, type ProductCount } from '../../config/products';
 import { shareWord, type Feed } from './accountData';
 
 export interface NumberCounts {
-  /** Numbers on the account (or listed, when `partial`). */
+  /** Numbers on the account, every product (or listed, when `partial`). */
   total: number;
+  /** Call forwarding numbers switched on. */
   forwarding: number;
+  /** Call forwarding numbers switched off. */
   paused: number;
+  /**
+   * Numbers per product, when the source knows products (catalog order).
+   * More than one product → the Numbers context line shows the mix.
+   */
+  mix?: readonly ProductCount[];
   /** The total is a lower bound (a list hit its cap and no exact count was available). */
   partial: boolean;
   /** The paused count is a lower bound (GET /rcf?enabled=false hit its cap). */
@@ -198,6 +212,10 @@ export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref,
   const platform = scope === 'platform';
   const yours = voice === 'tenant';
   const numbersWhere = platform ? 'Across all customers' : yours ? 'On your account' : 'On the account';
+  const n = numbers.state === 'ready' ? numbers.value : null;
+  const mix = n?.mix && n.mix.length > 1 ? mixSentence(n.mix) : null;
+  // Numbers exist but none of them is call forwarding (e.g. voicemail only).
+  const noForwarding = n !== null && n.total > 0 && n.forwarding + n.paused === 0;
   const callsWhere = platform ? 'Every call, all customers' : yours ? 'Every call to your numbers' : 'Every call to its numbers';
   // Customers lead the platform row; the team closes an account row.
   const slot = (i: number) => order + (platform ? i + 1 : i);
@@ -250,7 +268,10 @@ export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref,
           icon={<Hash size={16} strokeWidth={2} />}
           tone={AZURE}
           value={numbers.state === 'ready' ? `${numbers.value.total.toLocaleString()}${numbers.value.partial ? '+' : ''}` : <Placeholder state={numbers.state} />}
-          context={numbers.state === 'ready' && numbers.value.partial ? (platform ? 'First 1,000 listed' : 'First 100 listed') : numbersWhere}
+          context={
+            n?.partial ? (platform ? 'First 1,000 listed' : 'First 100 listed') : mix ? <span className="ad-ellipsis">{mix}</span> : numbersWhere
+          }
+          title={mix ? `${n?.total.toLocaleString()} numbers: ${mix}` : undefined}
           target={{ kind: 'link', to: numbersHref, hint: yours ? 'See all your numbers' : 'Open the numbers' }}
         />
       </div>
@@ -263,7 +284,7 @@ export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref,
           tone={GREEN}
           value={numbers.state === 'ready' ? numbers.value.forwarding.toLocaleString() : <Placeholder state={numbers.state} />}
           context={
-            numbers.state !== 'ready' ? 'Routing right now' : numbers.value.paused === 0 ? (
+            numbers.state !== 'ready' ? 'Routing right now' : noForwarding ? 'No call forwarding numbers' : numbers.value.paused === 0 ? (
               <span className="ad-kpi-ok">
                 <span className="ad-dot ad-dot-on" aria-hidden="true" />
                 All forwarding

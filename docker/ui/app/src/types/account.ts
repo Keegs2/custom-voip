@@ -23,6 +23,16 @@ export interface MyCustomer {
     rcf: number;
     api_dids: number;
     trunks: number;
+    /**
+     * Every number on the account, any product (the API's product-agnostic
+     * list). `by_product` omits zero-count products and never lists `api`.
+     * Absent on APIs that predate the holistic numbers change — the page
+     * then shows the per-product counts above, as before.
+     */
+    numbers?: {
+      total: number;
+      by_product: Record<string, number>;
+    };
   };
 }
 

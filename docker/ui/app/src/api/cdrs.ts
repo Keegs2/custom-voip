@@ -45,6 +45,9 @@ export function cdrSearchQuery(params: CdrSearchParams): URLSearchParams {
   if (params.product_type) query.set('product_type', params.product_type);
   if (params.direction) query.set('direction', params.direction);
   if (params.destination) query.set('destination', params.destination);
+  // The customer's own number (inbound destination / outbound caller ID).
+  // Sent only when set, so every existing request stays byte-identical.
+  if (params.number) query.set('number', params.number);
   if (params.start_date) query.set('start_date', toIsoUtc(params.start_date));
   if (params.end_date) query.set('end_date', toIsoUtc(params.end_date));
   if (params.zone) query.set('zone', params.zone);
@@ -79,10 +82,11 @@ export async function searchCdrs(params: CdrSearchParams = {}): Promise<CdrSearc
 }
 
 /**
- * GET /cdrs/activity — KPI totals + fixed, zero-filled buckets for the RCF
- * Call Activity tab (see types/cdrActivity.ts). Only declared params are
- * sent; `customer_id`/`destination` are omitted when unset so tenant and
- * "All Customers" requests stay server-scoped.
+ * GET /cdrs/activity — KPI totals + fixed, zero-filled buckets for the Call
+ * Activity tab and the dashboard (see types/cdrActivity.ts). Only declared
+ * params are sent; `customer_id`/`destination`/`number` are omitted when
+ * unset so tenant and "All Customers" requests stay server-scoped. An omitted
+ * `product_type` means rcf (the API default); `'all'` means every product.
  */
 export async function getCdrActivity(params: CdrActivityParams): Promise<CdrActivityResponse> {
   const query = new URLSearchParams();
@@ -91,6 +95,7 @@ export async function getCdrActivity(params: CdrActivityParams): Promise<CdrActi
   if (params.customer_id !== undefined) query.set('customer_id', String(params.customer_id));
   if (params.product_type) query.set('product_type', params.product_type);
   if (params.destination) query.set('destination', params.destination);
+  if (params.number) query.set('number', params.number);
   return apiRequest<CdrActivityResponse>('GET', `/cdrs/activity?${query.toString()}`);
 }
 

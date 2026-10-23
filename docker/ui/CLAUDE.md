@@ -280,7 +280,8 @@ return { items: raw.items ?? [], total: raw.total ?? raw.items?.length ?? 0 };
 | `trunks.ts` | `/trunks` | CRUD + IPs, DIDs, stats, call-path packages |
 | `apiDids.ts` | `/api-dids` | CRUD + filter |
 | `carriers.ts` | `/carriers` | CRUD + `testCarrier` |
-| `cdrs.ts` | `/cdrs` | `searchCdrs`, `getCdr`, `rateCdr`, `getCdrSummary`, customer-scoped helpers |
+| `cdrs.ts` | `/cdrs` | `searchCdrs`, `getCdr`, `rateCdr`, `getCdrSummary`, `getCdrActivity`, customer-scoped helpers. `product_type` may be `'all'` (= no product filter; `/cdrs/activity` defaults to rcf when omitted); `number` = one of the customer's own numbers (inbound destination OR outbound caller ID), sent only when set |
+| `reports.ts` | `/reports` | Reporting endpoints; `getMyNumbers(customerId?)` = the customer's numbers, EVERY product — also the dashboard's numbers list (§7) |
 | `rates.ts` | `/rates` | CRUD + `getMarginsData`, `lookupRate` |
 | `ivr.ts` | `/ivr` | CRUD for IVR flows |
 | `documents.ts` | `/documents` | folders CRUD, document upload/download/update/delete, stats |
@@ -362,26 +363,53 @@ switch remounts instead of changing hook order.
   `/v1/voicemail/summary` query + cache key as the sidebar; no dashboard
   panel), a quiet glass secondary action and the azure-glow primary action.
   Also used by the admin `/rcf` console.
-- `KpiCards` (`KpiRow`) — six cards. Account scope: Numbers · Forwarding
-  (paused count) · Calls 7d · Answered · Sounded good (quality.ts tone + word)
-  · Team. Platform scope (`scope="platform"`): Customers leads, Team dropped.
+- **Holistic (every product).** The account view's numbers card, Numbers
+  KPI, every call card and the Call activity overlay cover every product on
+  the account (call forwarding, voicemail, SIP trunk, any future product via
+  `config/products.ts`). Numbers = `GET /reports/my-numbers` (the Reporting
+  picker's list) merged with the editable `/rcf` entries
+  (`accountData.toNumberRows`); calls = `/cdrs/activity?product_type=all` and
+  `/cdrs` with no product filter. A call-forwarding-only account renders
+  exactly as before (header "Forwards to", chips All/Forwarding/Paused,
+  same KPI values). If my-numbers fails or an older API answers without
+  `enabled` (`isHolisticNumbers`), the card + KPIs fall back to the `/rcf`
+  entries. **Deploy the API first:** an older `/cdrs/activity` reads
+  `product_type=all` literally (0 calls).
+- `KpiCards` (`KpiRow`) — six cards. Account scope: Numbers (every product;
+  with 2+ products the context line is the mix, "3 forwarding · 2 SIP trunk ·
+  2 voicemail") · Forwarding (call forwarding only — "No call forwarding
+  numbers" when there are none) · Calls 7d · Answered · Sounded good
+  (quality.ts tone + word) · Team. Platform scope (`scope="platform"`): Customers leads, Team dropped.
   3px tone edge, icon chip, 7-day sparklines; `numbersHref` (tenant `/rcf`,
   admin `/rcf?customer=…`), call cards open Call activity; Team links My
   account (tenant/preview) or nothing (admin).
-- `NumbersCard` — small table (8 rows), search + All/Forwarding/Paused chips,
-  row → shared `RowEditor` inline (`isAdmin` = admin fields such as max
-  channels, admin dashboard only), "View all N numbers" → `allHref`.
+- `NumbersCard` — small table (8 rows) of `NumberRow`s, search + chips (All ·
+  Forwarding · Paused when there are rcf numbers · one chip per other
+  product). rcf row → shared `RowEditor` inline (`isAdmin` = admin fields
+  such as max channels, admin dashboard only; past the 100-row `/rcf` cap a
+  read-only row with "Manage in call forwarding"); voicemail row → a link
+  (`ad-row-link`, → chevron) to `/voicemail` (admin one-customer view:
+  `/voicemail?customer=ID`); SIP trunk / other products → plain
+  non-interactive rows (`ad-row-static`) with catalog words. Column 2 reads
+  "Forwards to" when every row is rcf, else "Where calls go". Footer "View all
+  N numbers" (rcf only) / "Manage call forwarding" (mixed) → `allHref`.
 - `CallCards` — Call volume (daily answered/missed bars), Call quality
   (good-share ring + one-way/poor/graded), Recent calls (last 6, outcome +
   quality words from `pages/rcf/callOutcome.ts`; optional Customer column via
   `customerNames`, names are buttons to that customer's dashboard), Busiest
-  numbers. `CustomerName` is shared with the admin cards.
+  numbers (non-forwarding numbers name their product, "Front desk ·
+  Voicemail"). A call voicemail answered reads **Voicemail** (INFO tone,
+  `callOutcome.callStatusInfo`) here and in the Call activity table; it
+  counts as answered. `CustomerName` is shared with the admin cards.
 - `AccountCards` — Team (header link optional), Number requests (optional
   footer action; optional customer names), `QuickActionsCard` (renders a list
   built by `quickActions.tsx`: `customerQuickActions` — Request/Manage numbers →
-  `DidManagement` overlay, Open call activity → `CallActivityTab` overlay,
-  Download a report, Manage all numbers; `adminCustomerActions` /
-  `adminPlatformActions` — see below).
+  `DidManagement` overlay, Open call activity → `CallActivityTab` overlay
+  (`scope="account"`), Open voicemail (while voicemail is on), Download a
+  report, Manage all numbers ("Manage call forwarding" once other products
+  share the account); `adminCustomerActions` (+ "Voicemail console" →
+  `voicemailConsoleHref(id)` while voicemail is on) / `adminPlatformActions`
+  — see below).
 - **Admin dashboard** (`AdminDashboard.tsx`, admin in normal view). Same look,
   "Viewing" dropdown in the header (All customers default | each call
   forwarding customer; a deep-linked customer of another type is added).
@@ -390,15 +418,17 @@ switch remounts instead of changing hook order.
   `adminLinks.ts` (`parseCustomerParam`, `dashboardHref`, `rcfConsoleHref`,
   `callsHref`, `reportingHref`, `READS_CUSTOMER_PARAM`).
   - **All customers** (`AdminOverview`): KPIs platform-wide (Customers ·
-    Numbers · Forwarding/paused · Calls 7d · Answered · Sounded good); cards
-    `CustomersCard` (name/since · type · status · numbers · paused; row →
-    that customer; search + show-all above 8), Call volume, Call quality,
-    Recent calls (+ Customer column), Number requests across customers
-    (waiting approval / release pending — the admin's to-dos), `PausedCard`,
-    `InventoryCard` (pool: available · assigned · call forwarding · waiting ·
-    releasing), admin quick actions (Numbers console `/rcf?customer=all`, Call
-    activity overlay for all customers, Calls & Quality, Reporting,
-    Troubleshooting). `AdminCards.tsx`.
+    Numbers (every product, exact, with the mix) · Forwarding/paused · Calls
+    7d · Answered · Sounded good — calls every product); cards
+    `CustomersCard` (name/since · type · status · numbers (every product,
+    hover = mix) · paused; row → that customer; search + show-all above 8),
+    Call volume, Call quality, Recent calls (+ Customer column), Number
+    requests across customers (waiting approval / release pending — the
+    admin's to-dos), `PausedCard`, `InventoryCard` (pool: available ·
+    assigned · one line per visible product · waiting · releasing), admin
+    quick actions (Numbers console `/rcf?customer=all`, Call activity overlay
+    for all customers (`scope="account"`, static "All Numbers"), Calls &
+    Quality, Reporting, Troubleshooting). `AdminCards.tsx`.
   - **One customer**: `AccountDashboardView viewer="admin"` — the customer
     cards with admin actions: header "View as customer" (sets
     `previewCustomer` + turns on customer view → lands on that customer's
@@ -415,14 +445,24 @@ switch remounts instead of changing hook order.
   `GET /search/user/by-customer/{id}` (is_self false); number requests
   `GET /numbers/my` vs `GET /numbers/inventory?customer_id=`; both pass
   `customer_id` to `GET /rcf`, `/cdrs/activity` (7d), `/reports/numbers` (7d),
-  `/cdrs` (recent). Staff number counts come from the /rcf list (100-row cap →
-  "100+"). `useWeekActivity(null)` / `useRecentCalls(null)` = every customer.
+  `/cdrs` (recent); every-product numbers `GET /reports/my-numbers` (staff +
+  `customer_id`, key `['account-numbers', id, 'staff'|'self']`). Number
+  counts are exact from that list; only the fallback (no list) reads the
+  /rcf list (100-row cap → "100+"). `useWeekActivity(null)` /
+  `useRecentCalls(null)` = every customer. Keys of the all-products feeds:
+  `['dash-activity','all-products',…]`, `['dash-recent-calls','all-products',…]`.
+  `invalidateAccountNumbers(qc)` refreshes `['account-numbers']` +
+  `['reports','my-numbers']` — called by voicemail mailbox create / delete /
+  suspend / resume / relabel (NOT inside `invalidateVoicemail()`).
 - Admin data (`adminData.ts`, admin-only endpoints): customers
   `GET /customers?limit=500` (shared `['customers-dropdown']`, `select` maps to
   identity fields — no money); platform numbers + per-customer counts
+  `GET /numbers/owned` (every product, exact; key
+  `['admin-dash','owned-numbers']`) — fallback when it fails (older API):
   `GET /numbers/inventory?product_type=rcf&limit=1000` (statuses on an
-  account; exact total, "1,000+" past one page); paused `GET /rcf?enabled=false`
-  (server cap 100 → "+"); open requests `GET /numbers/inventory?status=reserved`
+  account; "1,000+" past one page); paused list `GET /rcf?enabled=false`
+  (server cap 100 → "+"; the per-customer Paused column is exact from
+  /numbers/owned); open requests `GET /numbers/inventory?status=reserved`
   + `?status=release_requested`; pool `GET /numbers/stats`. NOT available
   without a backend change: per-customer call counts and a cross-customer
   "busiest numbers" (no cross-customer per-number/per-customer roll-up).
@@ -463,7 +503,24 @@ the board and the console fetch once and page in the browser, and say so at
 
 **`ReportingPage`** (`/reporting`, lazy)
 Staff pick a customer; an admin in customer view reports on the sidebar's
-preview customer (no page picker; the page is keyed on it).
+preview customer (no page picker; the page is keyed on it). "Your numbers"
+and the number picker list EVERY product's numbers (`/reports/my-numbers`,
+`/reports/numbers`): the picker tags each option with its product when the
+list spans more than one; the table / PDF sub-line adds the product for
+non-forwarding numbers ("Front desk · Voicemail"); the call list shows the
+server's `outcome_label` ("Answered by voicemail"); the glossary explains it.
+
+**`CallActivityTab`** (`pages/rcf/`) — `scope` prop: `'rcf'` (default, the
+/rcf console — GET /rcf picker, `product_type=rcf` + `destination`,
+unchanged) or `'account'` (the dashboard overlay — `numbers` prop picker, any
+product, `ad-prodtag` on non-forwarding options; `product_type=all` + `number`
+on the activity feed, no product + `number` on the table; GET /rcf disabled
+via `enabled:`). Keys carry the scope.
+
+**`MyAccountPage`** — with `counts.numbers` (holistic API): one tile + header
+metric per product (`by_product`, catalog order) plus the SIP trunks tile, and
+a Voicemail section on Products when the account has mailbox numbers (same
+`['account-numbers', id, 'self']` list). Without it: the old tiles.
 
 **`TrunksPage`** (`/trunks`)
 Currently a placeholder/coming-soon shell. Shows the page header but no data.
@@ -485,7 +542,8 @@ live in `pages/docs/shared.tsx`. There is no single `DocsPage`.
 **`CallsPage`** (`/call-quality` and `/cdrs`, `pages/calls/`) — Calls & Quality
 The merged CDR search + voice-quality page. Top composition (2026-10 rework):
 - **Search row** (`CallsFilterBar`) — ONE centred row at ≥1366px: Customer
-  (staff) · Trunk · Product · Direction · Dest. prefix · Time range (select;
+  (staff) · Trunk · Product (+ Voicemail: always for staff, for others while
+  Visual Voicemail is on — sidebar's summary key) · Direction · Dest. prefix · Time range (select;
   From/To appear inline only for "Custom range") · **More** popover (staff:
   Zone, Rows = Calls/All legs/Carrier legs, Rated only — the button turns blue
   with a count when any is non-default) · Search · Export (staff). Call-ID chip
@@ -693,12 +751,35 @@ All types live in `src/types/`. They map 1:1 to FastAPI Pydantic schemas.
 | `didInventory.ts` | `DidStatus`, `DidInventoryItem`, `DidStats`, `DidAssignRequest`, `DidInventoryListParams`, `DidInventoryListResponse`, `DidAvailableParams` |
 | `onboarding.ts` | `OnboardingStatus`, `OnboardingRequest`, `DIDConfigEntry`, `OnboardingSubmitPayload`, `ApprovePayload`, `ApproveResponse` |
 
+Holistic-numbers additions (all OPTIONAL — older APIs omit them):
+`reports.ts` `ReportProduct` is open-ended (`'rcf'|'trunk'|'api'|'voicemail'|
+(string & {})`), `MyNumber.enabled?` / `forwards_to?`, `ReportCallRow.product?`;
+`cdr.ts` `ProductType` adds `'voicemail'`, `ProductFilter = ProductType |
+'all'`, `CdrSearchParams.number?`; `cdrActivity.ts` `product_type?:
+ProductFilter`, `number?`; `account.ts` `counts.numbers?: {total, by_product}`.
+
 **`User.account_type`** controls what the authenticated user sees in the sidebar
 and on their pages. It is a nullable union: `'rcf' | 'api' | 'trunk' | 'hybrid' | 'ucaas' | null`.
 
 **`User.role`** controls admin access: `'admin' | 'user' | 'readonly'`.
 `'readonly'` users see the Administration group in the sidebar but can only view
 call quality and troubleshooting (no edit access).
+
+---
+
+### Products catalog (`src/config/products.ts`)
+
+The ONE place that names the product a customer's number belongs to (rcf ·
+api (hidden while retired) · trunk · voicemail): `label` ("Call forwarding"),
+`tag` ("RCF"), on/off words ("Forwarding"/"Paused", "Taking
+messages"/"Off"), `mixWord`, "where calls go" copy, `order`, `hidden`.
+Helpers: `productInfo`, `productLabel`, `productTag`, `isProductHidden`,
+`compareProducts`, `productMix` / `countByProduct` / `mixSentence`,
+`nameWithProduct`. An id it doesn't know still renders (title-cased label
+"Fax Line", upper-case tag, Active/Off), so a NEW product (a new
+`number_routing` arm on the API) appears on the dashboard, Reporting, My
+Account and the admin counts with NO UI change; an entry here is optional
+polish. Not the dashboard header's product SWITCHER (`pages/dashboard/products.ts`).
 
 ---
 

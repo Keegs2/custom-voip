@@ -4,7 +4,9 @@
  *   ┌ Granite header: name · status · since     [ product switcher ] [action] ┐
  *   ┌KPI┐┌KPI┐┌KPI┐┌KPI┐┌KPI┐┌KPI┐   numbers · forwarding · calls · answered · sounded good · team
  *   ┌ Numbers (8) ──────────────────┐ ┌ Call volume (4) ┐
- *   │ small table, row → RowEditor  │ ├ Call quality (4) ┤
+ *   │ every product's numbers;      │ ├ Call quality (4) ┤
+ *   │ rcf row → RowEditor,          │
+ *   │ voicemail row → /voicemail    │
  *   ┌ Recent calls (8) ─────────────┐ ┌ Team (4) ┐
  *   ┌ Busiest (4) ┐ ┌ Requests (4) ┐ ┌ Quick actions (4) ┐
  *
@@ -18,6 +20,13 @@
  *            console / Calls & Quality / Reporting / Troubleshooting, a
  *            read-only team list, and no customer-only actions (Request
  *            numbers).
+ *
+ * Holistic: the numbers card, the Numbers KPI, every call card and the
+ * Call activity overlay cover EVERY product on the account (call
+ * forwarding, voicemail, SIP trunk, future products via
+ * config/products.ts). A call-forwarding-only account looks exactly as it
+ * did before; if the every-product list is unavailable (an older API) the
+ * view falls back to the call forwarding entries.
  *
  * Callers key this component on the customer id, so switching accounts
  * remounts it (hook order never changes). Endpoints: accountData.ts. No
@@ -37,13 +46,16 @@ import { NumbersCard } from './NumbersCard';
 import { BusiestCard, QualityCard, RecentCard, VolumeCard } from './CallCards';
 import { QuickActionsCard, RequestsCard, TeamCard } from './AccountCards';
 import { adminCustomerActions, customerQuickActions } from './quickActions';
-import { rcfConsoleHref } from './adminLinks';
+import { rcfConsoleHref, voicemailConsoleHref } from './adminLinks';
 import { DASHBOARD_PRODUCTS, isProductAvailable, type DashboardProductId } from './products';
 import { staffScope, tenantScope, useVoicemailSummary } from '../voicemail/voicemailData';
 import {
   RCF_LIST_CAP,
   fmtMonthYear,
+  numberMix,
+  toNumberRows,
   toNumberStats,
+  useAccountAllNumbers,
   useAccountDids,
   useAccountNumbers,
   useAccountSummary,
@@ -84,6 +96,7 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
 
   const summary = useAccountSummary(scope);
   const numbers = useAccountNumbers(customer.id);
+  const allNumbers = useAccountAllNumbers(scope);
   const activity = useWeekActivity(customer.id, tz);
   const numberStats = useWeekNumberStats(customer.id, tz);
   const recent = useRecentCalls(customer.id);
@@ -102,11 +115,35 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
   const openNumbers = useCallback(() => setOverlay('numbers'), []);
   const openActivity = useCallback(() => setOverlay('activity'), []);
 
+  const admin = viewer === 'admin';
+  // A voicemail number's row opens its voicemail: the customer's own page
+  // (tenant, staff preview) or the admin console scoped to this customer.
+  const voicemailHref = admin ? voicemailConsoleHref(customer.id) : '/voicemail';
   const entries = useMemo(() => numbers.data?.items ?? [], [numbers.data]);
+  const numberRows = useMemo(
+    () => toNumberRows(allNumbers.data, entries, { voicemailHref }),
+    [allNumbers.data, entries, voicemailHref],
+  );
+  const rows = numberRows.rows;
   const stats = useMemo(() => toNumberStats(numberStats.data, numberStats.isError), [numberStats.data, numberStats.isError]);
 
+  // The every-product list is still on its (single) way — wait for it rather
+  // than flash the call-forwarding-only fallback first.
+  const listPending = allNumbers.isPending;
+  const holistic = numberRows.source === 'all';
   const accountTotal = summary.data?.rcfCount ?? null;
   const numberFeed = useMemo<Feed<NumberCounts>>(() => {
+    if (listPending) return { state: 'loading' };
+    if (holistic) {
+      // Exact: the list is every number on the account (/rcf only adds editability).
+      const rcf = rows.filter((r) => r.product === 'rcf');
+      const forwarding = rcf.filter((r) => r.enabled).length;
+      return {
+        state: 'ready',
+        value: { total: rows.length, forwarding, paused: rcf.length - forwarding, partial: false, mix: numberMix(rows) },
+      };
+    }
+    // Fallback (list unavailable): today's call-forwarding-only counts.
     if (numbers.isError) return { state: 'error' };
     if (!numbers.data) return { state: 'loading' };
     const forwarding = entries.filter((e) => e.enabled).length;
@@ -121,10 +158,9 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
         partial: accountTotal === null && entries.length >= RCF_LIST_CAP,
       },
     };
-  }, [numbers.isError, numbers.data, entries, accountTotal]);
+  }, [listPending, holistic, rows, numbers.isError, numbers.data, entries, accountTotal]);
 
   // ── Derived values (after all hooks) ──
-  const admin = viewer === 'admin';
   const role = user?.role ?? 'user';
   const canEdit = role !== 'readonly' && role !== 'support';
   const canRequest = role === 'user';
@@ -149,11 +185,15 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
   const accountName = summary.data?.name ?? (customer.name || (admin ? `Customer #${customer.id}` : 'Your account'));
   const voicemailOn = voicemail.data?.enabled === true;
   // Admins land on the voicemail console scoped to this customer.
-  const productLinks = voicemailOn
-    ? { voicemail: admin ? `/voicemail?customer=${customer.id}` : '/voicemail' }
-    : undefined;
+  const productLinks = voicemailOn ? { voicemail: voicemailHref } : undefined;
   const totalNumbers = numberFeed.state === 'ready' ? numberFeed.value.total : null;
   const numbersHref = admin ? rcfConsoleHref(customer.id) : '/rcf';
+  const multiProduct = rows.some((r) => r.product !== 'rcf');
+  // Loading until both sources settle (an rcf row without its /rcf entry is
+  // read-only, so don't flash that while /rcf is still on its way); an
+  // error only when neither source can fill the card.
+  const numbersLoading = listPending || numbers.isLoading;
+  const numbersError = !numbersLoading && !holistic && numbers.isError && !numbers.data;
 
   const headerAction: HeaderAction | null =
     activeProduct !== 'rcf' ? null : canRequest ? { label: 'Request numbers', onClick: openNumbers } : staff ? { label: 'Manage numbers', onClick: openNumbers } : null;
@@ -169,8 +209,16 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
         customerName: accountName,
         onViewAsCustomer: viewAs ?? (() => undefined),
         onActivity: openActivity,
+        voicemailOn,
       })
-    : customerQuickActions({ numbersLabel, onNumbers: openNumbers, onActivity: openActivity, showReports: canSeeReporting(user) });
+    : customerQuickActions({
+        numbersLabel,
+        onNumbers: openNumbers,
+        onActivity: openActivity,
+        showReports: canSeeReporting(user),
+        multiProduct,
+        voicemailHref: voicemailOn ? voicemailHref : null,
+      });
 
   return (
     <div className="rcf-scope ad-scope">
@@ -201,10 +249,13 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
 
             <div className="ad-grid">
               <NumbersCard
-                entries={entries}
-                loading={numbers.isLoading}
-                error={numbers.isError && !numbers.data}
-                onRetry={() => void numbers.refetch()}
+                rows={rows}
+                loading={numbersLoading}
+                error={numbersError}
+                onRetry={() => {
+                  void numbers.refetch();
+                  void allNumbers.refetch();
+                }}
                 stats={stats}
                 canEdit={canEdit}
                 total={totalNumbers}
@@ -236,7 +287,7 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
                 link={admin ? null : MY_ACCOUNT}
                 emptyText={admin ? 'No one on this account can sign in yet. People are added in TED.' : undefined}
               />
-              <BusiestCard stats={stats} entries={entries} order={12} />
+              <BusiestCard stats={stats} rows={rows} order={12} />
               <RequestsCard
                 dids={dids}
                 action={{ label: admin ? 'Manage numbers' : numbersLabel, onClick: openNumbers }}
@@ -282,7 +333,7 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
           }
           onClose={closeOverlay}
         >
-          <CallActivityTab customerId={customer.id} />
+          <CallActivityTab customerId={customer.id} scope="account" numbers={rows} />
         </DashboardOverlay>
       )}
 

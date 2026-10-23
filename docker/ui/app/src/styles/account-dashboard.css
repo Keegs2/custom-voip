@@ -888,6 +888,45 @@ button.ad-kpi { cursor: pointer; }
 .ad-status-off { color: var(--rcf-ink-soft); }
 .ad-status-off .ad-dot { background: var(--ad-slate); box-shadow: 0 0 0 3px rgba(139, 153, 176, 0.16); }
 
+/* Every-product rows (NumbersCard). A voicemail row is a link (→ chevron);
+   a SIP trunk row (or an rcf row past the /rcf list cap) is plain text —
+   same grid, no pointer, no hover tint. */
+.ad-row-static { cursor: default; }
+.ad-row-static:hover { background: transparent; }
+
+.ad-dest-main {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rcf-ink);
+  white-space: nowrap;
+}
+
+.ad-row-link:hover .ad-dest-main,
+.ad-row-link:focus-visible .ad-dest-main { color: var(--rcf-azure-deep); }
+
+.ad-row-hint { text-decoration: none; }
+.ad-row-hint:hover { color: var(--rcf-azure-deep); text-decoration: underline; text-underline-offset: 3px; }
+.ad-row-hint:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; border-radius: 3px; }
+
+/* Product tag — a small brand-blue pill naming a number's product (activity
+   picker options). Uses --rcf-* tokens only: it also renders inside the
+   portalled .rcf-scope overlay, outside .ad-scope. */
+.ad-prodtag {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  color: var(--rcf-azure-deep, #1d63dd);
+  background: rgba(47, 125, 246, 0.09);
+  border: 1px solid rgba(47, 125, 246, 0.24);
+  border-radius: 999px;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+
 .ad-editor-row > td { padding: 0 !important; border-bottom: 1px solid var(--rcf-line); }
 
 .ad-editor .rcf-xpanel {

@@ -50,6 +50,7 @@ import type { Grade, QualityStatus } from './quality';
 import { carrierLabel, isOnNetCall, trunkLabel, EMPTY } from './callsFormat';
 import { fmtCallDuration } from '../../utils/callDuration';
 import type { Cdr, CdrRowsMode, ProductType, CallDirection } from '../../types/cdr';
+import { productTag } from '../../config/products';
 
 /** Table timestamps render in the operator's LOCAL timezone (matches the
     local-time filter pickers, so what you search is what you read). */
@@ -74,8 +75,9 @@ function DirectionTag({ dir }: { dir: CallDirection }) {
   return <span className={dir === 'inbound' ? 'dl-tag' : 'dl-tag dl-tag-slate'}>{dir}</span>;
 }
 
+/** The call's product, named by the shared catalog (unknown products still read). */
 function ProductTag({ pt }: { pt: ProductType }) {
-  return <span className="dl-tag">{pt.toUpperCase()}</span>;
+  return <span className="dl-tag">{productTag(pt)}</span>;
 }
 
 interface GradePillProps {

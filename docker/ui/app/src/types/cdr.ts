@@ -2,7 +2,16 @@ import type { TrafficGrade } from './customer';
 import type { StirBadgeFields } from './stir';
 import type { Grade, QualityStatus } from '../pages/calls/quality';
 
-export type ProductType = 'rcf' | 'api' | 'trunk';
+export type ProductType = 'rcf' | 'api' | 'trunk' | 'voicemail';
+
+/**
+ * `product_type` as a FILTER: one product, or `'all'` = no product filter.
+ * `/cdrs` and `/cdrs/summary` already treat an omitted product as "every
+ * product"; `/cdrs/activity` defaults to rcf when it is omitted, so the
+ * account-wide views send `'all'` there explicitly (API ≥ the holistic
+ * numbers change — an older API reads it as a literal product).
+ */
+export type ProductFilter = ProductType | 'all';
 export type CallDirection = 'inbound' | 'outbound';
 /** Deployment zone — one self-contained SIP stack per GCP region. */
 export type CdrZone = 'east' | 'west' | 'central';
@@ -237,8 +246,8 @@ export interface Cdr extends StirBadgeFields {
  *
  * PINNED 1:1 to the router's declared params (routers/cdrs.py query_cdrs):
  * customer_id, trunk_id, product_type, direction, destination (prefix),
- * sbc_id, zone, start_date, end_date, rated_only, leg + call_id (staff),
- * limit, offset — and NOTHING else. FastAPI silently drops undeclared query params (the old
+ * number, sbc_id, zone, start_date, end_date, rated_only, leg + call_id
+ * (staff), limit, offset — and NOTHING else. FastAPI silently drops undeclared query params (the old
  * `start_from`/`start_to` and `caller_id`/`sort_by`/`sort_dir` were exactly
  * such dead filters), so any param added here MUST exist on the router.
  */
@@ -246,10 +255,18 @@ export interface CdrSearchParams {
   customer_id?: number;
   /** Server-side trunk filter (cdrs.trunk_id is stored as text of this id). */
   trunk_id?: number;
-  product_type?: ProductType;
+  product_type?: ProductFilter;
   direction?: CallDirection;
   /** Literal destination PREFIX match (LIKE 'value%'). */
   destination?: string;
+  /**
+   * One of the customer's OWN numbers, any format (the API canonicalises
+   * it): matches the destination of inbound calls and the caller ID of
+   * outbound ones, so outbound SIP-trunk calls from that number count too.
+   * Combines with `destination` as AND. Tenants may send it — it only
+   * narrows within their own calls.
+   */
+  number?: string;
   /** Range start — ISO 8601 UTC instant (e.g. 2026-08-04T13:30:00.000Z). */
   start_date?: string;
   /** Range end — ISO 8601 UTC instant. */

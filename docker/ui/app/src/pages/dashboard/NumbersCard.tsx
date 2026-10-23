@@ -1,43 +1,75 @@
 /**
- * NumbersCard — the dashboard's small numbers table: search, All /
- * Forwarding / Paused chips, the first 8 matching numbers, and a way to the
- * full manager on /rcf.
+ * NumbersCard — the dashboard's small numbers table: search, filter chips,
+ * the first 8 matching numbers, and a way to the full call forwarding
+ * manager on /rcf. It lists EVERY product's numbers (accountData
+ * `toNumberRows`), one row kind per product:
  *
- *   Number              Forwards to          Last 7 days     Status
- *   +1 (217) 352-8498   +1 (949) 614-7510    24 calls        ● Forwarding   ⌄
- *   Boston office       Failover …           96% answered
+ *   Number              Forwards to /           Last 7 days     Status
+ *                       Where calls go
+ *   +1 (217) 352-8498   +1 (949) 614-7510       24 calls        ● Forwarding        ⌄   rcf: RowEditor
+ *   Boston office       Failover …              96% answered
+ *   +1 (508) 555-0100   Voicemail               3 calls         ● Taking messages   →   voicemail: link
+ *   Voicemail           Callers leave a message
+ *   +1 (617) 555-0202   Your phone system       —               ● Active                trunk: static
+ *   alpha               SIP trunk
  *
- * Selecting a row (click, Enter or Space) opens the shared RowEditor right
- * under it — the same editor, mutations and readonly gating as /rcf. One
- * row open at a time; Esc closes it.
+ * - rcf: selecting a row (click, Enter or Space) opens the shared RowEditor
+ *   right under it — the same editor, mutations and readonly gating as
+ *   /rcf. One row open at a time; Esc closes it. Past the /rcf list cap a
+ *   row has no editor and says where to manage it.
+ * - voicemail: the row is a link to the voicemail page (`row.href`).
+ * - trunk and any other product: a plain, non-interactive row whose words
+ *   come from config/products.ts (unknown products get its fallback).
+ *
+ * A call-forwarding-only account renders exactly as before: header
+ * "Forwards to", chips All / Forwarding / Paused, "View all N numbers".
+ * With other products the header reads "Where calls go", a chip per other
+ * product joins (Forwarding / Paused only when there are rcf numbers), and
+ * the footer link becomes "Manage call forwarding".
  *
  * Staff (the admin dashboard's one-customer view) get the admin RowEditor
- * fields (e.g. max channels) via `isAdmin`, and "View all" goes to the
+ * fields (e.g. max channels) via `isAdmin`, and the footer link goes to the
  * admin console scoped to the customer via `allHref`.
  */
-import { Fragment, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Fragment, useMemo, useState, type KeyboardEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, Hash } from 'lucide-react';
-import type { RcfEntry } from '../../types/rcf';
+import { compareProducts, productInfo } from '../../config/products';
 import { fmt } from '../../utils/format';
 import { RowEditor } from '../rcf/RowEditor';
 import { Card, CardState } from './Card';
-import { numberKey, type NumberStats } from './accountData';
+import { numberKey, type NumberRow, type NumberStats } from './accountData';
 
 const PREVIEW_ROWS = 8;
 
-type StatusFilter = 'all' | 'on' | 'off';
+/** all · rcf on / off · one product (`p:voicemail`). */
+type RowFilter = 'all' | 'on' | 'off' | `p:${string}`;
 
-function matches(entry: RcfEntry, q: string, qDigits: string): boolean {
+interface Chip {
+  id: RowFilter;
+  label: string;
+  count: number;
+}
+
+const digitsOf = (s: string) => s.replace(/\D/g, '');
+
+function matches(row: NumberRow, q: string, qDigits: string): boolean {
   if (!q) return true;
-  if ((entry.name ?? '').toLowerCase().includes(q)) return true;
+  if ((row.name ?? '').toLowerCase().includes(q)) return true;
+  // "voicemail" / "trunk" find those rows (rcf rows match as before).
+  if (row.product !== 'rcf' && productInfo(row.product).label.toLowerCase().includes(q)) return true;
   if (qDigits.length >= 2) {
-    const digits = (s: string) => s.replace(/\D/g, '');
-    if (digits(entry.did).includes(qDigits)) return true;
-    if (digits(entry.forward_to).includes(qDigits)) return true;
-    if (entry.failover_to && digits(entry.failover_to).includes(qDigits)) return true;
+    if (digitsOf(row.number).includes(qDigits)) return true;
+    if (row.forwardsTo && digitsOf(row.forwardsTo).includes(qDigits)) return true;
+    if (row.rcf?.failover_to && digitsOf(row.rcf.failover_to).includes(qDigits)) return true;
   }
-  return entry.did.includes(q) || entry.forward_to.toLowerCase().includes(q);
+  return row.number.includes(q) || (row.forwardsTo ?? '').toLowerCase().includes(q);
+}
+
+function passes(row: NumberRow, filter: RowFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'on' || filter === 'off') return row.product === 'rcf' && (filter === 'on') === row.enabled;
+  return row.product === filter.slice(2);
 }
 
 function WeekCell({ stats, did }: { stats: NumberStats; did: string }) {
@@ -57,8 +89,53 @@ function WeekCell({ stats, did }: { stats: NumberStats; did: string }) {
   );
 }
 
+function NumberCell({ row }: { row: NumberRow }) {
+  return (
+    <span className="ad-stack">
+      <span className="ad-num">{fmt(row.number)}</span>
+      <span className={row.name ? 'ad-faint' : 'ad-faint ad-italic'}>{row.name ?? 'No label'}</span>
+    </span>
+  );
+}
+
+function StatusCell({ row }: { row: NumberRow }) {
+  const info = productInfo(row.product);
+  return (
+    <span className={`ad-status ad-status-${row.enabled ? 'on' : 'off'}`}>
+      <span className="ad-dot" aria-hidden="true" />
+      {row.enabled ? info.onWord : info.offWord}
+    </span>
+  );
+}
+
+/** "Where calls go" for a non-forwarding number: catalog words (voicemail → "Voicemail"). */
+function DestinationCell({ row }: { row: NumberRow }) {
+  const info = productInfo(row.product);
+  const main = info.destination?.main ?? info.label;
+  const sub = info.destination?.sub ?? null;
+  return (
+    <span className="ad-stack">
+      <span className="ad-dest-main">{main}</span>
+      {sub && <span className="ad-faint">{sub}</span>}
+    </span>
+  );
+}
+
+const CHEV_DOWN = (
+  <svg className="ad-chev" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const CHEV_GO = (
+  <svg className="ad-chev ad-chev-go" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 export interface NumbersCardProps {
-  entries: readonly RcfEntry[];
+  /** Every number on the account, any product (accountData `toNumberRows`). */
+  rows: readonly NumberRow[];
   loading: boolean;
   error: boolean;
   onRetry: () => void;
@@ -74,12 +151,12 @@ export interface NumbersCardProps {
   title?: string;
   /** Show the admin-only RowEditor fields (real admin, not in customer view). */
   isAdmin?: boolean;
-  /** Where "View all N numbers" goes (default /rcf). */
+  /** The call forwarding manager the footer links to (default /rcf). */
   allHref?: string;
 }
 
 export function NumbersCard({
-  entries,
+  rows: allRows,
   loading,
   error,
   onRetry,
@@ -94,60 +171,205 @@ export function NumbersCard({
   allHref = '/rcf',
 }: NumbersCardProps) {
   // ALL hooks unconditionally at the top (React #310).
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<StatusFilter>('all');
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [filter, setFilter] = useState<RowFilter>('all');
+  /** The number whose RowEditor is open (rcf rows only). */
+  const [openNumber, setOpenNumber] = useState<string | null>(null);
 
-  const counts = useMemo(() => {
-    const on = entries.filter((e) => e.enabled).length;
-    return { all: entries.length, on, off: entries.length - on };
-  }, [entries]);
+  const chips = useMemo<Chip[]>(() => {
+    const rcf = allRows.filter((r) => r.product === 'rcf');
+    const on = rcf.filter((r) => r.enabled).length;
+    const others = new Map<string, number>();
+    for (const r of allRows) if (r.product !== 'rcf') others.set(r.product, (others.get(r.product) ?? 0) + 1);
+    const list: Chip[] = [{ id: 'all', label: 'All', count: allRows.length }];
+    // Forwarding / Paused only mean something for call forwarding numbers —
+    // shown whenever there are any, and always on an account with no other
+    // product (so an empty RCF account keeps today's three chips).
+    if (rcf.length > 0 || others.size === 0) {
+      list.push({ id: 'on', label: 'Forwarding', count: on }, { id: 'off', label: 'Paused', count: rcf.length - on });
+    }
+    for (const product of [...others.keys()].sort(compareProducts)) {
+      list.push({ id: `p:${product}`, label: productInfo(product).label, count: others.get(product) ?? 0 });
+    }
+    return list;
+  }, [allRows]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     const qDigits = q.replace(/\D/g, '');
-    return entries
-      .filter((e) => (filter === 'all' || (filter === 'on') === e.enabled) && matches(e, q, qDigits))
-      .sort((a, b) => a.did.localeCompare(b.did, undefined, { numeric: true }));
-  }, [entries, search, filter]);
+    return allRows
+      .filter((r) => passes(r, filter) && matches(r, q, qDigits))
+      .sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }));
+  }, [allRows, search, filter]);
 
+  // ── Derived (after all hooks) ──
   const rows = visible.slice(0, PREVIEW_ROWS);
-  const allCount = total ?? entries.length;
+  const allCount = total ?? allRows.length;
   const filtersActive = search.trim() !== '' || filter !== 'all';
+  const hasRcf = allRows.some((r) => r.product === 'rcf');
+  const onlyRcf = allRows.every((r) => r.product === 'rcf');
+  const hasVoicemailLinks = allRows.some((r) => r.href !== null);
 
-  const chips: { id: StatusFilter; label: string; count: number }[] = [
-    { id: 'all', label: 'All', count: counts.all },
-    { id: 'on', label: 'Forwarding', count: counts.on },
-    { id: 'off', label: 'Paused', count: counts.off },
-  ];
+  const baseSub = canEdit ? 'Select a number to change where it rings' : 'Select a number to see its settings';
+  const sub = hasVoicemailLinks ? `${baseSub}, or open its voicemail.` : `${baseSub}.`;
+
+  const footerLink = onlyRcf ? (
+    <Link to={allHref} className="ad-linkbtn ad-linkbtn-arrow">
+      View all {allCount.toLocaleString()} numbers
+      <ArrowRight size={14} aria-hidden="true" />
+    </Link>
+  ) : hasRcf ? (
+    <Link to={allHref} className="ad-linkbtn ad-linkbtn-arrow">
+      Manage call forwarding
+      <ArrowRight size={14} aria-hidden="true" />
+    </Link>
+  ) : null;
 
   const footer =
-    entries.length > 0 ? (
+    allRows.length > 0 ? (
       <div className="ad-foot-split">
         <span className="ad-faint">
           {filtersActive
             ? `${Math.min(rows.length, visible.length)} of ${visible.length.toLocaleString()} matching`
             : `Showing ${rows.length} of ${allCount.toLocaleString()}`}
         </span>
-        <Link to={allHref} className="ad-linkbtn ad-linkbtn-arrow">
-          View all {allCount.toLocaleString()} numbers
-          <ArrowRight size={14} aria-hidden="true" />
-        </Link>
+        {footerLink}
       </div>
     ) : null;
+
+  function pickFilter(next: RowFilter): void {
+    setFilter(next);
+    setOpenNumber(null);
+  }
+
+  function renderRcfRow(row: NumberRow) {
+    const entry = row.rcf;
+    if (!entry) {
+      // Past the /rcf list cap: no editor here, so say where it lives.
+      return (
+        <tr key={row.number} className="ad-row ad-row-static">
+          <td><NumberCell row={row} /></td>
+          <td>
+            <span className="ad-stack">
+              <span className="ad-num ad-num-dest">{row.forwardsTo ? fmt(row.forwardsTo) : '—'}</span>
+              <Link to={allHref} className="ad-faint ad-row-hint">Manage in call forwarding</Link>
+            </span>
+          </td>
+          <td className="ad-col-week"><WeekCell stats={stats} did={row.number} /></td>
+          <td><StatusCell row={row} /></td>
+          <td className="ad-col-chev" />
+        </tr>
+      );
+    }
+    const open = openNumber === row.number;
+    const editorId = `ad-editor-${entry.id}`;
+    const toggle = () => setOpenNumber((cur) => (cur === row.number ? null : row.number));
+    return (
+      <Fragment key={row.number}>
+        <tr
+          className={`ad-row${open ? ' ad-row-open' : ''}`}
+          tabIndex={0}
+          aria-expanded={open}
+          aria-controls={open ? editorId : undefined}
+          aria-label={`${fmt(entry.did)}${entry.name ? `, ${entry.name}` : ''}, ${
+            entry.enabled ? 'forwarding' : 'paused'
+          } to ${fmt(entry.forward_to)}. ${canEdit ? 'Edit' : 'View'} settings`}
+          onClick={toggle}
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              toggle();
+            } else if (e.key === 'Escape' && open) {
+              e.preventDefault();
+              setOpenNumber(null);
+            }
+          }}
+        >
+          <td><NumberCell row={row} /></td>
+          <td>
+            <span className="ad-stack">
+              <span className="ad-num ad-num-dest">{fmt(entry.forward_to)}</span>
+              <span className="ad-faint">
+                {entry.failover_to ? `Failover ${fmt(entry.failover_to)}` : `Rings ${entry.ring_timeout}s`}
+              </span>
+            </span>
+          </td>
+          <td className="ad-col-week">
+            <WeekCell stats={stats} did={entry.did} />
+          </td>
+          <td><StatusCell row={row} /></td>
+          <td className="ad-col-chev">{CHEV_DOWN}</td>
+        </tr>
+        {open && (
+          <tr className="ad-editor-row">
+            <td colSpan={5} id={editorId}>
+              <div className="ad-editor rcf-xwrap">
+                <div>
+                  <RowEditor entry={entry} isAdmin={isAdmin} canEdit={canEdit} onClose={() => setOpenNumber(null)} />
+                </div>
+              </div>
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
+  }
+
+  function renderOtherRow(row: NumberRow) {
+    const info = productInfo(row.product);
+    const cells = (
+      <>
+        <td><NumberCell row={row} /></td>
+        <td><DestinationCell row={row} /></td>
+        <td className="ad-col-week"><WeekCell stats={stats} did={row.number} /></td>
+        <td><StatusCell row={row} /></td>
+        <td className="ad-col-chev">{row.href ? CHEV_GO : null}</td>
+      </>
+    );
+    const href = row.href;
+    if (!href) {
+      return (
+        <tr key={row.number} className="ad-row ad-row-static">
+          {cells}
+        </tr>
+      );
+    }
+    const word = info.label.toLowerCase();
+    const go = () => navigate(href);
+    return (
+      <tr
+        key={row.number}
+        className="ad-row ad-row-link"
+        tabIndex={0}
+        aria-label={`${fmt(row.number)}${row.name ? `, ${row.name}` : ''}, ${word}. Open ${word}`}
+        onClick={go}
+        onKeyDown={(e: KeyboardEvent<HTMLTableRowElement>) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            go();
+          }
+        }}
+      >
+        {cells}
+      </tr>
+    );
+  }
 
   return (
     <Card
       id="ad-numbers"
       title={title}
       icon={<Hash size={15} strokeWidth={2.2} />}
-      count={entries.length > 0 ? allCount : null}
-      sub={canEdit ? 'Select a number to change where it rings.' : 'Select a number to see its settings.'}
+      count={allRows.length > 0 ? allCount : null}
+      sub={sub}
       className="ad-span-8 ad-card-numbers"
       order={order}
       footer={footer}
     >
-      {entries.length > 0 && (
+      {allRows.length > 0 && (
         <div className="ad-toolbar">
           <label className="ad-search">
             <span className="ad-visually-hidden">Search numbers</span>
@@ -160,7 +382,7 @@ export function NumbersCard({
               placeholder="Search number, label or destination"
               onChange={(e) => {
                 setSearch(e.target.value);
-                setOpenId(null);
+                setOpenNumber(null);
               }}
             />
           </label>
@@ -171,10 +393,7 @@ export function NumbersCard({
                 type="button"
                 className={`ad-chipbtn${filter === c.id ? ' ad-chipbtn-active' : ''}`}
                 aria-pressed={filter === c.id}
-                onClick={() => {
-                  setFilter(c.id);
-                  setOpenId(null);
-                }}
+                onClick={() => pickFilter(c.id)}
               >
                 {c.label}
                 <span className="ad-chipbtn-count">{c.count}</span>
@@ -188,7 +407,7 @@ export function NumbersCard({
         <CardState kind="loading">Loading numbers…</CardState>
       ) : error ? (
         <CardState kind="error" onRetry={onRetry}>We couldn’t load the numbers.</CardState>
-      ) : entries.length === 0 ? (
+      ) : allRows.length === 0 ? (
         <div className="ad-empty">
           <p className="ad-empty-title">No numbers on this account yet</p>
           <p className="ad-empty-sub">
@@ -224,83 +443,13 @@ export function NumbersCard({
             <thead>
               <tr>
                 <th scope="col">Number</th>
-                <th scope="col">Forwards to</th>
+                <th scope="col">{onlyRcf ? 'Forwards to' : 'Where calls go'}</th>
                 <th scope="col" className="ad-col-week">Last 7 days</th>
                 <th scope="col">Status</th>
                 <th scope="col" className="ad-col-chev"><span className="ad-visually-hidden">Details</span></th>
               </tr>
             </thead>
-            <tbody>
-              {rows.map((entry) => {
-                const open = openId === entry.id;
-                const editorId = `ad-editor-${entry.id}`;
-                const toggle = () => setOpenId((cur) => (cur === entry.id ? null : entry.id));
-                return (
-                  <Fragment key={entry.id}>
-                    <tr
-                      className={`ad-row${open ? ' ad-row-open' : ''}`}
-                      tabIndex={0}
-                      aria-expanded={open}
-                      aria-controls={open ? editorId : undefined}
-                      aria-label={`${fmt(entry.did)}${entry.name ? `, ${entry.name}` : ''}, ${
-                        entry.enabled ? 'forwarding' : 'paused'
-                      } to ${fmt(entry.forward_to)}. ${canEdit ? 'Edit' : 'View'} settings`}
-                      onClick={toggle}
-                      onKeyDown={(e) => {
-                        if (e.target !== e.currentTarget) return;
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          toggle();
-                        } else if (e.key === 'Escape' && open) {
-                          e.preventDefault();
-                          setOpenId(null);
-                        }
-                      }}
-                    >
-                      <td>
-                        <span className="ad-stack">
-                          <span className="ad-num">{fmt(entry.did)}</span>
-                          <span className={entry.name ? 'ad-faint' : 'ad-faint ad-italic'}>{entry.name ?? 'No label'}</span>
-                        </span>
-                      </td>
-                      <td>
-                        <span className="ad-stack">
-                          <span className="ad-num ad-num-dest">{fmt(entry.forward_to)}</span>
-                          <span className="ad-faint">
-                            {entry.failover_to ? `Failover ${fmt(entry.failover_to)}` : `Rings ${entry.ring_timeout}s`}
-                          </span>
-                        </span>
-                      </td>
-                      <td className="ad-col-week">
-                        <WeekCell stats={stats} did={entry.did} />
-                      </td>
-                      <td>
-                        <span className={`ad-status ad-status-${entry.enabled ? 'on' : 'off'}`}>
-                          <span className="ad-dot" aria-hidden="true" />
-                          {entry.enabled ? 'Forwarding' : 'Paused'}
-                        </span>
-                      </td>
-                      <td className="ad-col-chev">
-                        <svg className="ad-chev" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </td>
-                    </tr>
-                    {open && (
-                      <tr className="ad-editor-row">
-                        <td colSpan={5} id={editorId}>
-                          <div className="ad-editor rcf-xwrap">
-                            <div>
-                              <RowEditor entry={entry} isAdmin={isAdmin} canEdit={canEdit} onClose={() => setOpenId(null)} />
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
+            <tbody>{rows.map((row) => (row.product === 'rcf' ? renderRcfRow(row) : renderOtherRow(row)))}</tbody>
           </table>
         </div>
       )}

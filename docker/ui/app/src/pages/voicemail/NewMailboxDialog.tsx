@@ -25,6 +25,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { useAdminCustomers } from '../dashboard/adminData';
 import { VmDialog } from './VmDialog';
 import { invalidateVoicemail, isUnavailable, useAvailableNumbers, vmErrorText, vmKeys } from './voicemailData';
+import { invalidateAccountNumbers } from '../dashboard/accountData';
 import { DEFAULT_TIMEZONE, formatPhone, PIN_PATTERN, TIMEZONES } from './format';
 
 export interface NewMailboxDialogProps {
@@ -95,6 +96,8 @@ export function NewMailboxDialog({ customer, transcriptionAvailable, onClose, on
     },
     onSuccess: (mailbox) => {
       invalidateVoicemail(queryClient);
+      // The mailbox's number is now one of the customer's numbers (dashboard, Reporting).
+      invalidateAccountNumbers(queryClient);
       toastOk(`Mailbox ready on ${formatPhone(mailbox.did)}.`);
       onCreated(mailbox);
     },

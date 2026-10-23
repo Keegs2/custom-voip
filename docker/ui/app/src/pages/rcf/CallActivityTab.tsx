@@ -18,6 +18,18 @@
  *     labels (chart header, ticks, Recent Calls times) read the response's
  *     `tz`, so they say UTC whenever UTC was what the server bucketed in.
  *
+ * Two scopes (`scope`, query keys carry it so the two never share a cache):
+ *   - 'rcf' (default — the /rcf console): call forwarding only. The picker
+ *     lists GET /rcf; everything filters `product_type=rcf` + `destination`.
+ *     Unchanged.
+ *   - 'account' (the dashboard's Call activity overlay): every product on
+ *     the account. The picker lists `numbers` (the account's numbers, any
+ *     product, from the dashboard — GET /rcf is not fetched); the activity
+ *     feed sends `product_type=all` and the table no product filter, and a
+ *     picked number filters with `number` (its inbound destination OR
+ *     outbound caller ID, so SIP-trunk calls out from it count too). No
+ *     `numbers` (the admin's All customers overlay) → a static "All Numbers".
+ *
  * Refetches keep the previous frame on screen (dimmed) — no layout jump when
  * the range or DID changes. RcfPage remounts this tab per customer scope
  * (`key`), so a DID picked under one customer never leaks into another.
@@ -27,18 +39,19 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import { listRcf } from '../../api/rcf';
 import { getCdrActivity, isTimeZoneRejection, searchCdrs } from '../../api/cdrs';
-import type { RcfEntry } from '../../types/rcf';
 import type { ActivityRange, CdrActivityParams, CdrActivityResponse } from '../../types/cdrActivity';
 import { Spinner } from '../../components/ui/Spinner';
 import { Reveal } from '../../components/fx/Reveal';
 import { DEFAULT_PAGE_SIZE } from './theme';
 import {
-  browserTimeZone, DEFAULT_RANGE, didLabel, fallbackWindow, RANGE_PRESETS, rangePreset,
+  browserTimeZone, DEFAULT_RANGE, didLabel, fallbackWindow, RANGE_PRESETS, rangePreset, type PickerNumber,
 } from './activityFormat';
 import { ActivityDidPicker } from './ActivityDidPicker';
 import { ActivityKpis } from './ActivityKpis';
 import { ActivityChart } from './ActivityChart';
 import { RecentCallsTable } from './RecentCallsTable';
+
+export type ActivityScope = 'rcf' | 'account';
 
 export interface CallActivityTabProps {
   /**
@@ -46,11 +59,17 @@ export interface CallActivityTabProps {
    * tenant's own id, or undefined for "All Customers" (server-scoped).
    */
   customerId: number | undefined;
+  /** 'rcf' (default) = call forwarding only; 'account' = every product. */
+  scope?: ActivityScope;
+  /** 'account' scope: the picker's numbers (any product). Ignored for 'rcf'. */
+  numbers?: readonly PickerNumber[];
 }
 
 const BUCKET_NOUN = { hour: 'hour', day: 'day', week: 'week' } as const;
 
-export function CallActivityTab({ customerId }: CallActivityTabProps) {
+const NO_NUMBERS: readonly PickerNumber[] = [];
+
+export function CallActivityTab({ customerId, scope = 'rcf', numbers }: CallActivityTabProps) {
   // ALL hooks unconditionally at top — rules of hooks (#310 prevention)
   const { isAdmin, isSupport } = useAuth();
   // Carrier routing is a platform internal — the API withholds carrier_used
@@ -68,12 +87,18 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
   // the response's `tz`, never from this flag.
   const tzRejectedRef = useRef(false);
 
+  const account = scope === 'account';
   const { data: rcfData } = useQuery({
     queryKey: ['rcf-dids', customerId],
     queryFn: () => listRcf({ customer_id: customerId, limit: 500 }),
     staleTime: 60_000,
+    // The account view brings its own every-product list.
+    enabled: !account,
   });
-  const rcfEntries: RcfEntry[] = useMemo(() => rcfData?.items ?? [], [rcfData]);
+  const pickerNumbers: readonly PickerNumber[] = useMemo(() => {
+    if (account) return numbers ?? NO_NUMBERS;
+    return (rcfData?.items ?? []).map((e) => ({ number: e.did, name: e.name, product: 'rcf', enabled: e.enabled }));
+  }, [account, numbers, rcfData]);
 
   // Tenants are hard-scoped server-side (the param is ignored for them), so
   // the scope is sent whenever there is one: an admin's pick, or — for an
@@ -82,14 +107,11 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
   // (undefined) omits it.
   const activityCustomerId = customerId;
   const activity = useQuery({
-    queryKey: ['rcf-activity', activityCustomerId ?? 'all', range, tz, selectedDid],
+    queryKey: ['rcf-activity', scope, activityCustomerId ?? 'all', range, tz, selectedDid],
     queryFn: async (): Promise<CdrActivityResponse> => {
-      const params: Omit<CdrActivityParams, 'tz'> = {
-        range,
-        customer_id: activityCustomerId,
-        product_type: 'rcf',
-        destination: selectedDid ?? undefined,
-      };
+      const params: Omit<CdrActivityParams, 'tz'> = account
+        ? { range, customer_id: activityCustomerId, product_type: 'all', number: selectedDid ?? undefined }
+        : { range, customer_id: activityCustomerId, product_type: 'rcf', destination: selectedDid ?? undefined };
       if (!tzRejectedRef.current) {
         try {
           return await getCdrActivity({ ...params, tz });
@@ -122,13 +144,15 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
   }, [activityFresh, activityData, activity.isError, range, errorAt]);
 
   const calls = useQuery({
-    queryKey: ['rcf-activity-calls', customerId ?? 'all', selectedDid, callWindow?.start, callWindow?.end, page, pageSize],
+    queryKey: ['rcf-activity-calls', scope, customerId ?? 'all', selectedDid, callWindow?.start, callWindow?.end, page, pageSize],
     queryFn: () => {
       if (!callWindow) throw new Error('Call window not resolved');
       return searchCdrs({
         customer_id: customerId,
-        product_type: 'rcf',
-        destination: selectedDid ?? undefined,
+        // GET /cdrs: no product_type = every product.
+        ...(account
+          ? { number: selectedDid ?? undefined }
+          : { product_type: 'rcf' as const, destination: selectedDid ?? undefined }),
         start_date: callWindow.start,
         end_date: callWindow.end,
         limit: pageSize,
@@ -141,7 +165,7 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
   });
 
   const preset = rangePreset(range);
-  const selectedLabel = didLabel(rcfEntries, selectedDid);
+  const selectedLabel = didLabel(pickerNumbers, selectedDid);
 
   function handleRange(next: ActivityRange): void {
     setRange(next);
@@ -159,8 +183,8 @@ export function CallActivityTab({ customerId }: CallActivityTabProps) {
     <div className="rcf-act">
       {/* ── Filter row: DID + time range — scopes everything below ── */}
       <div className={`rcf-panel rcf-act-bar fx-load${selectedDid ? ' rcf-act-bar-scoped' : ''}`}>
-        {rcfEntries.length > 0 ? (
-          <ActivityDidPicker entries={rcfEntries} selectedDid={selectedDid} onChange={handleDid} />
+        {pickerNumbers.length > 0 ? (
+          <ActivityDidPicker entries={pickerNumbers} selectedDid={selectedDid} onChange={handleDid} />
         ) : (
           <div className="rcf-act-didpick">
             <span className="rcf-act-bar-label">Viewing</span>
