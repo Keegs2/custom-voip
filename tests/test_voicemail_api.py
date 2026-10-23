@@ -39,9 +39,12 @@ PORT = 55472  # distinct from every other test module
 MAILBOX_KEYS = {"id", "customer_id", "customer_name", "did", "label", "status", "timezone",
                 "greeting_mode", "active_greeting_id", "has_pin", "retention_days",
                 "max_message_seconds", "max_messages", "max_bytes", "message_count",
-                "unread_count", "bytes_used", "created_at"}
+                "unread_count", "bytes_used", "created_at",
+                # transcription v1.1 (additive, docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §10.1)
+                "transcription_enabled", "transcription_language"}
 MESSAGE_KEYS = {"id", "mailbox_id", "caller_id_number", "caller_id_name", "duration_ms",
-                "size_bytes", "is_read", "is_saved", "deleted_at", "created_at", "expires_at"}
+                "size_bytes", "is_read", "is_saved", "deleted_at", "created_at", "expires_at",
+                "transcript"}  # transcription v1.1 (additive, plan §10.1)
 GREETING_KEYS = {"id", "mailbox_id", "label", "duration_ms", "size_bytes", "is_active",
                  "created_at"}
 
@@ -123,7 +126,7 @@ def test_scope_rules_and_no_leak(h):
         assert r.status_code == 200 and r.json() == []
         r = await c.get("/v1/voicemail/summary", headers=h.auth("user_b"))
         assert r.json() == {"enabled": False, "mailbox_count": 0, "unread_count": 0,
-                            "can_manage": False}
+                            "can_manage": False, "transcription_available": False}
         for path in (f"/v1/voicemail/mailboxes/{box['id']}",
                      f"/v1/voicemail/mailboxes/{box['id']}/messages",
                      f"/v1/voicemail/mailboxes/{box['id']}/greetings"):

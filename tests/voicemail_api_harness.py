@@ -291,6 +291,67 @@ class Harness:
         assert r.json()["status"] == "stored"
         return r.json()["message_id"]
 
+    # -- transcripts (v1.1) -----------------------------------------------------
+    async def seed_transcript(self, message_id: int, status: str = "done", *,
+                              text: str = "This is a test transcript.",
+                              segments: tuple | None = None, confidence: float | None = 0.912,
+                              language: str = "en-US", model: str | None = "telephony",
+                              error_code: str | None = None, attempts: int = 0,
+                              billed_ms: int | None = None,
+                              plaintext: bytes | None = None) -> None:
+        """Upsert the voicemail_transcripts row of a stored message the way the
+        worker leaves it. ``done`` seals a real transcript document with the
+        REAL ``seal_transcript`` (local KMS, AAD ``vmt:``) — or ``plaintext``
+        verbatim (malformed-document tests); every other status carries no
+        crypto (the table's CHECKs). ``processing`` gets a live lease."""
+        from services.voicemail import seal_transcript
+        from services.voicemail.transcription import document
+        msg = (await self.fetch("SELECT mailbox_id, customer_id, msg_uuid FROM voicemail_messages "
+                                "WHERE id = $1", message_id))[0]
+        crypto: tuple = (None, None, None, None)
+        if status == "done":
+            if plaintext is None:
+                segs = segments if segments is not None else (
+                    document.Segment(start_ms=300, end_ms=5120, text=text, confidence=0.94),)
+                plaintext = document.encode(document.TranscriptDoc(
+                    language=language, model=model or "telephony", text=text,
+                    segments=tuple(segs)))
+            blob = await seal_transcript(customer_id=msg["customer_id"],
+                                         mailbox_id=msg["mailbox_id"],
+                                         msg_uuid=msg["msg_uuid"], plaintext=plaintext)
+            crypto = (blob.ciphertext, blob.wrapped_dek, blob.kek_version, blob.iv)
+        finished = status in ("done", "empty")
+        await self.execute(
+            """
+            INSERT INTO voicemail_transcripts AS t
+                   (message_id, mailbox_id, customer_id, status, language, model, provider,
+                    confidence, error_code, attempts, ciphertext, wrapped_dek, kek_version, iv,
+                    lease_until, attempt_id, completed_at, audio_ms, billed_ms, chunk_count)
+            VALUES ($1::bigint, $2::int, $3::int, $4::varchar, $5::varchar, $6::varchar,
+                    CASE WHEN $6::varchar IS NULL THEN NULL ELSE 'fake' END,
+                    $7::real, $8::varchar, $9::smallint, $10::bytea, $11::bytea, $12::text,
+                    $13::bytea,
+                    CASE WHEN $4::varchar = 'processing' THEN now() + interval '10 minutes' END,
+                    CASE WHEN $4::varchar = 'processing' THEN gen_random_uuid() END,
+                    CASE WHEN $14::boolean THEN now() END,
+                    CASE WHEN $14::boolean THEN 4000 END, $15::int,
+                    CASE WHEN $14::boolean THEN 1 END)
+            ON CONFLICT (message_id) DO UPDATE SET
+                status = EXCLUDED.status, language = EXCLUDED.language, model = EXCLUDED.model,
+                provider = EXCLUDED.provider, confidence = EXCLUDED.confidence,
+                error_code = EXCLUDED.error_code, attempts = EXCLUDED.attempts,
+                ciphertext = EXCLUDED.ciphertext, wrapped_dek = EXCLUDED.wrapped_dek,
+                kek_version = EXCLUDED.kek_version, iv = EXCLUDED.iv,
+                lease_until = EXCLUDED.lease_until, attempt_id = EXCLUDED.attempt_id,
+                completed_at = EXCLUDED.completed_at, audio_ms = EXCLUDED.audio_ms,
+                billed_ms = EXCLUDED.billed_ms, chunk_count = EXCLUDED.chunk_count,
+                updated_at = now()
+            """,
+            message_id, msg["mailbox_id"], msg["customer_id"], status, language,
+            model if finished else None, confidence if status == "done" else None, error_code,
+            attempts, *crypto, finished, billed_ms if billed_ms is not None
+            else (4000 if finished else None))
+
 
 def memory_store():
     from services.voicemail import get_object_store
