@@ -330,12 +330,12 @@ Read-only ELI5 reports over `cdrs`; whole minutes only, no costs/seconds/interna
 Scope: admin (`customer_id` param picks the customer), tenant `user` (own customer; cross-tenant → 404), `readonly` (reads + playback only), `support` → 403. `/fs/*` = `X-Ingest-Secret` (JWT-exempt); `…/audio` = `?t=` playback token (JWT-exempt GET/HEAD).
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/v1/voicemail/summary` | admin, tenant | `{enabled, mailbox_count, unread_count, can_manage}` |
-| `GET`/`POST` | `/v1/voicemail/mailboxes` | tenant / **admin** (POST) | List (ordered customer, label, id) / create on an `available` DID (201; 409 DID; 503 KMS down, nothing committed) |
-| `GET`/`PATCH`/`DELETE` | `/v1/voicemail/mailboxes/{id}` | tenant / writer / **admin** (DELETE 204) | Mailbox; PATCH label/timezone/greeting_mode+active_greeting_id/(admin) status |
+| `GET` | `/v1/voicemail/summary` | admin, tenant | `{enabled, mailbox_count, unread_count, can_manage, transcription_available}` (the last = platform flag on AND STT config valid, same for every caller) |
+| `GET`/`POST` | `/v1/voicemail/mailboxes` | tenant / **admin** (POST) | List (ordered customer, label, id) / create on an `available` DID (201; 409 DID; 503 KMS down, nothing committed). POST also takes `transcription_enabled` (default false; true while unavailable → 409) + `transcription_language` (`en-US`\|`es-US`\|`fr-CA`, else 422) |
+| `GET`/`PATCH`/`DELETE` | `/v1/voicemail/mailboxes/{id}` | tenant / writer / **admin** (DELETE 204) | Mailbox (+ `transcription_enabled`, `transcription_language`); PATCH label/timezone/greeting_mode+active_greeting_id/(admin) status/(**admin**, O2) `transcription_enabled`+`transcription_language` — any non-admin sending either → 403; off→on while unavailable → 409; bad language → 422; `false` flips the mailbox's `pending` transcripts to `disabled` in the same transaction. DELETE also deletes the mailbox's transcripts immediately |
 | `PUT` | `/v1/voicemail/mailboxes/{id}/pin` | writer | 4–10 digit PIN (bcrypt) → 204 |
 | `GET` | `/v1/voicemail/available-numbers` | **admin** | `[{did, city, state}]` (q digits, limit ≤ 50) |
-| `GET` | `/v1/voicemail/mailboxes/{id}/messages` | tenant | `?folder=inbox\|saved\|trash&limit&offset` → `{items, total, unread}` newest first |
+| `GET` | `/v1/voicemail/mailboxes/{id}/messages` | tenant | `?folder=inbox\|saved\|trash&limit&offset` → `{items, total, unread}` newest first. Every Message (here and on PATCH/DELETE/restore) carries `transcript: {status, confidence}` — LEFT JOIN, one query, never decrypts; no row yet → `pending` if the mailbox transcribes else `disabled` |
 | `PATCH`/`DELETE` | `/v1/voicemail/messages/{id}` | writer | read/saved flags; DELETE = move to trash |
 | `POST` | `/v1/voicemail/messages/{id}/restore` | writer | clear `deleted_at` (is_saved unchanged) |
 | `DELETE` | `/v1/voicemail/messages/{id}/purge` | writer | object then row → 204 |
@@ -345,7 +345,13 @@ Scope: admin (`customer_id` param picks the customer), tenant `user` (own custom
 | `DELETE` | `/v1/voicemail/greetings/{id}` | writer | purge; active → standard → 204 |
 | `POST` | `/v1/voicemail/greetings/{id}/playback-token` | tenant | `{url, expires_in}` |
 | `GET`/`HEAD` | `/v1/voicemail/greetings/{id}/audio?t=` | token | as message audio |
-| `POST` | `/v1/voicemail/customers/{id}/crypto-erase` | **admin** | `{confirm: "ERASE <id>"}` → counts |
+| `POST` | `/v1/voicemail/customers/{id}/crypto-erase` | **admin** | `{confirm: "ERASE <id>"}` → counts (transcripts deleted in the erase transaction) |
+| `GET` | `/v1/voicemail/messages/{id}/transcript` | tenant (incl. readonly) | `{message_id, status, language, model, confidence, text, segments, completed_at, can_retry}`; text only when `done`, decrypted under 4 per-process slots (2 s wait → 503) and returned only after a committed `transcript_view` audit (audit failure → 503, no text); integrity → 500; KMS down → 503 + Retry-After; does NOT mark read; `Cache-Control: no-store` |
+| `POST` | `/v1/voicemail/messages/{id}/transcript/retry` | writer (`force` **admin**) | optional `{force}` → 202 `{message_id, status:"pending"}`; 409 sentences (unavailable / mailbox off / trashed / in progress / already done) |
+| `GET` | `/v1/voicemail/mailboxes/{id}/transcript-snippets?ids=` | tenant | ≤ 50 ids → `{items:[{message_id, status, snippet}], unavailable}`; foreign ids omitted; one `transcript_view` audit per batch; never 5xx (failures → `snippet:null`, `unavailable:true`); `no-store` |
+| `POST` | `/v1/voicemail/mailboxes/{id}/transcripts/backfill` | **admin** (O2) | 202 `{queued}` — newest 200 stored, untrashed messages: missing → `pending`, `disabled` → `pending`; 409 unavailable / mailbox off |
+| `GET` | `/v1/voicemail/transcription/status` | **admin** | ops JSON (plan §13) from the table + config: counts, oldest due pending age, failed_by_code, billed_minutes_24h, daily cap, budget_exhausted, config_problems |
+| `POST` | `/v1/voicemail/transcription/requeue` | **admin** | `{error_code?, limit? (1-500, default 500)}` → `{requeued}` — only claimable `failed` rows (mailbox on, message stored + untrashed) |
 | `GET` | `/v1/voicemail/fs/mailbox/{id}` | ingest secret | `{mailbox_id, customer_id, did, status, accepting, reason, max_message_seconds, greeting}` |
 | `GET` | `/v1/voicemail/fs/greetings/{id}/audio` | ingest secret | plaintext greeting WAV (audit `greeting_fs_fetch`) |
 | `POST` | `/v1/voicemail/fs/deposit` | ingest secret | raw WAV + `X-VM-Meta` → `{"status":"stored","message_id":N}` |

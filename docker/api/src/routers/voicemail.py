@@ -17,8 +17,18 @@ FreeSWITCH-facing routes (``/fs/*``) are JWT-exempt (middleware) and depend on
 the ``?t=`` playback token.
 
 Business logic lives in ``services/voicemail/`` (mailboxes, deposit,
-greetings, audio, retention); this module is the HTTP surface + scoping.
-User-facing 4xx ``detail`` strings are short sentences (the UI shows them).
+greetings, audio, retention, transcripts); this module is the HTTP surface +
+scoping. User-facing 4xx ``detail`` strings are short sentences (the UI shows
+them).
+
+Transcription v1.1 (docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §10; owner decision
+O2 overrides its writer rule): every Message carries ``transcript`` {status,
+confidence} (LEFT JOIN, nothing decrypted); the transcript and snippet reads
+use the normal scope (readonly included) and answer ``Cache-Control:
+no-store``; ONLY an admin may change ``transcription_enabled`` /
+``transcription_language`` (PATCH, 403 for everyone else — other PATCH fields
+keep the writer rule), backfill a mailbox, force a re-run, or use the ops
+status / requeue routes. A plain retry stays a writer action.
 """
 from __future__ import annotations
 
@@ -46,10 +56,12 @@ from services.voicemail import audit as vm_audit
 from services.voicemail import deposit as vm_deposit
 from services.voicemail import greetings as vm_greetings
 from services.voicemail import mailboxes as mbx
+from services.voicemail import transcripts as vmt
 from services.voicemail.errors import (
     VoicemailCryptoUnavailable,
     VoicemailIntegrityError,
 )
+from services.voicemail.transcription import config as tx_config
 
 logger = logging.getLogger(__name__)
 
@@ -185,17 +197,28 @@ _FOLDERS = {
 }
 
 
-def message_out(row: Any) -> dict:
-    return {k: row[k] for k in MESSAGE_FIELDS}
+def message_out(row: Any, *, transcription_enabled: bool | None = None) -> dict:
+    """A Message (contract §4.2) + its ``transcript`` summary (plan §10.1).
+    ``row`` carries the SUMMARY_COLUMNS of the LEFT JOIN; the mailbox's
+    ``transcription_enabled`` (for a message with no transcript row yet)
+    comes from the row or, for a list, the already-scoped mailbox."""
+    out = {k: row[k] for k in MESSAGE_FIELDS}
+    enabled = row["transcription_enabled"] if transcription_enabled is None \
+        else transcription_enabled
+    out["transcript"] = vmt.summary(row["transcript_status"], row["transcript_confidence"],
+                                    enabled)
+    return out
 
 
 async def _scoped_message(conn: Any, scope: VmScope, message_id: int, *,
                           for_update: bool = False) -> Any:
     _id64(message_id, MSG_MESSAGE_NOT_FOUND)
-    sql = (f"SELECT {_MESSAGE_COLS}, m.customer_id, m.msg_uuid, b.timezone "
+    sql = (f"SELECT {_MESSAGE_COLS}, m.customer_id, m.msg_uuid, b.timezone, "
+           f"       b.transcription_enabled, b.transcription_language, {vmt.SUMMARY_COLUMNS} "
            "FROM voicemail_messages m "
            "JOIN voicemail_boxes b ON b.id = m.mailbox_id "
-           "JOIN customers c ON c.id = b.customer_id "
+           "JOIN customers c ON c.id = b.customer_id"
+           f"{vmt.SUMMARY_JOIN}"
            "WHERE m.id = $1::bigint AND m.status = 'stored' AND b.status <> 'deleted'")
     args: list[Any] = [message_id]
     if not scope.is_admin:
@@ -234,6 +257,8 @@ async def _scoped_greeting(conn: Any, scope: VmScope, greeting_id: int) -> Any:
 async def summary(customer_id: Optional[int] = Query(None),
                   scope: VmScope = Depends(vm_scope)):
     cid = _list_customer(scope, customer_id)
+    # Platform-level (flag on AND STT config valid) — the same for every caller.
+    tx = {"transcription_available": tx_config.available()}
     pool = await _pool()
     async with pool.acquire() as conn:
         if cid is None:  # admin, all customers
@@ -245,7 +270,7 @@ async def summary(customer_id: Optional[int] = Query(None),
                 "         WHERE m.status = 'stored' AND m.deleted_at IS NULL AND NOT m.is_read "
                 "           AND b.status <> 'deleted')::int AS unread_count")
             return {"enabled": True, "mailbox_count": row["mailbox_count"],
-                    "unread_count": row["unread_count"], "can_manage": True}
+                    "unread_count": row["unread_count"], "can_manage": True, **tx}
         row = await conn.fetchrow(
             "SELECT c.voicemail_enabled, "
             "       (SELECT count(*) FROM voicemail_boxes b "
@@ -258,12 +283,14 @@ async def summary(customer_id: Optional[int] = Query(None),
     if row is None:
         if scope.is_admin:
             raise HTTPException(status_code=404, detail=mbx.MSG_CUSTOMER_NOT_FOUND)
-        return {"enabled": False, "mailbox_count": 0, "unread_count": 0, "can_manage": False}
+        return {"enabled": False, "mailbox_count": 0, "unread_count": 0, "can_manage": False,
+                **tx}
     enabled = bool(row["voicemail_enabled"])
     if not scope.is_admin and not enabled:
-        return {"enabled": False, "mailbox_count": 0, "unread_count": 0, "can_manage": False}
+        return {"enabled": False, "mailbox_count": 0, "unread_count": 0, "can_manage": False,
+                **tx}
     return {"enabled": enabled, "mailbox_count": row["mailbox_count"],
-            "unread_count": row["unread_count"], "can_manage": scope.is_admin}
+            "unread_count": row["unread_count"], "can_manage": scope.is_admin, **tx}
 
 
 @router.get("/mailboxes")
@@ -289,6 +316,8 @@ class MailboxCreate(BaseModel):
     label: Optional[str] = None
     timezone: Optional[str] = None
     pin: Optional[str] = None
+    transcription_enabled: Optional[bool] = None   # default off (owner decision O1)
+    transcription_language: Any = None             # validated: 422 sentence, not pydantic's
 
 
 @router.post("/mailboxes", status_code=201)
@@ -296,7 +325,9 @@ async def create_mailbox(body: MailboxCreate, request: Request,
                          scope: VmScope = Depends(vm_admin)):
     box_id = await mbx.create_mailbox(
         customer_id=body.customer_id, did=body.did, label=body.label, timezone=body.timezone,
-        pin=body.pin, info=scope.info(request), source="admin")
+        pin=body.pin, info=scope.info(request), source="admin",
+        transcription_enabled=bool(body.transcription_enabled),
+        transcription_language=body.transcription_language)
     pool = await _pool()
     async with pool.acquire() as conn:
         row = await mbx.fetch_mailbox(conn, box_id)
@@ -316,6 +347,8 @@ class MailboxPatch(BaseModel):
     greeting_mode: Optional[Literal["standard", "custom"]] = None
     active_greeting_id: Optional[int] = None
     status: Optional[Literal["active", "suspended"]] = None
+    transcription_enabled: Optional[bool] = None   # ADMIN only (owner decision O2)
+    transcription_language: Any = None             # ADMIN only; "en-US" | "es-US" | "fr-CA"
 
 
 @router.patch("/mailboxes/{mailbox_id}")
@@ -324,6 +357,13 @@ async def update_mailbox(mailbox_id: int, body: MailboxPatch, request: Request,
     fields = body.model_fields_set
     if "status" in fields and body.status is not None and not scope.is_admin:
         raise HTTPException(status_code=403, detail=MSG_TENANT_STATUS)
+    # O2: present with a value -> admin only (even if it equals the current one).
+    tx_fields = {f for f in ("transcription_enabled", "transcription_language")
+                 if f in fields and getattr(body, f) is not None}
+    if tx_fields and not scope.is_admin:
+        raise HTTPException(status_code=403, detail=mbx.MSG_TX_ADMIN_ONLY)
+    tx_language = (mbx.clean_transcription_language(body.transcription_language)
+                   if "transcription_language" in tx_fields else None)
     sets: list[str] = []
     args: list[Any] = []
 
@@ -345,8 +385,16 @@ async def update_mailbox(mailbox_id: int, body: MailboxPatch, request: Request,
             await conn.execute("SELECT 1 FROM voicemail_boxes WHERE id = $1::int FOR UPDATE",
                                mailbox_id)
             current = await conn.fetchrow(
-                "SELECT greeting_mode, active_greeting_id FROM voicemail_boxes "
-                "WHERE id = $1::int", mailbox_id)
+                "SELECT greeting_mode, active_greeting_id, transcription_enabled "
+                "FROM voicemail_boxes WHERE id = $1::int", mailbox_id)
+            if "transcription_enabled" in tx_fields:
+                # Turning it ON needs the platform; re-asserting the current
+                # value (e.g. a language change while paused) does not.
+                if body.transcription_enabled and not current["transcription_enabled"]:
+                    mbx.require_transcription_available()
+                add("transcription_enabled", "boolean", body.transcription_enabled)
+            if tx_language is not None:
+                add("transcription_language", "varchar", tx_language)
             new_active = current["active_greeting_id"]
             if "active_greeting_id" in fields:
                 new_active = body.active_greeting_id
@@ -378,11 +426,18 @@ async def update_mailbox(mailbox_id: int, body: MailboxPatch, request: Request,
                     raise HTTPException(status_code=422, detail=MSG_GREETING_UNUSABLE)
                 except asyncpg.CheckViolationError:
                     raise HTTPException(status_code=422, detail="That change is not allowed.")
+                if body.transcription_enabled is False and "transcription_enabled" in tx_fields:
+                    await vmt.disable_pending(conn, mailbox_id)  # plan §9, same transaction
                 changed = sorted(f for f in fields if getattr(body, f) is not None
                                  or f == "active_greeting_id")
                 detail: dict[str, Any] = {"fields": changed}
                 if "status" in changed:
                     detail["status"] = body.status
+                # The STT opt-in/out is on record (values only, never content).
+                if "transcription_enabled" in tx_fields:
+                    detail["transcription_enabled"] = body.transcription_enabled
+                if tx_language is not None:
+                    detail["transcription_language"] = tx_language
                 await vm_audit.write_audit(
                     conn, action="mailbox_update", source=scope.source,
                     customer_id=box["customer_id"], mailbox_id=mailbox_id,
@@ -455,17 +510,21 @@ async def list_messages(mailbox_id: int, folder: str = Query("inbox"),
         raise HTTPException(status_code=422, detail=MSG_BAD_FOLDER)
     pool = await _pool()
     async with pool.acquire() as conn:
-        await _scoped_box(conn, scope, mailbox_id)
+        box = await _scoped_box(conn, scope, mailbox_id)
         where = f"m.mailbox_id = $1::int AND m.status = 'stored' AND {pred}"
+        # ONE query: the transcript summary is a LEFT JOIN PK probe per row —
+        # nothing is decrypted, KMS is never touched (plan §10.1).
         rows = await conn.fetch(
-            f"SELECT {_MESSAGE_COLS} FROM voicemail_messages m WHERE {where} "
+            f"SELECT {_MESSAGE_COLS}, {vmt.SUMMARY_COLUMNS} "
+            f"FROM voicemail_messages m{vmt.SUMMARY_JOIN}WHERE {where} "
             "ORDER BY m.created_at DESC, m.id DESC LIMIT $2::int OFFSET $3::bigint",
             mailbox_id, limit, offset)
         counts = await conn.fetchrow(
             "SELECT count(*)::int AS total, count(*) FILTER (WHERE NOT m.is_read)::int AS unread "
             f"FROM voicemail_messages m WHERE {where}", mailbox_id)
-    return {"items": [message_out(r) for r in rows], "total": counts["total"],
-            "unread": counts["unread"]}
+    enabled = bool(box["transcription_enabled"])
+    return {"items": [message_out(r, transcription_enabled=enabled) for r in rows],
+            "total": counts["total"], "unread": counts["unread"]}
 
 
 class MessagePatch(BaseModel):
@@ -763,6 +822,80 @@ async def crypto_erase(customer_id: int, body: EraseBody, request: Request,
     if body.confirm != f"ERASE {customer_id}":
         raise HTTPException(status_code=422, detail=MSG_CONFIRM.format(customer_id=customer_id))
     return await mbx.erase_customer(customer_id, info=scope.info(request))
+
+
+# ===========================================================================
+# Transcription v1.1 (docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §10.2, §10.3, §13)
+# ===========================================================================
+@router.get("/messages/{message_id}/transcript")
+async def get_transcript(message_id: int, request: Request, response: Response,
+                         scope: VmScope = Depends(vm_scope)):
+    """Text only when done, after its transcript_view audit committed. Does
+    NOT mark the message read (the UI does, plan §11.4)."""
+    pool = await _pool()
+    async with pool.acquire() as conn:
+        msg = await _scoped_message(conn, scope, message_id)
+    response.headers["Cache-Control"] = "no-store"
+    return await vmt.read_transcript(msg, writer=scope.role != "readonly", admin=scope.is_admin,
+                                     source=scope.source, info=scope.info(request))
+
+
+class RetryBody(BaseModel):
+    force: bool = False
+
+
+@router.post("/messages/{message_id}/transcript/retry", status_code=202)
+async def retry_transcript(message_id: int, request: Request,
+                           body: Optional[RetryBody] = Body(None),
+                           scope: VmScope = Depends(vm_writer)):
+    force = bool(body.force) if body is not None else False
+    if force and not scope.is_admin:
+        raise HTTPException(status_code=403, detail=MSG_ADMIN_ONLY)
+    pool = await _pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            msg = await _scoped_message(conn, scope, message_id, for_update=True)
+            return await vmt.request_retry(conn, msg, force=force, source=scope.source,
+                                           info=scope.info(request))
+
+
+@router.get("/mailboxes/{mailbox_id}/transcript-snippets")
+async def transcript_snippets(mailbox_id: int, request: Request, response: Response,
+                              ids: Optional[str] = Query(None),
+                              scope: VmScope = Depends(vm_scope)):
+    pool = await _pool()
+    async with pool.acquire() as conn:
+        box = await _scoped_box(conn, scope, mailbox_id)
+    wanted = vmt.parse_snippet_ids(ids)
+    response.headers["Cache-Control"] = "no-store"
+    return await vmt.snippets(box, wanted, source=scope.source, info=scope.info(request))
+
+
+@router.post("/mailboxes/{mailbox_id}/transcripts/backfill", status_code=202)
+async def backfill_transcripts(mailbox_id: int, request: Request,
+                               scope: VmScope = Depends(vm_admin)):
+    pool = await _pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            box = await _scoped_box(conn, scope, mailbox_id)
+            return await vmt.backfill(conn, box, source=scope.source, info=scope.info(request))
+
+
+@router.get("/transcription/status")
+async def transcription_status(scope: VmScope = Depends(vm_admin)):
+    return await vmt.ops_status()
+
+
+class RequeueBody(BaseModel):
+    error_code: Any = None   # validated by the service: 422 sentences
+    limit: Any = None
+
+
+@router.post("/transcription/requeue")
+async def transcription_requeue(request: Request, body: Optional[RequeueBody] = Body(None),
+                                scope: VmScope = Depends(vm_admin)):
+    body = body or RequeueBody()
+    return await vmt.requeue(body.error_code, body.limit, info=scope.info(request))
 
 
 # ===========================================================================
