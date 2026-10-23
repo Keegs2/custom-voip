@@ -13,6 +13,11 @@
  * Audio never flows through here: playback/download use the short-lived
  * `url` from a playback token verbatim as an <audio src> / link href, and
  * greetings upload as a raw `audio/wav` body (apiRequestRaw).
+ *
+ * Transcription (v1.1, docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §10.2 / §11.2):
+ * transcript text only ever arrives from getTranscript / getTranscriptSnippets
+ * (both `Cache-Control: no-store`). It is held in React Query memory only —
+ * never persisted (plan D8).
  */
 import { apiRequest, apiRequestRaw } from './client';
 import type {
@@ -25,6 +30,10 @@ import type {
   MessagePage,
   MessageUpdate,
   PlaybackToken,
+  Transcript,
+  TranscriptBackfillResult,
+  TranscriptRetryResult,
+  TranscriptSnippetPage,
   VoicemailFolder,
   VoicemailMessage,
   VoicemailSummary,
@@ -112,6 +121,54 @@ export function purgeMessage(messageId: number): Promise<void> {
 /** Mints a 120 s playback URL; also marks the message read server-side. */
 export function getMessagePlaybackToken(messageId: number, download = false): Promise<PlaybackToken> {
   return apiRequest('POST', `${BASE}/messages/${messageId}/playback-token`, { download });
+}
+
+/* ─── Transcripts (v1.1) ──────────────────────────────────── */
+
+/**
+ * The full transcript (admin, tenant incl. readonly). A `done` transcript is
+ * decrypted and audited (`transcript_view`) on EVERY call, so callers cache it
+ * (pages/voicemail/voicemailData.ts). 503 = temporarily unavailable
+ * (Retry-After: 5); 500 = failed integrity check — show the detail verbatim.
+ * Does not mark the message read.
+ */
+export function getTranscript(messageId: number): Promise<Transcript> {
+  return apiRequest('GET', `${BASE}/messages/${messageId}/transcript`);
+}
+
+/**
+ * Writer. Queues a re-run for a failed / disabled / empty transcript
+ * (`force` is admin-only and also re-runs `done`). 409 sentences explain why
+ * not (unavailable, mailbox off, in Trash, already running, already done).
+ */
+export function retryTranscript(messageId: number, force = false): Promise<TranscriptRetryResult> {
+  return apiRequest('POST', `${BASE}/messages/${messageId}/transcript/retry`, { force });
+}
+
+/** The API's cap on ids per snippet request (422 "Ask for at most 50 messages at a time."). */
+export const TRANSCRIPT_SNIPPET_BATCH_MAX = 50;
+
+/**
+ * One-line snippets for up to 50 messages of one mailbox (each `done` one is
+ * decrypted server-side, one audit row per call). Ids outside the mailbox are
+ * silently omitted. Never a 5xx for a decrypt problem: those rows come back
+ * `snippet: null` with `unavailable: true`.
+ */
+export function getTranscriptSnippets(mailboxId: number, ids: readonly number[]): Promise<TranscriptSnippetPage> {
+  if (ids.length === 0 || ids.length > TRANSCRIPT_SNIPPET_BATCH_MAX) {
+    return Promise.reject(new RangeError(`getTranscriptSnippets takes 1–${TRANSCRIPT_SNIPPET_BATCH_MAX} ids, got ${ids.length}`));
+  }
+  // Integer ids only, so the comma list needs no escaping.
+  return apiRequest('GET', `${BASE}/mailboxes/${mailboxId}/transcript-snippets?ids=${ids.map((id) => Math.trunc(id)).join(',')}`);
+}
+
+/**
+ * Admin only (owner decision O2). Queues the mailbox's newest (≤ 200) stored
+ * messages whose transcript is `disabled`. 409 when transcription is
+ * unavailable or off for the mailbox.
+ */
+export function backfillTranscripts(mailboxId: number): Promise<TranscriptBackfillResult> {
+  return apiRequest('POST', `${BASE}/mailboxes/${mailboxId}/transcripts/backfill`);
 }
 
 /* ─── 4.3 Greetings ───────────────────────────────────────── */

@@ -1,10 +1,13 @@
 /**
  * VoicemailIntro — what a tenant sees when Visual Voicemail isn't switched
- * on for their account. Copy is trimmed to what v1 ships (build plan D3/D5/
- * D7): web inbox, greetings, encryption at rest, 90-day retention. No
- * transcription, notifications, API or prices.
+ * on for their account. Copy is trimmed to what ships (build plan D3/D5/D7):
+ * web inbox, greetings, encryption at rest, 90-day retention. Transcription
+ * (v1.1) is mentioned only while it is live on the platform
+ * (`summary.transcription_available`), and as optional — it is off per
+ * mailbox until Granite turns it on (owner decisions O1/O2). No search, no
+ * notifications, no voicemail API, no prices.
  */
-import { Download, Lock, Mic, PlayCircle } from 'lucide-react';
+import { Download, FileText, Lock, Mic, PlayCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { IconVoicemail } from '../../components/icons/ProductIcons';
 
@@ -12,6 +15,8 @@ interface Point {
   icon: ReactNode;
   title: string;
   line: string;
+  /** Shown only while transcription is available. */
+  transcription?: boolean;
 }
 
 const POINTS: readonly Point[] = [
@@ -19,6 +24,12 @@ const POINTS: readonly Point[] = [
     icon: <PlayCircle size={17} strokeWidth={1.8} />,
     title: 'Listen in your browser',
     line: 'Every message in an inbox you can scan, play and skip through — no dial-in menus.',
+  },
+  {
+    icon: <FileText size={17} strokeWidth={1.8} />,
+    title: 'Read it instead',
+    line: 'Optional transcripts appear next to each message.',
+    transcription: true,
   },
   {
     icon: <Mic size={17} strokeWidth={1.8} />,
@@ -37,7 +48,13 @@ const POINTS: readonly Point[] = [
   },
 ];
 
-export function VoicemailIntro() {
+export interface VoicemailIntroProps {
+  /** summary.transcription_available. */
+  transcriptionAvailable?: boolean;
+}
+
+export function VoicemailIntro({ transcriptionAvailable = false }: VoicemailIntroProps) {
+  const points = POINTS.filter((p) => !p.transcription || transcriptionAvailable);
   return (
     <div className="dl-panel vm-intro">
       <div className="vm-intro-head">
@@ -52,7 +69,7 @@ export function VoicemailIntro() {
         </div>
       </div>
       <ul className="vm-intro-points">
-        {POINTS.map((p) => (
+        {points.map((p) => (
           <li key={p.title} className="vm-intro-point">
             <span className="vm-intro-chip" aria-hidden="true">
               {p.icon}

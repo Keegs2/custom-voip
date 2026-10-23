@@ -12,6 +12,11 @@
  * States: loading, error (503 → "temporarily unavailable"), a tenant whose
  * voicemail isn't switched on (VoicemailIntro), no mailboxes (staff get the
  * New mailbox call to action), suspended-mailbox banner.
+ *
+ * Transcription (v1.1): `summary.transcription_available` (platform flag on
+ * and configured) is read once here and handed down. Who may switch it on is
+ * `canManage` — platform admins only, incl. "View as Customer" (owner
+ * decision O2); tenants see it read-only.
  */
 import { useCallback, useId, useMemo, useState, type ReactNode } from 'react';
 import { Plus, RefreshCw } from 'lucide-react';
@@ -97,7 +102,10 @@ export function VoicemailWorkspace({
     setTab('messages');
   }, []);
 
+  const openSettings = useCallback(() => setTab('settings'), []);
+
   // ── Derived (after all hooks) ──
+  const transcriptionAvailable = summary.data?.transcription_available === true;
   const unread = sumOf(list, (m) => m.unread_count);
   const stored = sumOf(list, (m) => m.message_count);
   const ready = mailboxes.isSuccess;
@@ -120,7 +128,7 @@ export function VoicemailWorkspace({
       </div>
     );
   } else if (tenantOff) {
-    body = <VoicemailIntro />;
+    body = <VoicemailIntro transcriptionAvailable={transcriptionAvailable} />;
   } else if (mailboxes.isError) {
     const unavailable = isUnavailable(mailboxes.error);
     body = (
@@ -241,7 +249,15 @@ export function VoicemailWorkspace({
         </div>
 
         {tab === 'messages' ? (
-          <InboxView key={`inbox-${mailbox.id}`} scope={scope} mailbox={mailbox} canEdit={canEdit} />
+          <InboxView
+            key={`inbox-${mailbox.id}`}
+            scope={scope}
+            mailbox={mailbox}
+            canEdit={canEdit}
+            canManage={canManage}
+            transcriptionAvailable={transcriptionAvailable}
+            onOpenSettings={openSettings}
+          />
         ) : (
           <MailboxSettings
             key={`settings-${mailbox.id}`}
@@ -249,6 +265,7 @@ export function VoicemailWorkspace({
             mailbox={mailbox}
             canEdit={canEdit}
             canManage={canManage}
+            transcriptionAvailable={transcriptionAvailable}
             onDeleted={onDeleted}
           />
         )}
@@ -304,7 +321,14 @@ export function VoicemailWorkspace({
         <div className="vm-body fx-load fx-load-d1">{body}</div>
       </div>
 
-      {creating && <NewMailboxDialog customer={createFor} onClose={() => setCreating(false)} onCreated={onCreated} />}
+      {creating && (
+        <NewMailboxDialog
+          customer={createFor}
+          transcriptionAvailable={transcriptionAvailable}
+          onClose={() => setCreating(false)}
+          onCreated={onCreated}
+        />
+      )}
     </div>
   );
 }

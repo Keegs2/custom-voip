@@ -6,6 +6,9 @@
  * Timestamps are ISO-8601 strings as the API serialises them. Every field
  * here is in the contract — nothing is invented UI-side; anything the UI
  * derives (folder labels, expiry hints) lives in pages/voicemail/format.ts.
+ *
+ * Transcription (v1.1) fields are additive, per
+ * docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §10.1 / §11.1.
  */
 
 /** voicemail_boxes.status. 'deleted' boxes never come back from the API. */
@@ -17,6 +20,82 @@ export type GreetingMode = 'standard' | 'custom';
 /** The three message folders (GET /mailboxes/{id}/messages?folder=). */
 export type VoicemailFolder = 'inbox' | 'saved' | 'trash';
 
+/* ─── Transcription (v1.1) — docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §10–§11 ─── */
+
+/**
+ * The API's view of one message's transcript. With no transcript row yet it
+ * is derived: `pending` if the mailbox has transcription on, else `disabled`.
+ */
+export type TranscriptStatus = 'pending' | 'processing' | 'done' | 'empty' | 'failed' | 'disabled';
+
+/** The languages the API accepts (422 "Choose a supported language." otherwise). */
+export type TranscriptionLanguage = 'en-US' | 'es-US' | 'fr-CA';
+
+export const TRANSCRIPTION_LANGUAGES: readonly { id: TranscriptionLanguage; label: string }[] = [
+  { id: 'en-US', label: 'English (US)' },
+  { id: 'es-US', label: 'Spanish (US)' },
+  { id: 'fr-CA', label: 'French (Canada)' },
+];
+
+/** `Message.transcript` — on every route that returns a Message. Never carries text. */
+export interface MessageTranscriptSummary {
+  status: TranscriptStatus;
+  /** Only when status is 'done'. */
+  confidence: number | null;
+}
+
+export interface TranscriptSegment {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  confidence: number | null;
+}
+
+/**
+ * GET /messages/{id}/transcript. For any status other than 'done': `text`
+ * null, `segments` [] and `confidence` null; `model` and `language` are set
+ * once known.
+ */
+export interface Transcript {
+  message_id: number;
+  status: TranscriptStatus;
+  language: string | null;
+  model: string | null;
+  confidence: number | null;
+  text: string | null;
+  segments: TranscriptSegment[];
+  completed_at: string | null;
+  /**
+   * Writer + transcription available + mailbox on + not trashed + status in
+   * failed|disabled|empty (admins also for 'done', via force).
+   */
+  can_retry: boolean;
+}
+
+/** One row of GET /mailboxes/{id}/transcript-snippets. `snippet` null = not decrypted. */
+export interface TranscriptSnippet {
+  message_id: number;
+  status: TranscriptStatus;
+  snippet: string | null;
+}
+
+/** GET /mailboxes/{id}/transcript-snippets. `unavailable` = some done snippets came back null. */
+export interface TranscriptSnippetPage {
+  items: TranscriptSnippet[];
+  unavailable: boolean;
+}
+
+/** POST /messages/{id}/transcript/retry → 202. */
+export interface TranscriptRetryResult {
+  message_id: number;
+  status: TranscriptStatus;
+}
+
+/** POST /mailboxes/{id}/transcripts/backfill → 202. */
+export interface TranscriptBackfillResult {
+  queued: number;
+}
+
 /** GET /summary — drives the sidebar and the page's first paint. */
 export interface VoicemailSummary {
   /** customers.voicemail_enabled for the scoped customer. */
@@ -25,6 +104,8 @@ export interface VoicemailSummary {
   unread_count: number;
   /** True for staff (admin) — may create / suspend / delete mailboxes. */
   can_manage: boolean;
+  /** Transcription is live: the platform flag is on and its config is valid. */
+  transcription_available: boolean;
 }
 
 /** §4.1 `Mailbox`. Counts are over stored, not-deleted messages; bytes_used includes trash. */
@@ -49,6 +130,9 @@ export interface Mailbox {
   unread_count: number;
   bytes_used: number;
   created_at: string;
+  /** Off by default (owner decision O1). Only platform admins may change it (O2). */
+  transcription_enabled: boolean;
+  transcription_language: TranscriptionLanguage;
 }
 
 /** POST /mailboxes (admin). */
@@ -59,15 +143,25 @@ export interface MailboxCreate {
   timezone?: string;
   /** 4–10 digits. */
   pin?: string;
+  /** Default false; true while transcription is unavailable → 409. */
+  transcription_enabled?: boolean;
+  transcription_language?: TranscriptionLanguage;
 }
 
-/** PATCH /mailboxes/{id}. `status` is honoured for admins only. */
+/**
+ * PATCH /mailboxes/{id}. `status` is honoured for admins only, and so are the
+ * two transcription fields (403 "Only an administrator can change
+ * transcription settings." for anyone else — owner decision O2).
+ */
 export interface MailboxUpdate {
   label?: string;
   timezone?: string;
   greeting_mode?: GreetingMode;
   active_greeting_id?: number;
   status?: Exclude<MailboxStatus, 'deleted'>;
+  /** true while transcription is unavailable → 409. false flips this mailbox's pending jobs to disabled. */
+  transcription_enabled?: boolean;
+  transcription_language?: TranscriptionLanguage;
 }
 
 /** GET /available-numbers (admin) — unassigned DIDs a mailbox can claim. */
@@ -92,6 +186,8 @@ export interface VoicemailMessage {
   created_at: string;
   /** created_at + mailbox.retention_days — the message is purged after this. */
   expires_at: string;
+  /** Transcript status only — list routes never decrypt (plan T11). */
+  transcript: MessageTranscriptSummary;
 }
 
 /** GET /mailboxes/{id}/messages response. */
