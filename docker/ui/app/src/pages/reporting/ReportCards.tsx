@@ -374,6 +374,10 @@ export function Glossary() {
             <dd>Someone picked up the call.</dd>
           </div>
           <div>
+            <dt>Answered by voicemail</dt>
+            <dd>The call reached your voicemail; it counts as answered.</dd>
+          </div>
+          <div>
             <dt>Missed</dt>
             <dd>The call ended before anyone picked up — for example nobody was there, the line was busy, or the caller hung up first.</dd>
           </div>

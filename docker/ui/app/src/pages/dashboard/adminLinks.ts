@@ -34,6 +34,11 @@ export function rcfConsoleHref(scope: CustomerScopeParam): string {
   return withCustomer('/rcf', scope);
 }
 
+/** The admin Visual Voicemail console, scoped (`/voicemail?customer=<id>`). */
+export function voicemailConsoleHref(scope: CustomerScopeParam): string {
+  return withCustomer('/voicemail', scope);
+}
+
 /** Calls & Quality (staff route). */
 export function callsHref(customerId: number | null): string {
   return withCustomer('/cdrs', customerId);

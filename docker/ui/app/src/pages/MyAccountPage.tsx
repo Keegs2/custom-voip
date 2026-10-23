@@ -6,6 +6,12 @@
  * Your Account (identity facts + display name + password, PUT /auth/me —
  * absorbed the retired standalone /account page).
  *
+ * Number counts are holistic when the API sends `counts.numbers` (every
+ * product's numbers, config/products.ts names them): one tile / header
+ * metric per product, and a Voicemail section on Products when the account
+ * has mailbox numbers. Without it (an older API) the page shows the
+ * per-product counts exactly as before.
+ *
  * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` classes in index.css,
  * aliased from the RCF console primitives) — paper canvas, quiet breadcrumb
  * header, white panels, ink text, azure accents.
@@ -22,6 +28,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import {
   IdCard,
   Users,
@@ -33,6 +40,7 @@ import {
   Sparkles,
   AlertTriangle,
   Receipt,
+  Voicemail,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiRequest, ApiError } from '../api/client';
@@ -41,6 +49,8 @@ import { listRcf } from '../api/rcf';
 import { listTrunks } from '../api/trunks';
 import { listApiDids } from '../api/apiDids';
 import { API_CALLING_ENABLED } from '../config/features';
+import { productLabel, productMix, productTag, type ProductCount } from '../config/products';
+import { useAccountAllNumbers } from './dashboard/accountData';
 import type { MyCustomer, BillingLineItem, TeamMember } from '../types/account';
 import type { User } from '../types/auth';
 import type { AccountType } from '../types/customer';
@@ -379,9 +389,31 @@ function MonthlyBillCard() {
   );
 }
 
+/* ─── Holistic number counts (`counts.numbers`, every product) ─── */
+
+/** Small line under a product's tile. Unknown products get none. */
+const NUMBER_TILE_HINT: Readonly<Record<string, string>> = {
+  rcf: 'Remote Call Forwarding',
+  trunk: 'On your SIP trunks',
+  voicemail: 'Visual Voicemail',
+};
+
+/**
+ * Numbers per product from `counts.numbers.by_product` (visible products,
+ * catalog order), with call forwarding always listed — or null when the API
+ * predates `counts.numbers`.
+ */
+function numberTiles(customer: MyCustomer): ProductCount[] | null {
+  const byProduct = customer.counts.numbers?.by_product;
+  if (!byProduct) return null;
+  const mix = productMix(byProduct);
+  return mix.some((m) => m.product === 'rcf') ? mix : [{ product: 'rcf', count: 0 }, ...mix];
+}
+
 /* ═════════════════ 1. Account Overview tab ═════════════════ */
 
 function OverviewTab({ customer }: { customer: MyCustomer }) {
+  const tiles = numberTiles(customer);
   return (
     <div className="dl-stack">
       {/* Identity + estimated bill side by side on wide screens */}
@@ -453,7 +485,18 @@ function OverviewTab({ customer }: { customer: MyCustomer }) {
             gap: 14,
           }}
         >
-          <Tile label="RCF numbers" value={customer.counts.rcf} hint="Remote Call Forwarding" />
+          {tiles ? (
+            tiles.map((t) => (
+              <Tile
+                key={t.product}
+                label={`${productLabel(t.product)} numbers`}
+                value={t.count}
+                hint={NUMBER_TILE_HINT[t.product]}
+              />
+            ))
+          ) : (
+            <Tile label="RCF numbers" value={customer.counts.rcf} hint="Remote Call Forwarding" />
+          )}
           <Tile label="SIP trunks" value={customer.counts.trunks} hint="SIP Trunking" />
           {API_CALLING_ENABLED && (
             <Tile label="API DIDs" value={customer.counts.api_dids} hint="Programmable Voice" />
@@ -820,10 +863,76 @@ function UcaasProductSection() {
   );
 }
 
+/** The account's voicemail numbers (GET /reports/my-numbers, voicemail rows). */
+function VoicemailProductSection({ customerId }: { customerId: number }) {
+  // Same query + cache key as the tenant dashboard's numbers card.
+  const { data, isLoading, isError } = useAccountAllNumbers({ customerId, staff: false });
+
+  const rows = useMemo(() => (data?.numbers ?? []).filter((n) => n.product === 'voicemail'), [data]);
+
+  return (
+    <Section
+      title="Voicemail"
+      subtitle="Numbers that take messages for you"
+      icon={<Voicemail size={16} strokeWidth={1.8} />}
+      actions={<span className="dl-count">{rows.length} number{rows.length === 1 ? '' : 's'}</span>}
+    >
+      {isLoading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+          <Spinner size="lg" />
+        </div>
+      ) : isError ? (
+        <InlineEmpty message="Unable to load voicemail numbers." />
+      ) : rows.length === 0 ? (
+        <InlineEmpty message="No voicemail numbers yet." />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {rows.map((n) => (
+            <ProductRow key={n.number}>
+              <div style={{ minWidth: 160, flex: '1 1 160px' }}>
+                <div
+                  style={{
+                    fontSize: '0.88rem',
+                    fontWeight: 700,
+                    color: INK,
+                    fontFamily: MONO,
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {fmt(n.number)}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: INK_DIM, marginTop: 2 }}>{n.name ?? 'No label'}</div>
+              </div>
+
+              <Link
+                to="/voicemail"
+                style={{ fontSize: '0.8rem', fontWeight: 600, color: AZURE_DEEP, textDecoration: 'none' }}
+              >
+                Open voicemail <span aria-hidden="true">→</span>
+              </Link>
+
+              {n.enabled !== undefined && (
+                <div style={{ marginLeft: 'auto' }}>
+                  <span className={n.enabled ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
+                    {n.enabled ? 'On' : 'Off'}
+                  </span>
+                </div>
+              )}
+            </ProductRow>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function ProductsTab({ customer }: { customer: MyCustomer }) {
   const type = customer.account_type;
   const showRcf = type === 'rcf' || type === 'hybrid';
   const showTrunk = type === 'trunk' || type === 'hybrid';
+  // Voicemail is switched on per account, not per type: shown whenever the
+  // account has mailbox numbers (only an API with `counts.numbers` says so).
+  const showVoicemail = (customer.counts.numbers?.by_product.voicemail ?? 0) > 0;
   // API Calling is retired: its section (and the /api-dids call it makes) only
   // renders while API_CALLING_ENABLED is on. Hybrid now means RCF + SIP
   // Trunking, so hybrid never shows the API section.
@@ -835,9 +944,10 @@ function ProductsTab({ customer }: { customer: MyCustomer }) {
     <div className="dl-stack">
       {showRcf && <RcfProductSection />}
       {showTrunk && <TrunkProductSection />}
+      {showVoicemail && <VoicemailProductSection customerId={customer.id} />}
       {showApi && <ApiDidProductSection />}
       {showUcaas && <UcaasProductSection />}
-      {!showRcf && !showTrunk && !showApi && !showUcaas && (
+      {!showRcf && !showTrunk && !showVoicemail && !showApi && !showUcaas && (
         <Section title="Products" subtitle="No products configured" icon={<Boxes size={16} strokeWidth={1.8} />}>
           <InlineEmpty message="No products are configured for your account. Contact support to get started." />
         </Section>
@@ -1141,7 +1251,13 @@ function MyAccountHeader({ customer, loaded }: { customer: MyCustomer | undefine
   const counts = customer?.counts;
   const metrics: { value: number; label: string }[] = [];
   if (counts) {
-    if (counts.rcf > 0) metrics.push({ value: counts.rcf, label: 'RCF Numbers' });
+    const byProduct = counts.numbers?.by_product;
+    if (byProduct) {
+      // One metric per product with numbers: "RCF Numbers", "Voicemail Numbers", …
+      for (const m of productMix(byProduct)) metrics.push({ value: m.count, label: `${productTag(m.product)} Numbers` });
+    } else if (counts.rcf > 0) {
+      metrics.push({ value: counts.rcf, label: 'RCF Numbers' });
+    }
     if (counts.trunks > 0) metrics.push({ value: counts.trunks, label: 'SIP Trunks' });
     if (API_CALLING_ENABLED && counts.api_dids > 0) metrics.push({ value: counts.api_dids, label: 'API DIDs' });
   }

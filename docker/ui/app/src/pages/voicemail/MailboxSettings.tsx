@@ -22,6 +22,7 @@ import { TRANSCRIPTION_LANGUAGES } from '../../types/voicemail';
 import { backfillTranscripts, deleteMailbox, setMailboxPin, updateMailbox } from '../../api/voicemail';
 import { useToast } from '../../components/ui/ToastContext';
 import { invalidateVoicemail, transcriptErrorText, vmErrorText, type VoicemailScope } from './voicemailData';
+import { invalidateAccountNumbers } from '../dashboard/accountData';
 import { GreetingsPanel } from './GreetingsPanel';
 import { ConfirmDialog } from './VmDialog';
 import { formatBytes, formatPhone, nationalDigits, PIN_PATTERN, TIMEZONES } from './format';
@@ -74,7 +75,11 @@ function DetailsPanel({ mailbox, canEdit }: { mailbox: Mailbox; canEdit: boolean
 
   const save = useMutation({
     mutationFn: (body: MailboxUpdate) => updateMailbox(mailbox.id, body),
-    onSuccess: () => toastOk('Mailbox details saved.'),
+    onSuccess: (_mb, body) => {
+      toastOk('Mailbox details saved.');
+      // The label is the number's name on the dashboard and in Reporting.
+      if (body.label !== undefined) invalidateAccountNumbers(queryClient);
+    },
     onSettled: () => invalidateVoicemail(queryClient),
   });
 
@@ -491,8 +496,11 @@ function AdminPanel({ mailbox, onDeleted }: { mailbox: Mailbox; onDeleted: () =>
 
   const setStatus = useMutation({
     mutationFn: (status: 'active' | 'suspended') => updateMailbox(mailbox.id, { status }),
-    onSuccess: (_mb, status) =>
-      toastOk(status === 'suspended' ? 'Mailbox suspended — callers can’t leave messages.' : 'Mailbox resumed.'),
+    onSuccess: (_mb, status) => {
+      toastOk(status === 'suspended' ? 'Mailbox suspended — callers can’t leave messages.' : 'Mailbox resumed.');
+      // On / off is the number's status on the dashboard.
+      invalidateAccountNumbers(queryClient);
+    },
     onError: (err) => toastErr(vmErrorText(err, 'The status couldn’t be changed.')),
     onSettled: () => invalidateVoicemail(queryClient),
   });
@@ -502,6 +510,8 @@ function AdminPanel({ mailbox, onDeleted }: { mailbox: Mailbox; onDeleted: () =>
     onSuccess: () => {
       setConfirmDelete(false);
       toastOk(`Mailbox deleted. ${formatPhone(mailbox.did)} is back in the number pool.`);
+      // The number is no longer one of the customer's numbers.
+      invalidateAccountNumbers(queryClient);
       onDeleted();
     },
     onSettled: () => invalidateVoicemail(queryClient),

@@ -2,9 +2,13 @@
  * quickActions.tsx — what the dashboard's Quick actions card lists, per
  * audience. The card itself (AccountCards.QuickActionsCard) only renders.
  *
- *   customer (tenant / staff preview)  request or manage numbers · call activity · report · all numbers
- *   admin, one customer                view as this customer · numbers console · call activity ·
- *                                      Calls & Quality · Reporting · Troubleshooting
+ *   customer (tenant / staff preview)  request or manage numbers · call activity · [voicemail] ·
+ *                                      report · all numbers ("Manage call forwarding" when the
+ *                                      account has other products too)
+ *   admin, one customer                view as this customer · numbers console · [voicemail
+ *                                      console] · call activity · Calls & Quality · Reporting ·
+ *                                      Troubleshooting
+ *   ([…] only while Visual Voicemail is on for the account)
  *   admin, all customers               numbers console · call activity · Calls & Quality ·
  *                                      Reporting · Troubleshooting
  *
@@ -12,13 +16,14 @@
  * opens on the customer or on its own picker (READS_CUSTOMER_PARAM).
  */
 import type { ReactNode } from 'react';
-import { Activity, BarChart3, Eye, ListChecks, PhoneIncoming, Plus, Search } from 'lucide-react';
+import { Activity, BarChart3, Eye, ListChecks, PhoneIncoming, Plus, Search, Voicemail } from 'lucide-react';
 import {
   READS_CUSTOMER_PARAM,
   TROUBLESHOOTING_HREF,
   callsHref,
   rcfConsoleHref,
   reportingHref,
+  voicemailConsoleHref,
 } from './adminLinks';
 
 export interface QuickAction {
@@ -36,10 +41,21 @@ export interface CustomerQuickActionsArgs {
   onNumbers: () => void;
   onActivity: () => void;
   showReports: boolean;
+  /** The account has numbers on products other than call forwarding. */
+  multiProduct?: boolean;
+  /** Where "Open voicemail" goes, or null/absent when voicemail is off. */
+  voicemailHref?: string | null;
 }
 
 /** The customer dashboard's actions (tenant and staff preview). */
-export function customerQuickActions({ numbersLabel, onNumbers, onActivity, showReports }: CustomerQuickActionsArgs): QuickAction[] {
+export function customerQuickActions({
+  numbersLabel,
+  onNumbers,
+  onActivity,
+  showReports,
+  multiProduct = false,
+  voicemailHref = null,
+}: CustomerQuickActionsArgs): QuickAction[] {
   const actions: QuickAction[] = [
     {
       key: 'numbers',
@@ -56,6 +72,15 @@ export function customerQuickActions({ numbersLabel, onNumbers, onActivity, show
       run: { onClick: onActivity },
     },
   ];
+  if (voicemailHref) {
+    actions.push({
+      key: 'voicemail',
+      label: 'Open voicemail',
+      sub: 'Messages and greetings',
+      icon: <Voicemail {...ICON} />,
+      run: { to: voicemailHref },
+    });
+  }
   if (showReports) {
     actions.push({
       key: 'reports',
@@ -67,7 +92,8 @@ export function customerQuickActions({ numbersLabel, onNumbers, onActivity, show
   }
   actions.push({
     key: 'all',
-    label: 'Manage all numbers',
+    // /rcf is the call forwarding manager — name it that once other products share the account.
+    label: multiProduct ? 'Manage call forwarding' : 'Manage all numbers',
     sub: 'The full list, with sorting and paging',
     icon: <ListChecks {...ICON} />,
     run: { to: '/rcf' },
@@ -80,10 +106,29 @@ export interface AdminCustomerActionsArgs {
   customerName: string;
   onViewAsCustomer: () => void;
   onActivity: () => void;
+  /** Visual Voicemail is on for this customer — adds the voicemail console. */
+  voicemailOn?: boolean;
 }
 
 /** The admin's actions for ONE customer. */
-export function adminCustomerActions({ customerId, customerName, onViewAsCustomer, onActivity }: AdminCustomerActionsArgs): QuickAction[] {
+export function adminCustomerActions({
+  customerId,
+  customerName,
+  onViewAsCustomer,
+  onActivity,
+  voicemailOn = false,
+}: AdminCustomerActionsArgs): QuickAction[] {
+  const voicemail: QuickAction[] = voicemailOn
+    ? [
+        {
+          key: 'voicemail',
+          label: 'Voicemail console',
+          sub: `${customerName}’s mailboxes and messages`,
+          icon: <Voicemail {...ICON} />,
+          run: { to: voicemailConsoleHref(customerId) },
+        },
+      ]
+    : [];
   return [
     {
       key: 'view-as',
@@ -99,6 +144,7 @@ export function adminCustomerActions({ customerId, customerName, onViewAsCustome
       icon: <ListChecks {...ICON} />,
       run: { to: rcfConsoleHref(customerId) },
     },
+    ...voicemail,
     {
       key: 'activity',
       label: 'Open call activity',

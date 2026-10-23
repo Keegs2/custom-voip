@@ -13,7 +13,7 @@
  * over GRADED calls only — never an average MOS. Rates are `null` (not 0)
  * when their denominator is 0, so an empty bucket renders as a gap.
  */
-import type { ProductType } from './cdr';
+import type { ProductFilter } from './cdr';
 
 export type ActivityRange = '24h' | '7d' | '30d' | '90d';
 export type ActivityBucket = 'hour' | 'day' | 'week';
@@ -24,9 +24,12 @@ export interface CdrActivityParams {
   tz: string;
   /** Admin scope only — omit for "All Customers" and for tenants (server-scoped). */
   customer_id?: number;
-  product_type?: ProductType;
-  /** Selected DID (E.164). Omit for all numbers. */
+  /** Omitted → the API's default, rcf. `'all'` = every product. */
+  product_type?: ProductFilter;
+  /** Selected DID (E.164), EXACT destination match. Omit for all numbers. */
   destination?: string;
+  /** One of the customer's own numbers — destination (inbound) or caller ID (outbound). */
+  number?: string;
 }
 
 /** Counters shared by the whole-range KPIs and every bucket. */

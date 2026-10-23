@@ -1,10 +1,12 @@
 /**
  * AdminCards — the cards only the admin's All customers view has:
  *
- *   CustomersCard   every call forwarding customer: type · status · numbers ·
- *                   paused; a row opens that customer's dashboard
+ *   CustomersCard   every call forwarding customer: type · status · numbers
+ *                   (every product; hover for the mix) · paused; a row opens
+ *                   that customer's dashboard
  *   PausedCard      numbers not forwarding right now, across customers
- *   InventoryCard   the number pool: available / assigned / waiting / releasing
+ *   InventoryCard   the number pool: available / assigned / one line per
+ *                   product / waiting / releasing
  *
  * Same Card surface, table look and tokens as the customer cards
  * (account-dashboard.css). Status is always a word + colour. No money.
@@ -13,6 +15,7 @@ import { useMemo, useState } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { Boxes, Building2, PauseCircle } from 'lucide-react';
 import type { RcfListResponse } from '../../api/rcf';
+import { compareProducts, isProductHidden, mixSentence, productLabel } from '../../config/products';
 import type { CustomerStatus } from '../../types/customer';
 import { fmt } from '../../utils/format';
 import { Card, CardState } from './Card';
@@ -36,6 +39,11 @@ const TYPE_WORD: Record<CustomerRow['account_type'], string> = {
 
 const CUSTOMER_PREVIEW = 8;
 
+/** "10 forwarding · 1 voicemail · 1 SIP trunk" — only worth a tooltip with 2+ products. */
+function mixTitle(mix: PlatformNumberCounts['mix']): string | undefined {
+  return mix && mix.length > 1 ? mixSentence(mix) : undefined;
+}
+
 // ─── Customers ───────────────────────────────────────────────────────────────
 
 export interface CustomersCardProps {
@@ -43,7 +51,7 @@ export interface CustomersCardProps {
   loading: boolean;
   error: boolean;
   onRetry: () => void;
-  /** Numbers per customer, or null while the inventory loads / if it failed. */
+  /** Numbers per customer (every product), or null while they load / if they failed. */
   numbers: PlatformNumberCounts | null;
   numbersState: 'loading' | 'error' | 'ready';
   /** Paused numbers per customer (lower bounds when `pausedPartial`). */
@@ -59,18 +67,21 @@ function CountCell({
   state,
   partial,
   zeroText,
+  title,
 }: {
   value: number | undefined;
   state: 'loading' | 'error' | 'ready';
   partial: boolean;
   zeroText: string;
+  /** Hover text, e.g. the product mix behind a total. */
+  title?: string;
 }) {
   if (state === 'loading') return <span className="ad-skel ad-skel-sm" aria-label="Loading" />;
   if (state === 'error') return <span className="ad-faint" title="Couldn’t load right now">—</span>;
   const n = value ?? 0;
   if (n === 0 && !partial) return <span className="ad-faint">{zeroText}</span>;
   return (
-    <span className="ad-strong">
+    <span className="ad-strong" title={title}>
       {n.toLocaleString()}
       {partial ? '+' : ''}
     </span>
@@ -212,6 +223,7 @@ export function CustomersCard({
                         state={numbersState}
                         partial={numbers?.partial ?? false}
                         zeroText="None"
+                        title={mixTitle(numbers?.mixByCustomer?.get(c.id))}
                       />
                     </td>
                     <td className="ad-col-num">
@@ -311,7 +323,11 @@ export interface InventoryCardProps {
 export function InventoryCard({ stats, order }: InventoryCardProps) {
   const s = stats.data;
   const releasing = s?.by_status?.release_requested ?? 0;
-  const forwarding = s?.by_product?.rcf ?? null;
+  // One line per visible product the pool knows, in catalog order
+  // (call forwarding, SIP trunk, voicemail, then any newer product).
+  const products = Object.entries(s?.by_product ?? {})
+    .filter(([product, n]) => typeof n === 'number' && !isProductHidden(product))
+    .sort(([a], [b]) => compareProducts(a, b));
   return (
     <Card
       id="ad-inventory"
@@ -337,12 +353,12 @@ export function InventoryCard({ stats, order }: InventoryCardProps) {
             <dt>Assigned</dt>
             <dd>{s.assigned.toLocaleString()}</dd>
           </div>
-          {forwarding != null && (
-            <div>
-              <dt>Call forwarding</dt>
-              <dd>{forwarding.toLocaleString()}</dd>
+          {products.map(([product, n]) => (
+            <div key={product}>
+              <dt>{productLabel(product)}</dt>
+              <dd>{n.toLocaleString()}</dd>
             </div>
-          )}
+          ))}
           <div>
             <dt>Waiting for approval</dt>
             <dd className={s.reserved > 0 ? 'ad-fact-todo' : undefined}>{s.reserved.toLocaleString()}</dd>
