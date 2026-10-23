@@ -90,8 +90,17 @@ STATEMENT_TIMEOUT = "5s"
 
 INT64_MAX = 9_223_372_036_854_775_807
 _ID_RE = re.compile(r"[0-9]{1,19}", re.ASCII)
-#: Same shape as voicemail_transcripts_error_code_chk.
-_ERROR_CODE_RE = re.compile(r"[a-z0-9_]{1,40}", re.ASCII)
+
+#: The worker's error codes that can sit on a ``failed`` row (backend-T,
+#: transcription/worker.py): transient codes after MAX_ATTEMPTS, and the
+#: permanent ones. Deferral codes (decrypt_busy, stt_quota, stt_permission,
+#: stt_config, budget) only ever sit on ``pending`` rows, so requeue (which
+#: acts on ``failed`` rows only) rejects them as a filter.
+TRANSIENT_FAILED_CODES = ("stt_unavailable", "stt_timeout", "decrypt_unavailable",
+                          "seal_unavailable", "db", "lease_expired", "internal")
+PERMANENT_FAILED_CODES = ("stt_rejected", "bad_wav", "integrity", "key_destroyed",
+                          "message_gone")
+REQUEUE_ERROR_CODES = frozenset(TRANSIENT_FAILED_CODES + PERMANENT_FAILED_CODES)
 
 
 def _unavailable(detail: str = MSG_TRANSCRIPT_DOWN) -> HTTPException:
@@ -535,12 +544,14 @@ async def backfill(conn: Any, box: Any, *, source: str,
 # Ops status + requeue (plan §13, §6.10) — admin only
 # ===========================================================================
 STATUS_COUNTS_SQL = """
-SELECT status, count(*)::bigint AS jobs,
-       COALESCE(sum(billed_ms) FILTER (WHERE status IN ('done', 'empty')
-                                         AND completed_at >= now() - interval '24 hours'),
-                0)::bigint AS billed_ms_24h
-  FROM voicemail_transcripts GROUP BY status
+SELECT status, count(*)::bigint AS jobs FROM voicemail_transcripts GROUP BY status
 """
+
+#: The worker's rolling 24 h budget — VERBATIM backend-T's
+#: ``transcription.queue.BUDGET_SQL`` (copied, not imported: the API never
+#: depends on the worker module; unify at merge). idx_vm_transcripts_completed.
+BUDGET_SQL = ("SELECT COALESCE(sum(billed_ms),0) FROM voicemail_transcripts "
+              "WHERE status IN ('done','empty') AND completed_at >= now() - interval '24 hours'")
 
 #: How long the most overdue CLAIMABLE-looking job has waited past its due
 #: time (idx_vm_transcripts_due). Trashed messages are excluded: they stay
@@ -585,7 +596,9 @@ RETURNING t.message_id
 
 
 async def ops_status() -> dict:
-    """Plan §13 ops JSON, from the table + config only."""
+    """Plan §13 ops JSON, from the table + config only. The worker's
+    per-process breaker state is not visible here and is not reported;
+    ``budget_exhausted`` is the worker's own rule (BUDGET_SQL >= the cap)."""
     cfg = tx_config.load_config()
     pool = await _pool()
     try:
@@ -593,6 +606,7 @@ async def ops_status() -> dict:
             async with conn.transaction(readonly=True):
                 await conn.execute(f"SET LOCAL statement_timeout = '{STATEMENT_TIMEOUT}'")
                 rows = await conn.fetch(STATUS_COUNTS_SQL)
+                billed_ms = int(await conn.fetchval(BUDGET_SQL))
                 oldest = await conn.fetchval(OLDEST_DUE_SQL)
                 failed = await conn.fetch(FAILED_BY_CODE_SQL)
     except Exception as exc:  # noqa: BLE001
@@ -601,7 +615,6 @@ async def ops_status() -> dict:
     counts = {s: 0 for s in STATUSES}
     for r in rows:
         counts[r["status"]] = int(r["jobs"])
-    billed_ms = sum(int(r["billed_ms_24h"]) for r in rows)
     cap_ms = cfg.daily_cap_ms
     return {
         "available": tx_config.available(),
@@ -620,8 +633,10 @@ async def ops_status() -> dict:
 
 
 def clean_requeue(error_code: Any, limit: Any) -> tuple[str | None, int]:
+    """``error_code``: None (every code) or one of REQUEUE_ERROR_CODES;
+    ``limit``: 1..MAX_REQUEUE (default MAX_REQUEUE). 422 sentences."""
     if error_code is not None and (not isinstance(error_code, str)
-                                   or not _ERROR_CODE_RE.fullmatch(error_code)):
+                                   or error_code not in REQUEUE_ERROR_CODES):
         raise HTTPException(status_code=422, detail=MSG_BAD_ERROR_CODE)
     if limit is None:
         limit = MAX_REQUEUE
