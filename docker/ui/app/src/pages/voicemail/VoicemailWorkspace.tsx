@@ -1,0 +1,310 @@
+/**
+ * VoicemailWorkspace — the Visual Voicemail product page body, shared by
+ * every audience (tenant, admin "View as Customer" preview, admin console).
+ * The route entry (pages/VisualVoicemailPage.tsx) decides the scope and the
+ * abilities; this component never reads `user.customer_id`.
+ *
+ *   ┌ daylight header: crumb · title · sub        Unread | Messages | Mailboxes  [Encrypted at rest] ┐
+ *   ┌ mailbox bar: [Mailbox ▾]  (617) 555-0134 · Active                         [+ New mailbox]     ┐
+ *   [ Messages | Greeting & settings ]                                           (tab rail)
+ *   InboxView (folders · list · reading pane)  |  MailboxSettings
+ *
+ * States: loading, error (503 → "temporarily unavailable"), a tenant whose
+ * voicemail isn't switched on (VoicemailIntro), no mailboxes (staff get the
+ * New mailbox call to action), suspended-mailbox banner.
+ */
+import { useCallback, useId, useMemo, useState, type ReactNode } from 'react';
+import { Plus, RefreshCw } from 'lucide-react';
+import type { Mailbox } from '../../types/voicemail';
+import { IconVoicemail } from '../../components/icons/ProductIcons';
+import { Spinner } from '../../components/ui/Spinner';
+import { isUnavailable, UNAVAILABLE_TEXT, useMailboxes, useVoicemailSummary, type VoicemailScope } from './voicemailData';
+import { InboxView } from './InboxView';
+import { MailboxSettings } from './MailboxSettings';
+import { NewMailboxDialog } from './NewMailboxDialog';
+import { EncryptionBadge } from './EncryptionBadge';
+import { VoicemailIntro } from './VoicemailIntro';
+import { formatPhone } from './format';
+import { ApiError } from '../../api/client';
+
+type Tab = 'messages' | 'settings';
+
+export interface VoicemailWorkspaceProps {
+  scope: VoicemailScope;
+  viewer: 'tenant' | 'preview' | 'admin';
+  /** May change messages, greetings, label, PIN. */
+  canEdit: boolean;
+  /** Staff: may create, suspend and delete mailboxes. */
+  canManage: boolean;
+  /** Breadcrumb tail (customer name, "Staff console"). */
+  crumb: string;
+  /** Amber staff tag in the header ("Staff preview", "Staff"), or null. */
+  tag: string | null;
+  /** Who a new mailbox is for (null = pick in the dialog). */
+  createFor: { id: number; name: string } | null;
+  /** Show the owning customer next to mailboxes (admin, all customers). */
+  showCustomer: boolean;
+  /** Extra header tools (the admin scope picker). */
+  tools?: ReactNode;
+}
+
+function sumOf(list: readonly Mailbox[], pick: (m: Mailbox) => number): number {
+  return list.reduce((n, m) => n + pick(m), 0);
+}
+
+export function VoicemailWorkspace({
+  scope,
+  viewer,
+  canEdit,
+  canManage,
+  crumb,
+  tag,
+  createFor,
+  showCustomer,
+  tools,
+}: VoicemailWorkspaceProps) {
+  // ── ALL hooks unconditionally at the top (React #310) ──
+  const summary = useVoicemailSummary(scope);
+  const mailboxes = useMailboxes(scope);
+  const [mailboxSel, setMailboxSel] = useState<number | null>(null);
+  const [tab, setTab] = useState<Tab>('messages');
+  const [creating, setCreating] = useState(false);
+  const selectId = useId();
+
+  const list = useMemo(() => mailboxes.data ?? [], [mailboxes.data]);
+  // The user's pick if it still exists, else the first mailbox — derived, so
+  // a deleted mailbox or a scope switch falls back without an effect.
+  const mailbox = list.find((m) => m.id === mailboxSel) ?? list[0] ?? null;
+
+  const grouped = useMemo(() => {
+    if (!showCustomer) return null;
+    const groups = new Map<string, Mailbox[]>();
+    for (const m of [...list].sort((a, b) => a.customer_name.localeCompare(b.customer_name) || a.label.localeCompare(b.label))) {
+      const key = m.customer_name || `Customer #${m.customer_id}`;
+      groups.set(key, [...(groups.get(key) ?? []), m]);
+    }
+    return [...groups.entries()];
+  }, [list, showCustomer]);
+
+  const onCreated = useCallback((mb: Mailbox) => {
+    setCreating(false);
+    setMailboxSel(mb.id);
+    setTab('messages');
+  }, []);
+
+  const onDeleted = useCallback(() => {
+    setMailboxSel(null);
+    setTab('messages');
+  }, []);
+
+  // ── Derived (after all hooks) ──
+  const unread = sumOf(list, (m) => m.unread_count);
+  const stored = sumOf(list, (m) => m.message_count);
+  const ready = mailboxes.isSuccess;
+  const tenantOff =
+    viewer === 'tenant' &&
+    list.length === 0 &&
+    (summary.data?.enabled === false || (summary.error instanceof ApiError && summary.error.status === 404));
+  const optionText = (m: Mailbox) =>
+    `${m.label} · ${formatPhone(m.did)}${m.unread_count > 0 ? ` · ${m.unread_count} new` : ''}${m.status === 'suspended' ? ' · suspended' : ''}`;
+
+  let body: ReactNode;
+  // A tenant with no mailboxes needs the summary too (intro vs. empty).
+  if (mailboxes.isLoading || (viewer === 'tenant' && list.length === 0 && summary.isLoading)) {
+    body = (
+      <div className="dl-panel">
+        <div className="dl-center" role="status">
+          <Spinner size="lg" />
+          <span className="dl-help">Loading voicemail…</span>
+        </div>
+      </div>
+    );
+  } else if (tenantOff) {
+    body = <VoicemailIntro />;
+  } else if (mailboxes.isError) {
+    const unavailable = isUnavailable(mailboxes.error);
+    body = (
+      <div className="dl-panel">
+        <div className="dl-center" role="alert">
+          <span className="dl-center-icon" aria-hidden="true">
+            <IconVoicemail size={26} />
+          </span>
+          <strong className="vm-center-title">
+            {unavailable ? 'Voicemail is temporarily unavailable' : 'Voicemail couldn’t load'}
+          </strong>
+          <p className="vm-center-copy">
+            {unavailable ? UNAVAILABLE_TEXT.replace('Voicemail is temporarily unavailable. ', '') : 'Something went wrong loading your mailboxes.'}
+          </p>
+          <button type="button" className="dl-btn dl-btn-ghost" onClick={() => void mailboxes.refetch()} disabled={mailboxes.isFetching}>
+            <RefreshCw size={14} aria-hidden="true" /> Try again
+          </button>
+        </div>
+      </div>
+    );
+  } else if (list.length === 0) {
+    body = (
+      <div className="dl-panel">
+        <div className="dl-center">
+          <span className="dl-center-icon" aria-hidden="true">
+            <IconVoicemail size={26} />
+          </span>
+          <strong className="vm-center-title">No voicemail mailboxes yet</strong>
+          <p className="vm-center-copy">
+            {canManage
+              ? createFor
+                ? `Give ${createFor.name} a voicemail number: pick one from the pool and it rings straight to a mailbox.`
+                : 'Create a mailbox for any customer: pick a number from the pool and it rings straight to voicemail.'
+              : 'Your Granite account team sets up voicemail numbers. Once one is on your account, its messages show up here.'}
+          </p>
+          {canManage && (
+            <button type="button" className="dl-btn dl-btn-primary" onClick={() => setCreating(true)}>
+              <Plus size={15} aria-hidden="true" /> New mailbox
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  } else if (mailbox) {
+    body = (
+      <>
+        <div className="dl-panel vm-mbar">
+          <div className="vm-mbar-pick">
+            <label className="dl-flabel" htmlFor={selectId}>
+              Mailbox
+            </label>
+            {list.length > 1 ? (
+              <select
+                id={selectId}
+                className="dl-input vm-mbar-select"
+                value={mailbox.id}
+                onChange={(e) => {
+                  setMailboxSel(Number(e.target.value));
+                }}
+              >
+                {grouped
+                  ? grouped.map(([customerName, boxes]) => (
+                      <optgroup key={customerName} label={customerName}>
+                        {boxes.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {optionText(m)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))
+                  : list.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {optionText(m)}
+                      </option>
+                    ))}
+              </select>
+            ) : (
+              <span id={selectId} className="vm-mbar-single">
+                {mailbox.label}
+              </span>
+            )}
+          </div>
+          <div className="vm-mbar-facts">
+            <span className="dl-chip">{formatPhone(mailbox.did)}</span>
+            {showCustomer && <span className="vm-mbar-customer">{mailbox.customer_name}</span>}
+            <span className={`dl-pill ${mailbox.status === 'active' ? 'dl-pill-on' : 'dl-pill-off'}`}>
+              {mailbox.status === 'active' ? 'Active' : 'Suspended'}
+            </span>
+          </div>
+        </div>
+
+        {mailbox.status === 'suspended' && (
+          <div className="dl-banner dl-banner-warn vm-gap-bottom" role="status">
+            This mailbox is suspended — callers can’t leave new messages. Existing messages are still here.
+          </div>
+        )}
+
+        <div className="dl-tabs vm-tabs" role="tablist" aria-label="Mailbox">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'messages'}
+            className={`dl-tab${tab === 'messages' ? ' dl-tab-active' : ''}`}
+            onClick={() => setTab('messages')}
+          >
+            Messages
+            {mailbox.unread_count > 0 && <span className="dl-count">{mailbox.unread_count} new</span>}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'settings'}
+            className={`dl-tab${tab === 'settings' ? ' dl-tab-active' : ''}`}
+            onClick={() => setTab('settings')}
+          >
+            Greeting &amp; settings
+          </button>
+        </div>
+
+        {tab === 'messages' ? (
+          <InboxView key={`inbox-${mailbox.id}`} scope={scope} mailbox={mailbox} canEdit={canEdit} />
+        ) : (
+          <MailboxSettings
+            key={`settings-${mailbox.id}`}
+            scope={scope}
+            mailbox={mailbox}
+            canEdit={canEdit}
+            canManage={canManage}
+            onDeleted={onDeleted}
+          />
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className="dl-scope vm-scope">
+      <div className="dl-shell vm-shell">
+        <header className="dl-header vm-header fx-load">
+          <div className="dl-header-id">
+            <div className="dl-crumb">
+              <span>Visual Voicemail</span>
+              <span className="dl-crumb-sep" aria-hidden="true">
+                /
+              </span>
+              <span className="vm-crumb-tail">{crumb}</span>
+              {tag && <span className="vm-staff-tag">{tag}</span>}
+            </div>
+            <h1 className="dl-title">Voicemail</h1>
+            <p className="dl-sub">Listen to messages, set your greeting, and keep every mailbox tidy — from any browser.</p>
+            <div className="vm-header-badges">
+              <EncryptionBadge />
+            </div>
+          </div>
+          <div className="vm-header-side">
+            {tools}
+            {ready && list.length > 0 && (
+              <div className="dl-metrics" aria-label="Voicemail totals">
+                <div className="dl-metric">
+                  <div className="dl-metric-value">{unread}</div>
+                  <div className="dl-metric-label">Unread</div>
+                </div>
+                <div className="dl-metric">
+                  <div className="dl-metric-value">{stored}</div>
+                  <div className="dl-metric-label">Messages</div>
+                </div>
+                <div className="dl-metric">
+                  <div className="dl-metric-value">{list.length}</div>
+                  <div className="dl-metric-label">{list.length === 1 ? 'Mailbox' : 'Mailboxes'}</div>
+                </div>
+              </div>
+            )}
+            {canManage && ready && list.length > 0 && (
+              <button type="button" className="dl-btn dl-btn-primary vm-btn-sm" onClick={() => setCreating(true)}>
+                <Plus size={14} aria-hidden="true" /> New mailbox
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="vm-body fx-load fx-load-d1">{body}</div>
+      </div>
+
+      {creating && <NewMailboxDialog customer={createFor} onClose={() => setCreating(false)} onCreated={onCreated} />}
+    </div>
+  );
+}

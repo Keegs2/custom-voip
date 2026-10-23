@@ -7,6 +7,7 @@ from config import API_CALLING_RETIRED_MESSAGE, api_calling_enabled
 from db import database as db
 from auth.dependencies import get_current_user, get_support_read_filter, require_admin
 from services import tenant_redaction as tr
+from services.voicemail.mailboxes import voicemail_schema_present
 
 router = APIRouter()
 
@@ -472,6 +473,35 @@ async def delete_customer(customer_id: int, admin: dict = Depends(require_admin)
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            # Encrypted voicemail (migration 54): voicemail_boxes and
+            # voicemail_customer_keys reference customers ON DELETE RESTRICT,
+            # and an erased customer's key row is kept as a tombstone. Refuse
+            # with a clear 409 instead of a ForeignKeyViolation 500.
+            if await voicemail_schema_present(conn):
+                vm = await conn.fetchrow(
+                    """
+                    SELECT EXISTS (SELECT 1 FROM voicemail_boxes
+                                    WHERE customer_id = $1::int AND status <> 'deleted')
+                        OR EXISTS (SELECT 1 FROM voicemail_customer_keys
+                                    WHERE customer_id = $1::int AND status = 'active') AS live,
+                           EXISTS (SELECT 1 FROM voicemail_boxes WHERE customer_id = $1::int)
+                        OR EXISTS (SELECT 1 FROM voicemail_customer_keys
+                                    WHERE customer_id = $1::int) AS history
+                    """,
+                    customer_id,
+                )
+                if vm["live"]:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This customer has voicemail. Erase their voicemail first "
+                               f"(POST /v1/voicemail/customers/{customer_id}/crypto-erase).",
+                    )
+                if vm["history"]:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This customer's voicemail was erased; its erasure record must "
+                               "be kept, so the customer can't be deleted. Close it instead.",
+                    )
             # Delete dependent records first (FK constraints)
             await conn.execute("DELETE FROM rcf_numbers WHERE customer_id = $1", customer_id)
             await conn.execute("DELETE FROM api_dids WHERE customer_id = $1", customer_id)

@@ -125,6 +125,50 @@ end
 pcall(run_connectivity_tests)
 
 -- ============================================
+-- ENCRYPTED VOICEMAIL: tmpfs sweep + readiness
+-- ============================================
+-- docs/ENCRYPTED_VOICEMAIL_INTERFACES.md §6 / build plan §3.1 "sweep
+-- /dev/shm/vm at FS start". Done HERE (bind-mounted, deploys with git pull)
+-- rather than in entrypoint.sh: the image ENTRYPOINT is the freeswitch binary
+-- itself and docker-compose.media.yml has no entrypoint override, so
+-- entrypoint.sh never runs in production — and changing either would need an
+-- FS image rebuild / startup-path change.
+-- The tmpfs is created empty on every container start anyway; this sweep is
+-- the belt-and-braces for an in-container FS restart. It deletes regular
+-- files older than 1 minute only, so a `reload mod_lua` (which re-runs this
+-- startup script) can never delete a recording that is still being written
+-- (its mtime is seconds old) or awaiting its deposit (< 1 min).
+-- Readiness problems are only LOGGED — voicemail calls fail closed per call
+-- (play `unavailable`), RCF/trunk routing is never affected.
+local function voicemail_startup()
+    local chunk, err = loadfile("/usr/local/freeswitch/scripts/lib/vm_box.lua")
+    if not chunk then
+        freeswitch.consoleLog("WARNING", "Voicemail:  lib/vm_box.lua not loadable (" .. tostring(err) .. ")\n")
+        return
+    end
+    local ok, vm = pcall(chunk)
+    if not ok or type(vm) ~= "table" or not vm.dep then
+        freeswitch.consoleLog("WARNING", "Voicemail:  lib/vm_box.lua failed to initialise\n")
+        return
+    end
+    if vm.tmpfs_mounted() then
+        vm.sweep(1, true)
+        freeswitch.consoleLog("INFO", "Voicemail:  tmpfs " .. vm.dep.VM_DIR .. " mounted, swept\n")
+    else
+        freeswitch.consoleLog("WARNING", "Voicemail:  tmpfs " .. vm.dep.VM_DIR
+            .. " NOT mounted — voicemail calls will play 'unavailable' until the FS container is recreated with docker-compose.media.yml\n")
+    end
+    local hok, why = vm.dep.ingest_header_ok()
+    if hok then
+        freeswitch.consoleLog("INFO", "Voicemail:  ingest header file present\n")
+    else
+        freeswitch.consoleLog("WARNING", "Voicemail:  " .. tostring(why)
+            .. " — voicemail calls will play 'unavailable' until it is provisioned\n")
+    end
+end
+pcall(voicemail_startup)
+
+-- ============================================
 -- STARTUP COMPLETE
 -- ============================================
 

@@ -12,6 +12,8 @@ src/
     __init__.py
     security.py              # JWT creation/validation, bcrypt password hashing
     dependencies.py          # FastAPI Depends functions: get_current_user, require_admin
+    ingest.py                # require_ingest_secret — X-Ingest-Secret for FreeSWITCH voicemail /fs/ endpoints (fail-closed 503 when INGEST_SHARED_SECRET unset/short)
+    playback.py              # mint/verify 120 s voicemail playback tokens (separate key, aud+typ 'vm-playback', bound to kind+object id)
   middleware/
     __init__.py
     auth.py                  # JWTAuthMiddleware (Starlette BaseHTTPMiddleware)
@@ -44,6 +46,7 @@ src/
     homer_correlation.py     # Pure A/B leg correlation helpers (X-CID parse, windows, ClickHouse SQL, groups)
     onboarding.py            # New-customer intake pipeline (public POST + admin review)
     billing.py               # Read-only tenant-scoped ledger views (/billing/balance, /billing/ledger)
+    voicemail.py             # Encrypted voicemail product API (/v1/voicemail): mailboxes, messages, playback tokens + Range audio, greetings, crypto-erase, FS lookup/greeting/deposit (contract docs/ENCRYPTED_VOICEMAIL_INTERFACES.md §4/§5)
   services/
     __init__.py
     esl_client.py            # FreeSWITCH ESL TCP client
@@ -52,6 +55,8 @@ src/
     ledger.py                # Append-only ledger (migration 37) — read by billing.py; no in-tree writer since the payments demo was removed
     call_pricing.py          # Rate-deck lookups shared with rates.py (quote_call_price now unused)
     reporting.py             # Customer Reporting pure logic (date/tz validation, buckets, missed reasons, grades, CSV)
+    voicemail/               # Encrypted voicemail crypto layer: AES-256-GCM envelope, per-customer Cloud KMS KEKs (keys.py), GCS ciphertext store, CRC32C, AAD (contract docs/ENCRYPTED_VOICEMAIL_INTERFACES.md §2)
+                             #   + product logic (§4/§5): mailboxes.py (create/delete/erase/purge, shared with number_inventory), deposit.py (FS deposit: leases, idempotency, deadline), greetings.py, audio.py + plaintext_cache.py (decrypt-once LRU, Range), retention.py (lifespan sweep), wav.py, meta.py (X-VM-Meta), body.py (capped raw body), audit.py (fail-closed access log)
 ```
 
 ## Retired / removed products (2026-09)
@@ -179,6 +184,8 @@ Tests: `tests/test_reports.py` (ephemeral PG 16).
 1. `init_db()` -- creates asyncpg connection pool (parses `DATABASE_URL` with regex)
 2. `schema_check.run_startup_check()` -- probes `information_schema.columns` for `cdrs.stir_outcome` / `stir_eff_actual` (47) and `leg` / `call_id` / `leg_attempt` (48), all bound by the ingest INSERT. Missing → logs **CRITICAL** with the exact remedy per migration file (`sudo -u postgres psql -d voip -f …/47_cdr_stir_outcome.sql`, `sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f …/48_cdr_call_legs.sql`); DB unreachable → WARNING. Never raises — the API keeps serving.
 3. `init_redis()` -- creates redis-py async client with retry logic (5 attempts, 2s backoff)
+4. Voicemail retention task (`services/voicemail/retention.run_forever`, unless `VOICEMAIL_RETENTION_ENABLED=false`)
+- Before all of that, at import AND at the top of the lifespan: `utils.access_log.install_access_log_redaction()` — a filter on the `uvicorn.access` logger ONLY that rewrites `t=<value>` (the voicemail playback token) to `t=<redacted>`. Import time matters: each `--workers 4` child runs uvicorn's `configure_logging()` and then imports `main`, so the filter survives uvicorn's dictConfig in every worker. Test: `tests/test_access_log_redaction.py` (incl. a fresh-process worker simulation).
 
 ### Shutdown
 1. `close_db()` -- closes asyncpg pool
@@ -220,6 +227,7 @@ CRUD for the `customers` table. Account types: `rcf`, `api` (RETIRED — create 
 - **Billing estimate** (`compute_billing_estimate`, `/me/billing` + `/{id}/billing`): RCF line (by provisioned rcf_numbers count), SIP Trunking line (trunk/hybrid), API Calling line ONLY when `API_CALLING_ENABLED` — retired ⇒ hybrid (Granite Telephony) shows rcf + trunk only.
 - **`/me` counts**: `{rcf, api_dids, trunks}` — `api_dids` is 0 (not queried) while API Calling is retired.
 - Delete is transactional: wraps cascading deletes of `rcf_numbers`, `api_dids`, `trunk_dids`, `trunk_auth_ips`, `sip_trunks`, `api_credentials` in a single `conn.transaction()`.
+- Delete refuses (409, never a FK 500) a customer with a live voicemail mailbox or active voicemail key ("Erase their voicemail first") and, after a crypto-erase, a customer whose erased key row is the permanent tombstone (migration 54 `ON DELETE RESTRICT`). Guarded by `voicemail_schema_present` so it works before 54 is applied.
 - Balance operations: `GET /{id}/balance` computes `available = balance + credit_limit`, `POST /{id}/credit` adds to balance.
 
 ### rcf.py
@@ -286,6 +294,14 @@ Complete DID lifecycle management backed by the `did_inventory` table.
 - Unassign removes the product record and resets status to 'available'
 - Sync is idempotent: inserts new TNs as 'available', updates metadata on existing, flags removed TNs
 - All assignment changes invalidate relevant Redis caches and are logged
+
+### voicemail.py
+Encrypted voicemail product API (contract `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md` §4/§5 — §4.9 and the §5 server notes are the as-built refinements). Mounted at `/v1/voicemail` + `/voicemail`; logic in `services/voicemail/`.
+- **Scope** (`vm_scope`): admin = `customer_id` param (lists) / unscoped per-id; `user`/`readonly` = own customer, another customer's object or param → 404, voicemail-disabled customer → `[]` / `enabled:false` / 404; `readonly` = reads + playback tokens only (`vm_writer` 403s mutations); `support` → 403. Handler `detail`s are short user-facing sentences (the UI shows them).
+- **FS routes** `/fs/mailbox/{id}`, `/fs/greetings/{id}/audio`, `/fs/deposit` are JWT-exempt and carry `Depends(require_ingest_secret)`. Deposit (`services/voicemail/deposit.py`): strict X-VM-Meta (`meta.py`), 10 MB cap (Content-Length 413 before reading + streamed counter), 5 concurrent per worker (503 + Retry-After 2), lenient-size WAV parse (`wav.py`, mirrors FS `wav_duration_ms`), `pending` row FIRST with a fencing token + lease (`deposit_attempt_id`/`deposit_lease_until`, migration 54), idempotent on msg_uuid (stored → 200 same id; live lease → 503; failed/expired → takeover; purged → 409), 11 s deadline WITHOUT cancelling the seal (late seals finalize in the background under a renewed lease), `deposit` audit in the same transaction as `stored`.
+- **Playback**: `POST …/playback-token` (body optional) → `{url: /api/v1/voicemail/{kind}s/{id}/audio?t=…, expires_in: 120}`; marks read. `GET/HEAD …/audio?t=` (JWT-exempt): decrypt once per token per worker into `audio.PLAYBACK_CACHE` (64 MB), audit `play`/`download`/`greeting_play` once per token across workers (`uq_vm_access_log_playback_jti` + ON CONFLICT DO NOTHING) BEFORE serving (audit failure → 503), Range/206/416, HEAD from `size_bytes`, `Cache-Control: no-store`.
+- **Lifecycle**: `services/voicemail/mailboxes.create_mailbox` (KMS key ensured BEFORE the claim transaction; DID claim + box + `voicemail_enabled=true` + audit atomic) and `delete_mailbox` (deleted + DID available + audit, then purge objects→rows; leftovers → retention) are shared with `number_inventory.py`; `erase_customer` destroys the KMS key first. Retention (`retention.py`) runs in every worker under `pg_try_advisory_xact_lock`; `VOICEMAIL_RETENTION_ENABLED=false` disables it.
+- Tests: `tests/test_voicemail_api.py`, `test_voicemail_deposit.py` (incl. the REAL FS Lua encoder via `lua`), `test_voicemail_retention.py`, `test_voicemail_billing.py` (shared harness `tests/voicemail_api_harness.py`).
 
 ### carriers.py
 Admin-only CRUD for `carrier_gateways` (display/config cards — Bandwidth Dallas/LA + Sinch rows from migrations 46/53; not on the call path). `POST /{carrier_id}/test` probes carrier reachability.
@@ -354,8 +370,8 @@ Module-level `client` variable. All convenience functions check `if not client: 
 - `JWT_SECRET_KEY` is **required** (raises `RuntimeError` at import time if missing)
 - `JWT_ALGORITHM = "HS256"`, `JWT_EXPIRE_MINUTES = 480` (8 hours)
 - `verify_password()` / `hash_password()` -- direct bcrypt usage
-- `create_access_token(data)` -- adds `exp` claim and signs
-- `decode_access_token(token)` -- validates and returns claims dict
+- `create_access_token(data)` -- adds `exp` + `typ: "session"` (callers cannot override `typ`) and signs
+- `decode_access_token(token)` -- validates and returns claims dict; rejects a token whose `typ` is present and != `"session"` (e.g. a voicemail playback token) and any token with an `aud`. Pre-`typ` tokens stay valid until they expire
 
 ### dependencies.py
 FastAPI `Depends` functions:
@@ -372,6 +388,7 @@ Starlette `BaseHTTPMiddleware`. Exempt paths are hardcoded in `EXEMPT_PATHS` set
 - `POST /v1/onboarding` and `POST /onboarding` (public intake form; GET/approve/reject still require admin)
 - Paths ending with `/cdrs/ingest` or `/cdrs/ingest/bulk`
 - `/ws/*` paths (WebSocket auth handled via query params)
+- Encrypted voicemail (`is_voicemail_exempt`, evaluated on `scope["path"]`; control chars / dot segments never exempt): prefixes `/v1/voicemail/fs/` + `/voicemail/fs/` (every route there MUST `Depends(require_ingest_secret)`), and GET/HEAD `^/(v1/)?voicemail/(messages|greetings)/\d+/audio$` (route verifies the `?t=` playback token)
 
 On auth failure, returns a `JSONResponse(status_code=401)` directly (never raises HTTPException from middleware).
 

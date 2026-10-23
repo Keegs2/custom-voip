@@ -60,6 +60,8 @@ inbound_router.lua executes:
      a. RCF: PostgreSQL (rcf_numbers JOIN customers)
      b. API DID: PostgreSQL (api_dids JOIN customers)
      c. Trunk DID: PostgreSQL (trunk_dids JOIN sip_trunks JOIN customers)
+     d. Voicemail mailbox DID: number_routing view, product_type='voicemail'
+        (LAST; only runs for a DID a-c all missed; unfiltered on enabled)
   5. If no match -> UNALLOCATED_NUMBER (SIP 404)
   6. Set channel variables: customer_id, product_type, traffic_grade, trunk_id
   7. Route via named terminators + a TERMINATORS dispatch map:
@@ -70,7 +72,65 @@ inbound_router.lua executes:
      |            CALL_REJECTED (603) + lua_routed=true. Flag on: terminate_api
      |            (Answer, then execute voice_webhook.lua) — unchanged code.
      |-- "trunk" -> terminate_trunk: Bridge to customer PBX via Kamailio
+     |-- "voicemail" -> terminate_vvm: answer + record + deposit to the API
+     |            (lib/vm_box.lua) — see "Encrypted voicemail" below
 ```
+
+### Encrypted voicemail (v1, dedicated-DID mailboxes) — `terminate_vvm`
+
+Contract: `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md` §5/§6 (incl. the "Deviations"
+list); plan: `docs/ENCRYPTED_VOICEMAIL_BUILD_PLAN.md` (D6/D8, §3.1). Tests:
+`tests/lua/voicemail_harness.lua`.
+
+- **Routing.** `TERMINATORS.voicemail = terminate_vvm`. Two entries, both through
+  `dispatch_terminal` (customer_id = mailbox owner, product_type = voicemail):
+  (a) **direct dial** — STEP-1 `lookup_voicemail_did` (4th/last arm,
+  `db.lookup_voicemail_did` = `number_routing` WHERE product_type='voicemail' +
+  customers.traffic_grade); (b) **on-net** — an RCF `forward_to`/chain whose
+  terminal resolves to the view's voicemail arm (product_ref_id = mailbox id);
+  no carrier leg, no `[cdr_*]` block. Disabled mailbox / `voicemail_enabled=false`
+  / suspended customer ⇒ `CALL_REJECTED` 603 (on-net: chain loop; direct:
+  `terminate_vvm` — the STEP-1 arm is deliberately unfiltered). `lua_routed=true`
+  on every voicemail path. RCF/API/trunk calls never load the voicemail code
+  (`vm_box` is loaded lazily inside `terminate_vvm`).
+- **Flow (`lib/vm_box.lua`).** Preflight (API_HOST/PORT valid, header file valid,
+  `/dev/shm/vm` is a tmpfs mount, UUIDv4) → answer → `GET /fs/mailbox/{id}` (3 s)
+  → full/inactive/404/401/403 ⇒ prompt + hang up; other failures ⇒ defaults →
+  custom greeting (fetched to `/dev/shm/vm/g_<uuid>.wav`, played, unlinked at
+  once) or `sounds/vm/default_greeting.wav` → beep → `record
+  /dev/shm/vm/<msg_uuid>.wav <max> 200 5` at 8 kHz (`#` ends / skips greeting) →
+  hang up a still-connected caller → deposit → unlink → rate-limited sweep.
+- **Post-hangup deposit.** The `lua` app runs in the session thread; a caller
+  BYE makes `record` return and `session:ready()` false, but the script keeps
+  running and the state machine only proceeds to hangup/CDR/destroy after it
+  returns. The deposit (≤ 3 × 15 s + 1 s/2 s backoff via `freeswitch.msleep`,
+  since `session:sleep` is a no-op on a dead channel) and the `vm_*` CDR vars
+  happen there. CDR timing: FS stamps end/hangup time at CS_HANGUP, i.e.
+  AFTER the script returns, so voicemail `billsec`/`duration` include the
+  deposit time (normally < 1 s; ≤ ~50 s if the API is down) — verified on a
+  real FS 1.11.3 loopback lab.
+- **Shell safety (`lib/vm_deposit.lua`).** curl via `io.popen`; the only
+  variable command-line parts are the validated API base URL + integer id, a
+  `/dev/shm/vm/<uuidv4>.wav` path, and the `X-VM-Meta` base64url value (charset
+  checked). Caller data / Call-ID / DID live only inside that base64url JSON;
+  the secret only in the header file (`-H @/run/revup/vm_ingest.header`).
+  NEVER build a command from SIP data — the FS uuid IS the inbound Call-ID
+  (`inbound-use-callid-as-uuid=true`).
+- **Plaintext hygiene.** Every tmpfs path is registered before it can exist and
+  unlinked on every exit (success, rejection, retries exhausted, too short,
+  hangup mid-greeting/record, Lua error). Files > 15 min old are swept
+  (constant `find` command, ≤ once / 5 min); `startup.lua` sweeps files > 1 min
+  old at FS start (`entrypoint.sh` does not run in production).
+- **Prompts.** `scripts/sounds/vm/{default_greeting,mailbox_full,unavailable}.wav`
+  (8 kHz mono PCM16, espeak-ng placeholders — replace in place, same format).
+  Missing file ⇒ tone fallback (greeting tones / reorder), never a failure.
+- **Libraries.** `lib/json.lua` (encode/decode; escapes all control chars,
+  passes valid UTF-8, replaces invalid UTF-8 with U+FFFD, depth-capped decoder),
+  `lib/vm_deposit.lua` (commands, retry table, base64url, UUIDv4),
+  `lib/vm_box.lua` (call flow). All loaded with `loadfile()`.
+- **Requires:** migration 54 (number_routing voicemail arm — before it, the arm
+  returns 0 rows and nothing changes), the API FS endpoints, and the
+  `docker-compose.media.yml` recreate (tmpfs, core 0, secret dir mount).
 
 ### API Calling product — RETIRED (flag `API_CALLING_ENABLED`, default OFF)
 
@@ -275,6 +335,9 @@ Responsibilities:
 3. Build PostgreSQL connection string: `PG_CONNSTRING`
 4. Run non-blocking connectivity tests (Redis PING, PostgreSQL SELECT 1)
 5. Log configuration summary
+6. Encrypted voicemail: sweep `/dev/shm/vm` files older than 1 min and log
+   WARNING if the tmpfs is not mounted or the ingest header file is missing
+   (logs only — never blocks startup)
 
 **These globals are available to all subsequent Lua script invocations** within the same mod_lua instance. The `PG_CONNSTRING` global is consumed by db_client.lua.
 
@@ -583,7 +646,8 @@ PostgreSQL client with connection pooling.
 | Function | Table(s) | Returns |
 |---|---|---|
 | `lookup_rcf(did)` | rcf_numbers JOIN customers | forward_to, customer_id, pass_caller_id, ring_timeout, traffic_grade, cpm_limit, daily_limit |
-| `resolve_destination(did)` | `number_routing` view (rcf/api/trunk UNION ALL JOIN customers) | 0/1 row: did, product_type, customer_id, product_ref_id, product_enabled, customer_status, forward_to, pass_caller_id, ring_timeout, max_channels, product_name, voice_url, trunk_id. **UNFILTERED** on enabled/active — caller decides on-net vs hard-reject. |
+| `resolve_destination(did)` | `number_routing` view (rcf/api/trunk[/voicemail after migration 54] UNION ALL JOIN customers) | 0/1 row: did, product_type, customer_id, product_ref_id, product_enabled, customer_status, forward_to, pass_caller_id, ring_timeout, max_channels, product_name, voice_url, trunk_id. **UNFILTERED** on enabled/active — caller decides on-net vs hard-reject. |
+| `lookup_voicemail_did(did)` | `number_routing` (product_type='voicemail') JOIN customers | 0/1 row: did, product_type, customer_id, product_ref_id (mailbox id), product_enabled, customer_status, product_name (label), traffic_grade. **UNFILTERED** (603 in terminate_vvm). STEP-1 arm, runs last. |
 | `lookup_api_did(did)` | api_dids JOIN customers | voice_url, fallback_url, customer_id, traffic_grade, cpm_limit, daily_limit |
 | `lookup_trunk_did(did)` | trunk_dids JOIN sip_trunks JOIN customers | trunk_id, customer_id, max_channels, traffic_grade |
 | `lookup_trunk_by_ip(ip)` | trunk_auth_ips JOIN sip_trunks JOIN customers | trunk_id, customer_id, max_channels, cps_limit, traffic_grade |
@@ -692,7 +756,7 @@ trunk_auth_ips    (trunk_id, ip_address, description)
 extensions        (extension, customer_id, display_name, assigned_did, status)
 cps_tiers         (id, name, tier_type, cps_limit, monthly_fee, per_call_fee, description, features, is_active, sort_order)
 cdrs              (uuid, customer_id, product_type, trunk_id, direction, caller_id, destination, start_time, end_time, duration_ms, hangup_cause, carrier_used, traffic_grade, origin_customer_id, terminating_customer_id, on_net, on_net_hops)
-number_routing    VIEW: UNION ALL over rcf_numbers/api_dids/trunk_dids JOIN customers (on-net oracle; resolve_destination)
+number_routing    VIEW: UNION ALL over rcf_numbers/api_dids/trunk_dids[/voicemail_boxes, migration 54] JOIN customers (on-net oracle; resolve_destination, lookup_voicemail_did). FS has NO grant on voicemail_* tables.
 ```
 
 ---

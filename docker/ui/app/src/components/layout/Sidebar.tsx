@@ -11,6 +11,7 @@ import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen, BarChart3, 
 import { CustomerPreviewPicker } from '../preview/CustomerPreviewPicker';
 import { API_CALLING_ENABLED } from '../../config/features';
 import { canSeeReporting } from '../../utils/reportingAccess';
+import { staffScope, tenantScope, useVoicemailSummary } from '../../pages/voicemail/voicemailData';
 
 /* ─── Types ───────────────────────────────────────────────── */
 
@@ -23,6 +24,8 @@ interface NavItemDef {
   adminOnly?: boolean;
   /** Custom active-match function. When provided, overrides NavLink's default isActive. */
   isActiveFn?: (pathname: string) => boolean;
+  /** Small count pill after the label (e.g. unread voicemail); hidden at 0. */
+  badge?: number;
 }
 
 /* ─── Nav item definitions ────────────────────────────────── */
@@ -32,6 +35,18 @@ interface NavItemDef {
 const allProductNavItems: NavItemDef[] = [
   { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#2f7df6', accountTypes: ['rcf', 'hybrid'] },
 ];
+
+// Visual Voicemail is live per ACCOUNT, not per account type: it joins
+// Products (and leaves Coming Soon) when GET /voicemail/summary says the
+// effective customer has it switched on, and always for platform admins
+// (their /voicemail is the staff console). Any account type can have it.
+const voicemailNavItem: NavItemDef = {
+  label: 'Visual Voicemail',
+  icon: <IconVoicemail size={18} />,
+  to: '/voicemail',
+  color: '#2f7df6',
+};
+const VOICEMAIL_SOON_LABEL = 'Visual Voicemail';
 
 /* ─── Dashboard (top-level, above Products) ───────────────── */
 
@@ -80,8 +95,9 @@ interface ComingSoonItemDef {
   linkAccountTypes?: string[];
 }
 
-// RCF is the only LIVE product (gated by account_type in allProductNavItems).
-// Everything here is pre-launch or de-prioritised and renders DARKENED: each
+// RCF is live (gated by account_type in allProductNavItems); Visual Voicemail
+// is live per account (see voicemailNavItem) and drops out of this list when
+// it is. Everything here is pre-launch or de-prioritised and renders DARKENED: each
 // row still links to its real page (routes keep working — SIP Trunking hosts
 // the owner's test customer, the docs stay readable), but none competes with
 // live nav. Like the group itself, these show for ALL non-support
@@ -482,6 +498,27 @@ function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {item.label}
             </span>
+            {item.badge !== undefined && item.badge > 0 && (
+              <span
+                aria-label={`${item.badge} unread`}
+                style={{
+                  minWidth: 18,
+                  height: 18,
+                  padding: '0 5px',
+                  borderRadius: 999,
+                  background: 'var(--brand-azure)',
+                  color: '#ffffff',
+                  fontSize: '0.62rem',
+                  fontWeight: 700,
+                  lineHeight: '18px',
+                  textAlign: 'center',
+                  fontVariantNumeric: 'tabular-nums',
+                  flexShrink: 0,
+                }}
+              >
+                {item.badge > 99 ? '99+' : item.badge}
+              </span>
+            )}
             {/* Active dot */}
             {isActive && (
               <span
@@ -676,7 +713,28 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
   // has account_type null, which used to hide RCF and the whole group).
   const effectiveAccountType = isAdmin ? null : (effectiveCustomer?.account_type ?? user?.account_type ?? null);
 
-  const productNavItems = allProductNavItems.filter((item) => {
+  // Voicemail summary for the account the customer nav follows: a tenant's
+  // own (no customer_id — the API scopes it), or the previewed customer for
+  // an admin in customer view. Same cache key as the /voicemail page. Admins
+  // in normal view and support never ask (admins always see it; the API
+  // answers 403 to support). A failed call (e.g. the API predates
+  // voicemail) just leaves it in Coming Soon.
+  const voicemailScope = !effectiveCustomer
+    ? null
+    : isActualAdmin
+      ? staffScope(effectiveCustomer.id)
+      : tenantScope(effectiveCustomer.id);
+  const voicemailSummary = useVoicemailSummary(
+    voicemailScope ?? staffScope('all'),
+    isAuthenticated && !isSupport && !isAdmin && voicemailScope !== null,
+  );
+  const voicemailLive = !isSupport && (isAdmin || (voicemailScope !== null && voicemailSummary.data?.enabled === true));
+  const voicemailUnread = !isAdmin && voicemailLive ? (voicemailSummary.data?.unread_count ?? 0) : 0;
+
+  const productNavItems = [
+    ...allProductNavItems,
+    ...(voicemailLive ? [{ ...voicemailNavItem, badge: voicemailUnread }] : []),
+  ].filter((item) => {
     if (isAdmin) return true;
     if (item.adminOnly) return false;
     if (item.accountTypes && effectiveAccountType) {
@@ -684,6 +742,10 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
     }
     return !item.accountTypes;
   });
+  // Coming Soon without Visual Voicemail once it is live for this viewer.
+  const soonItems = voicemailLive
+    ? COMING_SOON_ITEMS.filter((i) => i.label !== VOICEMAIL_SOON_LABEL)
+    : COMING_SOON_ITEMS;
   // Never render an empty Products header (e.g. trunk-only accounts).
   const showProducts = !isSupport && productNavItems.length > 0;
 
@@ -695,7 +757,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
     const adminPaths   = ['/admin', '/call-quality', '/troubleshooting', '/cdrs'];
     const inProducts = productPaths.some((p) => path === p || path.startsWith(p + '/'));
     const inAdmin    = adminPaths.some((p) => path === p || path.startsWith(p + '/'));
-    const inSoon     = COMING_SOON_ITEMS.some((i) => isSoonItemActive(i, path));
+    const inSoon     = soonItems.some((i) => isSoonItemActive(i, path));
     const inInsights = path === reportingNavItem.to || path.startsWith(reportingNavItem.to + '/');
 
     setGroupOpen((prev) => {
@@ -1041,7 +1103,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                  Voicemail, Guides, API Reference — must never compete with
                  live nav; each row still links to its working page).
                  Hidden while empty / for support. ─ */}
-            {!isSupport && COMING_SOON_ITEMS.length > 0 && (
+            {!isSupport && soonItems.length > 0 && (
               <>
                 <div className="sb-soon-divider" aria-hidden="true" />
                 <CollapsibleGroup
@@ -1052,7 +1114,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
                   onToggle={toggleGroup}
                   muted
                 >
-                  {COMING_SOON_ITEMS.map((item) => {
+                  {soonItems.map((item) => {
                     const linked = !item.linkAccountTypes || isAdmin
                       || (effectiveAccountType != null && item.linkAccountTypes.includes(effectiveAccountType));
                     return (

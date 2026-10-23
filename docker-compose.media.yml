@@ -75,6 +75,33 @@ services:
       - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
       - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts
       - freeswitch_logs:/var/log/freeswitch
+      # Encrypted voicemail ingest secret (docs/ENCRYPTED_VOICEMAIL_INTERFACES.md
+      # §6). The DIRECTORY is mounted, not the file: a short-syntax bind of a
+      # missing host FILE makes Docker create a directory in its place (and the
+      # long syntax with create_host_path:false refuses to start FS). A missing
+      # directory is simply created empty, so a node that has not been given
+      # the secret yet starts FreeSWITCH normally (voicemail calls play
+      # `unavailable`, RCF/trunk unaffected), and a file the operator adds
+      # later is visible immediately — no recreate. The directory holds ONLY
+      # this one file (least privilege; /opt/revup/secrets itself is not
+      # mounted). Git-ignored by the `secrets/*` rule. OPERATOR, per FS node:
+      #   sudo install -d -m 0700 -o root -g root /opt/revup/secrets/fs-voicemail
+      #   then write /opt/revup/secrets/fs-voicemail/vm_ingest.header (root:root
+      #   0600) holding the single line `X-Ingest-Secret: <INGEST_SHARED_SECRET>`
+      #   (same value as the services VM's INGEST_SHARED_SECRET).
+      # Read by curl via `-H @/run/revup/vm_ingest.header` — never on argv.
+      - ./secrets/fs-voicemail:/run/revup:ro
+    # Encrypted voicemail recording scratch (build plan §3.1 / D8): plaintext
+    # audio exists ONLY in this RAM-backed mount — record writes
+    # /dev/shm/vm/<uuid>.wav, the Lua deposits it to the API and unlinks it on
+    # every exit path. 512m ~= 100 concurrent 300 s 8 kHz recordings; pages
+    # count against the 16G memory limit below. mode=0700: FreeSWITCH runs as
+    # root in this image (no USER / -u), so only FS can read it. noexec/
+    # nosuid/nodev: data only. Lua refuses to record unless this is a real
+    # tmpfs mount (never falls back to disk). Adding/changing it needs a
+    # container recreate (`up -d freeswitch`), not an image rebuild.
+    tmpfs:
+      - /dev/shm/vm:size=512m,mode=0700,noexec,nosuid,nodev
     cap_add:
       - NET_ADMIN
       - SYS_NICE
@@ -90,9 +117,11 @@ services:
       nofile:
         soft: 65536
         hard: 65536
-      core:
-        soft: -1
-        hard: -1
+      # core 0 (was unlimited): build plan D8 — plaintext voicemail audio lives
+      # in this process's memory and in the /dev/shm/vm tmpfs, and a core dump
+      # (the FS build uses -g) would copy it to persistent disk. Crash triage
+      # now relies on logs / a deliberate, temporary re-enable in a window.
+      core: 0
     healthcheck:
       test: ["CMD-SHELL", "/usr/local/freeswitch/bin/fs_cli -p $ESL_PASSWORD -x 'sofia status' 2>/dev/null | grep -q 'RUNNING' || exit 1"]
       interval: 30s

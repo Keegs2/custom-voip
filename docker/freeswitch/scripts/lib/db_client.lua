@@ -354,6 +354,58 @@ function M.resolve_destination(did)
     return row
 end
 
+-- Lookup a voicemail mailbox DID dialed DIRECTLY (inbound_router.lua STEP 1,
+-- the voicemail arm — encrypted voicemail v1, dedicated-DID mailboxes only).
+--
+-- Reads the `number_routing` view's voicemail arm (migration
+-- 54_voicemail.sql): product_ref_id = voicemail_boxes.id (mailbox id),
+-- product_enabled = (box active AND customers.voicemail_enabled),
+-- product_name = mailbox label. The freeswitch DB role has NO grant on the
+-- voicemail_* tables by design (contract §1) — only this view.
+--
+-- Deliberately UNFILTERED on enabled/active (same semantics as
+-- resolve_destination): a suspended/disabled mailbox returns its row so the
+-- router hard-rejects it 603 (CALL_REJECTED) instead of a 404 — the number is
+-- ours. Deleted mailboxes are absent from the view (not ours again).
+-- Before migration 54 is applied the view has no voicemail arm and this
+-- returns nil (0 rows, no error) — behavior identical to today's 404.
+--
+-- The product_type predicate is constant-folded against each UNION-ALL arm's
+-- literal product_type, so PostgreSQL only executes the voicemail arm (one
+-- point lookup on voicemail_boxes.did) + the customers PK join.
+--
+-- Returns the raw row (strings/nil, as luasql returns them):
+--   did, product_type, customer_id, product_ref_id, product_enabled,
+--   customer_status, product_name, traffic_grade
+function M.lookup_voicemail_did(did)
+    local clean_did = validate_did(did)
+    if not clean_did then
+        freeswitch.consoleLog("WARN", "Invalid DID format for voicemail lookup: " .. tostring(did) .. "\n")
+        return nil
+    end
+
+    local sql = string.format([[
+        SELECT n.did, n.product_type, n.customer_id, n.product_ref_id,
+               n.product_enabled, n.customer_status, n.product_name,
+               c.traffic_grade
+        FROM number_routing n
+        JOIN customers c ON c.id = n.customer_id
+        WHERE n.did = %s AND n.product_type = 'voicemail'
+        LIMIT 1
+    ]], sql_string(clean_did))
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("ERR", "Voicemail DID lookup failed: " .. tostring(err) .. "\n")
+        return nil
+    end
+
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+
+    return row
+end
+
 -- Lookup API DID
 function M.lookup_api_did(did)
     -- Validate and sanitize input

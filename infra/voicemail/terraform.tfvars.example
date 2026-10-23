@@ -1,0 +1,25 @@
+# Copy to terraform.tfvars only if you need to change something. Every value
+# has an East ground-truth default (rugged-night-193017 / us-east1). The
+# default is credential OPTION A (vm-api attached to the services VM), which
+# needs nothing here. See docs/runbooks/VOICEMAIL_GCP_SETUP.md.
+
+# --- Option B (impersonation, no VM restart). Use both lines together. ---
+# vm_api_is_services_vm_identity = false
+# impersonator_service_account   = "562404538544-compute@developer.gserviceaccount.com"
+
+# --- Option A: mirror what the default compute SA holds today (runbook 1.4). ---
+# Never add roles/editor or roles/owner (validation rejects them).
+# services_vm_project_roles = ["roles/logging.logWriter", "roles/monitoring.metricWriter", "roles/monitoring.viewer"]
+# backup_bucket_name        = "revup-db-backups"   # "" = skip the backup-bucket grant
+
+# --- Audit logs (runbook 1.8). Copy any existing storage exemptions here. ---
+# enable_data_access_audit_logs  = true
+# storage_audit_exempted_members = []
+
+# --- Names (must match the services .env). Bucket names are global. ---
+# bucket_name                = "voip-voicemail"
+# keyring_name               = "voicemail-prod"
+# bucket_keyring_name        = "voicemail-bucket"
+# bucket_key_name            = "voip-voicemail-bucket"
+# bucket_key_rotation_period = "7776000s"   # 90 days
+# soft_delete_retention_days = 7

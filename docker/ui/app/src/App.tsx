@@ -12,7 +12,6 @@ import { AccountDashboard } from './pages/dashboard/AccountDashboard';
 import { ApiDidsPage } from './pages/ApiDidsPage';
 import { TrunksPage } from './pages/TrunksPage';
 import { IvrBuilderPage } from './pages/IvrBuilderPage';
-import { VisualVoicemailPage } from './pages/VisualVoicemailPage';
 import { GuidesPage } from './pages/docs/GuidesPage';
 import { ApiDocsPage } from './pages/docs/ApiDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
@@ -25,6 +24,11 @@ import { Spinner } from './components/ui/Spinner';
 // the lazily-imported PDF renderer) only download when a customer opens it.
 const ReportingPage = lazy(() =>
   import('./pages/reporting/ReportingPage').then((m) => ({ default: m.ReportingPage })),
+);
+// Visual Voicemail is code-split the same way: the inbox, player and the
+// in-browser greeting recorder/transcoder load only when /voicemail opens.
+const VisualVoicemailPage = lazy(() =>
+  import('./pages/VisualVoicemailPage').then((m) => ({ default: m.VisualVoicemailPage })),
 );
 
 function RouteFallback() {
@@ -65,7 +69,14 @@ export function App() {
               />
               <Route path="trunks"     element={<TrunksPage />} />
               <Route path="ivr"        element={<IvrBuilderPage />} />
-              <Route path="voicemail"  element={<VisualVoicemailPage />} />
+              <Route
+                path="voicemail"
+                element={
+                  <Suspense fallback={<RouteFallback />}>
+                    <VisualVoicemailPage />
+                  </Suspense>
+                }
+              />
               {/* Customer Reporting — every rcf/trunk/hybrid customer + admins
                   (with a customer picker); support is redirected away. */}
               <Route

@@ -369,6 +369,9 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 | `FREESWITCH_ESL_PASSWORD` | (secret) | Must match FS ESL_PASSWORD |
 | `JWT_SECRET_KEY` | (secret) | Required — API crashes without it |
 | `SBC_PROXY_IP` | `10.142.0.250` | Zone signaling ILB VIP — ESL/API originate bridge target (always the ACTIVE SBC). Was SBC-1's direct IP, which had no failover. |
+| `VOICEMAIL_KMS_PROJECT` (+ `_LOCATION` us-east1, `_KEYRING` voicemail-prod, `VOICEMAIL_BUCKET` voip-voicemail) | `rugged-night-193017` | Encrypted voicemail: per-customer Cloud KMS keys + GCS ciphertext bucket. Missing ⇒ voicemail endpoints 503 (fail-closed, never plaintext). `VOICEMAIL_KMS_PROVIDER` stays `gcpkms`; optional `VOICEMAIL_IMPERSONATE_SA` |
+| `VOICEMAIL_PLAYBACK_SECRET` | (secret) | 120 s playback-URL key; ≥ 32 chars, ≠ `JWT_SECRET_KEY` |
+| `INGEST_SHARED_SECRET` | (secret) | `X-Ingest-Secret` FS sends on `/v1/voicemail/fs/*` (same value as `/opt/revup/secrets/fs-voicemail/vm_ingest.header` on every FS node); ≥ 32 chars, unset ⇒ 503 |
 
 ## GCP Production Topology (3 zones — East / West / Central, all LIVE 2026-07-23)
 

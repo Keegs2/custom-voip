@@ -2,6 +2,7 @@
 RCF Platform API - Production FastAPI Application
 Stripped to RCF-only services for RCF-V1 deployment
 """
+import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
@@ -19,9 +20,11 @@ from routers import (
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
     onboarding, freeswitch, carrier_status, live_trunk_stats,
-    stir, billing, carrier_trunks, reports,
+    stir, billing, carrier_trunks, reports, voicemail,
 )
 from middleware.auth import JWTAuthMiddleware
+from services.voicemail import retention as voicemail_retention
+from utils.access_log import install_access_log_redaction
 
 # Configure logging
 logging.basicConfig(
@@ -30,10 +33,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Voicemail playback URLs carry a token in ?t= — keep it out of uvicorn's
+# access log (utils/access_log.py). Installed here (each uvicorn worker
+# imports main AFTER uvicorn configured logging) and again in the lifespan
+# below; idempotent, uvicorn.access logger only.
+install_access_log_redaction()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup resources."""
+    install_access_log_redaction()
     logger.info("Starting RCF Platform API...")
 
     # Initialize database pool
@@ -49,10 +59,25 @@ async def lifespan(app: FastAPI):
     await init_redis()
     logger.info("Redis connection initialized")
 
+    # Encrypted-voicemail retention worker (contract §4.7): runs in every
+    # uvicorn worker; a PG advisory xact lock lets one sweep at a time. Needs
+    # no KMS; never raises out of its loop. VOICEMAIL_RETENTION_ENABLED=false
+    # turns it off.
+    retention_task = None
+    if voicemail_retention.enabled():
+        retention_task = asyncio.create_task(voicemail_retention.run_forever(),
+                                             name="voicemail-retention")
+
     yield
 
     # Cleanup
     logger.info("Shutting down...")
+    if retention_task is not None:
+        retention_task.cancel()
+        try:
+            await retention_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
     await close_db()
     await close_redis()
 
@@ -154,6 +179,11 @@ app.include_router(billing.router, prefix="/billing", tags=["Billing"])
 # docs/CUSTOMER_REPORTING_DESIGN.md).
 app.include_router(reports.router, prefix="/v1/reports", tags=["Reports"])
 app.include_router(reports.router, prefix="/reports", tags=["Reports"])
+# Encrypted voicemail (docs/ENCRYPTED_VOICEMAIL_INTERFACES.md §4/§5). /fs/* is
+# JWT-exempt (X-Ingest-Secret inside the router); GET/HEAD .../audio is
+# JWT-exempt (playback token inside the router).
+app.include_router(voicemail.router, prefix="/v1/voicemail", tags=["Voicemail"])
+app.include_router(voicemail.router, prefix="/voicemail", tags=["Voicemail"])
 
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
 # middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so

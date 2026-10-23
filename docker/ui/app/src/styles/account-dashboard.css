@@ -440,6 +440,13 @@
 }
 
 .ad-switch-opt:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
+
+/* A product with its own page (Visual Voicemail when switched on): a plain
+   link in the pill — same resting/hover look as an available option, plus a
+   small "opens" arrow. Never takes the active (azure) state. */
+.ad-switch-opt-link { text-decoration: none; }
+.ad-switch-go { width: 12px; height: 12px; opacity: 0.75; flex-shrink: 0; }
+.ad-switch-opt-link:hover .ad-switch-go { opacity: 1; }
 .ad-switch-opt:focus-visible { outline: 2px solid var(--ad-azure-bright); outline-offset: 1px; }
 
 .ad-switch-opt-active,

@@ -40,6 +40,8 @@ from db import database as db
 from db import redis_client as cache
 from auth.dependencies import require_admin, get_current_user, get_customer_filter
 from services.bandwidth_client import get_all_tns, _credentials_configured
+from services.voicemail import mailboxes as vm_mailboxes
+from services.voicemail.audit import RequestInfo as VmRequestInfo
 from utils import phone
 
 logger = logging.getLogger(__name__)
@@ -73,11 +75,14 @@ class AssignRequest(BaseModel):
     # Enforced in assign_did, not here, because the requirement is conditional.
     forward_to: Optional[str] = None
     notes: Optional[str] = None
+    # product_type='voicemail' only: the new mailbox's name (default
+    # 'Voicemail'). Ignored for every other product type.
+    label: Optional[str] = None
 
     @field_validator("product_type")
     @classmethod
     def validate_product_type(cls, v: str) -> str:
-        allowed = ("rcf", "trunk", "api", "ucaas")
+        allowed = ("rcf", "trunk", "api", "ucaas", "voicemail")
         if v not in allowed:
             raise ValueError(f"product_type must be one of {allowed}")
         return _reject_retired_api_product(v)
@@ -238,7 +243,7 @@ async def _reconcile_product_tables() -> dict:
     """
     pool = await db.get_pool()
     reconciled = 0
-    by_product = {"rcf": 0, "api": 0, "trunk": 0}
+    by_product = {"rcf": 0, "api": 0, "trunk": 0, "voicemail": 0}
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -321,10 +326,41 @@ async def _reconcile_product_tables() -> dict:
                 )
                 by_product["trunk"] += 1
 
+            # --- Voicemail mailboxes (migration 54; skipped until applied) ---
+            # A live (status <> 'deleted') mailbox owns its DID; product_ref_id
+            # is the mailbox id (the number_routing voicemail arm's ref).
+            if await vm_mailboxes.voicemail_schema_present(conn):
+                vm_rows = await conn.fetch(
+                    """
+                    SELECT b.id AS ref_id, b.did, b.customer_id, b.created_at
+                      FROM voicemail_boxes b
+                      JOIN customers c ON b.customer_id = c.id
+                     WHERE b.status <> 'deleted'
+                    """
+                )
+                for row in vm_rows:
+                    await conn.execute(
+                        """
+                        INSERT INTO did_inventory (did, customer_id, product_type, product_ref_id,
+                                                   status, assigned_at, updated_at)
+                        VALUES ($1, $2, 'voicemail', $3, 'assigned', $4, NOW())
+                        ON CONFLICT (did) DO UPDATE
+                           SET customer_id = EXCLUDED.customer_id,
+                               product_type = EXCLUDED.product_type,
+                               product_ref_id = EXCLUDED.product_ref_id,
+                               status = 'assigned',
+                               assigned_at = COALESCE(did_inventory.assigned_at, EXCLUDED.assigned_at),
+                               updated_at = NOW()
+                        """,
+                        row["did"], row["customer_id"], row["ref_id"], row["created_at"],
+                    )
+                    by_product["voicemail"] += 1
+
     reconciled = sum(by_product.values())
     logger.info(
-        "Product table reconciliation complete: %d total (rcf=%d, api=%d, trunk=%d)",
+        "Product table reconciliation complete: %d total (rcf=%d, api=%d, trunk=%d, voicemail=%d)",
         reconciled, by_product["rcf"], by_product["api"], by_product["trunk"],
+        by_product["voicemail"],
     )
 
     return {"reconciled": reconciled, "by_product": by_product}
@@ -853,6 +889,31 @@ async def assign_did(
             detail=f"DID {e164} has status '{inv['status']}' and cannot be assigned",
         )
 
+    if body.product_type == "voicemail":
+        # The SAME service the voicemail router uses (contract §4.8): ensures
+        # the customer's KMS key first (503, nothing committed, when KMS is
+        # down), then claims the DID + creates the mailbox + sets
+        # customers.voicemail_enabled + audits, in one transaction.
+        mailbox_id = await vm_mailboxes.create_mailbox(
+            customer_id=body.customer_id, did=e164, label=body.label,
+            info=VmRequestInfo(actor_user_id=admin_user_id), source="admin",
+            notes=body.notes, allowed_statuses=("available", "reserved"),
+            require_active_customer=False,  # checked above (400, existing contract)
+        )
+        await cache.cache_delete("bandwidth:tns")
+        logger.info(
+            "DID assigned: did=%s, customer=%s (%d), product=voicemail, mailbox=%d, by_user=%d",
+            e164, customer["name"], body.customer_id, mailbox_id, admin_user_id,
+        )
+        return {
+            "status": "assigned",
+            "did": e164,
+            "customer_id": body.customer_id,
+            "customer_name": customer["name"],
+            "product_type": "voicemail",
+            "product_ref_id": mailbox_id,
+        }
+
     pool = await db.get_pool()
     product_ref_id = None
 
@@ -959,6 +1020,34 @@ async def unassign_did(
         )
 
     pool = await db.get_pool()
+
+    if inv["product_type"] == "voicemail":
+        # Delete the live mailbox on this DID through the voicemail service:
+        # mailbox -> 'deleted' + DID back to 'available' + audit in one
+        # transaction, then its messages/greetings are purged (objects first;
+        # leftovers finished by the retention worker). No live mailbox (drift)
+        # -> fall through to the plain inventory reset below.
+        async with pool.acquire() as conn:
+            box_id = await conn.fetchval(
+                "SELECT id FROM voicemail_boxes WHERE did = $1::varchar AND status <> 'deleted'",
+                e164,
+            )
+        if box_id is not None:
+            await vm_mailboxes.delete_mailbox(
+                box_id, info=VmRequestInfo(actor_user_id=admin_user_id), source="admin",
+                notes=body.notes,
+            )
+            await cache.cache_delete("bandwidth:tns")
+            logger.info(
+                "DID unassigned: did=%s, was_customer=%s, was_product=voicemail (mailbox %s), by_user=%d",
+                e164, inv["customer_id"], box_id, admin_user_id,
+            )
+            return {
+                "status": "unassigned",
+                "did": e164,
+                "previous_customer_id": inv["customer_id"],
+                "previous_product_type": "voicemail",
+            }
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -1084,7 +1173,24 @@ async def get_my_numbers(
     (rcf_numbers, api_dids, trunk_dids).
     """
     customer_id = customer_filter
+    # Voicemail arm (migration 54): live mailboxes own their DID. Built only
+    # once the table exists, so this endpoint keeps working before 54 lands.
+    async with db.pool.acquire() as conn:
+        vm_present = await vm_mailboxes.voicemail_schema_present(conn)
     if customer_id is None:
+        vm_arm = """
+                UNION
+                SELECT b.did, 'voicemail' AS product_type, 'assigned' AS status,
+                       NULL AS city, NULL AS state,
+                       b.created_at AS assigned_at, NULL AS notes,
+                       b.customer_id,
+                       c.name AS customer_name
+                  FROM voicemail_boxes b
+                  JOIN customers c ON b.customer_id = c.id
+                 WHERE b.status <> 'deleted'
+                   AND b.did NOT IN (
+                       SELECT di.did FROM did_inventory di
+                        WHERE di.status IN ('assigned', 'reserved', 'release_requested'))""" if vm_present else ""
         # Admin: show all assigned DIDs from did_inventory + product tables
         rows = await db.fetch_all(
             """
@@ -1131,12 +1237,27 @@ async def get_my_numbers(
                  WHERE td.did NOT IN (
                        SELECT di.did FROM did_inventory di
                         WHERE di.status IN ('assigned', 'reserved', 'release_requested'))
+            """ + vm_arm + """
               ) combined
              ORDER BY did
              LIMIT 500
             """
         )
     else:
+        vm_arm = """
+                UNION
+                SELECT b.did, 'voicemail' AS product_type, 'assigned' AS status,
+                       NULL AS city, NULL AS state,
+                       b.created_at AS assigned_at, NULL AS notes,
+                       b.customer_id,
+                       c.name AS customer_name
+                  FROM voicemail_boxes b
+                  JOIN customers c ON b.customer_id = c.id
+                 WHERE b.customer_id = $1
+                   AND b.status <> 'deleted'
+                   AND b.did NOT IN (
+                       SELECT di.did FROM did_inventory di
+                        WHERE di.customer_id = $1)""" if vm_present else ""
         rows = await db.fetch_all(
             """
             SELECT did, product_type, status, city, state,
@@ -1186,6 +1307,7 @@ async def get_my_numbers(
                    AND td.did NOT IN (
                        SELECT di.did FROM did_inventory di
                         WHERE di.customer_id = $1)
+            """ + vm_arm + """
               ) combined
              ORDER BY did
             """,
