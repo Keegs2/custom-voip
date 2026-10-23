@@ -341,7 +341,7 @@ Scope: admin (`customer_id` param picks the customer), tenant `user` (own custom
 | `POST` | `/v1/voicemail/fs/deposit` | ingest secret | raw WAV + `X-VM-Meta` → `{"status":"stored","message_id":N}` |
 
 ### Carriers (Admin only)
-Carrier gateway management — backed by `carrier_gateways` (Bandwidth Dallas/LA).
+Carrier gateway management — backed by `carrier_gateways` (display/config cards only — nothing in the call path reads it; Bandwidth Dallas/LA + Sinch rows from migrations 46/53).
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/carriers` | List carrier gateways |
@@ -352,11 +352,11 @@ Carrier gateway management — backed by `carrier_gateways` (Bandwidth Dallas/LA
 | `POST` | `/v1/carriers/{carrier_id}/test` | Probe carrier reachability |
 
 ### Carrier Trunks (Admin only)
-Multi-carrier trunk registry — backed by `carrier_trunks` (migrations 40 + 42; Bandwidth Dallas/LA + Sinch Denver/Chicago). The Kamailio SBCs read this table directly via sqlops as the DB-backed trust fallback for unknown-source INVITEs, and FreeSWITCH reads it per zone as the outbound TERMINATION-ORDER oracle (`COALESCE(priority_<z>, priority)`, direction IN ('outbound','both'), enabled) — the column names `carrier`/`pop`/`trunk_group`/`source_ip`/`test_tn`/`direction`/`cps_limit`/`enabled`/`priority`/`priority_east`/`priority_west`/`priority_central` are a CONTRACT with those SQLs, never rename them. Disabling a trunk here removes it from every zone's termination list on the next call (redundancy operated from the tool). Operated by the TED admin tool through the revup-admin bridge (admin JWT).
+Multi-carrier trunk registry — backed by `carrier_trunks` (migrations 40/42/44/52/53; Bandwidth Dallas/LA + Sinch origination, toll-free origination and LD/8YY termination trunks). **Uniqueness (53):** one ingress row (`inbound`/`both`) and one egress row (`outbound`/`both`) per `source_ip` — Sinch runs an inbound 8XX-T trunk and an outbound redundant termination trunk on the same IP — plus UNIQUE (carrier, pop); every by-IP reader filters direction. The Kamailio SBCs read this table directly via sqlops as the DB-backed trust fallback for unknown-source INVITEs, and FreeSWITCH reads it per zone as the outbound TERMINATION-ORDER oracle (`COALESCE(priority_<z>, priority)`, direction IN ('outbound','both'), enabled) — the column names `carrier`/`pop`/`trunk_group`/`source_ip`/`test_tn`/`direction`/`cps_limit`/`enabled`/`priority`/`priority_east`/`priority_west`/`priority_central` are a CONTRACT with those SQLs, never rename them. Disabling a trunk here removes it from every zone's termination list on the next call (redundancy operated from the tool). Operated by the TED admin tool through the revup-admin bridge (admin JWT).
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/carrier-trunks` | List carrier trunks (filters: carrier, direction, enabled; rows carry priority + per-zone overrides) |
-| `POST` | `/v1/carrier-trunks` | Create carrier trunk (409 on duplicate source_ip / carrier+pop; `priority` defaults 100, zone overrides default NULL = inherit) |
+| `POST` | `/v1/carrier-trunks` | Create carrier trunk (409 when the IP already has a row in the same direction slot — detail names the ingress or egress slot — or on duplicate carrier+pop; `priority` defaults 100, zone overrides default NULL = inherit) |
 | `GET` | `/v1/carrier-trunks/{trunk_id}` | Get carrier trunk detail |
 | `PUT` | `/v1/carrier-trunks/{trunk_id}` | Partial update (pop/trunk_group/source_ip/test_tn/direction/cps_limit/enabled/priority/priority_east/west/central/notes; carrier immutable; priorities ≥1, zone overrides nullable — explicit null clears back to inheriting `priority`, `priority` itself not nullable) |
 | `DELETE` | `/v1/carrier-trunks/{trunk_id}` | Delete carrier trunk |

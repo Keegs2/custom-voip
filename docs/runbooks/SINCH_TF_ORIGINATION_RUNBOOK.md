@@ -48,7 +48,8 @@ If step 2 fails: `cd /opt/revup && sudo git checkout HEAD~1 -- docker/kamailio &
 - Strict 8YY termination: re-enable or add a `tollfree` outbound trunk in TED. Relabeling Bandwidth to `any` does NOT make it eligible for 8YY (tollfree is strict by design).
 - Full: `cd /opt/revup && sudo git checkout 47ae879 -- docker/kamailio docker/freeswitch/scripts && sudo docker compose -f docker-compose.sbc.yml up -d --build kamailio` (SBCs), FS needs only the checkout. Migration 52 needs no undo: rows + view are additive. After a partial-path checkout, re-attach before the next pull: `cd /opt/revup && sudo git checkout RCF-V1 -- docker/kamailio docker/freeswitch/scripts`.
 
-## Follow-ups (not this window)
-- Root `CLAUDE.md` Sinch section + `scripts/db/check_migrations.sql` (migration 52) — docs PR after #136 merges.
-- Customer trunk / API outbound to 8YY still goes via Bandwidth (those paths don't use `carrier_trunks`).
-- Second TF termination trunk from Sinch (`denver-tf` is a single point of failure).
+## Follow-ups — addressed by `feat/sinch-redundant-term` (migration 53)
+- Root `CLAUDE.md` Sinch section + `scripts/db/check_migrations.sql` now cover 52 and 53.
+- Customer trunk / API outbound 8YY now uses the `tollfree` `carrier_trunks` rows (fail-closed, never Bandwidth); non-8YY unchanged.
+- Second TF termination trunk: `sinch/atlanta-tf` (206.146.98.25, priority 45) plus a second LD trunk `sinch/denver-ld` (206.146.100.25, priority 35), seeded `enabled=false` until Sinch confirms the build. They share the .25 IPs with the TF orig rows, which is why 53 replaces UNIQUE(source_ip) with per-direction partial unique indexes.
+- `TF_INGRESS_ENFORCE=off` in the SBC `.env` files is replaced by `TF_TEST_TNS=5595335873,5595335908`.

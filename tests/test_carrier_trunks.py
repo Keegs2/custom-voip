@@ -1368,3 +1368,180 @@ def test_migration52_tf_origination(trunks_db, client):
         assert h["sinch-denver-tf-orig"]["status"] == "passive"
 
     _run(go())
+
+
+# ---------------------------------------------------------------------------
+# 10) Migration 53 — redundant Sinch termination trunks on the SAME IPs as the
+#     52 TF orig trunks: UNIQUE(source_ip) -> one ingress + one egress row per
+#     IP (partial unique indexes), two disabled seed rows, carrier_gateways
+#     cards, health view setids 11/12 + appended trunk_enabled. Kept LAST: it
+#     builds on the 45/52 state the previous test leaves behind (and
+#     re-applies 45/52 itself so it is self-contained under -k).
+# ---------------------------------------------------------------------------
+MIG_CARRIER_GATEWAYS = REPO / "docker" / "postgres" / "init" / "08_carrier_gateways.sql"
+MIG_SINCH_REDUNDANT_TERM = (
+    REPO / "docker" / "postgres" / "init" / "53_sinch_redundant_termination.sql")
+
+# Kamailio route[TO_CARRIER] Step 1a X-Carrier-IP egress validation.
+SBC_XCIP_SQL = (
+    "SELECT 1 FROM carrier_trunks WHERE host(source_ip) = '{ip}' "
+    "AND direction IN ('outbound','both') AND enabled = true LIMIT 1"
+)
+
+
+def test_migration53_redundant_termination(trunks_db, client, tokens):
+    pg = trunks_db["pg"]
+    db = trunks_db["db"]
+    hdr = _auth(tokens, "admin")
+
+    async def go():
+        owner = await asyncpg.connect(
+            host=pg.sock, port=pg.port, user="postgres", database="postgres",
+            statement_cache_size=0)
+        try:
+            await owner.execute(MIG_CARRIER_GATEWAYS.read_text())
+            await owner.execute(MIG_ORIG_PASSIVE.read_text())
+            await owner.execute(MIG_SINCH_TF_ORIG.read_text())
+            # 53 twice — idempotent (index IF NOT EXISTS, catalog-driven
+            # constraint drop, ON CONFLICT DO NOTHING seeds, view replace).
+            await owner.execute(MIG_SINCH_REDUNDANT_TERM.read_text())
+            await owner.execute(MIG_SINCH_REDUNDANT_TERM.read_text())
+            idx = {r["indexname"]: r["indexdef"] for r in await owner.fetch(
+                "SELECT indexname, indexdef FROM pg_indexes "
+                "WHERE tablename = 'carrier_trunks'")}
+            assert "carrier_trunks_source_ip_key" not in idx
+            assert "carrier_trunks_carrier_pop_key" in idx
+            assert "WHERE" in idx["carrier_trunks_ingress_ip_key"]
+            assert "WHERE" in idx["carrier_trunks_egress_ip_key"]
+            rows = {r["pop"]: dict(r) for r in await owner.fetch(
+                "SELECT pop, host(source_ip) AS ip, trunk_group, direction, "
+                "traffic_class, cps_limit, enabled, priority, priority_east, "
+                "priority_west, priority_central FROM carrier_trunks "
+                "WHERE carrier = 'sinch' AND pop IN ('denver-ld', 'atlanta-tf')")}
+            gws = {r["gateway_name"]: dict(r) for r in await owner.fetch(
+                "SELECT gateway_name, sip_proxy, enabled FROM carrier_gateways "
+                "WHERE gateway_name IN ('sinch_denver_ld', 'sinch_atlanta_tf')")}
+        finally:
+            await owner.close()
+
+        assert rows["denver-ld"] == {
+            "pop": "denver-ld", "ip": "206.146.100.25", "trunk_group": None,
+            "direction": "outbound", "traffic_class": "ld", "cps_limit": 25,
+            "enabled": False, "priority": 35, "priority_east": 35,
+            "priority_west": 35, "priority_central": 35}
+        assert rows["atlanta-tf"] == {
+            "pop": "atlanta-tf", "ip": "206.146.98.25", "trunk_group": None,
+            "direction": "outbound", "traffic_class": "tollfree", "cps_limit": 25,
+            "enabled": False, "priority": 45, "priority_east": 45,
+            "priority_west": 45, "priority_central": 45}
+        assert gws["sinch_denver_ld"] == {
+            "gateway_name": "sinch_denver_ld", "sip_proxy": "206.146.100.25",
+            "enabled": False}
+        assert gws["sinch_atlanta_tf"]["sip_proxy"] == "206.146.98.25"
+        assert gws["sinch_atlanta_tf"]["enabled"] is False
+
+        # --- API 409 mapping over the partial unique indexes -------------
+        r = await client.post("/v1/carrier-trunks", headers=hdr, json={
+            "carrier": "sinch", "pop": "denver-in2", "source_ip": "206.146.100.25",
+            "direction": "inbound"})
+        assert r.status_code == 409 and "ingress" in r.json()["detail"], r.text
+        r = await client.post("/v1/carrier-trunks", headers=hdr, json={
+            "carrier": "sinch", "pop": "atlanta-out2", "source_ip": "206.146.98.25",
+            "direction": "outbound"})
+        assert r.status_code == 409 and "egress" in r.json()["detail"], r.text
+        # 'both' on an IP that has either slot taken -> 409.
+        r = await client.post("/v1/carrier-trunks", headers=hdr, json={
+            "carrier": "sinch", "pop": "both-x", "source_ip": "206.146.98.25",
+            "direction": "both"})
+        assert r.status_code == 409 and "source_ip" in r.json()["detail"], r.text
+        # (carrier, pop) still unique.
+        r = await client.post("/v1/carrier-trunks", headers=hdr, json={
+            "carrier": "sinch", "pop": "denver-ld", "source_ip": "203.0.113.90",
+            "direction": "outbound"})
+        assert r.status_code == 409 and "carrier" in r.json()["detail"], r.text
+        # One inbound + one outbound row on a fresh IP is allowed; a third
+        # row in either slot is not; PUT into a taken slot is a 409 too.
+        r_in = await client.post("/v1/carrier-trunks", headers=hdr, json={
+            "carrier": "testco", "pop": "in", "source_ip": "203.0.113.91",
+            "direction": "inbound"})
+        r_out = await client.post("/v1/carrier-trunks", headers=hdr, json={
+            "carrier": "testco", "pop": "out", "source_ip": "203.0.113.91",
+            "direction": "outbound"})
+        assert r_in.status_code == 200 and r_out.status_code == 200, (r_in.text, r_out.text)
+        r = await client.put(f"/v1/carrier-trunks/{r_in.json()['id']}", headers=hdr,
+                             json={"direction": "both"})
+        assert r.status_code == 409 and "egress" in r.json()["detail"], r.text
+        for t in (r_in.json(), r_out.json()):
+            assert (await client.delete(f"/v1/carrier-trunks/{t['id']}",
+                                        headers=hdr)).status_code == 200
+
+        # --- SBC + FS contracts as the freeswitch role -------------------
+        conn = await asyncpg.connect(
+            host=pg.sock, port=pg.port, user="freeswitch", database="postgres",
+            statement_cache_size=0)
+        try:
+            # Ingress trust on the shared IPs still resolves the orig rows.
+            r = await conn.fetch(SBC_CONTRACT_SQL_TF.format(si="206.146.100.25"))
+            assert [tuple(x) for x in r] == [("sinch", "denver-tf-orig", 10, "tollfree")]
+            r = await conn.fetch(SBC_CONTRACT_SQL_TF.format(si="206.146.98.25"))
+            assert [tuple(x) for x in r] == [("sinch", "atlanta-tf-orig", 10, "tollfree")]
+            # Disabled -> absent from FS selection and X-Carrier-IP validation.
+            for zone in ZONES:
+                pops = [t["pop"] for t in await conn.fetch(
+                    TERM_CONTRACT_SQL.format(zone=zone))]
+                assert "denver-ld" not in pops and "atlanta-tf" not in pops
+            assert await conn.fetch(SBC_XCIP_SQL.format(ip="206.146.100.25")) == []
+        finally:
+            await conn.close()
+
+        # Owner enables both rows (admin PUT) -> they join every zone's list
+        # in priority order, X-Carrier-IP validates, ingress trust unchanged.
+        ids = {t["pop"]: t["id"] for t in (await client.get(
+            "/v1/carrier-trunks?carrier=sinch", headers=hdr)).json()["trunks"]}
+        for pop in ("denver-ld", "atlanta-tf"):
+            r = await client.put(f"/v1/carrier-trunks/{ids[pop]}", headers=hdr,
+                                 json={"enabled": True})
+            assert r.status_code == 200, r.text
+        conn = await asyncpg.connect(
+            host=pg.sock, port=pg.port, user="freeswitch", database="postgres",
+            statement_cache_size=0)
+        try:
+            for zone in ZONES:
+                term = [(t["pop"], t["eff_priority"]) for t in await conn.fetch(
+                    TERM_CONTRACT_SQL.format(zone=zone)) if t["carrier"] == "sinch"]
+                assert term == [("atlanta-ld", 30), ("denver-ld", 35),
+                                ("denver-tf", 40), ("atlanta-tf", 45)], (zone, term)
+            assert len(await conn.fetch(SBC_XCIP_SQL.format(ip="206.146.100.25"))) == 1
+            assert len(await conn.fetch(SBC_XCIP_SQL.format(ip="206.146.98.25"))) == 1
+            r = await conn.fetch(SBC_CONTRACT_SQL_TF.format(si="206.146.100.25"))
+            assert [tuple(x) for x in r] == [("sinch", "denver-tf-orig", 10, "tollfree")]
+        finally:
+            await conn.close()
+
+        # --- carrier_trunk_health: setids 11/12 admitted, 10 excluded,
+        #     trunk_enabled appended ------------------------------------
+        await db.execute(
+            """
+            INSERT INTO carrier_trunk_status (duid, sbc_id, name, ip, setid, is_up)
+            VALUES
+              ('sinch-denver-ld',  'east-sbc-1', 'Sinch Denver LD',  '206.146.100.25', 11, false),
+              ('sinch-atlanta-tf', 'east-sbc-1', 'Sinch Atlanta TF', '206.146.98.25',  12, true),
+              ('sbc-peer',         'east-sbc-1', 'SBC peer',         '10.142.0.101',   10, true)
+            ON CONFLICT (duid, sbc_id) DO UPDATE
+              SET is_up = EXCLUDED.is_up, updated_at = now()
+            """
+        )
+        r = await client.put(f"/v1/carrier-trunks/{ids['denver-ld']}", headers=hdr,
+                             json={"enabled": False})
+        assert r.status_code == 200, r.text
+        h = {r["duid"]: dict(r) for r in await db.fetch_all(
+            "SELECT * FROM carrier_trunk_health")}
+        assert "sbc-peer" not in h
+        assert (h["sinch-denver-ld"]["status"], h["sinch-denver-ld"]["trunk_enabled"]) == \
+            ("down", False)
+        assert (h["sinch-atlanta-tf"]["status"], h["sinch-atlanta-tf"]["trunk_enabled"]) == \
+            ("up", True)
+        assert h["sinch-denver-tf-orig"]["trunk_enabled"] is True
+        assert h["sinch-denver-tf-orig"]["status"] == "passive"
+
+    _run(go())

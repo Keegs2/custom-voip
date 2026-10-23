@@ -2129,7 +2129,7 @@
       "id": 11,
       "type": "geomap",
       "title": "US datacenters · live regions, carriers & traffic",
-      "description": "Geographic view of the 3 GCP datacenters (green server-rack icons, sized by calls in the last hour) and every carrier trunk (signal-tower icons) — Bandwidth (Dallas primary, LA secondary) plus all 6 Sinch PoPs: origination Denver (TG DNVTCOZIGR2_3278) and Chicago (CHCGIL24GR4_7412), toll-free origination Atlanta TF (ATLNGAQSGR2_7284) and Denver TF (DNVTCOZIGR2_3327; no OPTIONS probe — traffic-only health, migration 52), termination Atlanta LD (ATLNGAQSGR2_7214) and Denver TF (DNVTCOZIGR2_3282, toll-free 8YY only, priority below Bandwidth). Bandwidth + Sinch TERMINATION tower markers are colored by the SBCs' live Kamailio-dispatcher OPTIONS probes (carrier_trunk_health): Bandwidth GREEN when up, Sinch termination BLUE when up; RED when the trunk is down on every SBC or its status is stale (no fresh probe in 90s) / not yet reported. Sinch ORIGINATION tower markers (Denver orig + Chicago) use passive-OR-probe health instead (migration 45): BLUE when the probe is answered OR inbound calls landed via that PoP in the last 60 min, YELLOW 'PASSIVE' when neither — these orig-only TGs were provisioned Sinch→us and do not answer OPTIONS from unregistered IPs, so 'down' is unknowable and never rendered red; RED on an orig tower marker only means stale/unreported monitoring. Denver hosts BOTH a Sinch origination PoP and the TF termination trunk — the two tower markers are offset slightly (orig west / label above, TF east / label below) so both stay legible at TV distance. Probe coloring is proactive and independent of call traffic, so a dead probed carrier shows even at zero volume. Hover a tower marker for status, SBCs up / reporting, seconds since last probe, and (origination) inbound calls in the last hour. Datacenter up/down, VIP reachability and servers up/down are the zone tiles in the band below the map; Bandwidth + Sinch origination health/volume are the carrier tiles in that band.",
+      "description": "Geographic view of the 3 GCP datacenters (green server-rack icons, sized by calls in the last hour) and every carrier trunk (signal-tower icons) — Bandwidth (Dallas primary, LA secondary) plus all 6 Sinch PoPs: origination Denver (TG DNVTCOZIGR2_3278) and Chicago (CHCGIL24GR4_7412), toll-free origination Atlanta TF (ATLNGAQSGR2_7284) and Denver TF (DNVTCOZIGR2_3327; no OPTIONS probe — traffic-only health, migration 52), termination Atlanta LD (ATLNGAQSGR2_7214) and Denver TF (DNVTCOZIGR2_3282, toll-free 8YY only, priority below Bandwidth), plus the REDUNDANT termination trunks Sinch built on the 8XX-T orig IPs: Denver LD (206.146.100.25, DENSBX21, INT, redundant of Atlanta LD; duid sinch-denver-ld, dispatcher group 11) and Atlanta TF (206.146.98.25, ATLSBX21, OSAO 8YY only, redundant of Denver TF; duid sinch-atlanta-tf, group 12). The redundant pair renders GREY 'NOT ENABLED' while carrier_trunk_health.trunk_enabled = false (migration 53 — the carrier_trunks row is seeded enabled=false until Sinch confirms the build + trunk group IDs) — a probe answer or silence on a trunk we do not route to is not an outage — then BLUE up / RED down exactly like the other termination markers once the row is enabled; their labels sit above the tower (the primary termination labels sit below). Bandwidth + Sinch TERMINATION tower markers are colored by the SBCs' live Kamailio-dispatcher OPTIONS probes (carrier_trunk_health): Bandwidth GREEN when up, Sinch termination BLUE when up; RED when the trunk is down on every SBC or its status is stale (no fresh probe in 90s) / not yet reported. Sinch ORIGINATION tower markers (Denver orig + Chicago) use passive-OR-probe health instead (migration 45): BLUE when the probe is answered OR inbound calls landed via that PoP in the last 60 min, YELLOW 'PASSIVE' when neither — these orig-only TGs were provisioned Sinch→us and do not answer OPTIONS from unregistered IPs, so 'down' is unknowable and never rendered red; RED on an orig tower marker only means stale/unreported monitoring. Denver hosts BOTH a Sinch origination PoP and the TF termination trunk — the two tower markers are offset slightly (orig west / label above, TF east / label below) so both stay legible at TV distance. Probe coloring is proactive and independent of call traffic, so a dead probed carrier shows even at zero volume. Hover a tower marker for status, SBCs up / reporting, seconds since last probe, and (origination) inbound calls in the last hour. Datacenter up/down, VIP reachability and servers up/down are the zone tiles in the band below the map; Bandwidth + Sinch origination health/volume are the carrier tiles in that band.",
       "datasource": {
         "type": "postgres",
         "uid": "voip-cdr-pg"
@@ -2184,6 +2184,17 @@
           "editorMode": "code",
           "rawQuery": true,
           "rawSql": "SELECT COALESCE(h.name, z.name) AS name, z.lat, z.lon, CASE WHEN h.status = 'up' THEN 1 ELSE 0 END AS sinch_up, COALESCE(h.status,'unknown') AS status, COALESCE(h.up_sbcs,0) AS up_sbcs, COALESCE(h.total_sbcs,0) AS total_sbcs, CASE WHEN h.last_updated IS NULL THEN NULL ELSE round(EXTRACT(EPOCH FROM (now() - h.last_updated)))::int END AS probe_age_s FROM (VALUES ('sinch-atlanta-ld','Sinch Atlanta LD',33.75::float8,-84.39::float8),('sinch-denver-tf','Sinch Denver TF',39.74::float8,-104.30::float8)) AS z(duid,name,lat,lon) LEFT JOIN carrier_trunk_health h ON h.duid = z.duid ORDER BY z.duid;"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "postgres",
+            "uid": "voip-cdr-pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT z.name, z.lat, z.lon, CASE WHEN h.trunk_enabled = false THEN 3 WHEN h.status = 'up' THEN 1 ELSE 0 END AS sinch_up, CASE WHEN h.trunk_enabled = false THEN 'not enabled' ELSE COALESCE(h.status,'unknown') END AS status, COALESCE(h.up_sbcs,0) AS up_sbcs, COALESCE(h.total_sbcs,0) AS total_sbcs, CASE WHEN h.last_updated IS NULL THEN NULL ELSE round(EXTRACT(EPOCH FROM (now() - h.last_updated)))::int END AS probe_age_s FROM (VALUES ('sinch-denver-ld','Sinch Denver LD (redundant)',40.55::float8,-103.50::float8),('sinch-atlanta-tf','Sinch Atlanta TF (redundant)',34.45::float8,-83.55::float8)) AS z(duid,name,lat,lon) LEFT JOIN carrier_trunk_health h ON h.duid = z.duid ORDER BY z.duid;"
         }
       ],
       "options": {
@@ -2377,6 +2388,48 @@
                   "fontSize": 11,
                   "textAlign": "center",
                   "offsetY": 18
+                }
+              }
+            }
+          },
+          {
+            "type": "markers",
+            "name": "Sinch redundant termination (up=blue, not enabled=grey)",
+            "tooltip": true,
+            "location": {
+              "mode": "coords",
+              "latitude": "lat",
+              "longitude": "lon"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "E"
+            },
+            "config": {
+              "showLegend": false,
+              "style": {
+                "size": {
+                  "fixed": 12,
+                  "min": 2,
+                  "max": 15
+                },
+                "color": {
+                  "field": "sinch_up"
+                },
+                "opacity": 0.9,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/custom/signal-tower.svg"
+                },
+                "text": {
+                  "mode": "field",
+                  "field": "name",
+                  "fixed": ""
+                },
+                "textConfig": {
+                  "fontSize": 11,
+                  "textAlign": "center",
+                  "offsetY": -16
                 }
               }
             }
@@ -2600,6 +2653,10 @@
                     {
                       "color": "yellow",
                       "value": 2
+                    },
+                    {
+                      "color": "#8e8e8e",
+                      "value": 3
                     }
                   ]
                 }
@@ -2621,6 +2678,10 @@
                       "2": {
                         "text": "PASSIVE",
                         "index": 2
+                      },
+                      "3": {
+                        "text": "NOT ENABLED",
+                        "index": 3
                       }
                     }
                   }

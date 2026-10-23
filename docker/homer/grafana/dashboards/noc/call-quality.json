@@ -1711,7 +1711,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "ASR trend per carrier — hourly",
-      "description": "ASR per carrier_used per hour on the selected zone — one series per carrier value, so table-driven trunks (bandwidth-dallas, bandwidth-la, sinch-atlanta-ld, sinch-denver-tf, future carriers) appear automatically. Legacy enum rows are folded to readable labels: carrier_primary -> bandwidth-dallas, carrier_secondary -> bandwidth-la (the East/Central mapping; pre-fold West rows labeled these enums the same way even though West's primary PoP was LA). 'local'/'default'/NULL excluded. Divergence between lines pinpoints a carrier/PoP-side answer problem.",
+      "description": "ASR per carrier_used per hour on the selected zone — one series per carrier value, so table-driven trunks (bandwidth-dallas, bandwidth-la, sinch-atlanta-ld, sinch-denver-tf, the redundant sinch-denver-ld / sinch-atlanta-tf once enabled, future carriers) appear automatically. Legacy enum rows are folded to readable labels: carrier_primary -> bandwidth-dallas, carrier_secondary -> bandwidth-la (the East/Central mapping; pre-fold West rows labeled these enums the same way even though West's primary PoP was LA). 'local'/'default'/NULL excluded. Divergence between lines pinpoints a carrier/PoP-side answer problem.",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -2134,7 +2134,7 @@
       "id": 73,
       "type": "timeseries",
       "title": "Egress volume by carrier trunk — hourly",
-      "description": "Outbound B-leg volume per egress trunk per hour from carrier_used — the volume companion of the 'ASR trend per carrier' panel (same value-agnostic fold: carrier_primary -> bandwidth-dallas, carrier_secondary -> bandwidth-la; table-driven values like sinch-atlanta-ld / sinch-denver-tf pass through untouched, so a Sinch TERMINATION sign-off attempt shows here as its own series the hour it happens — carrier_used records the winning/last bridge attempt). 'local' (on-net) / 'default' / NULL excluded. Honours the Zone filter.",
+      "description": "Outbound B-leg volume per egress trunk per hour from carrier_used — the volume companion of the 'ASR trend per carrier' panel (same value-agnostic fold: carrier_primary -> bandwidth-dallas, carrier_secondary -> bandwidth-la; table-driven values like sinch-atlanta-ld / sinch-denver-tf / the redundant sinch-denver-ld / sinch-atlanta-tf pass through untouched, so a Sinch TERMINATION sign-off attempt shows here as its own series the hour it happens — carrier_used records the winning/last bridge attempt). 'local' (on-net) / 'default' / NULL excluded. Honours the Zone filter.",
       "gridPos": {
         "h": 8,
         "w": 8,

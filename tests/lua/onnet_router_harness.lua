@@ -505,6 +505,13 @@ local function run_scenario(sc, script_path)
         if type(path) == "string" and path:match("db_client") then
             return function() return fake_db end
         end
+        -- Shared termination lib (carrier_trunks fetch/cache/filter/dial
+        -- builder): resolve from the repo, loaded INTO the sandbox env so
+        -- its freeswitch/os references hit the stubs.
+        if type(path) == "string" and path:match("/lib/term_trunks%.lua$") then
+            local here = SCRIPT:match("^(.*)/[^/]+$") or "."
+            return loadfile(here .. "/lib/term_trunks.lua", "t", env)
+        end
         return loadfile(path)
     end
     env.package = setmetatable({

@@ -282,8 +282,10 @@ inferred from leg topology), built from these vars:
 - **Where:** `cdr_b_leg_block(attempt)` (inline in `inbound_router.lua` and
   `trunk_outbound.lua` — deliberately not a lib, so a load failure can never
   touch the call path) is spliced into the dial string of: both RCF off-net
-  failover loops (table-driven `carrier_trunks` and the legacy fallback) and
-  `trunk_outbound.lua` primary (attempt 1) + failover (attempt 2).
+  failover loops (table-driven `carrier_trunks` and the legacy fallback),
+  `trunk_outbound.lua` primary (attempt 1) + failover (attempt 2), and the
+  trunk 8YY `carrier_trunks` loop (passed to `term_trunks.run_attempts` as
+  `leg_block`; attempt = launched count).
 - **Never on:** `terminate_trunk` PBX delivery, local extension (`user/…`),
   `terminate_api`, hard rejects (603/483/API-retired) — those produce NO B row.
   Not added to the retired API paths (`api_outbound.lua`, `outbound_api.lua`,
@@ -380,10 +382,13 @@ Call flow:
 6. [If Redis available] Acquire channel (concurrent call limit via Redis sorted set)
 7. [If Redis available] Velocity check (CPM/daily limits)
 8. Set caller ID: outbound_caller_id = trunk DID (carrier auth), effective_caller_id = PBX original
-9. Bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
+9. **NANP 8YY destination** (`classify_destination(normalized_dest)` == `tollfree`):
+   carrier_trunks `tollfree` rows ONLY via `lib/term_trunks.lua` — see
+   "Trunk/API 8YY egress" below. Steps 10-11 are skipped.
+10. Otherwise bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
    (per-leg `[cdr_*]` CDR-split block, `cdr_leg_attempt=1` — see "CDR A/B leg split")
-10. Failover with X-Carrier=secondary if primary fails (`cdr_leg_attempt=2`)
-11. Set `api_hangup_hook=lua channel_release.lua` for channel cleanup
+11. Failover with X-Carrier=secondary if primary fails (`cdr_leg_attempt=2`)
+12. Set `api_hangup_hook=lua channel_release.lua` for channel cleanup
 
 ### api_outbound.lua
 
@@ -401,9 +406,41 @@ Call flow:
 5. Get per-call fee from tier (starter=$0.01, professional=$0.008, enterprise=$0.005)
 6. [If Redis] Velocity check with higher API limits (300 CPM, 5000 daily)
 7. **STIR/SHAKEN attestation (STEP 7.5, Task 2.2)** — see the contract below
-8. If webhook_url set: hand off to voice_webhook.lua (TwiML engine)
-9. If no webhook: bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
-10. Failover with X-Carrier=secondary
+8. If webhook_url set: hand off to voice_webhook.lua (TwiML engine) — unchanged for 8YY too
+9. If no webhook and the destination is NANP 8YY: carrier_trunks `tollfree` rows ONLY
+   (see "Trunk/API 8YY egress" below; no `[cdr_*]` block — the API path never had one;
+   failure after the attempts is log-only, same as the Bandwidth path)
+10. Otherwise (no webhook, non-8YY): bridge via `sofia/external/dest@sbc_proxy_ip:5060` with X-Carrier=primary
+11. Failover with X-Carrier=secondary
+
+### Trunk/API 8YY egress (2026-10, Sinch close-out)
+
+`trunk_outbound.lua` and `api_outbound.lua` terminate NANP 8YY destinations
+(NPAs 800/833/844/855/866/877/888 — `number_utils.classify_destination`) over the
+`carrier_trunks` `tollfree` rows with the SAME machinery as the RCF loop
+(`lib/term_trunks.lua`): same SQL, same 60s process-wide cache entry
+(`term_trunks_<zone>`, one DB fetch serves all three scripts), per-zone priority
+(`FS_ZONE`), strict class filter, 4-trunk cap post-filter, trunk-major attempts
+× {`SBC_PROXY_IP`, `SBC_PROXY_IP_FAILOVER`} with the cached TCP pre-check (a dead
+SBC is skipped and not counted in `cdr_leg_attempt`), `X-Carrier-IP` /
+`X-Carrier-Label` selector (Kamailio TO_CARRIER Step 1a validates it and disables
+its own carrier flip), `carrier_used=<carrier>-<pop>` of the winner and
+`term_trunks_source=db|fallback`. Each script keeps its own per-attempt vars
+(trunk: `ignore_early_media=false,sip_enable_soa=false,progress_timeout,call_timeout=60`
++ `[cdr_*]`; API: origination caller-ID pair + `progress_timeout,call_timeout=60,...`),
+caller-ID/Diversion/X-Original-CID/X-Attestation and `stir_outcome` capture.
+
+**Fail closed, never Bandwidth:** no enabled `tollfree` row, carrier_trunks
+unresolvable (DB error / zero outbound rows / bad cache → `term_trunks_source=fallback`)
+or `lib/term_trunks.lua` missing → ERR log, `term_class_blocked=tollfree`,
+`lua_routed=true`, hangup `NO_ROUTE_DESTINATION` (404). This is deliberately
+stricter than the RCF loop, whose class-blind legacy fallback still fails open on
+a DB blip. All-attempts-failed: trunk → `NORMAL_TEMPORARY_FAILURE` (503, as
+before); API → log only (as before). Non-8YY destinations never read
+carrier_trunks and are byte-identical to the pre-change scripts.
+
+Current order: 8YY = sinch/denver-tf (40) → sinch/atlanta-tf (45, migration 53,
+seeded disabled). Products are disabled in production today.
 
 **STIR/SHAKEN attestation contract (API product = A, Phase 2 Task 2.2).**
 Kamailio `route[TO_CARRIER]` Step 8.5 reads `X-Attestation` ∈ {A,B,div} as the
@@ -624,6 +661,27 @@ PostgreSQL client with connection pooling.
 
 All queries filter on `enabled=true` / `status='active'` **except `resolve_destination`**, which is deliberately unfiltered so the on-net resolver can distinguish "not ours" (0 rows) from "ours but disabled/suspended" (row present → hard reject).
 
+### lib/term_trunks.lua
+
+Shared table-driven termination (carrier_trunks) for `inbound_router.lua` (RCF,
+all classes), `trunk_outbound.lua` and `api_outbound.lua` (NANP 8YY only).
+Loaded with `loadfile()`; uses the mod_lua `freeswitch` global; no Redis.
+
+| Function | Purpose |
+|---|---|
+| `get(zone, db, tag)` | Cached (60s, `term_trunks_<zone>` = `<epoch>\|carrier,pop,ip,class;...`, negative `\|FALLBACK`) validated trunk list in SQL order, or nil (DB error / zero usable rows / unparsable cache). `tag` keeps each script's log prefix. |
+| `classify_destination(n, number_utils)` | `tollfree` (NANP 8YY) / `ld`; delegates to number_utils, identical inline fallback. |
+| `filter_for_class(list, cls)` | Strict TF: `tollfree` → only `tollfree` rows; `ld` → `any`/`ld`. |
+| `cap(list, max)` / `build_attempts(list, sbc1, sbc2)` | Post-filter cap (4); trunk-major {SBC-1, SBC-2} attempts, label `<carrier>-<pop>`. |
+| `dial_string(lead, attempt, call_id, leg, dest)` | `{<lead>,sip_h_X-Carrier-IP=..,sip_h_X-Carrier-Label=..,sip_h_X-CID=..,<inert timer trio>}<leg>sofia/external/<dest>@<sbc>:5060` |
+| `is_sbc_reachable(ip, port, tag)` | Cached TCP pre-check, same `sbc_health_<ip>` cache as inbound_router's inline copy. |
+| `select_tollfree(zone, db, tag)` / `run_attempts(opts)` | Trunk/API 8YY: eligible list + `db`/`fallback` source; the failover loop (pre-check, `carrier_used`, SUCCESS/ready breaks, stir reset/capture callbacks). |
+
+The list is never keyed by IP, so two rows sharing a `source_ip` (migration 53:
+an inbound 8XX-T orig row + an outbound redundant termination row) never
+collapse — and only outbound/both rows are ever selected. Harness:
+`tests/lua/onnet_router_harness.lua` resolves this lib from the repo.
+
 ### lib/redis_client.lua
 
 Redis client with connection pooling and atomic operations.
@@ -710,6 +768,7 @@ number_routing    VIEW: UNION ALL over rcf_numbers/api_dids/trunk_dids[/voicemai
 | RCF | primary | Dallas 67.231.2.12 | secondary (LA 216.82.238.134) |
 | API Calling | primary | Dallas 67.231.2.12 | secondary (LA 216.82.238.134) |
 | Trunk | primary | Dallas 67.231.2.12 | secondary (LA 216.82.238.134) |
+| Trunk / API, NANP 8YY destination | X-Carrier-IP / X-Carrier-Label (carrier_trunks `tollfree` rows) | Sinch denver-tf 206.146.100.26, then atlanta-tf 206.146.98.25 | next tollfree row × SBC; none enabled → NO_ROUTE_DESTINATION (never Bandwidth) |
 
 All outbound bridges: `sofia/external/{dest}@{sbc_proxy_ip}:5060` with `sip_h_X-Carrier={carrier}`. Kamailio reads X-Carrier in `route[TO_CARRIER]` to set `$rd` / `$du`.
 

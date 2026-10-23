@@ -191,7 +191,7 @@ fi
 # line-replacement mechanism as FS_AWARE_OPTIONS: substitute the
 # __TF_INGRESS_ENFORCE_DEFINE__ placeholder LINE with the real
 # `#!define TF_INGRESS_ENFORCE` (ON) or a comment (OFF), so the
-# `#!ifdef TF_INGRESS_ENFORCE` blocks (route[TF_CLASSIFY]/[TF_INGRESS_CHECK],
+# `#!ifdef TF_INGRESS_ENFORCE` blocks (route[TF_INGRESS_CHECK] — TF_CLASSIFY is always in,
 # their two call sites, the CARRIER_TRUST traffic_class column) compile in/out.
 # Only exactly "off" disables it (fail-safe toward the enforced class split —
 # a typo keeps enforcement ON; OFF renders byte-identical pre-TF logic).
@@ -201,6 +201,61 @@ if [ "${TF_INGRESS_ENFORCE:-on}" = "off" ]; then
 else
   TF_INGRESS_ENFORCE_DEFINE="#!define TF_INGRESS_ENFORCE"
   TF_INGRESS_ENFORCE=on
+fi
+
+# TF_TEST_TNS: toll-free ingress TEST-TN allowlist (comma-separated 10-digit
+# NANP numbers, DEFAULT EMPTY). Sinch's 8XX-T orig trunks are tested with
+# NON-8YY test TNs (5595335873 ATL, 5595335908 DEN), which rule
+# tf-trunk-non-8yy would 404. A listed TN is ADMITTED from a toll-free
+# origination trunk (route[TF_INGRESS_CHECK], rule=tf-test-tn-exempt, INFO
+# log); every other enforcement outcome is unchanged. Production deploy:
+# TF_TEST_TNS=5595335873,5595335908 in each SBC .env (replacing the old
+# TF_INGRESS_ENFORCE=off); delete the line once real TFNs are live.
+#
+# STRICT validation: whitespace is stripped, each comma-separated entry must
+# be exactly 10 digits in NANP shape (NPA and NXX both start 2-9); anything
+# else (letters, +1/11-digit forms, wrong length, regex metacharacters) is
+# DROPPED with a loud WARNING — garbage can never reach the regex or widen
+# the exemption. Duplicates collapse. The survivors render the
+# __TF_TEST_TNS_DEFINE__ placeholder LINE as
+#   #!define TF_TEST_TNS_RE "^[+]?1?(tn1|tn2)(;.*)?$"
+# i.e. the SAME normalization as route[TF_CLASSIFY] (optional '+', optional
+# leading 1, trailing ;params ignored) applied to $rU. Empty / all-invalid =>
+# a comment, the `#!ifdef TF_TEST_TNS_RE` block compiles OUT, behavior
+# identical to no allowlist. Inert (logged) when TF_INGRESS_ENFORCE=off.
+TF_TEST_TNS_RAW="${TF_TEST_TNS:-}"
+TF_TEST_TNS_LIST=""
+if [ -n "$(printf '%s' "${TF_TEST_TNS_RAW}" | tr -d '[:space:],')" ]; then
+  OLD_IFS="$IFS"
+  IFS=','
+  set -f  # no pathname expansion of operator input (e.g. a stray '*')
+  for tn in ${TF_TEST_TNS_RAW}; do
+    tn="$(printf '%s' "$tn" | tr -d '[:space:]')"
+    if [ -z "$tn" ]; then
+      continue
+    fi
+    if printf '%s' "$tn" | grep -Eq '^[2-9][0-9]{2}[2-9][0-9]{6}$'; then
+      case ",${TF_TEST_TNS_LIST}," in
+        *",${tn},"*) ;;
+        *) TF_TEST_TNS_LIST="${TF_TEST_TNS_LIST:+${TF_TEST_TNS_LIST},}${tn}" ;;
+      esac
+    else
+      echo "WARNING: TF_TEST_TNS entry '${tn}' is not a 10-digit NANP number (NPA/NXX 2-9, digits only, no +/1 prefix) — IGNORED (not exempted from toll-free ingress enforcement)" >&2
+    fi
+  done
+  set +f
+  IFS="$OLD_IFS"
+fi
+if [ -n "${TF_TEST_TNS_LIST}" ]; then
+  TF_TEST_TNS_DEFINE="#!define TF_TEST_TNS_RE \"^[+]?1?($(printf '%s' "${TF_TEST_TNS_LIST}" | tr ',' '|'))(;.*)?\$\""
+  if [ "${TF_INGRESS_ENFORCE}" = "off" ]; then
+    echo "NOTE: TF_TEST_TNS=${TF_TEST_TNS_LIST} is INERT — TF_INGRESS_ENFORCE=off compiles the toll-free ingress check out entirely" >&2
+  fi
+else
+  if [ -n "$(printf '%s' "${TF_TEST_TNS_RAW}" | tr -d '[:space:],')" ]; then
+    echo "WARNING: TF_TEST_TNS='${TF_TEST_TNS_RAW}' contained NO valid entries — no test-TN exemption is active" >&2
+  fi
+  TF_TEST_TNS_DEFINE="# TF_TEST_TNS not set — no toll-free ingress test-TN exemption"
 fi
 
 # E.164 egress normalization toggle. DEFAULT OFF (dark). Same compile-time
@@ -384,6 +439,30 @@ SINCH_TF_DEN_IP="${SINCH_TF_DEN_IP:-206.146.100.25}"
 SINCH_LD_IP="${SINCH_LD_IP:-206.146.98.26}"
 SINCH_TF_IP="${SINCH_TF_IP:-206.146.100.26}"
 
+# Sinch REDUNDANT TERMINATION signaling IPs (dispatcher keepalive groups
+# 11-12 ONLY, same posture as SINCH_LD_IP/SINCH_TF_IP: egress is table-driven,
+# no kamailio.cfg define). Sinch built these TGs on the SAME IPs as the 8XX-T
+# toll-free ORIGINATION trunks above (SINCH_TF_DEN_IP / SINCH_TF_ATL_IP) —
+# Sinch tells the two apart by OUR source IP (TERM TGs = the 6 SBC public
+# IPs, 8XX-T orig TGs = the 3 zone VIPs), which is why groups 11-12 carry no
+# socket= attr and route[TO_CARRIER] never VIP-sources a non-Bandwidth INVITE.
+#   Denver LD  ("INT", DENSBX21, redundant of Atlanta LD):  carrier_trunks sinch/denver-ld
+#   Atlanta TF ("OSAO" 8YY, ATLSBX21, redundant of Denver TF): carrier_trunks sinch/atlanta-tf
+# VALIDATED: a non-dotted-quad value would make dispatcher reject the whole
+# list (kamailio would not start), so garbage falls back to the production
+# default with a WARNING.
+SINCH_LD2_IP="${SINCH_LD2_IP:-206.146.100.25}"
+SINCH_TF2_IP="${SINCH_TF2_IP:-206.146.98.25}"
+IPV4_RE='^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$'
+if ! printf '%s' "${SINCH_LD2_IP}" | grep -Eq "${IPV4_RE}"; then
+  echo "WARNING: SINCH_LD2_IP='${SINCH_LD2_IP}' is not a dotted-quad IPv4 address — using the production default 206.146.100.25" >&2
+  SINCH_LD2_IP=206.146.100.25
+fi
+if ! printf '%s' "${SINCH_TF2_IP}" | grep -Eq "${IPV4_RE}"; then
+  echo "WARNING: SINCH_TF2_IP='${SINCH_TF2_IP}' is not a dotted-quad IPv4 address — using the production default 206.146.98.25" >&2
+  SINCH_TF2_IP=206.146.98.25
+fi
+
 # FS_PUBLIC_IP: FreeSWITCH VM's own public IP for RTP media.
 # Used in SDP body rewrites. Different from EXTERNAL_SIP_IP (NLB VIP) because
 # RTP goes directly to/from FS, not through the NLB.
@@ -460,6 +539,12 @@ sed -i "s|__E164_EGRESS__|${E164_EGRESS_DEFINE}|" "$CONFIG"
 # Toll-free ingress toggle: same fixed-literal line replacement (no '|', '&'
 # or '\' in either string).
 sed -i "s|__TF_INGRESS_ENFORCE_DEFINE__|${TF_INGRESS_ENFORCE_DEFINE}|" "$CONFIG"
+# TF_TEST_TNS: the rendered define contains '|' (regex alternation) and '#',
+# so this substitution uses '@' as the sed delimiter. The value is built only
+# from validated digits plus fixed text, but sed-escape '\', '&' and '@'
+# anyway so the replacement can never be reinterpreted.
+TF_TEST_TNS_DEFINE_SED="$(printf '%s' "${TF_TEST_TNS_DEFINE}" | sed -e 's/[\\&@]/\\&/g')"
+sed -i "s@__TF_TEST_TNS_DEFINE__@${TF_TEST_TNS_DEFINE_SED}@" "$CONFIG"
 # UDP MTU fallback toggle + value. Both replacement strings are fixed literals
 # (the define/comment line and a sanitized integer) with no '|', '&' or '\'.
 # The value is substituted even when the toggle is OFF (renders 0 inside the
@@ -510,8 +595,12 @@ sed -i "s|__SINCH_TF_DEN_IP__|${SINCH_TF_DEN_IP}|g" "$CONFIG"
 # X-Carrier-IP), so DELIBERATELY only the dispatcher file is templated.
 sed -i "s|__SINCH_LD_IP__|${SINCH_LD_IP}|g" "$DISPATCH"
 sed -i "s|__SINCH_TF_IP__|${SINCH_TF_IP}|g" "$DISPATCH"
+# Sinch REDUNDANT TERMINATION IPs — dispatcher.list ONLY (groups 11-12), same
+# reasoning as the line above.
+sed -i "s|__SINCH_LD2_IP__|${SINCH_LD2_IP}|g" "$DISPATCH"
+sed -i "s|__SINCH_TF2_IP__|${SINCH_TF2_IP}|g" "$DISPATCH"
 
-echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_TF_ATL=${SINCH_TF_ATL_IP}, SINCH_TF_DEN=${SINCH_TF_DEN_IP}, TF_INGRESS_ENFORCE=${TF_INGRESS_ENFORCE}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, E164_EGRESS=${E164_EGRESS}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
+echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_TF_ATL=${SINCH_TF_ATL_IP}, SINCH_TF_DEN=${SINCH_TF_DEN_IP}, TF_INGRESS_ENFORCE=${TF_INGRESS_ENFORCE}, TF_TEST_TNS=${TF_TEST_TNS_LIST:-<none>}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, SINCH_LD2=${SINCH_LD2_IP}, SINCH_TF2=${SINCH_TF2_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, E164_EGRESS=${E164_EGRESS}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
 echo "Kamailio peer reply hand-off: SBC_PEER_HANDOFF=${SBC_PEER_MODE} (peer=${SBC_PEER_ECHO}; on = transaction-less external replies received on the VIP socket are handed raw to the peer while dispatcher group 10 reads it UP, off = today's stateless via2 forward)"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
