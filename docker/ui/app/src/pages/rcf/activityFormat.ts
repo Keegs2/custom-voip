@@ -8,7 +8,6 @@
  * midnight is always labelled with that local day, never its UTC neighbour.
  */
 import type { ActivityBucket, ActivityRange } from '../../types/cdrActivity';
-import type { RcfEntry } from '../../types/rcf';
 import { fmt } from '../../utils/format';
 
 // ─── Range presets ───────────────────────────────────────────────────────────
@@ -184,8 +183,22 @@ export function plural(n: number, one: string, many: string): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`;
 }
 
-/** "+1 (617) 454-4217 — Boston office" for a DID, or null when not in the list. */
-export function didLabel(entries: readonly RcfEntry[], did: string | null): string | null {
-  const entry = did ? entries.find((e) => e.did === did) : undefined;
-  return entry ? `${fmt(entry.did)}${entry.name ? ` — ${entry.name}` : ''}` : null;
+/**
+ * One number the Call Activity picker offers — an RCF entry on the /rcf
+ * console, or any product's number on the dashboard's account-wide view.
+ */
+export interface PickerNumber {
+  /** E.164. */
+  number: string;
+  name?: string | null;
+  /** Product id (config/products.ts); omitted = call forwarding. */
+  product?: string;
+  /** Switched on — drives the status dot; omitted = no dot. */
+  enabled?: boolean;
+}
+
+/** "+1 (617) 454-4217 — Boston office" for a number, or null when not in the list. */
+export function didLabel(entries: readonly PickerNumber[], did: string | null): string | null {
+  const entry = did ? entries.find((e) => e.number === did) : undefined;
+  return entry ? `${fmt(entry.number)}${entry.name ? ` — ${entry.name}` : ''}` : null;
 }

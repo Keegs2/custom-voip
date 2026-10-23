@@ -52,6 +52,7 @@ src/
     esl_client.py            # FreeSWITCH ESL TCP client
     bandwidth_client.py      # Bandwidth Numbers API (OAuth2 + XML parsing)
     tenant_redaction.py      # What a CUSTOMER may see of a call (CDR allowlist, minutes-only durations)
+    customer_numbers.py      # The ONE definition of "a customer's numbers" (number_routing view; pure SQL builders + shaping)
     ledger.py                # Append-only ledger (migration 37) — read by billing.py; no in-tree writer since the payments demo was removed
     call_pricing.py          # Rate-deck lookups shared with rates.py (quote_call_price now unused)
     reporting.py             # Customer Reporting pure logic (date/tz validation, buckets, missed reasons, grades, CSV)
@@ -145,10 +146,21 @@ Tests: `tests/test_reports.py` (ephemeral PG 16).
   walks every response (and the CSV text) for forbidden keys/values.
 - **"The customer's number"** = `destination` for inbound, `caller_id` for
   outbound (anything not `'outbound'` is inbound), canonicalized in SQL with the
-  `31_did_canonicalize.sql` CASE, matched against `rcf_numbers.did` +
-  `trunk_dids.did` (via `sip_trunks.customer_id`). The `numbers` filter is
+  `31_did_canonicalize.sql` CASE (`customer_numbers.cdr_customer_number_sql`),
+  matched against **the customer's numbers** = `customer_numbers.owned_numbers_sql`
+  over the `number_routing` view (every product: rcf, trunk, voicemail, future
+  arms; api hidden — see "Customer numbers" below). Never re-list product
+  tables in reports.py. The `numbers` filter is
   canonicalized in Python and intersected with the owned set IN SQL (`sel` CTE)
   — it can only narrow; a not-owned/junk entry is dropped, none left = empty.
+- **Products:** `/calls` rows carry `product` (the CDR's `product_type`); a
+  call a voicemail box answered is `outcome: "answered"` with
+  `outcome_label: "Answered by voicemail"` (`reporting.outcome_fields`; owner
+  decision O2 — counts as answered, also in the CSV Outcome cell).
+  `/my-numbers` = `{number, name, product, enabled, forwards_to}`
+  (`customer_numbers.shape_number`) and is ALSO the dashboard's numbers list.
+  An on-net RCF -> voicemail forward belongs to the DIALED RCF number (CDR
+  `destination` = first-hop DID); the mailbox's own row counts direct dials.
 - **Query shape (all endpoints):** one `WITH owned, sel, base, f` prelude; bind
   layout `$1 customer_id::int, $2 start::date, $3 end::date, $4 tz::text,
   $5 numbers::text[]` (+ endpoint extras `$6…`), every bind explicitly cast.
@@ -178,6 +190,72 @@ Tests: `tests/test_reports.py` (ephemeral PG 16).
 - **Adding a metric?** Aggregate in SQL inside the existing passes (no N+1, no
   per-row Python loops over CDRs), minutes through `tenant_redaction`, and extend
   `assert_report_safe` coverage in the test.
+
+## Customer numbers (`services/customer_numbers.py` — the ONE definition)
+
+Plan: `docs/CUSTOMER_NUMBERS_HOLISTIC_PLAN.md`. "A customer's numbers" is read
+from the `number_routing` view (22 + 54's voicemail arm) — the oracle
+FreeSWITCH routes on — through ONE pure helper, never a hand-written union of
+product tables. Readers: Reporting (`/reports/numbers`, `/reports/my-numbers`,
+the `numbers` filter), the dashboard (via `/reports/my-numbers`),
+`/customers/me` `counts.numbers`, `/numbers/owned` (admin), `/numbers/my`
+(fallback arm, raw view) and `/search/did` (raw view, admin).
+
+- **Owned** = on the account in ANY product, enabled or not: disabled RCF
+  numbers, disabled trunks, suspended mailboxes and mailboxes of a customer
+  with `voicemail_enabled=false` are IN with `enabled: false`; a deleted
+  mailbox is OUT (54's arm filters it); customer status is NOT applied.
+- **`HIDDEN_PRODUCTS = ("api",)`** — API Calling is retired: hidden from every
+  customer-facing list and the admin counts regardless of
+  `API_CALLING_ENABLED` (the arm stays in the view — FS must 603 it — and in
+  `/numbers/my` + `/search/did`). It is pruned at plan time (constant-false
+  arm), so `api_dids` is not even read.
+- **`PRECEDENCE`** (rcf, api, trunk, voicemail) = FreeSWITCH's STEP-1 order:
+  a DID in two product tables is listed once, the earlier product wins; also
+  the display order of every `by_product` object (unknown products after, by
+  name).
+- **Tenant shape** = `TENANT_NUMBER_KEYS` (`number, name, product, enabled,
+  forwards_to`; `forwards_to` rcf only). `product_ref_id` / `customer_status`
+  are never selected; `customer_id` only reaches the admin `/numbers/owned`.
+- **Performance:** `owned_numbers_sql("$1::int")` pushes `customer_id = $1`
+  into every UNION ALL arm: `idx_rcf_customer`, `idx_trunks_customer` ->
+  `idx_trunk_dids_trunk` (migration 57), `idx_voicemail_boxes_customer`
+  (`idx_api_did_customer` for the raw view). It is a tiny CTE; the CDR scan
+  stays on `idx_cdrs_customer_time`. `tests/test_customer_numbers.py` EXPLAINs
+  it on production-like volume (default planner too).
+- **CDR filters:** `product_filter()` — `product_type` `all`/empty = no
+  filter (`/cdrs`, `/cdrs/summary`, `/cdrs/activity`; `/activity` still
+  defaults to rcf when omitted). `parse_number_param()` + `cdr_customer_number_sql()`
+  back the `number` param (exact canonical match on the customer-side number,
+  422 `number must be a phone number`). The SQL canonicalizer agrees with
+  `utils.phone.normalize_e164` on every CDR-shaped input; where they differ
+  (formatted international, too-short `+`) SQL passes the raw value through —
+  it can drop a call from a number, never attribute it to the wrong one.
+
+### How a future product enrolls (checklist)
+
+1. **Migration** (product table, then `CREATE OR REPLACE VIEW number_routing`):
+   - add ONE arm, with every existing arm copied verbatim — same column list,
+     order and types (CREATE OR REPLACE refuses any change);
+   - arm columns: `product_type='<p>'` (a plain `^[a-z_]+$` word), `customer_id`,
+     `product_ref_id`, `product_enabled` (the CUSTOMER-visible on/off),
+     `product_name` (a **customer-safe label** — tenants see it), `forward_to`
+     (NULL unless it forwards);
+   - index the arm's customer path (`<table>(customer_id)`; see 57) and its
+     `did` point lookup (FS);
+   - `did_inventory_product_type_check += '<p>'`;
+   - a `scripts/db/check_migrations.sql` row.
+2. **FreeSWITCH:** `terminate_<p>` + a `TERMINATORS` entry in `inbound_router.lua`.
+3. **Automatic from there:** Reporting numbers / picker / `numbers` filter, the
+   dashboard numbers card + Numbers KPI + activity picker, `/customers/me`
+   `counts.numbers`, `/numbers/owned`, `/numbers/my`, `/search/did` (generic
+   `{name, enabled}` details) — no backend change.
+4. **Optional UI polish:** one entry in `docker/ui/app/src/config/products.ts`
+   (unknown products render with a title-cased fallback).
+5. **Per product by design** (not lists of numbers): `number_inventory`
+   assign / unassign / reconcile, `rate_cdr()`, the billing-estimate line, the
+   product's own console page. Add a product-specific `details` branch to
+   `/search/did` only if admins need more than `{name, enabled}`.
 
 ## main.py -- Application Lifecycle
 
@@ -227,7 +305,8 @@ Two endpoints, no auth. Both check DB (`SELECT 1`) and Redis (`ping`). Returns `
 ### customers.py
 CRUD for the `customers` table. Account types: `rcf`, `api` (RETIRED — create → 422 unless `API_CALLING_ENABLED`), `trunk`, `hybrid` (= RCF + SIP Trunking), `ucaas`.
 - **Billing estimate** (`compute_billing_estimate`, `/me/billing` + `/{id}/billing`): RCF line (by provisioned rcf_numbers count), SIP Trunking line (trunk/hybrid), API Calling line ONLY when `API_CALLING_ENABLED` — retired ⇒ hybrid (Granite Telephony) shows rcf + trunk only.
-- **`/me` counts**: `{rcf, api_dids, trunks}` — `api_dids` is 0 (not queried) while API Calling is retired.
+- **`/me` counts**: `{rcf, api_dids, trunks, numbers}` — `api_dids` is 0 (not queried) while API Calling is retired; `numbers = {total, by_product}` is product-agnostic (`customer_numbers.count_by_product_sql` + `numbers_count`; zero-count products omitted, api hidden even with the flag on).
+- **Voicemail billing:** NO estimate line (decision D5 / owner decision O1); the commented-out block in `compute_billing_estimate` shows the shape if it is ever priced (count live boxes only).
 - Delete is transactional: wraps cascading deletes of `rcf_numbers`, `api_dids`, `trunk_dids`, `trunk_auth_ips`, `sip_trunks`, `api_credentials` in a single `conn.transaction()`.
 - Delete refuses (409, never a FK 500) a customer with a live voicemail mailbox or active voicemail key ("Erase their voicemail first") and, after a crypto-erase, a customer whose erased key row is the permanent tombstone (migration 54 `ON DELETE RESTRICT`). Guarded by `voicemail_schema_present` so it works before 54 is applied.
 - Balance operations: `GET /{id}/balance` computes `available = balance + credit_limit`, `POST /{id}/credit` adds to balance.
@@ -272,14 +351,14 @@ CDR ingestion and querying. The largest router file.
   - **Three-tier fallback** (`_cdr_insert_sql(with_stir_outcome, with_call_legs)` / `_execute_cdr_insert`): full 60 → pre-48 57 → pre-47 55, strict tail truncations, on `asyncpg.UndefinedColumnError` naming a 48 / 47 column; ERROR once per 300s per tier. Other missing columns are NOT swallowed. `allow_fallback=False` for B rows (dropped instead — a B row without `leg` would count as a call).
   - **A/B leg split** (contract `docs/CDR_LEG_SPLIT_CONTRACT.md`): A-legs write `leg='A'`, `call_id=uuid`. Topology B-leg (`stir_outcome.b_leg_a_uuid`) + `cdr_leg=B` + `cdr_carrier_leg=true` + `CDR_B_LEG_ROWS` on → `_b_leg_row_context` (attribution ONLY from `cdr_*` vars; `cdr_customer_id`/`cdr_call_id`/`cdr_product_type` required else dropped; direction forced `outbound`) → `_insert_b_leg_row`. Otherwise no row. `_b_leg_stir_update`: STIR UPDATE onto the A-leg only from an ANSWERED carrier leg. `_store_call_attestation`: A-leg only. `cdr_leg=B` on a topology A-leg → kept as the A row (ERROR). Result status for every B-leg body is `b_leg`.
   - Always returns 200 to prevent FreeSWITCH retry storms
-- **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type, direction, destination, date range, rated_only). Defaults to last 24 hours. Tenant callers get the redacted allowlist shape (see the Tenant redaction section). **One row per call by default** (`ONE_ROW_PER_CALL_SQL` = `leg IS DISTINCT FROM 'B'`, applied in `_build_cdr_filters`, so list + total + all summary groupings agree). Staff-only `leg=calls|all|b` (`LegView`) and `call_id=` (all legs of one call: `(call_id = $1 OR uuid = $1)` — chosen over `COALESCE(call_id, uuid) = $1` so idx_cdrs_call_id + idx_cdrs_uuid BitmapOr; REPLACES the date window; page capped at `CALL_ID_LOOKUP_LIMIT`=50). Staff rows add `leg`, `call_id` (`COALESCE(call_id, uuid)`), `leg_attempt` (`_STAFF_LEG_COLUMNS_SQL`).
+- **Query**: `GET /v1/cdrs` with filters (customer, trunk, product_type — `all`/empty = every product —, direction, destination, `number` — the customer's number on the call, exact canonical, `customer_numbers.cdr_customer_number_sql` —, date range, rated_only). Defaults to last 24 hours. Tenant callers get the redacted allowlist shape (see the Tenant redaction section). **One row per call by default** (`ONE_ROW_PER_CALL_SQL` = `leg IS DISTINCT FROM 'B'`, applied in `_build_cdr_filters`, so list + total + all summary groupings agree). Staff-only `leg=calls|all|b` (`LegView`) and `call_id=` (all legs of one call: `(call_id = $1 OR uuid = $1)` — chosen over `COALESCE(call_id, uuid) = $1` so idx_cdrs_call_id + idx_cdrs_uuid BitmapOr; REPLACES the date window; page capped at `CALL_ID_LOOKUP_LIMIT`=50). Staff rows add `leg`, `call_id` (`COALESCE(call_id, uuid)`), `leg_attempt` (`_STAFF_LEG_COLUMNS_SQL`).
 - **Summary**: `GET /v1/cdrs/summary` grouped by day, hour, or destination prefix — same builder, same `leg`/`call_id` semantics.
 - **Other one-row-per-call surfaces** (`leg IS DISTINCT FROM 'B'`): `trunks.py` last-hour stats (tenant + staff), `sbc.py` `/stats`, `search.py` DID call history, `calls.py` completed-call lookup, `reports.py` (all), `scripts/backup/asr_guard.sh` (no longer depends on `direction`). The `call_attestations` → `cdrs` LATERAL joins match by `uuid` = the A-leg uuid, so they never hit a B row.
 - **Rating**: `POST /v1/cdrs/{uuid}/rate` calls a PostgreSQL function `rate_cdr()`.
 
 ### search.py
 Admin-only search tools. Uses `require_admin` dependency on all endpoints.
-- **DID search**: `GET /v1/search/did?q=617` -- UNION across `rcf_numbers`, `api_dids`, `trunk_dids` with LIKE matching on normalized digits. Returns product type, customer info, and product-specific details as JSONB.
+- **DID search**: `GET /v1/search/did?q=617` -- rows from the `number_routing` view (every product incl. voicemail and api) JOIN customers, LIKE on normalized digits, paged FIRST (`ORDER BY did, product precedence`), then `details` built for the page only by correlated sub-selects on `product_ref_id` / `trunk_id`: rcf/api/trunk keys + `status` byte-identical to the old per-table UNION (golden-compared in `tests/test_customer_numbers.py`), voicemail `{label, mailbox_id, enabled}`, a future product `{name, enabled}`.
 - **DID call history**: `GET /v1/search/did/{did}/calls` -- matches CDRs where the DID appears as caller or callee.
 - **User search**: `GET /v1/search/user?q=john` -- ILIKE on name/email, optionally scoped to a customer_id.
 - **Users by customer**: `GET /v1/search/user/by-customer/{id}` -- all users for a customer.
@@ -289,7 +368,8 @@ Admin-only search tools. Uses `require_admin` dependency on all endpoints.
 Complete DID lifecycle management backed by the `did_inventory` table.
 - **Admin endpoints**: `GET /inventory` (paginated, filterable — incl. `carrier=`, matching the COALESCEd attribution so `carrier=bandwidth` also finds legacy NULL rows), `GET /stats` (counts by status/product/state/carrier), `POST /sync` (upsert from Bandwidth API, then reconciles product tables), `POST /reconcile` (reconcile `did_inventory` against rcf/api/trunk product tables without calling Bandwidth — internal `_reconcile_product_tables()`; never touches `source`/`carrier_trunk_id`), `POST /add` (manual DID intake), `PUT /{did}/carrier-trunk` (re-associate/clear attribution), `POST /{did}/assign`, `POST /{did}/unassign`
 - **Manual intake + carrier attribution (migrations 41 + 42)**: every row carries `source` (`bandwidth_sync`|`manual`), nullable `carrier_trunk_id` FK → `carrier_trunks`, and a first-class `carrier` column (42; NULL = legacy implicit Bandwidth). Item/filter/stats carrier is `COALESCE(d.carrier, ct.carrier, 'bandwidth')` (`_CARRIER_COALESCE`; the item shape folds it in Python via `_shape_item` — d.* already emits a `carrier` column, and `dict(asyncpg.Record)` resolves duplicate names to the FIRST occurrence, so a SQL alias would silently return the raw NULL). `POST /add` takes `{dids: [1..500], carrier (REQUIRED, lowercased), carrier_trunk_id?, notes?}`: the carrier must have ≥1 ENABLED trunk row (404 "unknown carrier" otherwise — a carrier with only disabled trunks counts as unknown); the optional trunk must belong to that carrier and be enabled (422 otherwise — body-consistency, unlike the 404-able carrier). Normalizes via the shared `utils.phone` E.164 helper, dedupes in-batch, `ON CONFLICT DO NOTHING`, inserts `carrier` + nullable `carrier_trunk_id`, and returns the EXACT envelope `{"added": [e164], "skipped_existing": [e164], "invalid": [raw], "count": n}` (TED UI codes against it). Added DIDs land `available`/`manual` and flow through the existing assign path unchanged. **Sync ownership guard**: `POST /sync` only manages `source='bandwidth_sync'` rows (`_compute_sync_sets()`) — manual rows never appear in its report-only `removed` list and are never metadata-updated, even when their DID shows up in the Bandwidth feed (sync-inserted rows leave `carrier` NULL → render 'bandwidth'). `PUT /{did}/carrier-trunk` accepts a disabled trunk (attribution is metadata; only NEW intake demands an enabled one); setting a trunk also syncs `d.carrier` to that trunk's carrier, clearing (null) drops only the trunk and leaves `d.carrier` as-is; returns the full inventory-item shape.
-- **Customer endpoints**: `GET /available` (browse available DIDs), `GET /my` (customer's assigned numbers, includes `status`), `POST /{did}/request` (reserve a number for admin review), `POST /{did}/request-release`, `POST /{did}/cancel-release`
+- **Owned numbers**: `GET /owned` (admin) — counts from `number_routing` via `customer_numbers.owned_counts_sql` / `shape_owned_counts` (`did_inventory` lags: `POST /rcf` and `POST /trunks/{id}/dids` never write it). `/stats` stays the inventory/lifecycle view.
+- **Customer endpoints**: `GET /available` (browse available DIDs), `GET /my` (customer's assigned numbers, includes `status`; `did_inventory` rows UNION ONE `number_routing` fallback arm with the same `NOT IN did_inventory` predicates as before — every product incl. voicemail/api, fallback-only rows `assigned_at: null`), `POST /{did}/request` (reserve a number for admin review), `POST /{did}/request-release`, `POST /{did}/cancel-release`
 - **Release workflow (request-based)**: customers cannot unassign directly. `POST /{did}/request-release` (tenant-scoped: non-admins only their own DIDs, cross-tenant → 404 no-leak; 409 unless status is 'assigned') sets `assigned` → `release_requested` and appends an audit line to `notes`. Admin approves via `POST /{did}/unassign` (its status guard accepts 'assigned', 'reserved', and 'release_requested') or denies via `POST /{did}/cancel-release` (back to 'assigned'; the customer can use it to withdraw). The `release_requested` status is added to the CHECK constraint by `34_release_requested_status.sql`; `GET /my` includes it in its status filters so pending-release numbers still show for the customer.
 - Assign creates the product record (e.g., `rcf_numbers` row for RCF) inside a transaction
 - **API Calling retired:** `AssignRequest` / `NumberRequest` reject `product_type='api'` (422 "API Calling is retired: …") unless `API_CALLING_ENABLED`; `/inventory`, `/my`, `/stats`, `/reconcile` and `/unassign` still handle existing api rows (admin cleanup)

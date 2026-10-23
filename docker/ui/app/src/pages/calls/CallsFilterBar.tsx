@@ -23,6 +23,10 @@
  *   onClearCallId), and Export CSV.
  * - Tenants: none of those; the Trunk selector stays (listTrunks is
  *   tenant-scoped, so tenants only ever see their own trunks).
+ * - Product "Voicemail": always for staff; for everyone else only while
+ *   Visual Voicemail is on for their account (the same summary query and
+ *   cache key as the sidebar — an admin in "View as Customer" reads the
+ *   previewed customer's).
  *
  * Time-range semantics (state + serialization live in ./callsFilters —
  * unchanged):
@@ -42,6 +46,8 @@ import { Download, Search, SlidersHorizontal, X } from 'lucide-react';
 import { listCustomers } from '../../api/customers';
 import { listTrunks } from '../../api/trunks';
 import { API_CALLING_ENABLED } from '../../config/features';
+import { useAuth } from '../../contexts/AuthContext';
+import { staffScope, tenantScope, useVoicemailSummary } from '../voicemail/voicemailData';
 import {
   PRESET_LABELS,
   ROWS_MODE_OPTIONS,
@@ -88,6 +94,15 @@ export function CallsFilterBar({
   onClearCallId,
 }: CallsFilterBarProps) {
   // ALL hooks unconditionally at the top — React #310 prevention.
+  const { effectiveCustomer, isActualAdmin } = useAuth();
+  // Scope rule mirrors the Sidebar so both share one cache entry: a tenant's
+  // own account (no customer_id), or the customer an admin previews.
+  const voicemailScope = effectiveCustomer
+    ? isActualAdmin
+      ? staffScope(effectiveCustomer.id)
+      : tenantScope(effectiveCustomer.id)
+    : staffScope('all');
+  const voicemailSummary = useVoicemailSummary(voicemailScope, !isStaff && effectiveCustomer !== null);
   const { data: customersData } = useQuery({
     queryKey: ['customers-all'],
     queryFn: () => listCustomers({ limit: 500 }),
@@ -154,6 +169,9 @@ export function CallsFilterBar({
     (filters.zone ? 1 : 0) + (filters.rows !== 'calls' ? 1 : 0) + (filters.rated_only ? 1 : 0);
   const activeRows = ROWS_MODE_OPTIONS.find((o) => o.id === filters.rows) ?? ROWS_MODE_OPTIONS[0];
   const showCallChip = isStaff && filters.call_id !== '';
+  // Keep the option while it is the selected filter, so the select never shows a value it can't name.
+  const showVoicemail =
+    isStaff || voicemailSummary.data?.enabled === true || filters.product_type === 'voicemail';
 
   /* ── Mutators ────────────────────────────────────────────────────── */
 
@@ -235,6 +253,7 @@ export function CallsFilterBar({
               {/* API Calling is retired — its product filter only shows while enabled. */}
               {API_CALLING_ENABLED && <option value="api">API</option>}
               <option value="trunk">Trunk</option>
+              {showVoicemail && <option value="voicemail">Voicemail</option>}
             </select>
           </div>
 

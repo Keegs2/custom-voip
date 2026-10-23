@@ -42,8 +42,18 @@ insanely easy, ELI5 view of a customer's own calls — built from the platform's
 | `customer_id` | int | staff only (required for staff; ignored for tenants) |
 
 "The customer's number on a call" = `destination` for inbound, `caller_id` for
-outbound, matched against the customer's `rcf_numbers.did` + `trunk_dids.did`
-(via `sip_trunks.customer_id`) — canonicalize like `31_did_canonicalize.sql`.
+outbound — canonicalize like `31_did_canonicalize.sql` — matched against **the
+customer's numbers**: the ONE product-agnostic definition in
+`docker/api/src/services/customer_numbers.py`, read from the `number_routing`
+view (the oracle FreeSWITCH routes on): every product arm — rcf, SIP trunk,
+voicemail and any future product — enabled or not (a disabled RCF number, a
+disabled trunk, a suspended mailbox are still theirs); a deleted mailbox is
+not; `api` (API Calling, retired) is hidden; a DID in two product tables is
+listed once (rcf wins). Plan: `docs/CUSTOMER_NUMBERS_HOLISTIC_PLAN.md`.
+A call forwarded on-net from an RCF number to a voicemail box belongs to the
+number the caller DIALED (the CDR `destination` is the first-hop RCF DID), so
+it counts under that RCF number's row; the mailbox's own row counts direct
+dials only.
 
 Missed-call reasons (plain English; `hangup_cause` → key):
 
@@ -110,6 +120,7 @@ Per customer number, sorted by calls desc, max 500.
 ```
 `forwards_to` = the number's CURRENT forwarding target (rcf only, else null) — the
 UI labels it "currently forwards to". Includes the customer's numbers with 0 calls.
+`product` ∈ `rcf` | `trunk` | `voicemail` | any future product (never `api`).
 
 ### `GET /reports/calls`
 Extra params: `outcome` = `all|answered|missed` (default all), `direction` =
@@ -117,21 +128,38 @@ Extra params: `outcome` = `all|answered|missed` (default all), `direction` =
 ```json
 {"total": 1204, "calls": [{"id": "<cdr uuid>", "started_at": "2026-08-14T10:02:31-06:00",
   "direction": "inbound", "from": "+12085550100", "to": "+16174544217",
-  "number": "+16174544217", "outcome": "answered", "outcome_label": "Answered",
-  "missed_reason": null, "length_minutes": 3, "quality": "great"}]}
+  "number": "+16174544217", "product": "rcf", "outcome": "answered",
+  "outcome_label": "Answered", "missed_reason": null, "length_minutes": 3,
+  "quality": "great"}]}
 ```
 Newest first. `length_minutes` = `duration_minutes` (0 for missed, ≥1 answered).
-`outcome_label` for missed = the missed-reason label.
+`outcome_label` for missed = the missed-reason label. `product` = the CDR's
+`product_type` (`rcf` | `trunk` | `voicemail` | …). A call a voicemail box
+answered (`product` = `voicemail`) is `outcome: "answered"` with
+`outcome_label: "Answered by voicemail"` — it counts as answered everywhere
+(owner decision O2).
 
 ### `GET /reports/calls.csv`
 Same filters as `/reports/calls` (no limit/offset; hard cap 100,000 rows — header
 `X-Report-Truncated: true` if capped). Streaming `text/csv`,
 `Content-Disposition: attachment; filename="calls_<start>_<end>.csv"`. Columns
 (plain English): `Date, Time, Direction, From, To, Your number, Outcome, Length
-(minutes, rounded), Call quality`. Date/Time in `tz`, time to the minute.
+(minutes, rounded), Call quality`. Date/Time in `tz`, time to the minute. The
+Outcome cell is `outcome_label` (so "Answered by voicemail" for a voicemail
+call); the columns are unchanged.
 
 ### `GET /reports/my-numbers`
-For the number picker: `{"numbers": [{"number", "name", "product"}]}`.
+The customer's numbers, every product — shared by the Reporting number picker
+AND the dashboard's numbers card (two pages reading one list can't disagree):
+```json
+{"numbers": [
+  {"number": "+16174544217", "name": "Main line", "product": "rcf", "enabled": true, "forwards_to": "+17745550000"},
+  {"number": "+15085550100", "name": "Voicemail", "product": "voicemail", "enabled": true, "forwards_to": null},
+  {"number": "+16175550202", "name": "alpha", "product": "trunk", "enabled": true, "forwards_to": null}]}
+```
+`enabled` = the number's customer-visible on/off (rcf: forwarding on; trunk:
+the trunk is enabled; voicemail: mailbox active AND voicemail enabled on the
+account). `forwards_to` is non-null only for rcf. Ordered by number.
 
 ### Implementation notes / clarifications (backend, 2026-09)
 
@@ -159,8 +187,17 @@ These pin down behaviour the contract above left implicit; the shapes are unchan
 - **Per-call `quality`** is `none` for unrated calls. `from`/`to` are the raw
   CDR caller/destination; `number` is canonical +E.164.
 - **`/reports/my-numbers`** takes only `customer_id` (staff: required, 422
-  otherwise; tenants: ignored). Max 5,000 rows. "Numbers" = rcf + trunk DIDs.
-- **`/reports/numbers`** `name` for a trunk DID is its trunk's name.
+  otherwise; tenants: ignored). Max 5,000 rows. "Numbers" = every product the
+  account owns (`services/customer_numbers.py` over `number_routing`; `api`
+  hidden; deleted mailboxes excluded; disabled/suspended included with
+  `enabled: false`).
+- **`/reports/numbers`** `name` for a trunk DID is its trunk's name; for a
+  voicemail DID the mailbox label (default "Voicemail").
+- **Released numbers:** a number that left the account (a deleted mailbox, an
+  unassigned DID) has no number row and can't be picked (the `numbers` filter
+  drops it), but its past calls still count in totals, the trend and the call
+  list — `base` is scoped to the customer's OWN CDRs, so a number moved to
+  another customer never exposes the old owner's calls either.
 - **CSV:** `X-Report-Truncated` is always sent (`true`/`false`); cells that
   start with `=`, `@`, `-`, tab/CR (or `+` not followed by a phone number) are
   prefixed with `'` (spreadsheet formula-injection guard). CORS exposes

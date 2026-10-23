@@ -12,6 +12,7 @@ import { Reveal } from '../../components/fx/Reveal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/ui/Toast';
 import { fmt } from '../../utils/format';
+import { productTag } from '../../config/products';
 import {
   listAvailableDids,
   listMyDids,
@@ -798,7 +799,7 @@ function MyNumbersSection({
                           </td>
 
                           <td style={{ padding: '15px 16px' }}>
-                            <span className="dl-tag">{item.product_type ?? 'RCF'}</span>
+                            <span className="dl-tag">{productTag(item.product_type ?? 'rcf')}</span>
                           </td>
                           <td style={{ padding: '15px 16px' }}>
                             {didStatusBadge(item.status)}
@@ -927,7 +928,7 @@ function MyNumbersSection({
                                     Product
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
-                                    <span className="dl-tag">{item.product_type ?? 'RCF'}</span>
+                                    <span className="dl-tag">{productTag(item.product_type ?? 'rcf')}</span>
                                     {didStatusBadge(item.status)}
                                   </div>
                                 </div>

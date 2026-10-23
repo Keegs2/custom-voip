@@ -177,6 +177,28 @@
   color: var(--rcf-ink-dim);
 }
 
+/* The settings panel hosts the number picker's popover, which must hang
+   below the panel: the shared .dl-panel clips (overflow: hidden), which cut
+   the list off after its first option. Nothing in this panel bleeds to its
+   rounded edge, so letting it overflow is safe. */
+.dl-panel:has(> .dl-panel-body > .rpt-controls) { overflow: visible; }
+
+/* Product tag on a picker option — only when the customer's numbers span
+   more than one product (call forwarding, voicemail, SIP trunk, …). */
+.rpt-prodtag {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  color: var(--rcf-azure-deep);
+  background: rgba(47, 125, 246, 0.09);
+  border: 1px solid rgba(47, 125, 246, 0.24);
+  border-radius: 999px;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+
 .rpt-linkbtn {
   appearance: none;
   background: none;

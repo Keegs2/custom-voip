@@ -16,6 +16,7 @@
  * common punctuation (– ’ ·).
  */
 import { Document, Page, StyleSheet, Text, View } from '@react-pdf/renderer';
+import { nameWithProduct } from '../../config/products';
 import type { ReportNumbers, ReportOverview, ReportTrend, TrendBucket } from '../../types/reports';
 import {
   dayKeyToUtc,
@@ -117,6 +118,7 @@ export function ReportDocument({ input }: { input: ReportPdfInput }) {
   const reasons = [...overview.missed_reasons].filter((r) => r.calls > 0).sort((a, b) => b.calls - a.calls);
   const numberRows = numbers?.numbers ?? [];
   const showForward = numberRows.some((r) => r.product === 'rcf');
+  const hasVoicemail = numberRows.some((r) => r.product === 'voicemail');
 
   const cells: Array<[string, string]> = [
     [fmtCount(t.calls), 'Calls'],
@@ -252,7 +254,9 @@ export function ReportDocument({ input }: { input: ReportPdfInput }) {
                     ]
               }
               rows={numberRows.map((r) => {
-                const label = r.name ? `${fmtPhone(r.number)}  ${r.name}` : fmtPhone(r.number);
+                // Name, plus the product for non-forwarding numbers ("Front desk · Voicemail").
+                const sub = nameWithProduct(r.name, r.product);
+                const label = sub ? `${fmtPhone(r.number)}  ${sub}` : fmtPhone(r.number);
                 const quality = r.grade === 'none' ? '–' : GRADE_WORD[r.grade];
                 const answered = r.calls > 0 ? fmtPct(r.answer_rate_pct) : '–';
                 const minutes = r.calls > 0 ? fmtCount(r.minutes) : '–';
@@ -267,6 +271,9 @@ export function ReportDocument({ input }: { input: ReportPdfInput }) {
         <View style={s.section} wrap={false}>
           <Text style={s.h2}>What the words mean</Text>
           <Text style={s.note}>Answered – someone picked up. Missed – the call ended before anyone picked up.</Text>
+          {hasVoicemail && (
+            <Text style={s.note}>Answered by voicemail – the call reached your voicemail; it counts as answered.</Text>
+          )}
           <Text style={s.note}>Minutes – how long answered calls lasted, rounded to whole minutes (totals are rounded once, at the end).</Text>
           <Text style={s.note}>Call quality – how clear calls sounded: Great, Good, Fair or Poor, from a 1-to-5 sound score.</Text>
         </View>

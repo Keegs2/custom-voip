@@ -239,6 +239,7 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 |---|---|---|
 | `GET` | `/v1/customers` | List customers (filterable by status, account_type) |
 | `POST` | `/v1/customers` | Create customer (`account_type` `api` → 422 while API Calling is retired) |
+| `GET` | `/v1/customers/me` | Own record + `counts`: `{rcf, api_dids, trunks, numbers: {total, by_product}}` — `numbers` covers every product the account owns (`number_routing`; zero-count products omitted; api hidden) |
 | `GET` | `/v1/customers/{id}` | Get customer by ID |
 | `PUT` | `/v1/customers/{id}` | Update customer |
 | `DELETE` | `/v1/customers/{id}` | Delete customer (cascading, transactional) |
@@ -283,8 +284,9 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 |---|---|---|---|
 | `POST` | `/v1/cdrs/ingest` | None | FreeSWITCH CDR webhook |
 | `POST` | `/v1/cdrs/ingest/bulk` | None | Bulk CDR re-ingest |
-| `GET` | `/v1/cdrs` | User | Query CDRs with filters. One row per call by default. Staff-only: `leg=calls\|all\|b` (default `calls` = `leg IS DISTINCT FROM 'B'`) and `call_id=<A uuid>` (every leg of that call: `(call_id = $n OR uuid = $n)` — uses idx_cdrs_call_id + idx_cdrs_uuid; IGNORES start/end dates and the 24h default; page capped at 50). Tenants: both params ignored. Staff rows add `leg`, `call_id` (= `COALESCE(call_id, uuid)`), `leg_attempt` |
-| `GET` | `/v1/cdrs/summary` | User | CDR summary stats (by day/hour/destination); same filter builder incl. staff `leg`/`call_id` |
+| `GET` | `/v1/cdrs` | User | Query CDRs with filters. `product_type=all` (or empty) = every product; `number=` = the customer's number on the call (inbound destination / outbound caller_id, canonicalized in SQL — a 10-digit caller_id matches; any phone format; 422 `number must be a phone number`; tenants may use it, it only narrows). One row per call by default. Staff-only: `leg=calls\|all\|b` (default `calls` = `leg IS DISTINCT FROM 'B'`) and `call_id=<A uuid>` (every leg of that call: `(call_id = $n OR uuid = $n)` — uses idx_cdrs_call_id + idx_cdrs_uuid; IGNORES start/end dates and the 24h default; page capped at 50). Tenants: both params ignored. Staff rows add `leg`, `call_id` (= `COALESCE(call_id, uuid)`), `leg_attempt` |
+| `GET` | `/v1/cdrs/summary` | User | CDR summary stats (by day/hour/destination); same filter builder incl. `product_type=all`, `number=` and staff `leg`/`call_id` |
+| `GET` | `/v1/cdrs/activity` | User | Zero-filled KPIs + series (24h/7d/30d/90d, bucketed in `tz`; `services/cdr_activity.py`). `product_type` omitted = `rcf` (RCF console back-compat), `all`/empty = every product (the account dashboard); `destination` exact; `number` as on `/v1/cdrs` (AND-ed). Tenants: own customer, whole minutes only |
 | `GET` | `/v1/cdrs/{uuid}` | User | Get single CDR with full RTP metrics |
 | `POST` | `/v1/cdrs/{uuid}/rate` | User | Manually trigger CDR rating |
 
@@ -294,15 +296,17 @@ Read-only ELI5 reports over `cdrs`; whole minutes only, no costs/seconds/interna
 |---|---|---|
 | `GET` | `/v1/reports/overview` | Totals, previous period, quality grade, busiest day/hour, missed reasons |
 | `GET` | `/v1/reports/trend` | Zero-filled day/week/month buckets |
-| `GET` | `/v1/reports/numbers` | Per-number totals for the customer's own numbers (max 500) |
-| `GET` | `/v1/reports/calls` | Paginated call list (start time only, `length_minutes`) |
-| `GET` | `/v1/reports/calls.csv` | Streaming CSV (cap 100k, `X-Report-Truncated`) |
-| `GET` | `/v1/reports/my-numbers` | Number picker list |
+| `GET` | `/v1/reports/numbers` | Per-number totals for the customer's own numbers, every product (rcf/trunk/voicemail/future; max 500) |
+| `GET` | `/v1/reports/calls` | Paginated call list (start time only, `length_minutes`, `product`; a voicemail-answered call is `answered` labelled "Answered by voicemail") |
+| `GET` | `/v1/reports/calls.csv` | Streaming CSV (cap 100k, `X-Report-Truncated`; same columns, Outcome = `outcome_label`) |
+| `GET` | `/v1/reports/my-numbers` | The customer's numbers, every product — Reporting picker AND dashboard numbers card: `{numbers: [{number, name, product, enabled, forwards_to}]}` (`forwards_to` rcf only) |
+
+"The customer's numbers" (every surface above, plus `/customers/me` `counts.numbers`, `/numbers/owned`, `/numbers/my`, `/search/did`) = `src/services/customer_numbers.py` over the `number_routing` view — see `src/CLAUDE.md` → Customer numbers (incl. the product-enrollment checklist).
 
 ### Search (Admin only)
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/v1/search/did` | Search DIDs across RCF, API, Trunk products |
+| `GET` | `/v1/search/did` | Search DIDs across EVERY product (rows from the `number_routing` view: RCF, API, Trunk, Voicemail, future arms). rcf/api/trunk `details` + `status` byte-identical to the old per-table query; voicemail `details` = `{label, mailbox_id, enabled}`; other products `{name, enabled}` |
 | `GET` | `/v1/search/did/{did}/calls` | Call history for a specific DID |
 | `GET` | `/v1/search/user` | Search users by name/email |
 | `GET` | `/v1/search/user/by-customer/{id}` | List users for a customer |
@@ -312,6 +316,7 @@ Read-only ELI5 reports over `cdrs`; whole minutes only, no costs/seconds/interna
 |---|---|---|---|
 | `GET` | `/v1/numbers/inventory` | Admin | Full DID inventory with filters and pagination; items carry carrier attribution (`carrier` = COALESCE(d.carrier, ct.carrier, 'bandwidth') — first-class column since migration 42, trunk's carrier for 41-era rows, implicit Bandwidth for legacy —, `carrier_pop`, `carrier_trunk_id`, `source`); optional `carrier=` filter matches the same COALESCE |
 | `GET` | `/v1/numbers/stats` | Admin | Inventory summary stats (by status/product/state/carrier) |
+| `GET` | `/v1/numbers/owned` | Admin | OWNED-number counts from `number_routing` (never lags provisioning, never page-capped; api hidden): `{total, enabled, by_product: {<p>: {total, enabled}}, customers: [{customer_id, total, enabled, by_product}]}` — the admin dashboard's Numbers KPI / per-customer counts |
 | `POST` | `/v1/numbers/sync` | Admin | Sync Bandwidth TN inventory into did_inventory table (also reconciles product tables). Only manages rows with `source='bandwidth_sync'` — manually intaken rows never appear in `removed` and are never metadata-overwritten |
 | `POST` | `/v1/numbers/reconcile` | Admin | Reconcile did_inventory against product tables (rcf/api/trunk) without hitting Bandwidth (never clobbers `source`/`carrier_trunk_id`) |
 | `POST` | `/v1/numbers/add` | Admin | Manual DID intake: batch of 1-500 DIDs owned by `carrier` (REQUIRED, lowercased — must have ≥1 ENABLED carrier_trunks row, else 404 "unknown carrier"); `carrier_trunk_id` OPTIONAL (must belong to that carrier + be enabled, else 422) → status `available`, `source='manual'`, `carrier` set, trunk nullable. Envelope: `{added, skipped_existing, invalid, count}` (TED UI contract) |
@@ -319,7 +324,7 @@ Read-only ELI5 reports over `cdrs`; whole minutes only, no costs/seconds/interna
 | `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record; `product_type` `api` → 422 while API Calling is retired; `voicemail` (+ optional `label`) creates a mailbox via `services/voicemail/mailboxes.create_mailbox`, `product_ref_id` = mailbox id) |
 | `POST` | `/v1/numbers/{did}/unassign` | Admin | Unassign DID (removes product record; a voicemail DID deletes its mailbox via `delete_mailbox`) |
 | `GET` | `/v1/numbers/available` | User | Browse available DIDs with filters |
-| `GET` | `/v1/numbers/my` | User | Customer's assigned numbers (includes `status`, e.g. `release_requested`) |
+| `GET` | `/v1/numbers/my` | User | Customer's assigned numbers (includes `status`, e.g. `release_requested`): `did_inventory` rows UNION one `number_routing` fallback arm (every product incl. api and voicemail; fallback-only rows have `assigned_at: null`) |
 | `POST` | `/v1/numbers/{did}/request` | User | Reserve a number for admin review |
 | `POST` | `/v1/numbers/{did}/request-release` | User (tenant-scoped) | Request release of an assigned DID: `assigned` → `release_requested` (cross-tenant → 404, no existence leak; 409 if not `assigned`) |
 | `POST` | `/v1/numbers/{did}/cancel-release` | User (tenant-scoped) | Cancel a pending release request: back to `assigned` (also the admin DENY action) |

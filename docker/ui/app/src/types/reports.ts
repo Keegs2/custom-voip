@@ -8,8 +8,13 @@
  * history) are typed nullable so the UI is forced to handle them.
  */
 
-/** Product a customer number belongs to. */
-export type ReportProduct = 'rcf' | 'trunk' | 'api';
+/**
+ * Product a customer number belongs to — any product with a `number_routing`
+ * arm (rcf, trunk, voicemail, …). Open-ended on purpose: a future product
+ * arrives as a new string and renders through config/products.ts's
+ * fallback. `api` (retired) is hidden server-side from customer lists.
+ */
+export type ReportProduct = 'rcf' | 'trunk' | 'api' | 'voicemail' | (string & {});
 
 /**
  * Quality grade (docs/CALL_QUALITY_ACCURACY_PLAN.md §D, applied to the stored
@@ -187,6 +192,13 @@ export interface ReportCallRow {
   length_minutes: number;
   /** null when the call has no quality reading. */
   quality: QualityGrade | null;
+  /**
+   * The CDR's product (`cdrs.product_type`): rcf | trunk | voicemail | …
+   * Absent on APIs that predate the holistic numbers change. A call that
+   * reached voicemail keeps `outcome: 'answered'` and carries
+   * `outcome_label: 'Answered by voicemail'`.
+   */
+  product?: string;
 }
 
 export interface ReportCalls {
@@ -196,10 +208,21 @@ export interface ReportCalls {
 
 /* ─── GET /reports/my-numbers ───────────────────────────────────────────── */
 
+/**
+ * One of the customer's numbers, any product. Shared by the Reporting picker
+ * and the dashboard's numbers card (one list, so the two can't disagree).
+ * `enabled` / `forwards_to` are absent on APIs that predate the holistic
+ * numbers change — callers treat a row without `enabled` as the old shape.
+ */
 export interface MyNumber {
   number: string;
+  /** Customer-safe label (rcf name, mailbox label, trunk name), or null. */
   name: string | null;
   product: ReportProduct;
+  /** The number is switched on (forwarding / mailbox active / trunk enabled). */
+  enabled?: boolean;
+  /** CURRENT forwarding target — rcf only, else null. */
+  forwards_to?: string | null;
 }
 
 export interface MyNumbers {

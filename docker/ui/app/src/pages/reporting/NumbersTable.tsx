@@ -1,14 +1,16 @@
 /**
- * "Your numbers" — one row per customer number (server-sorted by calls, max
- * 500, including numbers with no calls). Shows the first 10 and expands on
- * request so a 300-number customer doesn't get a wall of rows by default.
- * The "Currently forwards to" column only appears when at least one number
- * is a call-forwarding (rcf) number.
+ * "Your numbers" — one row per customer number, every product (server-sorted
+ * by calls, max 500, including numbers with no calls). Shows the first 10
+ * and expands on request so a 300-number customer doesn't get a wall of rows
+ * by default. The "Currently forwards to" column only appears when at least
+ * one number is a call-forwarding (rcf) number; a number of any other
+ * product names it under the number ("Front desk · Voicemail").
  */
 import { useState } from 'react';
 import { Hash } from 'lucide-react';
 import type { ReportNumbers } from '../../types/reports';
 import { CardError, GradeBadge, ReportCard, Skeleton } from './ReportBits';
+import { nameWithProduct } from '../../config/products';
 import { fmtCount, fmtMinutes, fmtPct, fmtPhone } from './reportFormat';
 
 const INITIAL_ROWS = 10;
@@ -76,11 +78,13 @@ export function NumbersTable({ numbers }: NumbersTableProps) {
                 </tr>
               </thead>
               <tbody>
-                {visible.map((r) => (
+                {visible.map((r) => {
+                  const subline = nameWithProduct(r.name, r.product);
+                  return (
                   <tr key={r.number} className="dl-row">
                     <td>
                       <span className="rpt-mono" style={{ color: 'var(--rcf-azure-deep)', fontWeight: 600 }}>{fmtPhone(r.number)}</span>
-                      {r.name && <span className="rpt-subline">{r.name}</span>}
+                      {subline && <span className="rpt-subline">{subline}</span>}
                     </td>
                     {showForward && (
                       <td>
@@ -101,7 +105,8 @@ export function NumbersTable({ numbers }: NumbersTableProps) {
                     <td className="rpt-num">{r.calls > 0 ? fmtMinutes(r.minutes) : <span className="rpt-dim">—</span>}</td>
                     <td><GradeBadge grade={r.grade} /></td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

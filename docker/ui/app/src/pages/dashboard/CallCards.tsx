@@ -1,11 +1,14 @@
 /**
- * CallCards — the dashboard's call cards, all over the last 7 days:
+ * CallCards — the dashboard's call cards, all over the last 7 days and
+ * every product on the account (call forwarding, voicemail, SIP trunk, …):
  *
  *   VolumeCard   GET /cdrs/activity  answered / missed bars per day + average call
  *   QualityCard  GET /cdrs/activity  good-or-better ring (quality.ts tone + word),
  *                                    one-way audio, graded / poor counts
  *   RecentCard   GET /cdrs           the newest calls: time · from · to · outcome · quality
+ *                                    (a call voicemail answered reads "Voicemail")
  *   BusiestCard  GET /reports/numbers top numbers by calls, with a relative bar
+ *                                    (non-forwarding numbers name their product)
  *
  * The admin's All customers view passes platform-wide feeds plus a
  * customer-name map: Recent calls then gains a Customer column whose names
@@ -19,14 +22,14 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { Activity, AudioLines, Flame, PhoneIncoming } from 'lucide-react';
 import type { CdrActivityKpis, CdrActivityResponse } from '../../types/cdrActivity';
 import type { CdrSearchResult } from '../../types/cdr';
-import type { RcfEntry } from '../../types/rcf';
+import { nameWithProduct } from '../../config/products';
 import { fmt } from '../../utils/format';
 import { fmtAvgMinutes } from '../../utils/callDuration';
 import { goodShareColor } from '../calls/quality';
 import { bucketRangeLabel, bucketTick, fmtAcdExact, fmtCallDateTime, fmtShareFloor } from '../rcf/activityFormat';
 import { callQualityLabel, callStatusInfo } from '../rcf/callOutcome';
 import { Card, CardState } from './Card';
-import { fmtRelative, numberKey, shareWord, type NumberStats } from './accountData';
+import { fmtRelative, numberKey, shareWord, type NumberRow, type NumberStats } from './accountData';
 
 // ─── Shared ──────────────────────────────────────────────────────────────────
 
@@ -364,20 +367,25 @@ const BUSIEST = 5;
 
 export interface BusiestCardProps {
   stats: NumberStats;
-  entries: readonly RcfEntry[];
+  /** The account's numbers (any product) — fresher labels than the stats rows. */
+  rows: readonly NumberRow[];
   order: number;
 }
 
-export function BusiestCard({ stats, entries, order }: BusiestCardProps) {
+export function BusiestCard({ stats, rows, order }: BusiestCardProps) {
   const busiest = useMemo(() => {
     if (stats.state !== 'ready') return [];
-    const labels = new Map(entries.map((e) => [numberKey(e.did), e.name ?? null]));
+    const byKey = new Map(rows.map((r) => [numberKey(r.number), r]));
     return [...stats.byNumber.values()]
       .filter((r) => r.calls > 0)
       .sort((a, b) => b.calls - a.calls)
       .slice(0, BUSIEST)
-      .map((r) => ({ ...r, label: labels.get(numberKey(r.number)) ?? r.name }));
-  }, [stats, entries]);
+      .map((r) => {
+        const row = byKey.get(numberKey(r.number));
+        // "Front desk · Voicemail" — the product is named for non-forwarding numbers.
+        return { ...r, label: nameWithProduct(row?.name ?? r.name, row?.product ?? r.product) };
+      });
+  }, [stats, rows]);
   const max = busiest[0]?.calls ?? 1;
 
   return (

@@ -1,6 +1,7 @@
 /**
  * callOutcome.ts — how one call reads to a customer: its outcome word
- * (Answered / No Answer / Busy …) and its quality word, both with tones.
+ * (Answered / Voicemail / No Answer / Busy …) and its quality word, both
+ * with tones.
  * Shared by the Call Activity table and the dashboard's Recent calls card so
  * the two never disagree. Moved verbatim from RecentCallsTable.
  *
@@ -54,6 +55,14 @@ export function callStatusInfo(cdr: Cdr): { label: string; bg: string; color: st
   const INFO    = { bg: 'rgba(47,125,246,0.09)', color: AZURE_DEEP, border: '1px solid rgba(47,125,246,0.24)' };
 
   const cause = (cdr.hangup_cause ?? '').toUpperCase();
+
+  // A call voicemail picked up (the mailbox answers to play the greeting):
+  // it counts as answered everywhere (owner decision O2), but the customer
+  // should see that a mailbox — not a person — took it. Checked before the
+  // talk-time test so a hang-up during the greeting still reads Voicemail.
+  if (cdr.product_type === 'voicemail' && cdr.answer_time != null) {
+    return { label: 'Voicemail', ...INFO };
+  }
 
   // Answered calls (has answer_time and non-zero duration — exact seconds on
   // staff rows, whole minutes on tenant rows; see utils/callDuration.ts)

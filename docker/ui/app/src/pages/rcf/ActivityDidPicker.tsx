@@ -1,17 +1,22 @@
 /**
  * ActivityDidPicker — the "Viewing: All Numbers / one DID" dropdown on the
- * Call Activity tab (moved verbatim from RcfPage; behavior unchanged). The
- * selection scopes EVERYTHING on the tab — KPIs, chart and table — via the
- * server-side `destination` filter.
+ * Call Activity tab (moved verbatim from RcfPage). The selection scopes
+ * EVERYTHING on the tab — KPIs, chart and table — via a server-side filter
+ * (`destination` on the /rcf console, `number` on the dashboard's
+ * account-wide view).
+ *
+ * Takes generic numbers (`PickerNumber`): the /rcf console passes its RCF
+ * entries and renders exactly as before; the account view passes every
+ * product's numbers, and a non-forwarding number carries a product tag.
  */
 import { useEffect, useRef, useState } from 'react';
-import type { RcfEntry } from '../../types/rcf';
+import { productTag } from '../../config/products';
 import { fmt } from '../../utils/format';
 import { AZURE, AZURE_DEEP, INK, INK_DIM, INK_FAINT, MONO } from './theme';
-import { didLabel } from './activityFormat';
+import { didLabel, type PickerNumber } from './activityFormat';
 
 export interface ActivityDidPickerProps {
-  entries: RcfEntry[];
+  entries: readonly PickerNumber[];
   /** E.164 DID, or null for All Numbers. */
   selectedDid: string | null;
   onChange: (did: string | null) => void;
@@ -183,12 +188,13 @@ export function ActivityDidPicker({ entries: rcfEntries, selectedDid, onChange }
             {/* Individual DID options */}
             <div style={{ maxHeight: 280, overflowY: 'auto' }}>
               {rcfEntries.map((entry) => {
-                const isSelected = selectedDid === entry.did;
+                const isSelected = selectedDid === entry.number;
+                const product = entry.product ?? 'rcf';
                 return (
                   <button
-                    key={entry.did}
+                    key={entry.number}
                     type="button"
-                    onClick={() => { setSelectedDid(entry.did); setDidDropdownOpen(false); }}
+                    onClick={() => { setSelectedDid(entry.number); setDidDropdownOpen(false); }}
                     style={{
                       width: '100%',
                       display: 'flex',
@@ -212,14 +218,14 @@ export function ActivityDidPicker({ entries: rcfEntries, selectedDid, onChange }
                         width: 7,
                         height: 7,
                         borderRadius: '50%',
-                        background: entry.enabled ? '#16a34a' : '#dc2626',
+                        background: entry.enabled === undefined ? 'transparent' : entry.enabled ? '#16a34a' : '#dc2626',
                         flexShrink: 0,
                         display: 'inline-block',
                       }}
                     />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '0.84rem', fontWeight: 700, color: isSelected ? AZURE_DEEP : INK, fontFamily: MONO, letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {fmt(entry.did)}
+                        {fmt(entry.number)}
                       </div>
                       {entry.name && (
                         <div style={{ fontSize: '0.65rem', color: isSelected ? AZURE : INK_DIM, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -227,6 +233,7 @@ export function ActivityDidPicker({ entries: rcfEntries, selectedDid, onChange }
                         </div>
                       )}
                     </div>
+                    {product !== 'rcf' && <span className="ad-prodtag">{productTag(product)}</span>}
                     {isSelected && (
                       <svg viewBox="0 0 16 16" fill="none" stroke={AZURE_DEEP} strokeWidth={2.2} style={{ width: 13, height: 13, flexShrink: 0 }}>
                         <path d="M2 8l4 4 8-8" strokeLinecap="round" strokeLinejoin="round" />

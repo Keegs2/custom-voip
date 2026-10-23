@@ -6,6 +6,7 @@ from typing import Optional
 from config import API_CALLING_RETIRED_MESSAGE, api_calling_enabled
 from db import database as db
 from auth.dependencies import get_current_user, get_support_read_filter, require_admin
+from services import customer_numbers as cn
 from services import tenant_redaction as tr
 from services.voicemail.mailboxes import voicemail_schema_present
 
@@ -30,8 +31,10 @@ router = APIRouter()
 #   - API:   cps_tiers.monthly_fee (via customers.api_tier_id). API Calling is
 #            RETIRED (config.api_calling_enabled) — while off, NO api line is
 #            emitted for any account_type (hybrid now means RCF + SIP Trunking).
+#   - Voicemail: NO line (decision D5 / owner decision O1 — v1 has no
+#            voicemail pricing; rate_cdr() rates voicemail CDRs to zero).
 RCF_LINE_MRC = Decimal("5.00")
-VOICEMAIL_BOX_MRC = Decimal("2.00")  # PLACEHOLDER — confirm with product
+VOICEMAIL_BOX_MRC = Decimal("2.00")  # PLACEHOLDER — unused while D5 stands
 
 _BILLING_DISCLAIMER = (
     "Estimated monthly recurring charges. "
@@ -169,13 +172,18 @@ async def compute_billing_estimate(conn, customer_id: int) -> dict:
             ],
         })
 
-    # --- Visual Voicemail (NOT YET BUILT) ------------------------------------
-    # The VVM product does not exist on this branch — there is no voicemail /
-    # mailbox table in the schema — so the voicemail line is intentionally
-    # OMITTED. When the product ships, switch it on here with a box count like:
+    # --- Voicemail (no billing line — decision D5 / owner decision O1) -------
+    # Encrypted voicemail is LIVE (54_voicemail.sql: voicemail_boxes), but v1
+    # has no voicemail pricing: rate_cdr() rates voicemail CDRs to zero and
+    # this estimate deliberately carries NO voicemail line. Mailbox numbers
+    # still count as the customer's numbers (/me counts.numbers,
+    # services/customer_numbers.py). If the owner prices mailboxes later,
+    # add the line here, counting LIVE boxes only (a deleted box is not
+    # billable), e.g.:
     #
     #   vm_row = await conn.fetchrow(
-    #       "SELECT COUNT(*)::int AS n FROM voicemail_boxes WHERE customer_id = $1::int",
+    #       "SELECT COUNT(*)::int AS n FROM voicemail_boxes "
+    #       "WHERE customer_id = $1::int AND status <> 'deleted'",
     #       customer_id,
     #   )
     #   boxes = vm_row["n"]
@@ -326,6 +334,11 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
     Scope is derived ONLY from the JWT (never a client-supplied id). A caller
     with no associated customer (e.g. a pure platform admin) gets a 404 so we
     never leak the existence of other customers.
+
+    `counts.numbers` = {total, by_product} over EVERY product the account
+    owns (services/customer_numbers.py — number_routing; enabled or not;
+    zero-count products omitted; api hidden). The legacy rcf / api_dids /
+    trunks keys are unchanged.
     """
     customer_id = user.get("customer_id")
     if customer_id is None:
@@ -360,6 +373,9 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
         "SELECT COUNT(*)::int AS n FROM sip_trunks WHERE customer_id = $1::int",
         customer_id,
     )
+    # Product-agnostic numbers (rcf, trunk, voicemail, future arms; api is
+    # hidden in the SQL regardless of API_CALLING_ENABLED).
+    number_rows = await db.fetch_all(cn.count_by_product_sql("$1::int"), customer_id)
 
     c = dict(row)
     body = {
@@ -376,6 +392,7 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
             "rcf": rcf_count["n"],
             "api_dids": api_count["n"],
             "trunks": trunk_count["n"],
+            "numbers": cn.numbers_count(number_rows),
         },
     }
     # traffic_grade is an internal routing grade: staff only (an admin in

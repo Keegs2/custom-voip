@@ -12,34 +12,46 @@
  *   feed            tenant                         staff preview
  *   ─────────────   ────────────────────────────   ──────────────────────────────────
  *   account         GET /customers/me               GET /customers/{id} (fields picked)
- *   numbers         GET /rcf?customer_id            same (param ignored for tenants)
- *   activity (7d)   GET /cdrs/activity?customer_id  same
+ *   all numbers     GET /reports/my-numbers         same + customer_id (required for staff)
+ *   rcf numbers     GET /rcf?customer_id            same (param ignored for tenants)
+ *   activity (7d)   GET /cdrs/activity?customer_id  same      (product_type=all)
  *   per-number 7d   GET /reports/numbers            same + customer_id (required for staff)
- *   recent calls    GET /cdrs?customer_id           same
+ *   recent calls    GET /cdrs?customer_id           same      (no product filter)
  *   team            GET /auth/team                  GET /search/user/by-customer/{id}
  *   number requests GET /numbers/my                 GET /numbers/inventory?customer_id
  *
+ * "The account's numbers" are EVERY product's numbers (call forwarding,
+ * voicemail, SIP trunk, any future product): the product-agnostic list from
+ * /reports/my-numbers — the same list the Reporting picker shows — merged
+ * with the editable /rcf entries (`toNumberRows`). If that list fails, or an
+ * older API answers without `enabled`, the rows are the /rcf entries alone,
+ * exactly as before. Call feeds cover every product on the account too.
+ *
  * Query keys share prefixes with the rest of the console so existing
  * mutations keep these fresh: RowEditor invalidates ['rcf'], DID management
- * invalidates ['my-dids'], My Account shares ['my-customer'] / ['my-team'].
+ * invalidates ['my-dids'], My Account shares ['my-customer'] / ['my-team'],
+ * voicemail mailbox create/delete/suspend call `invalidateAccountNumbers`.
  * Staff keys add a discriminator so a differently-shaped (or differently
- * scoped) response never lands in a tenant cache entry.
+ * scoped) response never lands in a tenant cache entry; feeds whose product
+ * scope changed (rcf → all products) changed key, so no cache mixes them.
  *
  * Redaction: nothing here carries money to the UI. The admin customer row
  * includes financial columns; `toSummary` copies only identity fields.
  */
 import { useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { getMyCustomer, listCustomerTeam, listMyTeam } from '../../api/account';
 import { getCustomer } from '../../api/customers';
 import { listRcf } from '../../api/rcf';
 import { getCdrActivity, isTimeZoneRejection, searchCdrs } from '../../api/cdrs';
-import { getReportNumbers } from '../../api/reports';
+import { getMyNumbers, getReportNumbers } from '../../api/reports';
 import { listCustomerInventory, listMyDids } from '../../api/didInventory';
 import { ApiError } from '../../api/client';
+import { countByProduct, isProductHidden, productMix, type ProductCount } from '../../config/products';
 import type { AccountType, CustomerStatus } from '../../types/customer';
 import type { CdrActivityResponse } from '../../types/cdrActivity';
-import type { ReportNumberRow, ReportNumbers } from '../../types/reports';
+import type { RcfEntry } from '../../types/rcf';
+import type { MyNumbers, ReportNumberRow, ReportNumbers } from '../../types/reports';
 import { BAD, GOOD, WARN } from '../calls/quality';
 
 /** GET /rcf returns at most this many rows (server-side LIMIT). */
@@ -97,11 +109,42 @@ export function useAccountSummary({ customerId, staff }: DashboardScope) {
   });
 }
 
+/** The account's call forwarding entries (GET /rcf) — the editable rows. */
 export function useAccountNumbers(customerId: number) {
   return useQuery({
     queryKey: ['rcf', customerId, 'dashboard'],
     queryFn: () => listRcf({ customer_id: customerId, limit: 500 }),
   });
+}
+
+/** Root of the account-wide (every product) number list cache. */
+export const ACCOUNT_NUMBERS_KEY = ['account-numbers'] as const;
+
+/**
+ * Every number on the account, any product (GET /reports/my-numbers — the
+ * list the Reporting picker shows too). Tenants are self-scoped; staff
+ * (admin one-customer view, "View as Customer") must send the customer.
+ * One quiet attempt: on failure the dashboard falls back to the /rcf rows.
+ */
+export function useAccountAllNumbers({ customerId, staff }: DashboardScope) {
+  return useQuery({
+    queryKey: [...ACCOUNT_NUMBERS_KEY, customerId, staff ? 'staff' : 'self'],
+    queryFn: () => getMyNumbers(staff ? customerId : undefined),
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Refresh every cached "account's numbers" list — the dashboard's and the
+ * Reporting picker's. Call after anything that adds, removes or switches a
+ * number outside the /rcf editor (voicemail mailbox create / delete /
+ * suspend / resume / relabel). NOT part of invalidateVoicemail(), which runs
+ * after every message action.
+ */
+export function invalidateAccountNumbers(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: ACCOUNT_NUMBERS_KEY });
+  void queryClient.invalidateQueries({ queryKey: ['reports', 'my-numbers'] });
 }
 
 /**
@@ -129,18 +172,20 @@ function useTzFallback() {
 }
 
 /**
- * `customerId` null = every customer (staff only — the admin dashboard's
- * All customers view); tenants are hard-scoped by the API either way.
+ * The last 7 days of calls on EVERY product (`product_type=all` — the
+ * activity endpoint's default is rcf only). `customerId` null = every
+ * customer (staff only — the admin dashboard's All customers view); tenants
+ * are hard-scoped by the API either way.
  */
 export function useWeekActivity(customerId: number | null, tz: string) {
   const run = useTzFallback();
   return useQuery({
-    queryKey: ['rcf-dash-activity', customerId ?? 'all', tz],
+    queryKey: ['dash-activity', 'all-products', customerId ?? 'all', tz],
     queryFn: (): Promise<CdrActivityResponse> =>
       run(
         tz,
         (zone) =>
-          getCdrActivity({ range: '7d', tz: zone, customer_id: customerId ?? undefined, product_type: 'rcf' }),
+          getCdrActivity({ range: '7d', tz: zone, customer_id: customerId ?? undefined, product_type: 'all' }),
         isTimeZoneRejection,
       ),
     staleTime: 60_000,
@@ -189,17 +234,17 @@ export function useWeekNumberStats(customerId: number, tz: string) {
 /** How many calls the Recent calls card lists. */
 export const RECENT_CALLS = 6;
 
-/** The newest calls to the account's numbers in the last 7 days
- *  (`customerId` null = every customer, staff only). */
+/** The newest calls on the account's numbers in the last 7 days, every
+ *  product — GET /cdrs with no product filter (`customerId` null = every
+ *  customer, staff only). */
 export function useRecentCalls(customerId: number | null) {
   return useQuery({
-    queryKey: ['dash-recent-calls', customerId ?? 'all'],
+    queryKey: ['dash-recent-calls', 'all-products', customerId ?? 'all'],
     queryFn: () => {
       const end = new Date();
       const start = new Date(end.getTime() - 7 * 24 * 3_600_000);
       return searchCdrs({
         customer_id: customerId ?? undefined,
-        product_type: 'rcf',
         start_date: start.toISOString(),
         end_date: end.toISOString(),
         limit: RECENT_CALLS,
@@ -274,6 +319,126 @@ export function initials(name: string | null | undefined, email: string): string
 }
 
 // ─── Derived shapes ──────────────────────────────────────────────────────────
+
+/** One of the account's numbers as the dashboard lists it — any product. */
+export interface NumberRow {
+  /** E.164, as the API lists it. */
+  number: string;
+  /** Customer-safe label (rcf name, mailbox label, trunk name), or null. */
+  name: string | null;
+  /** Product id (config/products.ts). */
+  product: string;
+  /** Switched on: forwarding / taking messages / trunk active. */
+  enabled: boolean;
+  /** rcf only — where calls ring today. */
+  forwardsTo: string | null;
+  /** rcf only — the editable /rcf entry; null past the /rcf list cap (read-only row). */
+  rcf: RcfEntry | null;
+  /** Where selecting the row leads (voicemail → its page), or null. */
+  href: string | null;
+}
+
+export interface NumberRows {
+  rows: NumberRow[];
+  /** 'all' = the every-product list; 'rcf' = the /rcf entries alone (fallback). */
+  source: 'all' | 'rcf';
+}
+
+/**
+ * True when GET /reports/my-numbers answered in the holistic shape (every
+ * row carries a boolean `enabled`). An older API lists rcf + trunk numbers
+ * without it — the dashboard then keeps its call-forwarding-only view.
+ */
+export function isHolisticNumbers(data: MyNumbers | undefined): data is MyNumbers {
+  return (
+    data !== undefined &&
+    Array.isArray(data.numbers) &&
+    data.numbers.every((n) => n != null && typeof n.number === 'string' && typeof n.enabled === 'boolean')
+  );
+}
+
+function rcfRow(entry: RcfEntry): NumberRow {
+  return {
+    number: entry.did,
+    name: entry.name ?? null,
+    product: 'rcf',
+    enabled: entry.enabled,
+    forwardsTo: entry.forward_to,
+    rcf: entry,
+    href: null,
+  };
+}
+
+/**
+ * Merges the every-product list with the editable /rcf entries:
+ *  - an rcf number takes its /rcf entry (fresh after RowEditor saves, so
+ *    the row and the KPIs follow an edit at once); past the 100-row /rcf
+ *    cap it stays a read-only row from the list;
+ *  - other products come from the list (`voicemailHref` makes mailbox rows
+ *    links; other products are plain rows);
+ *  - an /rcf entry the cached list doesn't have yet is still shown;
+ *  - hidden products (retired API Calling) never appear.
+ * Without a usable list (failed, loading, or an older API) the rows are the
+ * /rcf entries alone — today's view.
+ *
+ * Example: list [{+1617…, rcf}, {+1508…, voicemail}] + /rcf [{+1617…}]
+ *   → [rcf row with its entry, voicemail row linking to voicemailHref]
+ */
+export function toNumberRows(
+  myNumbers: MyNumbers | undefined,
+  rcfEntries: readonly RcfEntry[],
+  { voicemailHref }: { voicemailHref: string | null },
+): NumberRows {
+  if (!isHolisticNumbers(myNumbers)) return { source: 'rcf', rows: rcfEntries.map(rcfRow) };
+
+  const entries = new Map(rcfEntries.map((e) => [numberKey(e.did), e]));
+  const seen = new Set<string>();
+  const rows: NumberRow[] = [];
+  for (const n of myNumbers.numbers) {
+    if (isProductHidden(n.product)) continue;
+    const key = numberKey(n.number);
+    if (seen.has(key)) continue; // the API de-duplicates; belt and braces
+    seen.add(key);
+    if (n.product === 'rcf') {
+      const entry = entries.get(key);
+      rows.push(
+        entry
+          ? rcfRow(entry)
+          : {
+              number: n.number,
+              name: n.name ?? null,
+              product: 'rcf',
+              enabled: n.enabled === true,
+              forwardsTo: n.forwards_to ?? null,
+              rcf: null,
+              href: null,
+            },
+      );
+    } else {
+      rows.push({
+        number: n.number,
+        name: n.name ?? null,
+        product: n.product,
+        enabled: n.enabled === true,
+        forwardsTo: null,
+        rcf: null,
+        href: n.product === 'voicemail' ? voicemailHref : null,
+      });
+    }
+  }
+  for (const entry of rcfEntries) {
+    const key = numberKey(entry.did);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(rcfRow(entry));
+  }
+  return { source: 'all', rows };
+}
+
+/** The rows' product mix, visible products only, in catalog order. */
+export function numberMix(rows: readonly NumberRow[]): ProductCount[] {
+  return productMix(countByProduct(rows.map((r) => r.product)));
+}
 
 /** A feed's state as a card needs it. */
 export type Feed<T> =

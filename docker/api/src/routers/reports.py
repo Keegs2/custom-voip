@@ -17,6 +17,10 @@ Hard rules (see the design doc + services/tenant_redaction.py):
     pass `customer_id` (422 otherwise).
   * `numbers` only ever NARROWS: requested numbers are intersected with the
     customer's own numbers in SQL (unknown / not-owned -> silently dropped).
+  * "The customer's numbers" is services/customer_numbers.py — the ONE
+    product-agnostic definition (the number_routing view: rcf, trunk,
+    voicemail and any future arm; api hidden). Never re-list product tables
+    here.
   * No routing internals: the raw hangup cause is read only to pick a
     plain-English missed reason; it is never returned.
 
@@ -51,6 +55,7 @@ from fastapi.responses import StreamingResponse
 
 from auth.dependencies import get_support_read_filter
 from db import database as db
+from services import customer_numbers as cn
 from services import reporting as rp
 from services import tenant_redaction as tr
 
@@ -80,45 +85,27 @@ CSV_CHUNK_ROWS = 5_000
 #   $4 tz::text           $5 numbers::text[] (NULL = no number filter)
 
 
-def _canon_sql(col: str) -> str:
-    """SQL twin of utils.phone.normalize_e164 (same CASE as
-    31_did_canonicalize.sql) so a CDR's raw caller_id/destination matches the
-    canonical DIDs stored in rcf_numbers / trunk_dids."""
-    digits = f"regexp_replace({col}, '[^0-9]', '', 'g')"
-    return (
-        f"(CASE WHEN {col} ~ '^\\+[1-9][0-9]{{1,14}}$' THEN {col} "
-        f"WHEN {digits} ~ '^1[2-9][0-9]{{9}}$' THEN '+' || {digits} "
-        f"WHEN {digits} ~ '^[2-9][0-9]{{9}}$' THEN '+1' || {digits} "
-        f"ELSE {col} END)"
-    )
-
+#: SQL twin of utils.phone.normalize_e164 (31_did_canonicalize.sql CASE) —
+#: lives in services/customer_numbers.py, shared with the CDR filters.
+_canon_sql = cn.canonical_e164_sql
 
 #: "The customer's number on a call": destination for inbound, caller_id for
 #: outbound (anything that isn't 'outbound' counts as inbound).
-_NUMBER_SQL = _canon_sql(
-    "(CASE WHEN c.direction = 'outbound' THEN c.caller_id ELSE c.destination END)")
+_NUMBER_SQL = cn.cdr_customer_number_sql("c")
 
 _LO_SQL = "($2::date::timestamp AT TIME ZONE $4::text)"
 _HI_SQL = "(($3::date + 1)::timestamp AT TIME ZONE $4::text)"
 
-#: The customer's own numbers (rcf + trunk DIDs). Stored DIDs are canonical
-#: (CHECK constraints from 31_did_canonicalize.sql). A DID present in both
-#: tables is listed once (rcf wins). `sel` = owned ∩ the `numbers` filter.
-_OWNED_CTES = """
-owned AS (
-    SELECT DISTINCT ON (u.number) u.number, u.name, u.product, u.forwards_to
-    FROM (
-        SELECT r.did::text AS number, r.name::text AS name, 'rcf'::text AS product,
-               r.forward_to::text AS forwards_to, 0 AS pri
-          FROM rcf_numbers r
-         WHERE r.customer_id = $1::int
-        UNION ALL
-        SELECT td.did::text, st.trunk_name::text, 'trunk'::text, NULL::text, 1
-          FROM trunk_dids td
-          JOIN sip_trunks st ON st.id = td.trunk_id
-         WHERE st.customer_id = $1::int
-    ) u
-    ORDER BY u.number, u.pri
+#: The customer's own numbers — EVERY product arm of number_routing (rcf,
+#: trunk, voicemail, any future product; api hidden), enabled or not, via the
+#: ONE definition in services/customer_numbers.py. Stored DIDs are canonical
+#: (CHECK constraints from 31_did_canonicalize.sql / 54). A DID present in two
+#: product tables is listed once (FreeSWITCH precedence: rcf wins). Columns:
+#: number, name, product, forwards_to, enabled, customer_id. Each arm reads
+#: its customer index, so this stays a tiny CTE. `sel` = owned ∩ the
+#: `numbers` filter.
+_OWNED_CTES = f"""
+owned AS ({cn.owned_numbers_sql("$1::int")}
 )"""
 
 _SEL_CTE = """
@@ -132,6 +119,7 @@ _BASE_CTE = f"""
 base AS (
     SELECT c.id, c.uuid, c.start_time, c.answer_time, c.direction,
            c.caller_id, c.destination, c.hangup_cause,
+           c.product_type AS product,
            -- call-level quality = the worse direction (migration 50,
            -- docs/CALL_QUALITY_ACCURACY_PLAN.md §C/§E.2): graded <=> grade set
            c.call_mos AS mos, c.call_quality_grade AS grade,
@@ -444,14 +432,16 @@ async def build_numbers(s: ReportScope) -> dict:
 
 
 _MY_NUMBERS_SQL = f"""WITH {_OWNED_CTES}
-SELECT number, name, product FROM owned ORDER BY number LIMIT {rp.MAX_MY_NUMBERS_ROWS}
+SELECT number, name, product, enabled, forwards_to
+  FROM owned ORDER BY number LIMIT {rp.MAX_MY_NUMBERS_ROWS}
 """
 
 
 async def build_my_numbers(customer_id: int) -> dict:
+    """The customer's numbers, every product (shared by the Reporting picker
+    and the dashboard): {number, name, product, enabled, forwards_to}."""
     (rows,) = await _run([(_MY_NUMBERS_SQL, [customer_id])])
-    return {"numbers": [{"number": r["number"], "name": r["name"], "product": r["product"]}
-                        for r in rows]}
+    return {"numbers": [cn.shape_number(r) for r in rows]}
 
 
 # ---------------------------------------------------------------------------
@@ -466,9 +456,11 @@ _DIRECTION_SQL = {"all": "", "inbound": " AND direction IS DISTINCT FROM 'outbou
 
 #: Per-call projection. `hangup_cause` is read ONLY to choose the plain-English
 #: missed reason and is dropped by _shape_call(); talk_ms never leaves SQL
-#: (length is the whole-minute call_minutes_sql('talk_ms')).
+#: (length is the whole-minute call_minutes_sql('talk_ms')). `product` is the
+#: CDR's product_type (tenant-allowlisted) — a voicemail-answered call is
+#: labelled "Answered by voicemail".
 _CALL_COLS = f"""
-    id, uuid, direction, caller_id, destination, number, hangup_cause, mos, grade,
+    id, uuid, direction, caller_id, destination, number, product, hangup_cause, mos, grade,
     ({_ANSWERED}) AS answered,
     {_MINUTES} AS length_minutes,
     (start_time AT TIME ZONE $4::text) AS local_ts,
@@ -490,7 +482,8 @@ def _shape_call(r: asyncpg.Record) -> dict:
         "from": r["caller_id"],
         "to": r["destination"],
         "number": r["number"],
-        **rp.outcome_fields(answered, r["hangup_cause"]),
+        "product": r["product"],
+        **rp.outcome_fields(answered, r["hangup_cause"], r["product"]),
         "length_minutes": int(r["length_minutes"]),
         # the STORED call grade (worse direction); one-way audio (no_rtp)
         # is 'poor' with no MOS -> "Poor" in the CSV, never "Not rated";
@@ -613,7 +606,8 @@ async def calls_csv(scope: ReportScope = Depends(report_scope),
 @router.get("/my-numbers")
 async def my_numbers(customer_id: Optional[int] = Query(None, ge=0),
                      customer_filter: Optional[int] = Depends(get_support_read_filter)):
-    """Number-picker list. Tenants: own numbers; staff: customer_id required."""
+    """The customer's numbers, every product (Reporting picker + dashboard).
+    Tenants: own numbers; staff: customer_id required."""
     if customer_filter is None and customer_id is None:
         raise HTTPException(422, "customer_id is required for staff (a report is about one customer)")
     return await build_my_numbers(customer_filter if customer_filter is not None else customer_id)

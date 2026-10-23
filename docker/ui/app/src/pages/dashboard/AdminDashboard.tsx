@@ -14,9 +14,12 @@
  * scope's view is keyed (`all` / the id): switching remounts instead of
  * changing hook order.
  *
- * Data: adminData.ts (customers, inventory, paused, requests, stats) plus
- * accountData.ts's activity / recent-calls hooks with a null customer. No
- * money anywhere.
+ * Data: adminData.ts (customers, owned numbers, paused, requests, stats)
+ * plus accountData.ts's activity / recent-calls hooks with a null customer.
+ * Holistic: numbers count EVERY product (GET /numbers/owned — exact, no
+ * caps), and calls cover every product. If /numbers/owned is unavailable
+ * (an older API) the counts fall back to the call forwarding inventory, as
+ * before. No money anywhere.
  */
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -37,10 +40,13 @@ import { useRecentCalls, useWeekActivity, type Feed } from './accountData';
 import {
   PAUSED_CAP,
   hasCallForwarding,
+  isOwnedNumbers,
+  ownedToPlatformCounts,
   toPlatformNumberCounts,
   useAdminCustomers,
   useInventoryStats,
   useOpenRequests,
+  useOwnedNumbers,
   usePausedNumbers,
   useRcfInventory,
   type CustomerRow,
@@ -150,7 +156,11 @@ function AdminOverview({
   // ── ALL hooks unconditionally at the top (React #310) ──
   const [tz] = useState(browserTimeZone);
   const [activityOpen, setActivityOpen] = useState(false);
-  const inventory = useRcfInventory();
+  const owned = useOwnedNumbers();
+  const ownedData = isOwnedNumbers(owned.data) ? owned.data : null;
+  // Fallback only: an API without /numbers/owned (or an unexpected body).
+  const inventoryFallback = owned.isError || (owned.data !== undefined && ownedData === null);
+  const inventory = useRcfInventory(inventoryFallback);
   const paused = usePausedNumbers();
   const activity = useWeekActivity(null, tz);
   const recent = useRecentCalls(null);
@@ -161,9 +171,17 @@ function AdminOverview({
   const closeActivity = useCallback(() => setActivityOpen(false), []);
 
   const names = useMemo(() => new Map(allCustomers.map((c) => [c.id, c.name])), [allCustomers]);
-  const counts = useMemo(() => (inventory.data ? toPlatformNumberCounts(inventory.data) : null), [inventory.data]);
+  const counts = useMemo(
+    () =>
+      ownedData
+        ? ownedToPlatformCounts(ownedData)
+        : inventoryFallback && inventory.data
+          ? toPlatformNumberCounts(inventory.data)
+          : null,
+    [ownedData, inventoryFallback, inventory.data],
+  );
   const pausedItems = useMemo(() => paused.data?.items ?? null, [paused.data]);
-  const pausedByCustomer = useMemo(() => {
+  const pausedFromList = useMemo(() => {
     if (!pausedItems) return null;
     const m = new Map<number, number>();
     for (const r of pausedItems) m.set(r.customer_id, (m.get(r.customer_id) ?? 0) + 1);
@@ -171,10 +189,25 @@ function AdminOverview({
   }, [pausedItems]);
 
   // ── Derived (after all hooks) ──
-  const pausedPartial = (pausedItems?.length ?? 0) >= PAUSED_CAP;
+  const exact = counts?.rcf !== undefined;
+  // Exact per-customer paused counts when /numbers/owned answered; else the capped list.
+  const pausedByCustomer = counts?.pausedByCustomer ?? pausedFromList;
+  const pausedPartial = !exact && (pausedItems?.length ?? 0) >= PAUSED_CAP;
 
   let numberFeed: Feed<NumberCounts>;
-  if (inventory.isError && !counts) numberFeed = { state: 'error' };
+  if (counts?.rcf) {
+    numberFeed = {
+      state: 'ready',
+      value: {
+        total: counts.total,
+        forwarding: counts.rcf.forwarding,
+        paused: counts.rcf.paused,
+        partial: false,
+        mix: counts.mix,
+      },
+    };
+  } else if (!inventoryFallback) numberFeed = { state: 'loading' };
+  else if (inventory.isError && !counts) numberFeed = { state: 'error' };
   else if (!counts || !pausedItems) numberFeed = paused.isError && counts ? { state: 'error' } : { state: 'loading' };
   else {
     const pausedCount = Math.min(pausedItems.length, counts.total);
@@ -202,7 +235,7 @@ function AdminOverview({
       ? { state: 'error' }
       : { state: 'ready', value: { total: customers.length, active: customers.filter((c) => c.status === 'active').length } };
 
-  const numbersState: 'loading' | 'error' | 'ready' = counts ? 'ready' : inventory.isError ? 'error' : 'loading';
+  const numbersState: 'loading' | 'error' | 'ready' = counts ? 'ready' : inventoryFallback && inventory.isError ? 'error' : 'loading';
 
   return (
     <div className="rcf-scope ad-scope">
@@ -245,7 +278,7 @@ function AdminOverview({
             numbersState={numbersState}
             paused={pausedByCustomer}
             pausedPartial={pausedPartial}
-            pausedError={paused.isError}
+            pausedError={!exact && paused.isError}
             onPick={onPick}
             order={7}
           />
@@ -286,7 +319,7 @@ function AdminOverview({
           subtitle="Every customer’s calls. Pick a time range to narrow it down."
           onClose={closeActivity}
         >
-          <CallActivityTab customerId={undefined} />
+          <CallActivityTab customerId={undefined} scope="account" />
         </DashboardOverlay>
       )}
     </div>
