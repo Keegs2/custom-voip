@@ -57,6 +57,11 @@ CDR_COLUMN_MIGRATIONS = (
     # the 5-argument cq_leg_status (no_rtp vs no_media split). Functions,
     # comments and role-guarded grants only; requires 50.
     "51_cdr_quality_no_media.sql",
+    # the 2026-10-23 incident fix: CREATE OR REPLACE of
+    # cdr_refresh_call_quality() (plpgsql, compressed-chunk safe) + COMMENT +
+    # role-guarded grant — the PRODUCTION function every scratch cdrs should
+    # run. Refuses to apply without 50, so it must stay after 50.
+    "55_cdr_refresh_call_quality_fix.sql",
 )
 
 

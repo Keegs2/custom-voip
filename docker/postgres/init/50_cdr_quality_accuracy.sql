@@ -141,6 +141,10 @@ RETURNS varchar LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
               ELSE 'rated' END $$;
 
 -- --------------------------------------------------------------------------
+-- SUPERSEDED: 55_cdr_refresh_call_quality_fix.sql replaces this function
+-- (2026-10-23: its JOIN-targeted UPDATE decompressed every compressed chunk
+-- on each call). Replaying this file reverts that fix — re-apply 55 after.
+-- --------------------------------------------------------------------------
 -- 3. Call-level combine (plan §C). VOLATILE; returns the number of A rows
 --    updated (0 or 1). Called by BOTH ingests (A and carrier B) as their OWN
 --    statement AFTER their INSERT committed, so whichever CDR arrives second

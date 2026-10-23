@@ -1,0 +1,157 @@
+-- ==========================================================================
+-- 55_cdr_call_quality_refill.psql — repopulate call-level quality after the
+-- 2026-10-23 cdr_refresh_call_quality() incident (migration 55).
+--
+-- A psql SCRIPT (\gset / \if / \gexec). Deliberately OUTSIDE init/ so initdb
+-- never runs it. Autocommit: every batch is its own transaction. NEVER run it
+-- with -1 / --single-transaction / inside BEGIN.
+--
+-- WHY: from ~09:14 UTC the migration-50 refresh failed on every CDR ingest
+-- (tuple decompression limit -> rolled back), and from ~14:50 UTC it was a
+-- hand-installed no-op (`SELECT 0`). A rows ingested in that span have
+-- call_quality_status/grade, call_mos and call_quality_leg NULL — the UI shows
+-- "Not rated · no sound data". The per-leg quality columns are intact (the
+-- INSERTs succeeded), so the call level is fully recomputable.
+--
+-- WHAT IT DOES: for every A row (leg IS DISTINCT FROM 'B') with
+-- call_quality_status IS NULL AND start_time >= :since, calls the FIXED
+-- cdr_refresh_call_quality(uuid, start_time) — the exact live-ingest code
+-- path — :batch rows per statement (default 500), printing one progress line
+-- per batch, then the totals.
+--
+-- SAFETY
+--   * REFUSES to run unless cdr_refresh_call_quality() is the migration-55
+--     function (plpgsql + sentinel `cq-refresh-v55` + the function-level
+--     timescaledb.enable_dml_decompression=off guard). The stub, the
+--     migration-50 body or a missing function abort before anything is done.
+--   * NEVER DML INTO A COMPRESSED CHUNK: candidates in a compressed chunk are
+--     reported and skipped by this script, and the function itself returns 0
+--     without DML for them (and for an A row whose B window reaches one). On
+--     2026-10-23 every affected row is in the uncompressed Oct 22-29 chunk.
+--   * RING-FENCED: the only cdrs writes are the function's UPDATE of
+--     call_quality_status / call_quality_grade / call_mos / call_quality_leg on
+--     A rows. Never billing/rating columns (billable_ms, rate_per_min,
+--     total_cost, carrier_cost, margin, rated_at), per-leg quality, timing,
+--     attribution or exported_at (Equinox is NOT re-fed).
+--   * IDEMPOTENT: only rows still NULL are candidates and the combine is a
+--     deterministic function of committed rows; a re-run finds 0 candidates
+--     (rows whose A quality_status is itself NULL — pre-50 legacy only — stay
+--     NULL by design and are refreshed again, harmlessly).
+--   * LIGHT: each refresh is a one-row, one-chunk UPDATE (~0.8 ms, ~0.2-6 KB
+--     WAL); batches are short transactions, so live ingest is not blocked.
+--   * No snapshot/rollback table: call_* were NULL before, so the rollback is
+--     "set them NULL again" — and the live ingest would recompute them anyway.
+--
+-- RUN (East primary only — replicates; AFTER 55_cdr_refresh_call_quality_fix.sql):
+--   hostname | grep -q '^services$' && sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -v since='2026-10-23 09:00+00' -f /opt/revup/docker/postgres/backfill/55_cdr_call_quality_refill.psql
+-- Optional: -v batch=200 (rows per statement; default 500).
+-- VERIFY (before and after — after: 0, plus any rows reported as skipped in a
+-- compressed chunk or legacy rows without a per-leg status):
+--   hostname | grep -q '^services$' && sudo -u postgres psql -d voip -Atc "SELECT count(*) FROM cdrs WHERE leg IS DISTINCT FROM 'B' AND call_quality_status IS NULL AND start_time >= '2026-10-23 09:00+00'"
+-- ==========================================================================
+
+\set ON_ERROR_STOP on
+\set QUIET on
+\pset pager off
+
+-- ---- 0. Guards ----------------------------------------------------------
+\if :{?since}
+\else
+\echo 'ABORT: the lower bound is required, e.g. -v since=''2026-10-23 09:00+00'''
+DO $$ BEGIN RAISE EXCEPTION 'psql variable "since" is not set (-v since=...)'; END $$;
+\endif
+\if :{?batch}
+\else
+\set batch 500
+\endif
+SELECT :'since'::timestamptz AS since_ts, greatest((:'batch')::int, 1) AS batch_size \gset
+
+SELECT EXISTS (
+    SELECT 1
+      FROM pg_proc p
+      JOIN pg_language l ON l.oid = p.prolang
+     WHERE p.oid = to_regprocedure('cdr_refresh_call_quality(varchar, timestamptz)')::oid
+       AND l.lanname = 'plpgsql'
+       AND p.prosrc LIKE '%cq-refresh-v55%'
+       AND 'timescaledb.enable_dml_decompression=off' = ANY (p.proconfig)
+) AS has_v55 \gset
+\if :has_v55
+\else
+\echo 'ABORT: cdr_refresh_call_quality() is not the migration-55 function (incident stub, migration-50 body, or missing). Apply docker/postgres/init/55_cdr_refresh_call_quality_fix.sql first.'
+DO $$ BEGIN RAISE EXCEPTION 'cdr_refresh_call_quality() is not the migration-55 version — refusing to refill'; END $$;
+\endif
+
+SELECT to_regclass('timescaledb_information.chunks') IS NOT NULL AS has_ts \gset
+SET statement_timeout = 0;
+SET client_min_messages = warning;
+
+-- ---- 1. Candidates (materialised once: batches are stable) ---------------
+DROP TABLE IF EXISTS pg_temp.cq55_refill;
+CREATE TEMP TABLE cq55_refill AS
+SELECT uuid, start_time, false AS in_compressed
+  FROM cdrs
+ WHERE leg IS DISTINCT FROM 'B'
+   AND call_quality_status IS NULL
+   AND start_time >= :'since'::timestamptz;
+
+\if :has_ts
+UPDATE cq55_refill r SET in_compressed = true
+ WHERE EXISTS (
+       SELECT 1
+         FROM timescaledb_information.chunks ch
+         JOIN pg_namespace n ON n.nspname = ch.hypertable_schema
+         JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = ch.hypertable_name
+        WHERE c.oid = 'cdrs'::regclass
+          AND ch.is_compressed
+          AND r.start_time >= ch.range_start AND r.start_time < ch.range_end);
+\endif
+
+DROP TABLE IF EXISTS pg_temp.cq55_todo;
+CREATE TEMP TABLE cq55_todo AS
+SELECT row_number() OVER (ORDER BY start_time, uuid) AS rn, uuid, start_time
+  FROM cq55_refill
+ WHERE NOT in_compressed;
+
+\echo '-- before:'
+SELECT :'since'::timestamptz AS since,
+       count(*) AS null_call_quality_a_rows,
+       count(*) FILTER (WHERE in_compressed) AS skipped_in_compressed_chunks,
+       count(*) FILTER (WHERE NOT in_compressed) AS to_refresh,
+       :batch_size AS batch_size
+  FROM cq55_refill;
+
+-- ---- 2. Refresh, one autocommit statement per batch ----------------------
+\pset format unaligned
+\pset tuples_only on
+SELECT format($f$SELECT 'batch %1$s/%2$s: ' || count(*) || ' rows, ' || coalesce(sum(cdr_refresh_call_quality(t.uuid, t.start_time)), 0) || ' refreshed' FROM (SELECT uuid, start_time FROM cq55_todo WHERE rn > %3$s AND rn <= %4$s ORDER BY rn) t$f$,
+              b, n.nb, (b - 1) * :batch_size, b * :batch_size)
+  FROM (SELECT ceil(count(*)::numeric / :batch_size)::int AS nb FROM cq55_todo) n,
+       generate_series(1, n.nb) AS b
+ ORDER BY b
+\gexec
+\pset tuples_only off
+\pset format aligned
+
+-- ---- 3. Totals -----------------------------------------------------------
+\echo '-- after:'
+SELECT (SELECT count(*) FROM cq55_todo) AS candidates,
+       (SELECT count(*) FROM cq55_todo t
+          JOIN cdrs c ON c.uuid = t.uuid AND c.start_time = t.start_time
+         WHERE c.start_time >= :'since'::timestamptz
+           AND c.leg IS DISTINCT FROM 'B'
+           AND c.call_quality_status IS NOT NULL) AS now_populated,
+       (SELECT count(*) FROM cdrs
+         WHERE leg IS DISTINCT FROM 'B' AND call_quality_status IS NULL
+           AND start_time >= :'since'::timestamptz) AS still_null_a_rows_since;
+
+-- ---- 4. Marker (same data_migrations table as 43 / 50 / 51) ----------------
+CREATE TABLE IF NOT EXISTS data_migrations (
+    migration_id TEXT PRIMARY KEY,
+    applied_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    cutoff_time  TIMESTAMPTZ,
+    notes        TEXT
+);
+INSERT INTO data_migrations (migration_id, cutoff_time, notes)
+VALUES ('55_cdr_call_quality_refill', :'since'::timestamptz,
+        'call-level quality refill after the 2026-10-23 refresh incident (cutoff_time = since)')
+ON CONFLICT (migration_id) DO UPDATE SET applied_at = now(), cutoff_time = EXCLUDED.cutoff_time;
