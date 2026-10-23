@@ -229,7 +229,7 @@ const PRODUCT_CARDS: Record<ProductKey, { name: string; desc: string }> = {
   },
   voicemail: {
     name: 'Visual Voicemail',
-    desc: 'Mailboxes with transcription, per number',
+    desc: 'Mailboxes per number, with optional transcripts',
   },
 };
 

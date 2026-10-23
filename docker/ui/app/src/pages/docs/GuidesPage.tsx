@@ -603,7 +603,7 @@ function VoicemailGuide() {
       >
         <NoteCards
           items={[
-            { title: 'Automatic transcription', body: 'Every message arrives with searchable text alongside the audio — read it in seconds instead of dialing in.' },
+            { title: 'Optional transcripts', body: 'Every message can arrive with a written transcript alongside the audio — read it in seconds instead of dialing in.' },
             { title: 'Instant delivery', body: 'Messages appear in the portal moments after the caller hangs up, playable from any browser or device.' },
             { title: 'Works with your numbers', body: 'Mailboxes attach to the numbers you already have — no new numbers, no porting, no dial-in menus.' },
             { title: 'Per-mailbox controls', body: 'Greetings, notification preferences, and retention set individually on each mailbox.' },
