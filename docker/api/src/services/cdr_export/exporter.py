@@ -361,19 +361,35 @@ async def _insert_export_log(pool: asyncpg.Pool, filename: str, meta: BatchMeta)
         return row["id"]
 
 
-async def _mark_rows_exported(pool: asyncpg.Pool, ids: Sequence[int]) -> None:
+async def _mark_rows_exported(pool: asyncpg.Pool, ids: Sequence[int],
+                              min_start: Optional[datetime] = None,
+                              max_start: Optional[datetime] = None) -> None:
     """Watermark the shipped CDRs: exported_at = now() WHERE id = ANY(...).
 
     id is a globally-unique BIGSERIAL, so matching on id alone is unambiguous
     even though the PK is composite (id, start_time).
+
+    The batch's start_time range bounds the UPDATE as well (2026-10-23 WAL
+    incident): `id = ANY(array)` alone cannot exclude TimescaleDB chunks or
+    filter compressed batches, so the UPDATE would decompress every compressed
+    chunk of cdrs. With the bounds only the batch's own chunk(s) are touched.
+    start_time is the hypertable's NOT NULL time column, so the bounds always
+    cover every id; they are only absent for an empty batch.
     """
     if not ids:
         return
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE cdrs SET exported_at = now() WHERE id = ANY($1::bigint[])",
-            list(ids),
-        )
+        if min_start is not None and max_start is not None:
+            await conn.execute(
+                "UPDATE cdrs SET exported_at = now() WHERE id = ANY($1::bigint[]) "
+                "AND start_time >= $2::timestamptz AND start_time <= $3::timestamptz",
+                list(ids), min_start, max_start,
+            )
+        else:
+            await conn.execute(
+                "UPDATE cdrs SET exported_at = now() WHERE id = ANY($1::bigint[])",
+                list(ids),
+            )
 
 
 async def _mark_log_sent(pool: asyncpg.Pool, log_id: int) -> None:
@@ -503,7 +519,8 @@ async def send_batch(pool: asyncpg.Pool, cfg: ExportConfig, ftp_client=None) -> 
             )
 
         # --- upload succeeded → watermark rows + mark log sent ----------
-        await _mark_rows_exported(pool, meta.ids)
+        await _mark_rows_exported(pool, meta.ids,
+                                  meta.min_start_time, meta.max_start_time)
         await _mark_log_sent(pool, log_id)
         logger.info(
             "cdr_export: SENT %s — %d CDRs marked exported (log id=%s)",

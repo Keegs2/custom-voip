@@ -449,6 +449,11 @@ async def test_send_batch_happy_path():
     # the ids passed to the watermark update are exactly the batch ids
     upd = [e for e in conn.executed if e[0] == "EXECUTE" and "exported_at = now()" in e[1]][0]
     assert upd[2][0] == [1001, 1002]
+    # ... and the UPDATE is bounded to the batch's start_time range so it
+    # never touches (decompresses) other TimescaleDB chunks (2026-10-23).
+    assert "start_time >= $2::timestamptz AND start_time <= $3::timestamptz" in upd[1]
+    batch_starts = [r["start_time"] for r in conn.fetch_result]
+    assert upd[2][1] == min(batch_starts) and upd[2][2] == max(batch_starts)
     # log flipped to 'sent'
     assert "status = 'sent'" in sql_text
     # lease released in the finally (clears our own row)
