@@ -608,7 +608,6 @@ function VoicemailGuide() {
             { title: 'Works with your numbers', body: 'Mailboxes attach to the numbers you already have — no new numbers, no porting, no dial-in menus.' },
             { title: 'Per-mailbox controls', body: 'Greetings, notification preferences, and retention set individually on each mailbox.' },
             { title: 'Private by design', body: 'Message content is encrypted at rest; access follows the same account permissions as the rest of the portal.' },
-            { title: 'API access', body: 'Mailboxes and messages will be readable over the same REST API and auth you use today.' },
           ]}
         />
       </AccordionSection>
