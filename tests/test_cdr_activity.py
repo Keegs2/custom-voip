@@ -16,6 +16,10 @@ Covers:
         time > 0) and quality semantics == summarizeCallQuality
       - tenant scoping (customer_id ignored) and no seconds/cost keys
       - staff all-customers vs. one customer; exact destination filter
+      - product_type "all" / "" = every product (omitted = rcf, back-compat);
+        `number` = the customer's number on the call (inbound destination,
+        outbound caller_id canonicalized from 10 digits), 422 on junk,
+        tenants only narrow, still a sargable index range scan
       - bad tz / range -> 422; route not shadowed by /{cdr_uuid}; legacy
         /cdrs mount; statement_timeout -> 503 without leaking SET LOCAL;
         sargable start_time range (index scan).
@@ -215,6 +219,7 @@ def _run(coro):
 
 CID_A, CID_B = 101, 202
 D_A1, D_A2, D_B = "+16175550101", "+16175550102", "+12085550900"
+D_A_VM = "+16175550109"     # A's voicemail mailbox DID
 
 # tag, cid, product, dest, start, ring_s, talk_s (None = unanswered),
 #   status, grade, mos
@@ -263,6 +268,19 @@ DST_STARTS = [
 CDRS += [(f"dst{i}", CID_DST, "rcf", D_B, ts, 5, 30, "rated", "good", 4.2)
          for i, ts in enumerate(DST_STARTS)]
 
+#: Product-agnostic rows (docs/CUSTOMER_NUMBERS_HOLISTIC_PLAN.md §4.5): a
+#: voicemail call in the 7d window, and an OUTBOUND trunk call whose
+#: caller_id FreeSWITCH stored as bare 10 digits (outside 7d, inside 30d) —
+#: the `number` filter must canonicalize it onto D_A1. Neither is rcf, so
+#: every product_type-defaulted expectation above is unchanged.
+#   tag, cid, product, direction, caller, dest, start, ring_s, talk_s
+NUMBER_CDRS = [
+    ("vm1", CID_A, "voicemail", "inbound", "+12125550000", D_A_VM,
+     NOW - timedelta(hours=3), 5, 40),
+    ("out1", CID_A, "trunk", "outbound", D_A1[2:], "+12125559999",
+     NOW - timedelta(days=10), 5, 60),
+]
+
 
 def _uuid(tag):
     return f"act-{tag}-0000-0000-0000-000000000000"
@@ -305,7 +323,7 @@ def activity_db():
                     " $8, $8, 0.012, 0.024, 'NORMAL_CLEARING', 'A', $1, $9, $10, $11)",
                     _uuid(tag), cid, product, dest, start, answer, end, dur_ms,
                     status, grade, mos)
-                if tag in B_LEG_TAGS:
+                if tag in B_LEG_TAGS:  # (B rows: outbound, caller = the customer's DID)
                     for attempt in (1, 2):
                         await conn.execute(
                             "INSERT INTO cdrs (uuid, customer_id, product_type, direction,"
@@ -317,6 +335,17 @@ def activity_db():
                             f"act-{tag}-b{attempt}-000-0000-000000000000", cid, product, dest,
                             start + timedelta(seconds=attempt), answer, end,
                             _uuid(tag), attempt)
+            for tag, cid, product, direction, caller, dest, start, ring, talk in NUMBER_CDRS:
+                answer = start + timedelta(seconds=ring)
+                end = answer + timedelta(seconds=talk)
+                await conn.execute(
+                    "INSERT INTO cdrs (uuid, customer_id, product_type, direction,"
+                    " caller_id, destination, start_time, answer_time, end_time,"
+                    " duration_ms, billable_ms, hangup_cause, leg, call_id)"
+                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10,"
+                    " 'NORMAL_CLEARING', 'A', $1)",
+                    _uuid(tag), cid, product, direction, caller, dest, start, answer, end,
+                    (ring + talk) * 1000)
         await owner.close()
         db.pool = await asyncpg.create_pool(
             host=pg.sock, port=pg.port, user="api", password="api_secret",
@@ -599,11 +628,107 @@ def test_scan_is_sargable_range(activity_db, staff, cid):
 
 def test_tenant_sql_never_reads_duration_or_cost_columns():
     w = act.compute_window("7d", NY, NOW)
-    sql, _ = act.build_activity_query(w, staff=False, customer_id=CID_A,
-                                      product_type="rcf", destination=None)
-    for col in ("duration_ms", "billable_ms", "total_cost", "rate_per_min"):
-        assert col not in sql
-    assert tr.TALK_MS_SQL in sql
+    for product, number in (("rcf", None), ("all", D_A1)):
+        sql, _ = act.build_activity_query(w, staff=False, customer_id=CID_A,
+                                          product_type=product, destination=None,
+                                          number=number)
+        for col in ("duration_ms", "billable_ms", "total_cost", "rate_per_min"):
+            assert col not in sql
+        assert tr.TALK_MS_SQL in sql
+
+
+# ---------------------------------------------------------------------------
+# product_type "all" + `number` (docs/CUSTOMER_NUMBERS_HOLISTIC_PLAN.md §4.5)
+# ---------------------------------------------------------------------------
+def test_build_query_all_and_number_binds():
+    w = act.compute_window("7d", NY, NOW)
+    for sentinel in ("all", "ALL", "", None):
+        sql, args = act.build_activity_query(w, staff=True, customer_id=CID_A,
+                                             product_type=sentinel, destination=None)
+        assert "product_type" not in sql and len(args) == 4
+    sql, args = act.build_activity_query(w, staff=True, customer_id=CID_A,
+                                         product_type="voicemail", destination=D_A1,
+                                         number=D_A1)
+    assert "product_type = $5::varchar" in sql and "destination = $6::varchar" in sql
+    assert "END) = $7::varchar" in sql and args[4:] == ["voicemail", D_A1, D_A1]
+
+
+def test_product_type_all_and_empty_mean_every_product(client, tokens):
+    for who, params in (("admin", {"customer_id": CID_A}), ("user_a", {"customer_id": CID_B})):
+        default = _ok(_get(client, tokens, who, tz=NY, **params))["kpis"]
+        assert default["calls"] == 6                     # omitted -> rcf only (unchanged)
+        for sentinel in ("all", ""):
+            k = _ok(_get(client, tokens, who, tz=NY, product_type=sentinel, **params))["kpis"]
+            assert k["calls"] == 8, (who, sentinel)      # rcf 6 + trunk a6 + voicemail vm1
+    vm = _ok(_get(client, tokens, "admin", customer_id=CID_A, tz=NY,
+                  product_type="voicemail"))["kpis"]
+    assert vm["calls"] == 1 and vm["answered"] == 1
+
+
+def test_number_filter_customer_side_number(client, tokens):
+    # inbound by destination: a1 a2 a4 (rcf) + a6 (trunk); B-leg rows (outbound,
+    # caller = D_A1) never count
+    k = _ok(_get(client, tokens, "admin", customer_id=CID_A, tz=NY, product_type="all",
+                 number=D_A1))["kpis"]
+    assert k["calls"] == 4
+    # product default (rcf) still applies: AND
+    assert _ok(_get(client, tokens, "admin", customer_id=CID_A, tz=NY,
+                    number=D_A1))["kpis"]["calls"] == 3
+    # 30d adds a7 (rcf) and the OUTBOUND trunk call whose caller_id is 10
+    # digits — any phone format for the param
+    for raw in (D_A1, D_A1[2:], "(617) 555-0101", "1 617 555 0101"):
+        body = _ok(_get(client, tokens, "admin", customer_id=CID_A, tz=NY, range="30d",
+                        product_type="all", number=raw))
+        assert body["kpis"]["calls"] == 6, raw
+    assert _ok(_get(client, tokens, "admin", customer_id=CID_A, tz=NY, range="30d",
+                    product_type="trunk", number=D_A1))["kpis"]["calls"] == 2  # a6 + out1
+    # AND with destination
+    assert _ok(_get(client, tokens, "admin", customer_id=CID_A, tz=NY, product_type="all",
+                    number=D_A1, destination=D_A2))["kpis"]["calls"] == 0
+    assert _ok(_get(client, tokens, "admin", customer_id=CID_A, tz=NY, product_type="all",
+                    number=D_A_VM))["kpis"]["calls"] == 1
+    # blank = no number filter
+    assert _ok(_get(client, tokens, "admin", customer_id=CID_A, tz=NY, product_type="all",
+                    number=""))["kpis"]["calls"] == 8
+
+
+@pytest.mark.parametrize("junk", ["junk", "1001", "447911123456", "+1"])
+def test_number_filter_junk_422(client, tokens, junk):
+    for who in ("admin", "user_a"):
+        r = _get(client, tokens, who, number=junk)
+        assert r.status_code == 422 and r.json()["detail"] == "number must be a phone number"
+
+
+def test_number_filter_tenant_only_narrows(client, tokens):
+    mine = _ok(_get(client, tokens, "user_a", tz=NY, product_type="all", number=D_A1))
+    _assert_tenant_safe(mine)
+    assert mine["kpis"]["calls"] == 4
+    # B's number from A's token: A's own calls only -> nothing
+    assert _ok(_get(client, tokens, "user_a", tz=NY, product_type="all",
+                    number=D_B))["kpis"]["calls"] == 0
+    # B with A's number cannot widen past its own customer
+    assert _ok(_get(client, tokens, "user_b", tz=NY, product_type="all", customer_id=CID_A,
+                    number=D_A1))["kpis"]["calls"] == 0
+    assert _ok(_get(client, tokens, "user_b", tz=NY, product_type="all",
+                    number=D_B))["kpis"]["calls"] == 1
+
+
+@pytest.mark.parametrize("staff,cid", [(True, None), (True, CID_A), (False, CID_A)])
+def test_scan_is_sargable_with_number_and_all(activity_db, staff, cid):
+    w = act.compute_window("30d", NY, NOW)
+    sql, args = act.build_activity_query(w, staff=staff, customer_id=cid,
+                                         product_type="all", destination=None, number=D_A1)
+
+    async def plan():
+        async with activity_db.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SET LOCAL enable_seqscan = off")
+                rows = await conn.fetch("EXPLAIN " + sql, *args)
+                return "\n".join(r[0] for r in rows)
+    text = _run(plan())
+    cond = next((ln for ln in text.splitlines() if "Index Cond" in ln), "")
+    assert "idx_cdrs_customer_time" in text or "idx_cdrs_start_time" in text, text
+    assert "start_time >=" in cond and "start_time <" in cond, text
 
 
 # ---------------------------------------------------------------------------

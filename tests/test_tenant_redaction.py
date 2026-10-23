@@ -153,9 +153,13 @@ PG_BIN = _find_pg_bin()
 # Production-shaped cdrs (05 base + 16 detail + 18 sbc_id + 40 inbound
 # carrier). 23 (on-net) and 47 (stir outcome) are replayed from the REAL
 # migration files via tests/cdr_schema.py.
-_SCHEMA = """
-CREATE ROLE api LOGIN PASSWORD 'api_secret';
-
+#
+# Split in two so a module that builds the product tables from the REAL init
+# scripts (tests/test_reports.py: 02/03/.../22/54) can still borrow the cdrs
+# side: `_CDR_SCHEMA` (cdrs, call_attestations, active_calls — IF NOT EXISTS,
+# 03 creates it) and `_PRODUCT_SCHEMA` (trimmed 02/03 product tables). `_SCHEMA`
+# (imported by six modules) is the same DDL as before.
+_CDR_SCHEMA = """
 CREATE TABLE cdrs (
   id BIGSERIAL,
   uuid VARCHAR(64) NOT NULL,
@@ -229,6 +233,20 @@ CREATE TABLE call_attestations (
   verstat_source     TEXT,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now());
 
+CREATE TABLE IF NOT EXISTS active_calls (
+  uuid UUID PRIMARY KEY,
+  customer_id INT NOT NULL,
+  product_type VARCHAR(10) NOT NULL,
+  trunk_id INT,
+  direction VARCHAR(10) NOT NULL,
+  caller_id VARCHAR(30),
+  destination VARCHAR(30),
+  start_time TIMESTAMPTZ DEFAULT NOW(),
+  answer_time TIMESTAMPTZ,
+  state VARCHAR(20) DEFAULT 'ringing');
+"""
+
+_PRODUCT_SCHEMA = """
 CREATE TABLE sip_trunks (
   id SERIAL PRIMARY KEY,
   customer_id INT NOT NULL,
@@ -240,18 +258,6 @@ CREATE TABLE trunk_dids (
   id SERIAL PRIMARY KEY,
   trunk_id INT NOT NULL,
   did VARCHAR(20) NOT NULL);
-
-CREATE TABLE active_calls (
-  uuid UUID PRIMARY KEY,
-  customer_id INT NOT NULL,
-  product_type VARCHAR(10) NOT NULL,
-  trunk_id INT,
-  direction VARCHAR(10) NOT NULL,
-  caller_id VARCHAR(30),
-  destination VARCHAR(30),
-  start_time TIMESTAMPTZ DEFAULT NOW(),
-  answer_time TIMESTAMPTZ,
-  state VARCHAR(20) DEFAULT 'ringing');
 
 -- customers / product tables (02_schema_core.sql shape, trimmed) for the
 -- traffic_grade redaction cases (GET /customers, /customers/me, /rcf/{did}).
@@ -284,10 +290,28 @@ CREATE TABLE api_dids (
   id SERIAL PRIMARY KEY,
   customer_id INT NOT NULL,
   did VARCHAR(20) UNIQUE NOT NULL);
+"""
 
+_SCHEMA = (
+    "CREATE ROLE api LOGIN PASSWORD 'api_secret';\n"
+    + _CDR_SCHEMA
+    + _PRODUCT_SCHEMA
+    + """
 GRANT ALL ON ALL TABLES IN SCHEMA public TO api;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO api;
+""")
+
+#: THIS module only: bring the trimmed product tables up to the columns the
+#: REAL number_routing view (22) reads, then run the real 22 — /customers/me
+#: counts.numbers reads it (services/customer_numbers.py).
+_NUMBER_ROUTING_SETUP = """
+CREATE ROLE freeswitch;
+ALTER TABLE rcf_numbers ADD ring_timeout INT DEFAULT 30, ADD max_channels INT DEFAULT 0;
+ALTER TABLE api_dids ADD enabled BOOLEAN DEFAULT true, ADD voice_url VARCHAR(512),
+                     ADD fallback_url VARCHAR(512);
+ALTER TABLE sip_trunks ADD enabled BOOLEAN DEFAULT true;
 """
+_MIG_22 = REPO / "docker" / "postgres" / "init" / "22_number_routing.sql"
 
 
 class _EphemeralPG:
@@ -363,6 +387,8 @@ def redact_db():
         async with owner.acquire() as conn:
             await conn.execute(_SCHEMA)
             await apply_cdr_column_migrations(conn)
+            await conn.execute(_NUMBER_ROUTING_SETUP)
+            await conn.execute(_MIG_22.read_text())
             await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO api")
 
             async def seed(uuid, cid, start, dur_ms, answered, trunk=None, rated=False):
@@ -752,6 +778,9 @@ def test_tenant_customer_endpoints_hide_traffic_grade(client, tokens):
             me = r.json()
             assert_no_tenant_customer_keys(me)
             assert me["id"] == CID_A and me["counts"]["rcf"] == 1
+            # product-agnostic numbers (number_routing): no internals
+            assert me["counts"]["numbers"] == {"total": 1, "by_product": {"rcf": 1}}
+            assert "product_ref_id" not in r.text and "customer_status" not in r.text
             assert "daily_limit" in me and "cpm_limit" in me  # unchanged shape
 
             r = await client.get(f"/v1/rcf/{RCF_DID_A}", headers=h)

@@ -9,6 +9,7 @@ from services import stir_outcome as stir_oc
 from services import tenant_redaction as tr
 from services import call_quality as cq
 from services import cdr_activity as act
+from services import customer_numbers as cn
 import asyncpg
 import logging
 import math
@@ -1889,6 +1890,25 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _number_param(raw: Optional[str]) -> Optional[str]:
+    """`number` query param -> canonical +E.164 (None when absent/blank);
+    422 "number must be a phone number" otherwise."""
+    try:
+        return cn.parse_number_param(raw)
+    except ValueError as e:
+        raise HTTPException(422, cn.BAD_NUMBER_DETAIL) from e
+
+
+def _number_query():
+    """`number` query param: the customer's own number on the call (any phone
+    format; canonicalized). Shared by /v1/cdrs, /summary and /activity (a
+    fresh Query per route — FieldInfo objects are not shared)."""
+    return Query(
+        None, max_length=32,
+        description="the customer's number on the call (destination inbound, caller_id "
+                    "outbound); any phone format, exact match after canonicalizing")
+
+
 def _build_cdr_filters(
     *,
     start_date: datetime,
@@ -1903,6 +1923,7 @@ def _build_cdr_filters(
     rated_only: bool,
     leg: str = "calls",
     call_id: Optional[str] = None,
+    number: Optional[str] = None,
 ) -> tuple[str, list]:
     """Build the WHERE clause + bind values shared by /v1/cdrs and /summary.
 
@@ -1923,6 +1944,14 @@ def _build_cdr_filters(
     which is the useful answer. Callers cap the page at CALL_ID_LOOKUP_LIMIT.
 
     `leg` applies the LegView predicate (default one-row-per-call).
+
+    `product_type` "all" (services.customer_numbers.ALL_PRODUCTS) or empty
+    means no product filter. `number` (already canonical +E.164 — see
+    `_number_param`) is an EXACT match on the call's customer-side number
+    (destination for inbound, caller_id for outbound, canonicalized in SQL:
+    customer_numbers.cdr_customer_number_sql), so an outbound trunk call
+    matches the customer's DID even when FreeSWITCH stored a 10-digit
+    caller_id. It only ever narrows (tenants stay inside their customer_id).
     """
     if call_id:
         sql = "WHERE (call_id = $1::varchar OR uuid = $1::varchar)"
@@ -1947,7 +1976,8 @@ def _build_cdr_filters(
         idx += 1
 
     # String filters keep truthiness on purpose: an empty '?direction=' means
-    # "no filter", matching historical behavior.
+    # "no filter", matching historical behavior. product_type "all" too.
+    product_type = cn.product_filter(product_type)
     if product_type:
         sql += f" AND product_type = ${idx}"
         values.append(product_type)
@@ -1962,6 +1992,13 @@ def _build_cdr_filters(
         # Literal prefix match — LIKE metachars in the input are escaped.
         sql += f" AND destination LIKE ${idx}"
         values.append(f"{_escape_like(destination)}%")
+        idx += 1
+
+    if number:
+        # The customer's number on the call (exact, canonical) — combinable
+        # with `destination` (AND).
+        sql += f" AND {cn.cdr_customer_number_sql()} = ${idx}::varchar"
+        values.append(number)
         idx += 1
 
     if sbc_id:
@@ -1996,6 +2033,7 @@ async def query_cdrs(
     product_type: Optional[str] = None,
     direction: Optional[str] = None,
     destination: Optional[str] = None,
+    number: Optional[str] = _number_query(),
     sbc_id: Optional[str] = None,
     zone: Optional[Zone] = None,
     start_date: Optional[datetime] = None,
@@ -2020,6 +2058,11 @@ async def query_cdrs(
         sbc_id prefix ("{zone}-sbc-{n}"); NULL-sbc_id rows never match.
       * sbc_id — exact match, retained for back-compat.
       * destination — literal prefix match.
+      * product_type — exact; "all" (or empty) = every product.
+      * number — the customer's own number on the call (destination for
+        inbound, caller_id for outbound), any phone format, exact after
+        canonicalizing; not a phone number -> 422. Tenants may use it (it
+        only narrows within their own customer).
 
     Response: {cdrs, count, total, offset, limit}. `count` is the RETURNED
     page's row count (back-compat); `total` is COUNT(*) over the same filters
@@ -2064,6 +2107,7 @@ async def query_cdrs(
         rated_only=rated_only,
         leg=leg,
         call_id=call_id,
+        number=_number_param(number),
     )
 
     # Real-pagination total: COUNT(*) over the EXACT same where clause and
@@ -2140,6 +2184,7 @@ async def cdr_summary(
     product_type: Optional[str] = None,
     direction: Optional[str] = None,
     destination: Optional[str] = None,
+    number: Optional[str] = _number_query(),
     sbc_id: Optional[str] = None,
     zone: Optional[Zone] = None,
     start_date: Optional[datetime] = None,
@@ -2158,8 +2203,9 @@ async def cdr_summary(
     Accepts the SAME filter set as GET /v1/cdrs — both endpoints run the
     shared `_build_cdr_filters` builder, so the CDR Search UI can drive the
     records list and this roll-up with identical query params (zone,
-    direction, product_type, destination prefix, trunk_id, sbc_id,
-    rated_only, inclusive start_date/end_date; naive datetimes pinned UTC).
+    direction, product_type (incl. "all"), destination prefix, number,
+    trunk_id, sbc_id, rated_only, inclusive start_date/end_date; naive
+    datetimes pinned UTC).
 
     CHANGED (CDR Search rebuild): the default window is now the last 24
     HOURS — it was 7 days, silently inconsistent with GET /v1/cdrs. The UI
@@ -2202,6 +2248,7 @@ async def cdr_summary(
         rated_only=rated_only,
         leg=leg,
         call_id=call_id,
+        number=_number_param(number),
     )
 
     if is_tenant:
@@ -2325,18 +2372,25 @@ async def cdr_activity(
     range_: act.ActivityRange = Query("7d", alias="range"),
     tz: str = Query("UTC", max_length=64, description="IANA time zone"),
     customer_id: Optional[int] = None,
-    product_type: Optional[str] = Query("rcf", max_length=32),
+    product_type: Optional[str] = Query(
+        "rcf", max_length=32,
+        description='omitted = rcf (back-compat); "all" or empty = every product'),
     destination: Optional[str] = Query(None, max_length=32, description="exact DID"),
+    number: Optional[str] = _number_query(),
     customer_filter: int | None = Depends(get_support_read_filter),
 ):
     """Zero-filled KPIs + time series over a fixed window (24h hourly, 7d/30d
     daily, 90d ISO-weekly), bucketed in `tz`. One row per call (no carrier
     B-legs). Tenants are hard-scoped to their own customer (`customer_id`
     ignored) and get whole-minute averages only — never seconds or costs;
-    staff may omit `customer_id` for all customers. Contract: module
-    docstring of services/cdr_activity.py. Unknown tz -> 422; timeout -> 503.
+    staff may omit `customer_id` for all customers. `product_type` defaults to
+    rcf when omitted; "all" (or empty) = every product. `number` = the
+    customer's number on the call (exact, canonical; AND with `destination`).
+    Contract: module docstring of services/cdr_activity.py. Unknown tz / bad
+    number -> 422; timeout -> 503.
     """
     staff = customer_filter is None
+    number = _number_param(number)
     canon_tz = act.canonical_tz(tz)
     if canon_tz is None:
         raise HTTPException(422, "unknown time zone")
@@ -2344,7 +2398,7 @@ async def cdr_activity(
     sql, args = act.build_activity_query(
         window, staff=staff,
         customer_id=customer_id if staff else customer_filter,
-        product_type=product_type, destination=destination)
+        product_type=product_type, destination=destination, number=number)
     return act.shape_activity(window, await act.run_activity_query(sql, args), staff=staff)
 
 

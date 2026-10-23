@@ -655,7 +655,8 @@ def test_support_403_on_admin_surfaces(client, tokens):
                                     "name": "Sneak", "role": "admin"})
         assert r.status_code == 403, r.text
         # One representative admin-only route per group.
-        for path in ("/v1/rates", "/v1/tiers", "/v1/carriers", "/v1/numbers/inventory"):
+        for path in ("/v1/rates", "/v1/tiers", "/v1/carriers", "/v1/numbers/inventory",
+                     "/v1/numbers/owned"):
             r = await client.get(path, headers=hdrs)
             assert r.status_code == 403, f"{path}: {r.status_code} {r.text}"
 

@@ -334,16 +334,33 @@ def test_me_counts_api_dids_zero_when_off(monkeypatch):
 
     monkeypatch.setattr(customers.db, "fetch_one", _fetch_one)
 
+    numbers_queries = []
+
+    async def _fetch_all(q, *a):
+        # counts.numbers (services/customer_numbers.py over number_routing)
+        numbers_queries.append(q)
+        assert "number_routing" in q and a == (3,), (q, a)
+        return [{"product": "rcf", "n": 4}]
+
+    monkeypatch.setattr(customers.db, "fetch_all", _fetch_all)
+    numbers = {"total": 4, "by_product": {"rcf": 4}}
+
     async def go():
         async with _client((customers.router, "/v1/customers"),
                            role="user", customer_id=3) as c:
             r = await c.get("/v1/customers/me")
             assert r.status_code == 200, r.text
-            assert r.json()["counts"] == {"rcf": 4, "api_dids": 0, "trunks": 2}
-            assert not any("api_dids" in q for q in queries)
+            assert r.json()["counts"] == {"rcf": 4, "api_dids": 0, "trunks": 2,
+                                          "numbers": numbers}
+            assert not any("api_dids" in q for q in queries + numbers_queries)
             monkeypatch.setenv("API_CALLING_ENABLED", "true")
             r = await c.get("/v1/customers/me")
-            assert r.json()["counts"] == {"rcf": 4, "api_dids": 9, "trunks": 2}
+            assert r.json()["counts"] == {"rcf": 4, "api_dids": 9, "trunks": 2,
+                                          "numbers": numbers}
+        # api is hidden from the product-agnostic numbers with the flag OFF
+        # AND ON (retired product: never one of a customer's numbers)
+        assert len(numbers_queries) == 2
+        assert all("NOT IN ('api')" in q for q in numbers_queries)
 
     _run(go())
 
