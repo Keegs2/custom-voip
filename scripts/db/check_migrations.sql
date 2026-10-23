@@ -1,4 +1,4 @@
--- Read-only: reports which hand-applied migrations (22..54) are present on this database.
+-- Read-only: reports which hand-applied migrations (22..55) are present on this database.
 -- Run on the East primary: sudo -u postgres psql -d voip -f /opt/revup/scripts/db/check_migrations.sql
 -- Init scripts only run on first initdb; every later migration is applied by hand, so check before assuming.
 -- 43 is a one-shot data backfill (jitter units) — if MISSING, read its header before running; never re-run it.
@@ -22,5 +22,6 @@ WITH c AS (SELECT table_name t, column_name col FROM information_schema.columns 
 ('51_cdr_quality_no_media', EXISTS(SELECT 1 FROM pg_proc WHERE proname='cq_leg_status' AND pronargs=5)),
 ('52_sinch_tf_origination', CASE WHEN to_regclass('public.carrier_trunks') IS NULL THEN false ELSE (xpath('/row/n/text()', query_to_xml('SELECT count(*) AS n FROM carrier_trunks WHERE carrier=''sinch'' AND pop IN (''atlanta-tf-orig'',''denver-tf-orig'')', false, true, '')))[1]::text::int = 2 END),
 ('53_sinch_redundant_termination', to_regclass('public.carrier_trunks_ingress_ip_key') IS NOT NULL AND to_regclass('public.carrier_trunks_egress_ip_key') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='carrier_trunks_source_ip_key') AND EXISTS(SELECT 1 FROM c WHERE t='carrier_trunk_health' AND col='trunk_enabled')),
-('54_voicemail', to_regclass('public.voicemail_access_log') IS NOT NULL AND EXISTS(SELECT 1 FROM c WHERE t='customers' AND col='voicemail_enabled') AND EXISTS(SELECT 1 FROM pg_constraint WHERE conname='did_inventory_product_type_check' AND pg_get_constraintdef(oid) LIKE '%voicemail%') AND CASE WHEN to_regclass('public.number_routing') IS NULL THEN false ELSE pg_get_viewdef(to_regclass('public.number_routing')) LIKE '%voicemail_boxes%' END)
+('54_voicemail', to_regclass('public.voicemail_access_log') IS NOT NULL AND EXISTS(SELECT 1 FROM c WHERE t='customers' AND col='voicemail_enabled') AND EXISTS(SELECT 1 FROM pg_constraint WHERE conname='did_inventory_product_type_check' AND pg_get_constraintdef(oid) LIKE '%voicemail%') AND CASE WHEN to_regclass('public.number_routing') IS NULL THEN false ELSE pg_get_viewdef(to_regclass('public.number_routing')) LIKE '%voicemail_boxes%' END),
+('55_cdr_refresh_call_quality_fix', EXISTS(SELECT 1 FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang WHERE p.oid = to_regprocedure('cdr_refresh_call_quality(varchar, timestamptz)')::oid AND l.lanname = 'plpgsql' AND p.prosrc LIKE '%cq-refresh-v55%' AND 'timescaledb.enable_dml_decompression=off' = ANY (p.proconfig)))
 ) SELECT m AS migration, CASE WHEN ok THEN 'applied' ELSE '*** MISSING ***' END AS status FROM chk;

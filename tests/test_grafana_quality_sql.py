@@ -336,11 +336,14 @@ def pg():
         conn = await asyncpg.connect(host=srv.sock, port=srv.port, user="postgres", database="postgres")
         await conn.execute(_SCHEMA)
         await apply_cdr_column_migrations(
-            conn, names=tuple(n for n in CDR_COLUMN_MIGRATIONS if not n.startswith(("50_", "51_"))))
+            conn, names=tuple(n for n in CDR_COLUMN_MIGRATIONS
+                              if not n.startswith(("50_", "51_", "55_"))))
         m50 = MIGRATION_50.read_text()
         await conn.execute(m50)
         await conn.execute(m50)  # idempotent replay
         await apply_cdr_column_migrations(conn, names=("51_cdr_quality_no_media.sql",))  # no_media split
+        # the production refresh function (55 replaces 50's; requires 50)
+        await apply_cdr_column_migrations(conn, names=("55_cdr_refresh_call_quality_fix.sql",))
         for uuid, node, ago, a, bs in CALLS:
             start = NOW - timedelta(minutes=ago)
             await _insert_leg(conn, uuid, node, start, a, "A", None, uuid)
