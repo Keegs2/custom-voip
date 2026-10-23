@@ -521,8 +521,8 @@ do
         tostring(c.setvars.playback_terminators) .. "/" .. tostring(c.setvars.record_sample_rate))
     local rp = rec_path_of(c)
     check("record path = /dev/shm/vm/<uuid4>.wav", rp and rp:match("^/dev/shm/vm/" .. UUID4 .. "%.wav$"), rp)
-    check("record args: max_message_seconds from API, silence 200/5",
-        c.records[1] == rp .. " 120 200 5", c.records[1])
+    check("record args: max_message_seconds from API, silence 200/10",
+        c.records[1] == rp .. " 120 200 10", c.records[1])
     local msg_uuid = rp and rp:match("^/dev/shm/vm/(.*)%.wav$")
     check("vm_msg_uuid CDR var = record file uuid", c.setvars.vm_msg_uuid == msg_uuid, c.setvars.vm_msg_uuid)
     check("exactly 2 commands (mailbox GET, deposit POST)", #c.popen == 2, #c.popen)
@@ -806,7 +806,7 @@ do
     local pi, ri = find_event(c, "playback:" .. (gpath or "?")), find_event(c, "remove:" .. (gpath or "?"))
     check("[6a] unlink right after its playback", pi and ri and ri == pi + 1, tostring(pi) .. "/" .. tostring(ri))
     check("[6a] vm_greeting=custom", c.setvars.vm_greeting == "custom", c.setvars.vm_greeting)
-    check("[6a] record uses 300 s", c.records[1] and c.records[1]:match(" 300 200 5$"), c.records[1])
+    check("[6a] record uses 300 s", c.records[1] and c.records[1]:match(" 300 200 10$"), c.records[1])
     assert_clean("[6a]", c)
 
     c = run_scenario(direct({ mailbox = mb, greeting = { code = "200", content = "<html>not a wav</html>" } }))
@@ -883,14 +883,14 @@ do
         c = run_scenario(direct({ mailbox = f.m }))
         local rp = rec_path_of(c)
         check("[8d] lookup " .. f.tag .. " -> defaults: 300 s, default greeting, deposits",
-            rp and c.records[1] == rp .. " 300 200 5"
+            rp and c.records[1] == rp .. " 300 200 10"
             and c.playbacks[1] == "/usr/local/freeswitch/scripts/sounds/vm/default_greeting.wav"
             and c.setvars.vm_result == "stored", tostring(c.records[1]) .. " " .. tostring(c.setvars.vm_result))
         assert_clean("[8d " .. f.tag .. "]", c)
     end
 
     c = run_scenario(direct({ mailbox = { code = "200", body = '{"mailbox_id":42,"accepting":true,"max_message_seconds":99999}' } }))
-    check("[8e] out-of-range max_message_seconds -> 300", c.records[1] and c.records[1]:match(" 300 200 5$"), c.records[1])
+    check("[8e] out-of-range max_message_seconds -> 300", c.records[1] and c.records[1]:match(" 300 200 10$"), c.records[1])
     assert_clean("[8e]", c)
 end
 
@@ -1078,6 +1078,10 @@ do
     check("[13] wav_duration_ms unfinalized header -> file size", vbox.wav_duration_ms(wdir .. "/c.wav") == 4000,
         vbox.wav_duration_ms(wdir .. "/c.wav"))
     check("[13] wav_duration_ms non-WAV -> nil", vbox.wav_duration_ms(wdir .. "/d.wav") == nil, "parsed")
+    -- owner decision O5: threshold 200, 10 s of continuous silence ends the message
+    check("[13] silence stop = threshold 200, 10 s",
+        vbox.SILENCE_THRESHOLD == 200 and vbox.SILENCE_HITS == 10,
+        tostring(vbox.SILENCE_THRESHOLD) .. "/" .. tostring(vbox.SILENCE_HITS))
 
     local long = string.rep("é", 150)
     local tr = dep.clean_text(long, 100)

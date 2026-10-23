@@ -30,7 +30,7 @@ The FreeSWITCH deposit path does not change. `deposit.py` is untouched, and the 
 | T2 | **Location `us`.** Endpoint `us-speech.googleapis.com`, recognizer `projects/rugged-night-193017/locations/us/recognizers/_` | Keeps processing in the US. The implicit `_` recognizer means there is no recognizer resource to create, so no admin-write IAM is needed. §2.3 |
 | T3 | **Model `telephony`** is the default. `chirp_3` can be chosen by env (`VOICEMAIL_STT_MODEL`). Language defaults to `en-US`; `es-US` and `fr-CA` are allowed. | Google recommends `telephony` for 8 kHz phone audio, and it supports confidence. Google says Chirp 3's confidence "isn't truly a confidence score". All three languages have `telephony` in `us`. §2.4 |
 | T4 | **LINEAR16 at the WAV's native rate** (8000 Hz from FS), mono, `ExplicitDecodingConfig` | Lossless, no resampling (Google's best practice). §2.4 |
-| T5 | **Chunk planner:** cut at the quietest 300 ms between 40 and 55 s, trim leading and trailing silence, skip silent pieces, and treat all-silent audio as `empty` with no API call | Respects the 60 s / 10 MB sync limit without cutting words. Avoids paying for FreeSWITCH's 5 s silence tail. §7 |
+| T5 | **Chunk planner:** cut at the quietest 300 ms between 40 and 55 s, trim leading and trailing silence, skip silent pieces, and treat all-silent audio as `empty` with no API call | Respects the 60 s / 10 MB sync limit without cutting words. Avoids paying for FreeSWITCH's silence tail, which is up to 10 s since O5 (`record … 200 10`). §7 |
 | T6 | **Transcript is encrypted** with the same customer KEK envelope: a fresh DEK, AES-256-GCM, AAD `vmt:`. The ciphertext goes in **Postgres** (`voicemail_transcripts.ciphertext`), not GCS. | It is small (≤ 64 KiB), it commits atomically with the job state, and it leaves no orphan objects. Erase and retention are row operations. §4, §5 |
 | T7 | **Durable queue = `voicemail_transcripts` rows.** Columns hold status, attempts, `next_attempt_at`, lease and fencing `attempt_id`. A worker runs in every uvicorn process. One process at a time discovers new stored messages (`pg_try_advisory_xact_lock`), claims use `FOR UPDATE SKIP LOCKED`, and the finalize is fenced. | Leaves `deposit.py` and the 11 s FS deadline untouched. PgBouncer transaction mode rules out LISTEN/NOTIFY, so polling is needed anyway. §6 |
 | T8 | **Lifecycle:** a purge trigger on `voicemail_messages`, an FK `ON DELETE CASCADE`, explicit deletes in mailbox delete and crypto-erase, and a retention orphan arm | Retention, user purge, mailbox delete and erase all remove transcripts automatically, including any future purge path. §9 |
@@ -1245,9 +1245,10 @@ The telephony agent reviewing audio quality owns any change here. These are the 
 4. **No processing:** do not add AGC, noise suppression, `record_*` gain or volume changes, or comfort-noise fill (`record_fill_cng`) on the voicemail leg. Google: "Don't use automatic gain control", "All noise reduction processing should be disabled", "Avoid audio clipping". CNG fill would also defeat FS's silence stop and our silence trim.
 
 **Worth reviewing (telephony decides):**
-5. **Silence stop `record … 200 5`:** threshold 200 and 5 s of silence end the message.
-   - It is good for STT (the tail is trimmed server-side using the same 200 threshold).
-   - It **truncates** callers who pause more than 5 s mid-message, for example while looking up a number. Consider 7–8 s.
+5. **Silence stop — BUILT as `record … 200 10` (owner decision O5).** `vm_box.lua` `M.SILENCE_HITS = 10`; the threshold stays 200.
+   - FS counts consecutive frames whose mean |sample| is below 200; any louder frame resets the count. 10 s = 500 frames of 20 ms.
+   - Good for STT: the tail, now up to 10 s, is trimmed server-side with the same 200 threshold.
+   - A caller can now pause up to 10 s mid-message (was 5 s), for example while looking up a number, without being cut off.
 6. **Wideband:** if an on-net leg ever negotiates G.722 (16 kHz), forcing 8000 throws the extra bandwidth away. Recording at the leg's native rate (8000 or 16000) is better. The API and STT already accept both.
 7. **Packet loss and jitter:** `record` writes what it reads, so lost packets become gaps. If the quality review shows meaningful loss on carrier legs, a jitter buffer on the voicemail A-leg (e.g. `jitterbuffer_msec`) would give STT more continuous audio.
 8. **DTMF:** `#` ends the recording. With RFC 2833 the tone is not in the audio. With in-band DTMF a short tone tail is harmless to STT.

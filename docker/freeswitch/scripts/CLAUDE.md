@@ -98,7 +98,8 @@ list); plan: `docs/ENCRYPTED_VOICEMAIL_BUILD_PLAN.md` (D6/D8, §3.1). Tests:
   → full/inactive/404/401/403 ⇒ prompt + hang up; other failures ⇒ defaults →
   custom greeting (fetched to `/dev/shm/vm/g_<uuid>.wav`, played, unlinked at
   once) or `sounds/vm/default_greeting.wav` → beep → `record
-  /dev/shm/vm/<msg_uuid>.wav <max> 200 5` at 8 kHz (`#` ends / skips greeting) →
+  /dev/shm/vm/<msg_uuid>.wav <max> 200 10` at 8 kHz (energy threshold 200;
+  10 s of continuous silence ends the message; `#` ends / skips greeting) →
   hang up a still-connected caller → deposit → unlink → rate-limited sweep.
 - **Post-hangup deposit.** The `lua` app runs in the session thread; a caller
   BYE makes `record` return and `session:ready()` false, but the script keeps

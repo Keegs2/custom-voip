@@ -27,7 +27,7 @@
 --     played, UNLINKED IMMEDIATELY after playback) else `default_greeting`
 --     (tone-only if the prompt file is missing). '#' skips the greeting.
 --   beep -> record /dev/shm/vm/<msg_uuid>.wav (8 kHz mono PCM16, max
---     max_message_seconds, silence-stop, '#' ends)
+--     max_message_seconds, 10 s silence-stop at threshold 200, '#' ends)
 --   hang up the A-leg (if the caller has not already) -> deposit (§5, raw
 --     audio/wav, retry table) -> unlink -> opportunistic sweep.
 --
@@ -89,8 +89,15 @@ M.MOUNTS_FILE = "/proc/self/mounts"
 M.DEFAULT_MAX_SECONDS = 300      -- contract cap; used when the lookup fails
 M.MIN_MAX_SECONDS     = 10
 M.MIN_DEPOSIT_MS      = 1000     -- contract §5: < 1 s is not deposited
-M.SILENCE_THRESHOLD   = 200      -- record energy threshold
-M.SILENCE_HITS        = 5        -- seconds of silence that end the recording
+M.SILENCE_THRESHOLD   = 200      -- record energy threshold (mean |sample| per frame)
+-- `record` counts consecutive frames below the threshold (any louder frame
+-- resets the count) and stops after SILENCE_HITS seconds of them. FS turns
+-- seconds into frames as rate x seconds / samples per frame, i.e.
+-- 8000 x 10 / 160 = 500 frames of 20 ms (switch_ivr_play_say.c:761,
+-- :906-927 at FREESWITCH_REF 0a54a48).
+-- 10 s (owner decision O5, was 5) lets a caller pause mid-message without
+-- being cut off. The silent tail is trimmed server-side before STT.
+M.SILENCE_HITS        = 10       -- seconds of continuous silence that end the recording
 M.RECORD_SAMPLE_RATE  = 8000     -- canonical 8 kHz mono PCM16 (<= 4.8 MB / 300 s)
 M.SETTLE_MS           = 300      -- after answer, before the first prompt
 M.SWEEP_AGE_MIN       = 15
@@ -453,9 +460,10 @@ local function flow(session, a, st)
     local rec_path = dep.message_path(st.msg_uuid)
     register(st, rec_path)
     setv(session, "record_sample_rate", M.RECORD_SAMPLE_RATE)
-    -- Returns when: max length reached, silence-stop, '#', the caller hangs
-    -- up (the normal end — see "POST-HANGUP DEPOSIT" above), or the file
-    -- could not be opened/written (tmpfs full).
+    -- Args: <path> <max seconds> <silence threshold> <silence seconds>.
+    -- Returns when: max length reached, SILENCE_HITS (10) s of continuous
+    -- silence, '#', the caller hangs up (the normal end — see "POST-HANGUP
+    -- DEPOSIT" above), or the file could not be opened/written (tmpfs full).
     session:execute("record", string.format("%s %d %d %d",
         rec_path, max_secs, M.SILENCE_THRESHOLD, M.SILENCE_HITS))
 
