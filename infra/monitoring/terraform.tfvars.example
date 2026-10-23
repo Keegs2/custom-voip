@@ -13,3 +13,11 @@ notification_email = "ops@example.com" # REQUIRED — who gets paged
 
 # Set false only if you manage the prober firewall rules elsewhere.
 # manage_uptime_firewall = true
+
+# Existing Slack channels (console-created), full resource names.
+# slack_channel_ids = ["projects/PROJECT_ID/notificationChannels/CHANNEL_ID"]
+
+# Existing Pub/Sub channel that publishes to topic monitoring-alerts (TED's CRAG
+# Ops intake). SET THIS before applying: an empty list detaches the channel from
+# every policy. Find it with the gcloud command in README.md ("Pub/Sub channel").
+# pubsub_notification_channel_ids = ["projects/PROJECT_ID/notificationChannels/CHANNEL_ID"]

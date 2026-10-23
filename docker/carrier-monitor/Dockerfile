@@ -31,6 +31,20 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #                  via the mounted /var/run/docker.sock (read-only in compose).
 #   - git        : host.git_head (`git -C /opt/revup rev-parse HEAD` + log). The
 #                  repo is bind-mounted read-only in compose.
+#   - systemd    : ONLY for the `journalctl` binary behind host.journalctl (in
+#                  bookworm journalctl ships in the `systemd` package; there is no
+#                  smaller split). It reads the HOST journal that compose mounts
+#                  read-only (/var/log/journal + /etc/machine-id). systemd is NOT
+#                  run: the ENTRYPOINT below stays ops_agent.py as PID 1, and no
+#                  unit is ever started in this container. Without it the
+#                  journal probe (ops_commands._journal_available) is always
+#                  False and every host.journalctl answers "unavailable".
+#                  Adds ~5.6 MB (local arm64 build: 114.6 MB -> 120.1 MB; most
+#                  of systemd's libraries are already pulled in by kamailio).
+#                  Its postinst writes a random /etc/machine-id; it is emptied
+#                  below so the image carries no identity — compose bind-mounts
+#                  the HOST's machine-id, which journalctl needs to find
+#                  /var/log/journal/<machine-id>/.
 #   - iproute2   : nothing here needs it; NOT installed (the agent opens no sockets
 #                  it must configure — it only reads).
 # gnupg2/wget/ca-certificates are needed only to add the two apt repo keys and are
@@ -44,18 +58,22 @@ RUN apt-get update \
     && wget -O- https://download.docker.com/linux/debian/gpg | gpg --dearmor > /usr/share/keyrings/docker.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends kamailio docker-ce-cli \
+    && apt-get install -y --no-install-recommends kamailio docker-ce-cli systemd \
     && pip install --no-cache-dir "requests>=2.31,<3" \
     && apt-get purge -y --auto-remove gnupg2 wget \
+    && : > /etc/machine-id \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Verify the command-surface binaries are present at build time (fail early if a
 # package layout ever changes). kamcmd is used by the poller + SBC role; docker +
-# git back the host.* commands. (journalctl is optional/best-effort at runtime.)
+# git + journalctl back the host.* commands. (Whether host.journalctl can READ
+# anything still depends on the host journal mount at runtime — the agent reports
+# "unavailable" cleanly when /var/log/journal is absent or empty.)
 RUN command -v kamcmd >/dev/null 2>&1 || (echo "kamcmd not found in image" && exit 1) \
     && command -v docker >/dev/null 2>&1 || (echo "docker cli not found in image" && exit 1) \
     && command -v git >/dev/null 2>&1 || (echo "git not found in image" && exit 1)
+RUN command -v journalctl >/dev/null 2>&1 || (echo "journalctl not found in image" && exit 1)
 
 # The agent is a handful of small stdlib modules copied side-by-side. ops_agent.py
 # is the entrypoint; it imports carrier_monitor (UNCHANGED poller) + ops_api +

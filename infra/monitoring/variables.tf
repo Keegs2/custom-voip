@@ -137,6 +137,20 @@ variable "slack_channel_ids" {
   default     = []
 }
 
+variable "pubsub_notification_channel_ids" {
+  description = "Existing Pub/Sub notification channel IDs (full resource names, projects/<project>/notificationChannels/<id>) added to every alert policy. The shared channel publishes incidents to Pub/Sub topic monitoring-alerts, which TED's CRAG Ops intake reads (it selects CRAG incidents by policy_user_labels.system = \"crag\"). Owned outside this module (console / TED observability root) — NOT created here. Set it in terraform.tfvars BEFORE the next apply: an empty list detaches the channel from every CRAG policy and CRAG Ops stops seeing alerts."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for id in var.pubsub_notification_channel_ids :
+      can(regex("^projects/[^/]+/notificationChannels/[0-9]+$", id))
+    ])
+    error_message = "Each Pub/Sub channel id must be a full resource name: projects/<project>/notificationChannels/<numeric id>."
+  }
+}
+
 # --- Thresholds ----------------------------------------------------------------
 variable "disk_percent_threshold" {
   description = "CRITICAL page when any real filesystem exceeds this used%% (replication-slot WAL, ClickHouse and PG can all silently fill the services disk)"

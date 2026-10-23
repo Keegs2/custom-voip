@@ -40,7 +40,12 @@ if [ -z "$ROWS" ]; then
     exit 0
 fi
 
-STATUS=0
+# Exit 0 after paging, like asr_guard.sh: the guard did its job (the specific
+# revup-alert lines below). A non-zero exit would also trip the unit's
+# OnFailure=revup-alert@%p.service and page a SECOND, generic "unit-failed" line
+# on every 15-min run. Non-zero exits are reserved for real script errors
+# (set -e: psql unreachable, query failure), which is exactly what OnFailure is
+# there to page.
 while IFS='|' read -r slot active wal_status retained; do
     [ -z "$slot" ] && continue
     # Always log an info line — Cloud Logging keeps the trend.
@@ -48,11 +53,9 @@ while IFS='|' read -r slot active wal_status retained; do
 
     if [ "$wal_status" = "lost" ] || [ "$wal_status" = "unreserved" ]; then
         logger -p user.err -t revup-alert -- "replication-slot slot=${slot} wal_status=${wal_status} — slot invalidated or at the max_slot_wal_keep_size cap; the standby needs a re-clone (see infra/replica/README.md)"
-        STATUS=1
     elif [ "$retained" -gt "$SLOT_WAL_ALERT_BYTES" ]; then
         logger -p user.err -t revup-alert -- "replication-slot slot=${slot} retained_bytes=${retained} exceeds ${SLOT_WAL_ALERT_BYTES} — standby down/lagging? Prod disk at risk. Check the sandbox standby, or drop the slot: SELECT pg_drop_replication_slot('${slot}');"
-        STATUS=1
     fi
 done <<< "$ROWS"
 
-exit "$STATUS"
+exit 0

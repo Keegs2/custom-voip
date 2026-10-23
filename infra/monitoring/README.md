@@ -12,16 +12,67 @@ Turns "customers are the monitoring" into GCP-native alerting. Creates:
 | **SBC standby UNHEALTHY** (per zone, WARNING; same log family) | No traffic impact — but the zone is one failure from a zone outage. Restore promptly (runbook §6) |
 | **Disk > 85%** (per filesystem; needs Ops Agent) | Slot-WAL / ClickHouse / PG disk-fill before it kills PG |
 | **Memory > 90%** (needs Ops Agent), **CPU > 90% 15m** | Saturation |
-| **`revup-alert` log match** | Any on-VM watchdog: backup failures, replication-slot WAL, future scripts |
+| **`revup-alert` log match** | Any on-VM watchdog: backup/guard unit failures, replication lag, replication-slot WAL, ASR, FreeSWITCH down, vmalert rules. One incident per (VM, kind) — see below |
 | Firewall: `voip-uptime-sip` / `voip-uptime-web` | Admits ONLY Google's prober IPv4s to ONLY the probed ports (existing rules stay Bandwidth/office-scoped) |
-| Channels: email (required), PagerDuty + SMS (optional) | Delivery |
+| Channels: email (required), PagerDuty + SMS (optional), existing Slack + Pub/Sub channels by id | Delivery |
 
 Targets these alerts defend: `SLOS.md` (same directory).
+
+## Pub/Sub channel (CRAG Ops intake)
+
+The shared Pub/Sub notification channel publishes incidents to topic
+`monitoring-alerts`; TED's CRAG Ops intake reads that topic. The channel is owned
+outside this module (it is the channel TED's observability root references as
+`buzz_pubsub_notification_channel`, display name "Buzz alerts (Pub/Sub)"), so this
+module attaches it by id through `pubsub_notification_channel_ids`, the same way
+as `slack_channel_ids`. It was previously attached in the console only, and every
+`tofu apply` removed it from the policies.
+
+**Set `pubsub_notification_channel_ids` in `terraform.tfvars` before the next
+apply.** Leaving it empty detaches the channel from every CRAG policy. Find the id
+(single line): `gcloud beta monitoring channels list --project=rugged-night-193017 --filter='type="pubsub"' --format='value(name,displayName)'`
+
+## Policy user labels
+
+Every policy carries `user_labels`, which Cloud Monitoring copies into each
+notification as `incident.policy_user_labels`. Consumers of the shared topic select
+CRAG incidents by `system = "crag"` instead of matching policy names.
+
+| Label | Values | On |
+|---|---|---|
+| `system` | `crag` | every policy |
+| `component` | `sip-vip`, `api`, `ui`, `vm`, `disk`, `memory`, `cpu`, `sbc`, `watchdog` | every policy |
+| `zone` | `east`, `west`, `central` | SIP VIP and SBC failover policies (pinned to one zone). Multi-VM policies carry the zone in the incident's resource labels instead |
+| `sbc_role` | `primary`, `standby` | SBC failover policies |
+
+## `revup-alert` grouping (label extractors)
+
+The log-match policy matches the logger tag (`revup-alert:` or
+`revup-alert[pid]:`), not the bare word, so systemd's own lines about the
+`revup-alert@` relay unit are not pages. Two label extractors split incidents and
+notifications:
+
+- `host` — the VM name (`labels."compute.googleapis.com/resource_name"`, set by the Ops Agent).
+- `kind` — the first word of the page, qualified for families that emit several
+  conditions from one VM: `unit-failed unit=<unit>`,
+  `vmalert <alertname> FIRING zone=<zone>` / `vmalert API`, `HA standby <ip> is` / `HA standby <ip> lag`,
+  `replication-slot slot=<slot> wal_status` / `... retained_bytes`; otherwise the
+  first word (`ASR`, `FreeSWITCH`, `test`, `TEST`).
+
+Each (host, kind) is its own incident and its own notification rate limit
+(900 s). Before, one page suppressed every other page for 30 minutes. The
+incident subject reads `[CRITICAL] On-VM watchdog page — <kind> on <host> (<zone>)`.
+Log-based incidents (this policy and the six SBC failover policies) send no
+notification when they close; they auto-close 24 h after the last matching line,
+so closure is not recovery.
+
+Offline check of the filter and `kind` regexes against every page line the scripts
+emit (single line): `python3 infra/monitoring/test_revup_alert_extractors.py`
 
 ## Apply (workstation, single lines)
 
 1. `cd /Users/keegan/revup/infra/monitoring && tofu init`
-2. `cp terraform.tfvars.example terraform.tfvars` — set `notification_email` (and ideally `pagerduty_service_key`)
+2. `cp terraform.tfvars.example terraform.tfvars` — set `notification_email` (and ideally `pagerduty_service_key`), and `pubsub_notification_channel_ids` (see above)
 3. `tofu plan` — expect ~12 adds (3 uptime checks, 8 policies/channels, 2 firewall rules), zero destroys
 4. `tofu apply`
 5. If you set `sms_number`: verify the number in Cloud Console → Monitoring → Alerting → Notification channels (GCP blocks SMS until verified).
@@ -40,7 +91,8 @@ and syslog shipping (which carries the `revup-alert` lines). On the
 
 ## Test the pipeline end-to-end (do this after apply)
 
-- On any VM with the agent: `logger -p user.err -t revup-alert -- "test page — ignore"` → expect an email (and PagerDuty incident) within ~2–5 min.
+- On any VM with the agent: `logger -p user.err -t revup-alert -- "test page — ignore"` → expect an email (and PagerDuty incident) within ~2–5 min. The subject must read `On-VM watchdog page — test on <that VM> (<zone>)`. No incident at all means the tag filter does not match this VM's syslog format; a subject with an empty kind or host means an extractor missed. Either way, revert the `revup_alert_log` change and re-apply before relying on watchdog paging.
+- After the first apply with `pubsub_notification_channel_ids`: confirm the channel is listed on a policy in Cloud Console → Monitoring → Alerting, and that the test page above reaches `monitoring-alerts` with `incident.policy_user_labels.system = "crag"` (TED's Discord relay logs non-`[TED NEXT]` incidents as skipped, which shows they arrived).
 - `sudo systemctl stop google-cloud-ops-agent && sleep 660 && sudo systemctl start google-cloud-ops-agent` is NOT a VM-down test (hypervisor metrics continue); to test VM-down semantics use a scratch VM, not production.
 
 ## vmalert alerts → pages

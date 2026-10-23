@@ -23,7 +23,7 @@
 #   * On the FS_WATCHDOG_FAIL_THRESHOLD-th consecutive failed tick (default 2,
 #     i.e. ~2 min) it emits ONE syslog line tagged `revup-alert` (user.err).
 #     The Ops Agent ships it to Cloud Logging where the existing
-#     infra/monitoring log-match policy pages (itself rate-limited 30m).
+#     infra/monitoring log-match policy pages (rate-limited 15m per VM + page kind).
 #     Zero new GCP/Terraform resources.
 #   * Further failed ticks log only an untagged `revup-fs-watchdog` journal
 #     trail (no page, no storm).
