@@ -213,10 +213,19 @@ def direction_of(raw: Optional[str]) -> str:
     return "outbound" if (raw or "").lower() == "outbound" else "inbound"
 
 
-def outcome_fields(answered: bool, hangup_cause: Optional[str]) -> dict:
-    """outcome / outcome_label / missed_reason for one call."""
+#: outcome_label of an answered call that a voicemail mailbox answered (owner
+#: decision O2, docs/CUSTOMER_NUMBERS_HOLISTIC_PLAN.md §7: it counts as
+#: answered — `outcome` stays "answered" — and says so in plain English).
+ANSWERED_BY_VOICEMAIL = "Answered by voicemail"
+
+
+def outcome_fields(answered: bool, hangup_cause: Optional[str],
+                   product: Optional[str] = None) -> dict:
+    """outcome / outcome_label / missed_reason for one call. `product` is the
+    CDR's product_type: a call answered by voicemail is still "answered"."""
     if answered:
-        return {"outcome": "answered", "outcome_label": "Answered", "missed_reason": None}
+        label = ANSWERED_BY_VOICEMAIL if product == "voicemail" else "Answered"
+        return {"outcome": "answered", "outcome_label": label, "missed_reason": None}
     key = missed_reason_key(hangup_cause)
     return {"outcome": "missed", "outcome_label": MISSED_REASONS[key], "missed_reason": key}
 

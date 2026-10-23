@@ -25,7 +25,11 @@ Release workflow (request-based): customer POST /{did}/request-release sets
 (back to 'assigned', also available to the customer to withdraw).
 
 Cross-references Bandwidth TN inventory with internal product tables
-(rcf_numbers, api_dids, trunk_dids) and manages the full DID lifecycle.
+(rcf_numbers, api_dids, trunk_dids, voicemail_boxes) and manages the full DID
+lifecycle. Which numbers a customer OWNS (as opposed to the did_inventory
+lifecycle record) comes from the number_routing view through
+services/customer_numbers.py: GET /owned (admin roll-up) and the fallback arm
+of GET /my. Assign / unassign / reconcile stay per product by design.
 """
 import logging
 from datetime import datetime, timezone
@@ -39,6 +43,7 @@ from config import API_CALLING_RETIRED_MESSAGE, api_calling_enabled
 from db import database as db
 from db import redis_client as cache
 from auth.dependencies import require_admin, get_current_user, get_customer_filter
+from services import customer_numbers as cn
 from services.bandwidth_client import get_all_tns, _credentials_configured
 from services.voicemail import mailboxes as vm_mailboxes
 from services.voicemail.audit import RequestInfo as VmRequestInfo
@@ -494,6 +499,23 @@ async def get_stats(admin: dict = Depends(require_admin)):
         "by_state": by_state,
         "by_carrier": by_carrier,
     }
+
+
+# Literal GET path: no clash with the /{did}/... routes (all have a suffix).
+@router.get("/owned")
+async def get_owned_numbers(admin: dict = Depends(require_admin)):
+    """Platform + per-customer counts of OWNED numbers, every product. Admin only.
+
+    Built on the number_routing view (services/customer_numbers.py — the same
+    set the customer sees: enabled or not, api hidden, a DID counted once), so
+    unlike did_inventory it never lags provisioning (POST /rcf and POST
+    /trunks/{id}/dids never write did_inventory) and is never page-capped.
+    Body: {total, enabled, by_product: {<p>: {total, enabled}},
+    customers: [{customer_id, total, enabled, by_product}]} (customers by id,
+    products in display order).
+    """
+    rows = await db.fetch_all(cn.owned_counts_sql())
+    return cn.shape_owned_counts(rows)
 
 
 @router.post("/sync")
@@ -1168,30 +1190,17 @@ async def get_my_numbers(
 ):
     """Get all DIDs assigned to the current user's customer. Any authenticated user.
 
-    Uses a UNION query so that even if did_inventory hasn't been synced/reconciled
-    yet, customers still see their real numbers from the product tables
-    (rcf_numbers, api_dids, trunk_dids).
+    did_inventory rows (assigned / reserved / release_requested — the
+    lifecycle record) UNION one fallback arm over the number_routing view
+    (services/customer_numbers.py), so customers still see every number they
+    own in ANY product (rcf, api, trunk, voicemail, future arms) even if
+    did_inventory hasn't been reconciled yet. Fallback-only rows carry
+    assigned_at null (number_routing has no assignment time). api is still
+    listed here (admin cleanup). Admins see every customer (capped at 500).
     """
     customer_id = customer_filter
-    # Voicemail arm (migration 54): live mailboxes own their DID. Built only
-    # once the table exists, so this endpoint keeps working before 54 lands.
-    async with db.pool.acquire() as conn:
-        vm_present = await vm_mailboxes.voicemail_schema_present(conn)
     if customer_id is None:
-        vm_arm = """
-                UNION
-                SELECT b.did, 'voicemail' AS product_type, 'assigned' AS status,
-                       NULL AS city, NULL AS state,
-                       b.created_at AS assigned_at, NULL AS notes,
-                       b.customer_id,
-                       c.name AS customer_name
-                  FROM voicemail_boxes b
-                  JOIN customers c ON b.customer_id = c.id
-                 WHERE b.status <> 'deleted'
-                   AND b.did NOT IN (
-                       SELECT di.did FROM did_inventory di
-                        WHERE di.status IN ('assigned', 'reserved', 'release_requested'))""" if vm_present else ""
-        # Admin: show all assigned DIDs from did_inventory + product tables
+        # Admin: show all assigned DIDs from did_inventory + number_routing
         rows = await db.fetch_all(
             """
             SELECT did, product_type, status, city, state,
@@ -1204,60 +1213,22 @@ async def get_my_numbers(
                   LEFT JOIN customers c ON d.customer_id = c.id
                  WHERE d.status IN ('assigned', 'reserved', 'release_requested')
                 UNION
-                SELECT r.did, 'rcf' AS product_type, 'assigned' AS status,
+                SELECT nr.did, nr.product_type, 'assigned' AS status,
                        NULL AS city, NULL AS state,
-                       r.created_at AS assigned_at, NULL AS notes,
-                       r.customer_id,
+                       NULL::timestamptz AS assigned_at, NULL AS notes,
+                       nr.customer_id,
                        c.name AS customer_name
-                  FROM rcf_numbers r
-                  JOIN customers c ON r.customer_id = c.id
-                 WHERE r.did NOT IN (
+                  FROM number_routing nr
+                  JOIN customers c ON c.id = nr.customer_id
+                 WHERE nr.did NOT IN (
                        SELECT di.did FROM did_inventory di
                         WHERE di.status IN ('assigned', 'reserved', 'release_requested'))
-                UNION
-                SELECT a.did, 'api' AS product_type, 'assigned' AS status,
-                       NULL AS city, NULL AS state,
-                       a.created_at AS assigned_at, NULL AS notes,
-                       a.customer_id,
-                       c.name AS customer_name
-                  FROM api_dids a
-                  JOIN customers c ON a.customer_id = c.id
-                 WHERE a.did NOT IN (
-                       SELECT di.did FROM did_inventory di
-                        WHERE di.status IN ('assigned', 'reserved', 'release_requested'))
-                UNION
-                SELECT td.did, 'trunk' AS product_type, 'assigned' AS status,
-                       NULL AS city, NULL AS state,
-                       t.created_at AS assigned_at, NULL AS notes,
-                       t.customer_id,
-                       c.name AS customer_name
-                  FROM trunk_dids td
-                  JOIN sip_trunks t ON td.trunk_id = t.id
-                  JOIN customers c ON t.customer_id = c.id
-                 WHERE td.did NOT IN (
-                       SELECT di.did FROM did_inventory di
-                        WHERE di.status IN ('assigned', 'reserved', 'release_requested'))
-            """ + vm_arm + """
               ) combined
              ORDER BY did
              LIMIT 500
             """
         )
     else:
-        vm_arm = """
-                UNION
-                SELECT b.did, 'voicemail' AS product_type, 'assigned' AS status,
-                       NULL AS city, NULL AS state,
-                       b.created_at AS assigned_at, NULL AS notes,
-                       b.customer_id,
-                       c.name AS customer_name
-                  FROM voicemail_boxes b
-                  JOIN customers c ON b.customer_id = c.id
-                 WHERE b.customer_id = $1
-                   AND b.status <> 'deleted'
-                   AND b.did NOT IN (
-                       SELECT di.did FROM did_inventory di
-                        WHERE di.customer_id = $1)""" if vm_present else ""
         rows = await db.fetch_all(
             """
             SELECT did, product_type, status, city, state,
@@ -1268,46 +1239,20 @@ async def get_my_numbers(
                        c.name AS customer_name
                   FROM did_inventory d
                   LEFT JOIN customers c ON d.customer_id = c.id
-                 WHERE d.customer_id = $1
+                 WHERE d.customer_id = $1::int
                    AND d.status IN ('assigned', 'reserved', 'release_requested')
                 UNION
-                SELECT r.did, 'rcf' AS product_type, 'assigned' AS status,
+                SELECT nr.did, nr.product_type, 'assigned' AS status,
                        NULL AS city, NULL AS state,
-                       r.created_at AS assigned_at, NULL AS notes,
-                       r.customer_id,
+                       NULL::timestamptz AS assigned_at, NULL AS notes,
+                       nr.customer_id,
                        c.name AS customer_name
-                  FROM rcf_numbers r
-                  JOIN customers c ON r.customer_id = c.id
-                 WHERE r.customer_id = $1
-                   AND r.did NOT IN (
+                  FROM number_routing nr
+                  JOIN customers c ON c.id = nr.customer_id
+                 WHERE nr.customer_id = $1::int
+                   AND nr.did NOT IN (
                        SELECT di.did FROM did_inventory di
-                        WHERE di.customer_id = $1)
-                UNION
-                SELECT a.did, 'api' AS product_type, 'assigned' AS status,
-                       NULL AS city, NULL AS state,
-                       a.created_at AS assigned_at, NULL AS notes,
-                       a.customer_id,
-                       c.name AS customer_name
-                  FROM api_dids a
-                  JOIN customers c ON a.customer_id = c.id
-                 WHERE a.customer_id = $1
-                   AND a.did NOT IN (
-                       SELECT di.did FROM did_inventory di
-                        WHERE di.customer_id = $1)
-                UNION
-                SELECT td.did, 'trunk' AS product_type, 'assigned' AS status,
-                       NULL AS city, NULL AS state,
-                       t.created_at AS assigned_at, NULL AS notes,
-                       t.customer_id,
-                       c.name AS customer_name
-                  FROM trunk_dids td
-                  JOIN sip_trunks t ON td.trunk_id = t.id
-                  JOIN customers c ON t.customer_id = c.id
-                 WHERE t.customer_id = $1
-                   AND td.did NOT IN (
-                       SELECT di.did FROM did_inventory di
-                        WHERE di.customer_id = $1)
-            """ + vm_arm + """
+                        WHERE di.customer_id = $1::int)
               ) combined
              ORDER BY did
             """,

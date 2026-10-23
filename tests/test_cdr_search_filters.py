@@ -22,6 +22,11 @@ endpoints accept the SAME filter set):
   * NEW `total` on GET /v1/cdrs — COUNT(*) over the SAME filters (shared
     builder, scoping included), independent of limit/offset; `count` stays
     the returned page's row count (back-compat).
+  * product_type "all" (or empty) = no product filter, and NEW `number` (the
+    customer's number on the call: inbound destination / outbound caller_id,
+    canonicalized — a 10-digit caller_id matches) on BOTH endpoints; junk ->
+    422; tenants may use it but only narrow
+    (docs/CUSTOMER_NUMBERS_HOLISTIC_PLAN.md §4.6).
 
 Harness mirrors tests/test_support_role_authz.py (ephemeral local PG, module
 event loop, db.pool wired as the runtime `api` role, REAL JWTAuthMiddleware
@@ -774,5 +779,122 @@ def test_total_respects_rated_only(client, tokens):
         r = await client.get("/v1/cdrs", params={"rated_only": "true", "limit": 0},
                              headers=hdrs)
         assert r.json()["count"] == 0 and r.json()["total"] == 1
+
+    _run(go())
+
+
+# ---------------------------------------------------------------------------
+# product_type "all" + `number` (docs/CUSTOMER_NUMBERS_HOLISTIC_PLAN.md §4.6)
+# ---------------------------------------------------------------------------
+A_VM_DID = "+16175550109"
+CDR_VM = "cdr-vm-0001"         # A, inbound VOICEMAIL to the mailbox DID, -6h
+CDR_OUT10 = "cdr-out10-0001"   # A, outbound trunk, caller_id stored as 10 digits, -7h
+
+
+@pytest.fixture
+def number_rows(search_db):
+    """Two extra in-window rows for A, removed again afterwards (the rest of
+    this module asserts exact in-window sets)."""
+    db, now = search_db["db"], search_db["now"]
+
+    async def add():
+        for uuid, direction, product, caller, dest, start in (
+            (CDR_VM, "inbound", "voicemail", "+12025550100", A_VM_DID, now - timedelta(hours=6)),
+            (CDR_OUT10, "outbound", "trunk", A_VM_DID[2:], "+12125550123",
+             now - timedelta(hours=7)),
+        ):
+            await db.execute(
+                "INSERT INTO cdrs (uuid, customer_id, product_type, direction, caller_id,"
+                " destination, start_time, answer_time, end_time, duration_ms, billable_ms,"
+                " hangup_cause, sip_code, sbc_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,"
+                " 60000, 57000, 'NORMAL_CLEARING', 200, 'east-sbc-1')",
+                uuid, CID_A, product, direction, caller, dest, start,
+                start + timedelta(seconds=3), start + timedelta(seconds=63))
+
+    async def drop():
+        await db.execute("DELETE FROM cdrs WHERE uuid = ANY($1::varchar[])", [CDR_VM, CDR_OUT10])
+
+    _run(add())
+    try:
+        yield
+    finally:
+        _run(drop())
+
+
+def test_product_type_all_means_no_filter(client, tokens, number_rows):
+    async def go():
+        h = _auth(tokens, "admin")
+        base = await client.get("/v1/cdrs", params={"customer_id": CID_A}, headers=h)
+        assert {c["product_type"] for c in base.json()["cdrs"]} == {"rcf", "trunk", "api",
+                                                                    "voicemail"}
+        for pt in ("all", "ALL", ""):
+            r = await client.get("/v1/cdrs", params={"customer_id": CID_A, "product_type": pt},
+                                 headers=h)
+            assert r.status_code == 200, r.text
+            assert _uuids(r) == _uuids(base) and r.json()["total"] == base.json()["total"]
+            s = await client.get("/v1/cdrs/summary",
+                                 params={"customer_id": CID_A, "product_type": pt}, headers=h)
+            assert s.status_code == 200 and _total(s) == base.json()["total"]
+        r = await client.get("/v1/cdrs", params={"customer_id": CID_A,
+                                                 "product_type": "voicemail"}, headers=h)
+        assert _uuids(r) == {CDR_VM}
+
+    _run(go())
+
+
+def test_number_filter_customer_side_number(client, tokens, number_rows):
+    async def go():
+        h = _auth(tokens, "admin")
+        # inbound -> destination; outbound -> caller_id canonicalized from 10 digits
+        for raw in (A_VM_DID, A_VM_DID[2:], "(617) 555-0109", "1-617-555-0109"):
+            r = await client.get("/v1/cdrs", params={"number": raw}, headers=h)
+            assert r.status_code == 200, r.text
+            assert _uuids(r) == {CDR_VM, CDR_OUT10} and r.json()["total"] == 2, raw
+            s = await client.get("/v1/cdrs/summary", params={"number": raw}, headers=h)
+            assert _total(s) == 2, raw
+        # every seeded outbound in-window row carries caller +16175551000
+        r = await client.get("/v1/cdrs", params={"number": "+16175551000"}, headers=h)
+        assert _uuids(r) == {CDR_EAST1, CDR_CENT1, CDR_NOSBC}
+        # AND with product_type / destination
+        r = await client.get("/v1/cdrs", params={"number": A_VM_DID, "product_type": "trunk"},
+                             headers=h)
+        assert _uuids(r) == {CDR_OUT10}
+        r = await client.get("/v1/cdrs", params={"number": A_VM_DID, "destination": "+1617"},
+                             headers=h)
+        assert _uuids(r) == {CDR_VM}
+        # blank = no number filter
+        r = await client.get("/v1/cdrs", params={"number": ""}, headers=h)
+        assert _uuids(r) == IN_WINDOW | {CDR_VM, CDR_OUT10}
+
+    _run(go())
+
+
+@pytest.mark.parametrize("junk", ["junk", "1001", "447911123456", "+1"])
+def test_number_filter_junk_422_both_endpoints(client, tokens, junk):
+    async def go():
+        for role in ("admin", "user_a"):
+            for path in ("/v1/cdrs", "/v1/cdrs/summary"):
+                r = await client.get(path, params={"number": junk}, headers=_auth(tokens, role))
+                assert r.status_code == 422, (role, path, r.text)
+                assert r.json()["detail"] == "number must be a phone number"
+
+    _run(go())
+
+
+def test_number_filter_tenant_only_narrows(client, tokens, number_rows):
+    async def go():
+        h = _auth(tokens, "user_a")
+        r = await client.get("/v1/cdrs", params={"number": A_VM_DID, "customer_id": CID_B},
+                             headers=h)
+        assert r.status_code == 200, r.text
+        assert _uuids(r) == {CDR_VM, CDR_OUT10}               # customer_id ignored
+        s = await client.get("/v1/cdrs/summary", params={"number": A_VM_DID}, headers=h)
+        assert _total(s) == 2
+        # B's number (CDR_EAST2's destination) from A's token: nothing
+        r = await client.get("/v1/cdrs", params={"number": "+13135552222"}, headers=h)
+        assert r.json()["total"] == 0
+        r = await client.get("/v1/cdrs", params={"number": "+13135552222"},
+                             headers=_auth(tokens, "admin"))
+        assert _uuids(r) == {CDR_EAST2}
 
     _run(go())

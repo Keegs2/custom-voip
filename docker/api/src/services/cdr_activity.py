@@ -42,6 +42,17 @@ The scan window is always the sargable `start_time >= lo AND start_time < hi`
 over bind params, so the (customer_id, start_time) / start_time indexes and
 Timescale chunk exclusion apply.
 
+Filters (all optional, AND-ed; every one only narrows):
+  product_type — exact; omitted at the ROUTE = "rcf" (back-compat for the RCF
+                 console), "all" (customer_numbers.ALL_PRODUCTS) or empty =
+                 every product (the account-wide dashboard).
+  destination  — exact raw CDR destination (the RCF console's DID picker).
+  number       — the customer's number on the call, canonical +E.164, exact:
+                 destination for inbound, caller_id for outbound, canonicalized
+                 in SQL (customer_numbers.cdr_customer_number_sql) — so an
+                 outbound trunk call with a 10-digit caller_id still matches.
+                 A row filter on the index range scan (never replaces it).
+
 Python (zoneinfo) is the SINGLE source of bucket edges: the bucket-start
 instants are bound as one ascending `timestamptz[]` and SQL only does
 `width_bucket(start_time, edges) - 1` (pure instant comparison — no
@@ -62,6 +73,7 @@ import asyncpg
 from fastapi import HTTPException
 
 from db import database as db
+from services import customer_numbers as cn
 from services import tenant_redaction as tr
 
 logger = logging.getLogger(__name__)
@@ -194,6 +206,7 @@ def build_activity_query(
     customer_id: Optional[int],
     product_type: Optional[str],
     destination: Optional[str],
+    number: Optional[str] = None,
 ) -> tuple[str, list[Any]]:
     """ONE statement: per-bucket rows + the window total via GROUPING SETS.
 
@@ -216,6 +229,7 @@ def build_activity_query(
         where += f" AND customer_id = ${idx}::int"
         args.append(customer_id)
         idx += 1
+    product_type = cn.product_filter(product_type)     # "all"/"" -> no filter
     if product_type:
         where += f" AND product_type = ${idx}::varchar"
         args.append(product_type)
@@ -224,6 +238,11 @@ def build_activity_query(
         # EXACT match: the UI filters `c.destination === selectedDid`.
         where += f" AND destination = ${idx}::varchar"
         args.append(destination)
+        idx += 1
+    if number:
+        # Already canonical (the router 422s anything else).
+        where += f" AND {cn.cdr_customer_number_sql()} = ${idx}::varchar"
+        args.append(number)
         idx += 1
 
     answered_sql = _STAFF_ANSWERED_SQL if staff else _TENANT_ANSWERED_SQL

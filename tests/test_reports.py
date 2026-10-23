@@ -8,10 +8,18 @@ Covers:
     numbers-filter canonicalization, CSV formula-injection guard.
   * The REAL router over an ephemeral PostgreSQL 16 behind the REAL JWT
     middleware with REAL minted JWTs (same harness as
-    test_tenant_redaction.py): two customers, rcf + trunk numbers, CDRs
-    straddling America/Boise local-day boundaries.
+    test_tenant_redaction.py): two customers, rcf + trunk + voicemail
+    numbers (+ a suspended and a deleted mailbox and a hidden api DID), CDRs
+    straddling America/Boise local-day boundaries. The product tables and
+    the number_routing view come from the REAL init chain (02 03 09 17 20 22
+    24 31 34 -> 54 -> 56 -> 57): "the customer's numbers" is
+    services/customer_numbers.py over number_routing.
       - exact response shapes for overview / trend / numbers / calls /
-        calls.csv / my-numbers
+        calls.csv / my-numbers (every product; api hidden; deleted box out)
+      - voicemail: per-number rows, the `numbers` filter, call `product` +
+        "Answered by voicemail" (JSON + CSV), on-net RCF -> voicemail
+        attributed to the dialed RCF number, calls to a released number
+        counted in totals with no number row
       - tenant isolation (customer_id param + numbers param cannot widen)
       - staff must pass customer_id (422)
       - minutes rounded ONCE at the aggregate; no seconds / costs /
@@ -151,7 +159,10 @@ asyncpg = pytest.importorskip("asyncpg", reason="asyncpg required for integratio
 httpx = pytest.importorskip("httpx", reason="httpx required for integration tests")
 
 from cdr_schema import apply_cdr_column_migrations  # noqa: E402
-from test_tenant_redaction import _SCHEMA, _EphemeralPG, _find_pg_bin  # noqa: E402
+from test_tenant_redaction import _CDR_SCHEMA, _EphemeralPG, _find_pg_bin  # noqa: E402
+from voicemail_db import INIT, apply_prerequisites, apply_voicemail_schema  # noqa: E402
+
+MIG_57 = INIT / "57_trunk_dids_trunk_index.sql"
 
 PG_BIN = _find_pg_bin()
 
@@ -175,6 +186,10 @@ TRUNK_A = 71
 A_MAIN = "+16175550101"     # rcf, "Main line"
 A_TRUNK = "+16175550202"    # trunk DID on trunk 'alpha'
 A_SPARE = "+16175550303"    # rcf, zero calls
+A_VM = "+16175550404"       # voicemail mailbox (active)
+A_VM_OFF = "+16175550505"   # voicemail mailbox (suspended) -> owned, enabled=false
+A_VM_GONE = "+16175550606"  # voicemail mailbox DELETED -> not owned any more
+A_API = "+16175550707"      # api DID (API Calling retired) -> hidden
 B_MAIN = "+12085550900"     # tenant B rcf
 
 # Seeded durations: none of these ms values (nor 95 s) may appear anywhere
@@ -212,6 +227,20 @@ CDRS = [
 ]
 
 
+#: Voicemail CDRs (2026-09-15 Boise — outside AUG, so the August
+#: expectations above are untouched). product_type='voicemail',
+#: direction inbound, customer_id = the mailbox owner (FS dispatch_terminal).
+#:   v01 direct dial to A's mailbox
+#:   v02 on-net RCF -> voicemail forward: destination = the DIALED RCF DID
+#:       (A_MAIN), on_net, origin = A (plan §3.2: attributed to the dialed number)
+#:   v03 to a since-deleted mailbox DID: in totals, no number row
+#:   uuid   local (Boise)           caller          dest       ms      on_net
+VM_CDRS = [
+    ("v01", (2026, 9, 15, 9, 0), "+12085550101", A_VM, 30_000, False),
+    ("v02", (2026, 9, 15, 9, 30), "+12085550102", A_MAIN, 60_000, True),
+    ("v03", (2026, 9, 15, 10, 0), "+12085550103", A_VM_GONE, 20_000, False),
+]
+
 #: A calls that also carry carrier B-leg rows (every report must still count
 #: each of these ONCE — `leg IS DISTINCT FROM 'B'`).
 _B_LEG_TAGS = {"a01", "a03", "a04", "a05", "a06", "a07", "a14"}
@@ -239,13 +268,22 @@ def reports_db():
             host=pg.sock, port=pg.port, user="postgres", database="postgres",
             min_size=1, max_size=2, statement_cache_size=0)
         async with owner.acquire() as conn:
-            await conn.execute(_SCHEMA)
+            # Product tables + number_routing from the REAL init chain (02 03
+            # 09 17 20 22 24 31 34, then 54 56, then 57); cdrs is the shared
+            # production-shaped scratch table + its real column migrations.
+            await apply_prerequisites(conn)
+            await apply_voicemail_schema(conn)
+            await conn.execute(MIG_57.read_text())
+            await conn.execute(_CDR_SCHEMA)
             await apply_cdr_column_migrations(conn)
             await conn.execute("CREATE INDEX idx_cdrs_customer_time ON cdrs(customer_id, start_time DESC)")
-            await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO api")
+            # Only the cdrs side (a blanket GRANT ALL would widen 54's
+            # append-only voicemail_access_log grants).
+            await conn.execute("GRANT ALL ON cdrs, call_attestations, active_calls TO api")
+            await conn.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO api")
             await conn.execute(
-                "INSERT INTO customers (id, name, account_type) VALUES "
-                "($1, 'Tenant A', 'hybrid'), ($2, 'Tenant B', 'rcf')", CID_A, CID_B)
+                "INSERT INTO customers (id, name, account_type, voicemail_enabled) VALUES "
+                "($1, 'Tenant A', 'hybrid', true), ($2, 'Tenant B', 'rcf', false)", CID_A, CID_B)
             await conn.execute(
                 "INSERT INTO rcf_numbers (customer_id, did, name, forward_to) VALUES "
                 "($1, $2, 'Main line', '+17745550000'), ($1, $3, 'Spare', '+17745550001'), "
@@ -256,6 +294,30 @@ def reports_db():
                 "VALUES ($1, $2, 'alpha', 10)", TRUNK_A, CID_A)
             await conn.execute(
                 "INSERT INTO trunk_dids (trunk_id, did) VALUES ($1, $2)", TRUNK_A, A_TRUNK)
+            await conn.execute(
+                "INSERT INTO voicemail_boxes (customer_id, did, label, status) VALUES "
+                "($1, $2, 'Voicemail', 'active'), ($1, $3, 'After hours', 'suspended'), "
+                "($1, $4, 'Old box', 'deleted')", CID_A, A_VM, A_VM_OFF, A_VM_GONE)
+            await conn.execute(
+                "INSERT INTO api_dids (customer_id, did, voice_url) "
+                "VALUES ($1, $2, 'https://example.invalid/voice')", CID_A, A_API)
+            for tag, local, caller, dest, ms, on_net in VM_CDRS:
+                start = _utc(*local)
+                answer = start + timedelta(seconds=7)
+                await conn.execute(
+                    """
+                    INSERT INTO cdrs (uuid, customer_id, product_type, direction,
+                      caller_id, destination, start_time, answer_time, end_time,
+                      duration_ms, billable_ms, rate_per_min, total_cost,
+                      hangup_cause, carrier_used, sbc_id, freeswitch_node,
+                      on_net, origin_customer_id, terminating_customer_id,
+                      leg, call_id, call_quality_status)
+                    VALUES ($1, $2, 'voicemail', 'inbound', $3, $4, $5, $6, $7,
+                      $8, 0, 0, 0, 'NORMAL_CLEARING', 'bandwidth-dallas',
+                      'east-sbc-1', 'east-fs', $9, $2, $2, 'A', $1, 'unanswered')
+                    """,
+                    _uuid(tag), CID_A, caller, dest, start, answer,
+                    answer + timedelta(milliseconds=ms), ms + 7_000, on_net)
             for (tag, cid, local, direction, caller, dest, ms, answered,
                  cause, mos, trunk) in CDRS:
                 start = _utc(*local)
@@ -399,7 +461,10 @@ def _ok(resp):
 # -- recursive safety net -------------------------------------------------
 _EXTRA_FORBIDDEN_KEYS = {"answer_time", "end_time", "answered_at", "ended_at",
                          "duration", "billsec", "hangup_cause", "sip_code",
-                         "customer_id", "trunk_id", "uuid"}
+                         "customer_id", "trunk_id", "uuid",
+                         # number_routing internals (services/customer_numbers.py)
+                         "product_ref_id", "customer_status", "product_type",
+                         "on_net", "origin_customer_id", "terminating_customer_id"}
 _FORBIDDEN_SUBSTRINGS = ("sec", "cost", "rate_per", "carrier", "margin", "sbc",
                          "billable", "_ms", "fraud")
 _RAW_CAUSES = ("NO_ANSWER", "ORIGINATOR_CANCEL", "USER_BUSY", "UNALLOCATED_NUMBER",
@@ -577,6 +642,14 @@ def test_numbers_per_number(client, tokens):
         {"number": A_SPARE, "name": "Spare", "product": "rcf",
          "forwards_to": "+17745550001", "calls": 0, "answered": 0, "missed": 0,
          "answer_rate_pct": None, "minutes": 0, "avg_mos": None, "grade": "none"},
+        # voicemail mailboxes are the customer's numbers too (suspended
+        # included); never the deleted box nor the (retired) api DID
+        {"number": A_VM, "name": "Voicemail", "product": "voicemail",
+         "forwards_to": None, "calls": 0, "answered": 0, "missed": 0,
+         "answer_rate_pct": None, "minutes": 0, "avg_mos": None, "grade": "none"},
+        {"number": A_VM_OFF, "name": "After hours", "product": "voicemail",
+         "forwards_to": None, "calls": 0, "answered": 0, "missed": 0,
+         "answer_rate_pct": None, "minutes": 0, "avg_mos": None, "grade": "none"},
     ]}
 
 
@@ -594,16 +667,126 @@ def test_numbers_filter_narrows_only_to_owned(client, tokens):
 
 def test_my_numbers(client, tokens):
     body = _ok(_get(client, tokens, "user_a", "my-numbers"))
+    assert_report_safe(body)
     assert body == {"numbers": [
-        {"number": A_MAIN, "name": "Main line", "product": "rcf"},
-        {"number": A_TRUNK, "name": "alpha", "product": "trunk"},
-        {"number": A_SPARE, "name": "Spare", "product": "rcf"},
+        {"number": A_MAIN, "name": "Main line", "product": "rcf", "enabled": True,
+         "forwards_to": "+17745550000"},
+        {"number": A_TRUNK, "name": "alpha", "product": "trunk", "enabled": True,
+         "forwards_to": None},
+        {"number": A_SPARE, "name": "Spare", "product": "rcf", "enabled": True,
+         "forwards_to": "+17745550001"},
+        {"number": A_VM, "name": "Voicemail", "product": "voicemail", "enabled": True,
+         "forwards_to": None},
+        {"number": A_VM_OFF, "name": "After hours", "product": "voicemail", "enabled": False,
+         "forwards_to": None},
     ]}
+    assert A_VM_GONE not in str(body) and A_API not in str(body)
+    for row in body["numbers"]:
+        assert tuple(row) == ("number", "name", "product", "enabled", "forwards_to")
     assert _ok(_get(client, tokens, "user_b", "my-numbers", customer_id=CID_A)) == {
-        "numbers": [{"number": B_MAIN, "name": "B line", "product": "rcf"}]}
+        "numbers": [{"number": B_MAIN, "name": "B line", "product": "rcf", "enabled": True,
+                     "forwards_to": "+17745559999"}]}
     assert _get(client, tokens, "admin", "my-numbers").status_code == 422
     assert _ok(_get(client, tokens, "support", "my-numbers", customer_id=CID_B))["numbers"][0][
         "number"] == B_MAIN
+    # staff "View as Customer" gets the tenant's exact list
+    staff = _get(client, tokens, "admin", "my-numbers", customer_id=CID_A)
+    assert staff.status_code == 200 and staff.json() == body
+
+
+# ---------------------------------------------------------------------------
+# voicemail (and every future product): plan docs/CUSTOMER_NUMBERS_HOLISTIC_PLAN.md
+# ---------------------------------------------------------------------------
+SEP = {"start": "2026-09-01", "end": "2026-09-30", "tz": "America/Boise"}
+
+
+def test_numbers_september_voicemail(client, tokens):
+    body = _ok(_get(client, tokens, "user_a", "numbers", **SEP))
+    assert_report_safe(body)
+    assert [n["number"] for n in body["numbers"]] == [A_MAIN, A_VM, A_TRUNK, A_SPARE, A_VM_OFF]
+    rows = {n["number"]: n for n in body["numbers"]}
+    # a14 + v02 (on-net RCF -> voicemail): the call belongs to the DIALED
+    # number (talk 20 s + 60 s = 80 s -> 1 minute, rounded once)
+    assert rows[A_MAIN] == {
+        "number": A_MAIN, "name": "Main line", "product": "rcf",
+        "forwards_to": "+17745550000", "calls": 2, "answered": 2, "missed": 0,
+        "answer_rate_pct": 100.0, "minutes": 1, "avg_mos": None, "grade": "none"}
+    # the mailbox row counts direct dials only (v01)
+    assert rows[A_VM] == {
+        "number": A_VM, "name": "Voicemail", "product": "voicemail",
+        "forwards_to": None, "calls": 1, "answered": 1, "missed": 0,
+        "answer_rate_pct": 100.0, "minutes": 1, "avg_mos": None, "grade": "none"}
+    assert rows[A_VM_OFF]["calls"] == 0
+    assert A_VM_GONE not in rows and A_API not in rows
+
+
+def test_overview_september_counts_every_call(client, tokens):
+    ov = _ok(_get(client, tokens, "user_a", "overview", **SEP))
+    assert_report_safe(ov)
+    # a14 + v01 + v02 + v03 — v03 went to a since-deleted mailbox: still in
+    # the totals (history), just no number row. Voicemail-answered calls
+    # count as answered (owner decision O2).
+    assert ov["totals"] == {
+        "calls": 4, "inbound": 4, "outbound": 0, "answered": 4, "missed": 0,
+        "answer_rate_pct": 100.0, "minutes": 2, "avg_minutes": 1.0}
+    trend = _ok(_get(client, tokens, "user_a", "trend", **SEP))
+    assert sum(p["calls"] for p in trend["points"]) == 4
+
+
+def test_numbers_filter_voicemail(client, tokens):
+    calls = _ok(_get(client, tokens, "user_a", "calls", numbers=A_VM, **SEP))
+    assert_report_safe(calls)
+    assert calls["total"] == 1 and [c["id"] for c in calls["calls"]] == [_uuid("v01")]
+    assert _ok(_get(client, tokens, "user_a", "overview", numbers=A_VM, **SEP))[
+        "totals"]["calls"] == 1
+    assert [n["number"] for n in _ok(_get(client, tokens, "user_a", "numbers",
+                                          numbers=f"{A_VM},{A_VM_OFF}", **SEP))["numbers"]] \
+        == [A_VM, A_VM_OFF]
+    # a released (deleted) mailbox DID / the hidden api DID are not the
+    # customer's numbers: the filter narrows to nothing
+    for gone in (A_VM_GONE, A_API):
+        assert _ok(_get(client, tokens, "user_a", "calls", numbers=gone, **SEP)) == {
+            "total": 0, "calls": []}
+    # tenant B can never reach A's mailbox calls through the filter
+    assert _ok(_get(client, tokens, "user_b", "calls", numbers=A_VM, **SEP)) == {
+        "total": 0, "calls": []}
+    assert _ok(_get(client, tokens, "user_b", "numbers", numbers=A_VM, **SEP)) == {"numbers": []}
+
+
+def test_calls_voicemail_product_and_label(client, tokens):
+    body = _ok(_get(client, tokens, "user_a", "calls", **SEP))
+    assert_report_safe(body)
+    assert body["total"] == 4
+    by = {c["id"]: c for c in body["calls"]}
+    assert by[_uuid("v01")] == {
+        "id": _uuid("v01"), "started_at": "2026-09-15T09:00:00-06:00",
+        "direction": "inbound", "from": "+12085550101", "to": A_VM, "number": A_VM,
+        "product": "voicemail", "outcome": "answered",
+        "outcome_label": "Answered by voicemail", "missed_reason": None,
+        "length_minutes": 1, "quality": "none"}
+    v02 = by[_uuid("v02")]
+    assert (v02["number"], v02["product"], v02["outcome"], v02["outcome_label"]) == (
+        A_MAIN, "voicemail", "answered", "Answered by voicemail")
+    assert (by[_uuid("a14")]["product"], by[_uuid("a14")]["outcome_label"]) == ("rcf", "Answered")
+    assert by[_uuid("v03")]["number"] == A_VM_GONE
+    # still "answered" for the outcome filter
+    ans = _ok(_get(client, tokens, "user_a", "calls", outcome="answered", **SEP))
+    assert ans["total"] == 4
+    assert _ok(_get(client, tokens, "user_a", "calls", outcome="missed", **SEP))["total"] == 0
+    # CSV: same columns; the Outcome cell carries the label
+    resp = _get(client, tokens, "user_a", "calls.csv", **SEP)
+    rows = _csv(resp)
+    assert rows[0] == ["Date", "Time", "Direction", "From", "To", "Your number",
+                       "Outcome", "Length (minutes, rounded)", "Call quality"]
+    assert ["2026-09-15", "09:00", "Inbound", "+12085550101", A_VM, A_VM,
+            "Answered by voicemail", "1", "Not rated"] in rows[1:]
+    assert ["2026-09-15", "09:30", "Inbound", "+12085550102", A_MAIN, A_MAIN,
+            "Answered by voicemail", "1", "Not rated"] in rows[1:]
+    for raw in _RAW_CAUSES:
+        assert raw not in resp.text
+    # staff (View as Customer) get the identical redacted body
+    staff = _get(client, tokens, "admin", "calls", customer_id=CID_A, **SEP)
+    assert staff.content == _get(client, tokens, "user_a", "calls", **SEP).content
 
 
 # ---------------------------------------------------------------------------
@@ -616,7 +799,7 @@ def test_calls_shape_order_and_values(client, tokens):
     calls = body["calls"]
     for c in calls:
         assert set(c) == {"id", "started_at", "direction", "from", "to", "number",
-                          "outcome", "outcome_label", "missed_reason",
+                          "product", "outcome", "outcome_label", "missed_reason",
                           "length_minutes", "quality"}
     starts = [datetime.fromisoformat(c["started_at"]) for c in calls]
     assert starts == sorted(starts, reverse=True)          # newest first
@@ -625,6 +808,7 @@ def test_calls_shape_order_and_values(client, tokens):
     assert by[_uuid("a04")] == {
         "id": _uuid("a04"), "started_at": "2026-08-14T10:02:31-06:00",
         "direction": "inbound", "from": "+12085550100", "to": A_MAIN, "number": A_MAIN,
+        "product": "rcf",
         "outcome": "answered", "outcome_label": "Answered", "missed_reason": None,
         "length_minutes": 1, "quality": "fair"}
     assert by[_uuid("a06")]["length_minutes"] == 2         # 95 s -> 2
@@ -634,6 +818,7 @@ def test_calls_shape_order_and_values(client, tokens):
     assert by[_uuid("a08")] | {} == {
         "id": _uuid("a08"), "started_at": "2026-08-21T08:00:00-06:00",
         "direction": "inbound", "from": "+12085550008", "to": A_TRUNK, "number": A_TRUNK,
+        "product": "trunk",
         "outcome": "missed", "outcome_label": "The caller hung up before it was answered",
         "missed_reason": "caller_hung_up", "length_minutes": 0, "quality": "none"}
     assert by[_uuid("a05")]["length_minutes"] == 0        # missed w/ 30 s ring -> 0
