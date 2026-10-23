@@ -30,6 +30,15 @@ Needs NO KMS — only the object store and the database. Missing tables (54 not
 applied), an unconfigured/unavailable object store or a DB outage are logged
 and retried next interval; the task never raises out of its loop.
 ``voicemail_access_log`` is never modified.
+
+Transcripts (migration 56, docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §9): every arm
+above purges messages, and 56's trigger deletes a purged message's transcript
+in the same transaction. A last step, under the same advisory lock, is the
+safety net: it deletes ``voicemail_transcripts`` rows whose message is not
+'stored', whose mailbox is deleted or whose customer key is not active (in
+practice only the discovery race of plan §6.3), in batches of 500 within the
+run budget, with a WARNING when it finds any. Skipped while 56 is not
+applied; it needs no object store, so it also runs when the arms stop early.
 """
 from __future__ import annotations
 
@@ -60,6 +69,8 @@ PENDING_MAX_AGE = "1 hour"
 FAILED_GRACE = "10 minutes"
 #: pg_try_advisory_xact_lock key ("vm_ret").
 LOCK_KEY = 0x766D5F726574
+#: Transcript orphan safety net (migration 56): rows per DELETE.
+TRANSCRIPT_ORPHAN_BATCH = 500
 
 _LEASE_LIVE = ("(m.status = 'pending' AND m.deposit_lease_until IS NOT NULL "
                "AND m.deposit_lease_until > now())")
@@ -88,6 +99,21 @@ ARMS: tuple[tuple[str, str, str], ...] = (
     ("greeting", "mailbox_deleted", f"m.status <> 'purged' AND m.mailbox_id IN {_DELETED_BOXES}"),
     ("greeting", "key_destroyed", f"m.status <> 'purged' AND m.mailbox_id IN {_ERASED_BOXES}"),
 )
+
+# Plan §9: a transcript whose message is no longer stored, whose mailbox is
+# deleted or whose customer key is not active. Should always find 0.
+TRANSCRIPT_ORPHAN_SQL = """
+DELETE FROM voicemail_transcripts
+ WHERE message_id IN (
+       SELECT t.message_id
+         FROM voicemail_transcripts t
+         JOIN voicemail_messages m ON m.id = t.message_id
+         JOIN voicemail_boxes b ON b.id = t.mailbox_id
+         LEFT JOIN voicemail_customer_keys k ON k.customer_id = t.customer_id
+        WHERE m.status <> 'stored' OR b.status = 'deleted'
+           OR k.status IS DISTINCT FROM 'active'
+        LIMIT $1::int)
+"""
 
 _SELECT = {
     "message": ("SELECT m.id, m.msg_uuid, m.mailbox_id, m.customer_id, m.status "
@@ -135,6 +161,29 @@ async def _sweep_arm(pool: Any, kind: str, arm: str, pred: str, deadline: float,
     return True
 
 
+async def _sweep_transcript_orphans(pool: Any, deadline: float, counts: dict) -> None:
+    """The migration-56 safety net (module docstring). No-op before 56."""
+    loop = asyncio.get_running_loop()
+    async with pool.acquire() as conn:
+        if not await conn.fetchval(
+                "SELECT to_regclass('public.voicemail_transcripts') IS NOT NULL"):
+            return
+    total = 0
+    while loop.time() < deadline:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SET LOCAL statement_timeout = '5s'")
+                status = await conn.execute(TRANSCRIPT_ORPHAN_SQL, TRANSCRIPT_ORPHAN_BATCH)
+        deleted = int(status.rsplit(" ", 1)[-1])
+        total += deleted
+        if deleted < TRANSCRIPT_ORPHAN_BATCH:
+            break
+    if total:
+        counts["transcript_orphans"] = total
+        logger.warning("voicemail retention: deleted %d orphaned transcript rows (message not "
+                       "stored, mailbox deleted or key not active)", total)
+
+
 async def sweep_once(*, budget_s: float = RUN_BUDGET_S) -> dict:
     """One sweep (if this process wins the advisory lock). Returns counts;
     ``{"skipped": reason}`` when it did not run. Never raises for DB/storage
@@ -163,6 +212,7 @@ async def sweep_once(*, budget_s: float = RUN_BUDGET_S) -> dict:
                         logger.warning("voicemail retention: object store unavailable — "
                                        "run cut short, retrying next interval")
                         break
+                await _sweep_transcript_orphans(pool, deadline, counts)
             finally:
                 await tx.rollback()  # releases the xact lock; nothing was written on it
     except Exception as exc:  # noqa: BLE001 — never kill the loop

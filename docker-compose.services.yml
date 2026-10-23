@@ -77,6 +77,21 @@ services:
       # impersonation cannot be used — the key file must then also be mounted
       # read-only via a compose override. Empty = unset (VM metadata ADC).
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      # Voicemail transcription (docs/VOICEMAIL_TRANSCRIPTION_PLAN.md §12).
+      # FAIL-CLOSED kill switch: ON only if exactly "true"; unset/empty = OFF
+      # (no worker, nothing sent to Google). Empty values below = the code's
+      # defaults (project = VOICEMAIL_KMS_PROJECT, location us — the ONLY one
+      # accepted —, model telephony, 1 job per worker process, 1000 billed
+      # min/day, 10 s poll). The dev-only fake provider switches
+      # (VOICEMAIL_STT_PROVIDER, VOICEMAIL_STT_FAKE_*) are DELIBERATELY not
+      # passed through, so production can never select the fake.
+      - VOICEMAIL_TRANSCRIPTION_ENABLED=${VOICEMAIL_TRANSCRIPTION_ENABLED:-}
+      - VOICEMAIL_STT_PROJECT=${VOICEMAIL_STT_PROJECT:-}
+      - VOICEMAIL_STT_LOCATION=${VOICEMAIL_STT_LOCATION:-}
+      - VOICEMAIL_STT_MODEL=${VOICEMAIL_STT_MODEL:-}
+      - VOICEMAIL_STT_CONCURRENCY=${VOICEMAIL_STT_CONCURRENCY:-}
+      - VOICEMAIL_STT_DAILY_MINUTES_CAP=${VOICEMAIL_STT_DAILY_MINUTES_CAP:-}
+      - VOICEMAIL_TRANSCRIPTION_POLL_S=${VOICEMAIL_TRANSCRIPTION_POLL_S:-}
     # Plaintext voicemail audio is RAM-only (build plan D8 / §3.2): anything
     # that does spool to /tmp stays in RAM, and the API never core-dumps
     # decrypted audio to disk.

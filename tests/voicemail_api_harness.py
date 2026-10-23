@@ -1,10 +1,11 @@
 """Shared harness for the voicemail API test modules.
 
 An ephemeral PostgreSQL 16 built from the REAL init scripts (voicemail_db:
-02/03/09/17/20/22/24/31/34 + 54), the API pool connected as the runtime
-``api`` role, and an httpx client over the REAL routers (voicemail at
-``/v1/voicemail`` + ``/voicemail``, number inventory, customers) behind the
-REAL ``JWTAuthMiddleware`` — the same shape as tests/test_carrier_trunks.py.
+02/03/09/17/20/22/24/31/34 + every voicemail migration: 54, 56), the API
+pool connected as the runtime ``api`` role, and an httpx client over the
+REAL routers (voicemail at ``/v1/voicemail`` + ``/voicemail``, number
+inventory, customers) behind the REAL ``JWTAuthMiddleware`` — the same shape
+as tests/test_carrier_trunks.py.
 
 Crypto runs on the dev/CI backends only (``VOICEMAIL_ALLOW_LOCAL_KMS=true``,
 ``VOICEMAIL_KMS_PROVIDER=local``, ``VOICEMAIL_STORAGE=memory``): nothing here
@@ -37,7 +38,12 @@ API_SRC = REPO / "docker" / "api" / "src"
 if str(API_SRC) not in sys.path:
     sys.path.insert(0, str(API_SRC))
 
-from voicemail_db import EphemeralPG, apply_54, apply_prerequisites, find_pg_bin  # noqa: E402
+from voicemail_db import (  # noqa: E402
+    EphemeralPG,
+    apply_prerequisites,
+    apply_voicemail_schema,
+    find_pg_bin,
+)
 
 PG_BIN = find_pg_bin()
 
@@ -153,7 +159,7 @@ class Harness:
         conn = await self.owner()
         try:
             await apply_prerequisites(conn)
-            await apply_54(conn)
+            await apply_voicemail_schema(conn)
             await conn.execute(
                 """
                 INSERT INTO customers (id, name, account_type, status) VALUES

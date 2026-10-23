@@ -1,6 +1,8 @@
-"""Throwaway PostgreSQL built from the REAL init scripts migration 54 needs.
+"""Throwaway PostgreSQL built from the REAL init scripts the voicemail
+migrations need (54 encrypted voicemail, 56 transcription).
 
-Shared by tests/test_voicemail_migration54.py and tests/test_voicemail_crypto.py.
+Shared by the voicemail test modules (tests/test_voicemail_*.py and
+tests/voicemail_api_harness.py).
 Same harness shape as tests/test_carrier_trunks.py (initdb + pg_ctl on a
 private unix socket, trust auth). The only hand-written DDL is the two roles
 that 01_extensions.sql would create (01 itself needs TimescaleDB).
@@ -15,6 +17,12 @@ Prerequisite chain (all REAL files, in init order):
   24 grafana_ro                — its ALTER DEFAULT PRIVILEGES is what 54 must undo
   31 E.164 CHECKs              — must survive 54
   34 did_inventory status CHECK (named, other column) — must survive 54
+
+Then the voicemail chain itself, in order (``VOICEMAIL_MIGRATIONS``):
+  54 encrypted voicemail v1
+  56 voicemail transcription v1.1 (requires 54; two transactions)
+``apply_voicemail_schema`` applies the whole chain; ``apply_54`` /
+``apply_56`` exist for the migration tests that step through it.
 """
 from __future__ import annotations
 
@@ -27,6 +35,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 INIT = REPO / "docker" / "postgres" / "init"
 MIG_54 = INIT / "54_voicemail.sql"
+MIG_56 = INIT / "56_voicemail_transcription.sql"
+#: The voicemail migrations, in apply order (every voicemail test DB gets all of them).
+VOICEMAIL_MIGRATIONS = (MIG_54, MIG_56)
 CHECK_MIGRATIONS = REPO / "scripts" / "db" / "check_migrations.sql"
 
 PREREQ_SCRIPTS = (
@@ -100,3 +111,16 @@ async def apply_prerequisites(conn) -> None:
 
 async def apply_54(conn) -> None:
     await conn.execute(MIG_54.read_text())
+
+
+async def apply_56(conn) -> None:
+    """56 is two explicit BEGIN/COMMIT blocks. asyncpg sends the script as ONE
+    simple-protocol query; PostgreSQL honours both blocks, and an error stops
+    the rest (like ``psql -v ON_ERROR_STOP=on -f``)."""
+    await conn.execute(MIG_56.read_text())
+
+
+async def apply_voicemail_schema(conn) -> None:
+    """Every voicemail migration, in order (54, 56). Prerequisites first."""
+    for mig in VOICEMAIL_MIGRATIONS:
+        await conn.execute(mig.read_text())
