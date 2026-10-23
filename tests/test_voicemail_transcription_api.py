@@ -350,6 +350,30 @@ def test_message_shape_carries_transcript_summary(h, monkeypatch):
     run(h, go())
 
 
+def test_confidence_is_rounded_from_real(h):
+    """voicemail_transcripts.confidence is REAL: 0.9 reads back as
+    0.8999999761581421. Every output rounds to 3 dp (list summary + full)."""
+    async def go():
+        box = await mailbox(h)
+        mid = await h.deposit_ok(box["id"])
+        await h.seed_transcript(mid, "done", text=TEXT, confidence=0.9)
+        raw = await h.fetchval("SELECT confidence FROM voicemail_transcripts "
+                               "WHERE message_id = $1", mid)
+        assert raw != 0.9 and abs(raw - 0.9) < 1e-6          # float4 artefact
+        r = await h.client.get(f"/v1/voicemail/mailboxes/{box['id']}/messages",
+                               headers=h.auth("user_a"))
+        item = next(m for m in r.json()["items"] if m["id"] == mid)
+        assert item["transcript"] == {"status": "done", "confidence": 0.9}
+        r = await h.client.patch(f"/v1/voicemail/messages/{mid}", headers=h.auth("user_a"),
+                                 json={"is_saved": True})
+        assert r.json()["transcript"]["confidence"] == 0.9
+        r = await h.client.get(tx_url(mid), headers=h.auth("user_a"))
+        assert r.json()["confidence"] == 0.9
+        assert '"confidence":0.9,' in r.text and "0.89999" not in r.text
+
+    run(h, go())
+
+
 # ===========================================================================
 # GET /messages/{id}/transcript
 # ===========================================================================
@@ -926,9 +950,14 @@ def test_ops_status_and_requeue(h, monkeypatch, on):
         monkeypatch.delenv("VOICEMAIL_STT_DAILY_MINUTES_CAP")
 
         url = "/v1/voicemail/transcription/requeue"
+        # Only codes that can sit on a FAILED row (backend-T's worker): deferral
+        # codes live on pending rows only, unknown codes are typos.
         for body, detail in (({"error_code": "Bad Code"}, "Choose a valid error code."),
                              ({"error_code": 5}, "Choose a valid error code."),
-                             ({"error_code": "x" * 41}, "Choose a valid error code."),
+                             ({"error_code": "nope"}, "Choose a valid error code."),
+                             ({"error_code": "stt_quota"}, "Choose a valid error code."),
+                             ({"error_code": "budget"}, "Choose a valid error code."),
+                             ({"error_code": "decrypt_busy"}, "Choose a valid error code."),
                              ({"limit": 0}, "Limit must be between 1 and 500."),
                              ({"limit": 501}, "Limit must be between 1 and 500."),
                              ({"limit": "5"}, "Limit must be between 1 and 500."),
@@ -954,6 +983,18 @@ def test_ops_status_and_requeue(h, monkeypatch, on):
             '{"count": 1, "error_code": "stt_unavailable"}',
             '{"count": 1, "error_code": null}']
         assert all(r_["source"] == "admin" and r_["customer_id"] is None for r_ in rows)
+        # Every transient + permanent failed-row code is accepted as a filter.
+        from services.voicemail import transcripts as vmt
+        assert vmt.REQUEUE_ERROR_CODES == {
+            "stt_unavailable", "stt_timeout", "decrypt_unavailable", "seal_unavailable", "db",
+            "lease_expired", "internal", "stt_rejected", "bad_wav", "integrity",
+            "key_destroyed", "message_gone"}
+        await h.seed_transcript(m[3], "failed", error_code="internal")
+        await h.seed_transcript(m[4], "failed", error_code="bad_wav")
+        for code in sorted(vmt.REQUEUE_ERROR_CODES):
+            r = await c.post(url, headers=h.auth("admin"), json={"error_code": code, "limit": 1})
+            assert r.status_code == 200, (code, r.text)
+            assert r.json() == {"requeued": 1 if code in ("internal", "bad_wav") else 0}, code
 
         # Flag off: still readable by an admin, reports why.
         monkeypatch.delenv("VOICEMAIL_TRANSCRIPTION_ENABLED")

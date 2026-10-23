@@ -303,7 +303,9 @@ class Harness:
         worker leaves it. ``done`` seals a real transcript document with the
         REAL ``seal_transcript`` (local KMS, AAD ``vmt:``) — or ``plaintext``
         verbatim (malformed-document tests); every other status carries no
-        crypto (the table's CHECKs). ``processing`` gets a live lease."""
+        crypto (the table's CHECKs). ``processing`` gets a live lease. ``empty``
+        defaults to the worker's all-silent shape: provider/model set,
+        chunk_count = audio_ms = billed_ms = 0 (no API call)."""
         from services.voicemail import seal_transcript
         from services.voicemail.transcription import document
         msg = (await self.fetch("SELECT mailbox_id, customer_id, msg_uuid FROM voicemail_messages "
@@ -321,6 +323,9 @@ class Harness:
                                          msg_uuid=msg["msg_uuid"], plaintext=plaintext)
             crypto = (blob.ciphertext, blob.wrapped_dek, blob.kek_version, blob.iv)
         finished = status in ("done", "empty")
+        sent_ms, chunks = {"done": (4000, 1), "empty": (0, 0)}.get(status, (None, None))
+        if billed_ms is None:
+            billed_ms = sent_ms
         await self.execute(
             """
             INSERT INTO voicemail_transcripts AS t
@@ -333,9 +338,7 @@ class Harness:
                     $13::bytea,
                     CASE WHEN $4::varchar = 'processing' THEN now() + interval '10 minutes' END,
                     CASE WHEN $4::varchar = 'processing' THEN gen_random_uuid() END,
-                    CASE WHEN $14::boolean THEN now() END,
-                    CASE WHEN $14::boolean THEN 4000 END, $15::int,
-                    CASE WHEN $14::boolean THEN 1 END)
+                    CASE WHEN $14::boolean THEN now() END, $16::int, $15::int, $17::smallint)
             ON CONFLICT (message_id) DO UPDATE SET
                 status = EXCLUDED.status, language = EXCLUDED.language, model = EXCLUDED.model,
                 provider = EXCLUDED.provider, confidence = EXCLUDED.confidence,
@@ -349,8 +352,7 @@ class Harness:
             """,
             message_id, msg["mailbox_id"], msg["customer_id"], status, language,
             model if finished else None, confidence if status == "done" else None, error_code,
-            attempts, *crypto, finished, billed_ms if billed_ms is not None
-            else (4000 if finished else None))
+            attempts, *crypto, finished, billed_ms, sent_ms, chunks)
 
 
 def memory_store():
