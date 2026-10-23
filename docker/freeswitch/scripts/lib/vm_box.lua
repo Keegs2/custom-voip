@@ -15,6 +15,7 @@
 --   preflight (no network): modules loaded, API_HOST/API_PORT valid, ingest
 --     header file valid, /dev/shm/vm is a tmpfs mount, msg UUIDv4 generated.
 --     Any failure -> answer, play `unavailable` (tone fallback), hang up.
+--   set rtp_timer_name + jitterbuffer_msec (see RECORDING MEDIA PATH)
 --   answer
 --   GET /v1/voicemail/fs/mailbox/{id} (3 s):
 --     200 accepting=false -> `mailbox_full` (reason "full") / `unavailable`,
@@ -27,7 +28,7 @@
 --     played, UNLINKED IMMEDIATELY after playback) else `default_greeting`
 --     (tone-only if the prompt file is missing). '#' skips the greeting.
 --   beep -> record /dev/shm/vm/<msg_uuid>.wav (8 kHz mono PCM16, max
---     max_message_seconds, silence-stop, '#' ends)
+--     max_message_seconds, 10 s silence-stop at threshold 200, '#' ends)
 --   hang up the A-leg (if the caller has not already) -> deposit (§5, raw
 --     audio/wav, retry table) -> unlink -> opportunistic sweep.
 --
@@ -69,6 +70,60 @@
 --   is still connected after `record` (max length / silence / '#') BEFORE
 --   depositing — every deposit therefore runs on a hung-up channel.
 --
+-- RECORDING MEDIA PATH (owner decision O6, docs/VOICEMAIL_TRANSCRIPTION_PLAN.md
+--   §0.1 and §18 item 7). The FreeSWITCH refs below are at the pinned
+--   FREESWITCH_REF 0a54a48. Two per-call variables are set just before
+--   session:answer():
+--     rtp_timer_name=soft        (M.RTP_TIMER_NAME)
+--     jitterbuffer_msec=60:200   (M.JITTERBUFFER)
+--   * When they are read: only when the audio RTP session is CREATED
+--     (switch_core_media_activate_rtp: rtp_timer_name at
+--     switch_core_media.c:8748, jitterbuffer_msec in check_jb() :2386, called
+--     at :8946 after switch_rtp_new :8757). On this leg the RTP session is
+--     created by the answer below (mod_sofia.c:931). The internal profile
+--     has inbound-late-negotiation=false, so the INVITE only negotiates
+--     codecs (sofia.c:7920-7934). Neither route into this file (the direct
+--     STEP-1 arm or the on-net chain) pre-answers, rings with media or
+--     bridges first. Set after the answer, they would have no effect:
+--     nothing re-reads them once RTP exists. A later activate_rtp takes the
+--     re-INVITE path and skips both reads (:8541-8545, :8641-8653). Only the
+--     dptools `jitterbuffer` app could add a buffer then, and it cannot add
+--     the timer.
+--   * Why the timer: neither sofia profile sets rtp-timer-name, and mod_sofia
+--     has no default (sofia.c:5285-5286 is the only assignment). Without a
+--     timer, RTP reads are paced by packet arrival ("Not using a timer",
+--     switch_rtp.c:4594). A jitter buffer read on arrival emits a PLC frame
+--     for a lost packet without consuming one, so its depth grows by one per
+--     loss until it holds more than 2 x max and is flushed
+--     (switch_jitterbuffer.c:262-267). With the soft timer there is exactly
+--     one read per ptime (switch_rtp.c:7339). A lost packet then gets one
+--     concealment frame in its own slot, and the depth stays bounded.
+--   * Effect on the WAV (read path only): packets are written in sequence
+--     order. A lost packet, or one later than the buffer, becomes 20 ms of
+--     packet-loss concealment instead of being left out. G.711 has no codec
+--     PLC, so this is FreeSWITCH's spandsp plc_fillin
+--     (switch_core_io.c:470-526; rtp_jitter_buffer_plc is unset, which means
+--     on, switch_core_media.c:2446). It fades to silence after 50 ms. The
+--     file therefore keeps real time.
+--   * 60:200 means start at 3 frames of 20 ms. The buffer grows by one frame
+--     on consecutive misses, up to 10 frames
+--     (switch_jitterbuffer.c:1689-1694), and shrinks after 5 s without a miss
+--     (:1597-1601). It is not elastic for G.711 (only Opus drops frames,
+--     :1112-1124). Latency does not matter for a one-way recording. The
+--     caller audio still buffered at a BYE (60 to 200 ms) is not recorded.
+--   * The timer also clocks the greeting and beep playback at 20 ms instead
+--     of on inbound arrival (playback paces itself on the read,
+--     switch_ivr_play_say.c:1911-1920). RFC 2833 '#' bypasses the buffer
+--     (switch_rtp.c:6396-6400).
+--   * No SDP change: suppress_cng is deliberately NOT set. Comfort-noise
+--     packets from the caller pass through the buffer in sequence and are
+--     written as silence.
+--   * Silence stop: still one detector sample per 20 ms frame (see
+--     M.SILENCE_HITS). With the timer, frames keep coming even if the
+--     caller's RTP stops, so the 10 s is wall-clock time.
+--   * The RTP quality measurement (quality patch v1) counts packets at the
+--     socket read, before the jitter buffer, so it is unaffected.
+--
 -- PLAINTEXT HYGIENE (D8, defect 12): every tmpfs path is registered BEFORE it
 --   can exist and is unlinked on EVERY exit path — success, API rejection,
 --   retries exhausted, too-short, caller hangup mid-greeting/mid-record, and a
@@ -89,9 +144,21 @@ M.MOUNTS_FILE = "/proc/self/mounts"
 M.DEFAULT_MAX_SECONDS = 300      -- contract cap; used when the lookup fails
 M.MIN_MAX_SECONDS     = 10
 M.MIN_DEPOSIT_MS      = 1000     -- contract §5: < 1 s is not deposited
-M.SILENCE_THRESHOLD   = 200      -- record energy threshold
-M.SILENCE_HITS        = 5        -- seconds of silence that end the recording
+M.SILENCE_THRESHOLD   = 200      -- record energy threshold (mean |sample| per frame)
+-- `record` counts consecutive frames below the threshold (any louder frame
+-- resets the count) and stops after SILENCE_HITS seconds of them. FS turns
+-- seconds into frames as rate x seconds / samples per frame, i.e.
+-- 8000 x 10 / 160 = 500 frames of 20 ms (switch_ivr_play_say.c:761,
+-- :906-927 at FREESWITCH_REF 0a54a48).
+-- 10 s (owner decision O5, was 5) lets a caller pause mid-message without
+-- being cut off. The silent tail is trimmed server-side before STT.
+M.SILENCE_HITS        = 10       -- seconds of continuous silence that end the recording
 M.RECORD_SAMPLE_RATE  = 8000     -- canonical 8 kHz mono PCM16 (<= 4.8 MB / 300 s)
+-- Recording-leg media clocking (O6). Set before the answer; see RECORDING
+-- MEDIA PATH above. The two go together: a jitter buffer without the timer
+-- grows by one frame per lost packet and is eventually flushed.
+M.RTP_TIMER_NAME      = "soft"   -- one RTP read per ptime
+M.JITTERBUFFER        = "60:200" -- jitterbuffer_msec: 60 ms start, 200 ms max
 M.SETTLE_MS           = 300      -- after answer, before the first prompt
 M.SWEEP_AGE_MIN       = 15
 M.SWEEP_INTERVAL_S    = 300
@@ -339,6 +406,12 @@ local function flow(session, a, st)
         log("ERR", tag .. "voicemail unavailable: " .. problem)
     end
 
+    -- Media clocking for the recording (RECORDING MEDIA PATH above). These are
+    -- read only when the answer creates the RTP session, so they MUST be set
+    -- before session:answer(). Setting them later has no effect.
+    setv(session, "rtp_timer_name", M.RTP_TIMER_NAME)
+    setv(session, "jitterbuffer_msec", M.JITTERBUFFER)
+
     pcall(function() session:answer() end)
     if not is_ready(session) then
         st.result = problem and "unavailable_config" or "caller_gone"
@@ -453,9 +526,10 @@ local function flow(session, a, st)
     local rec_path = dep.message_path(st.msg_uuid)
     register(st, rec_path)
     setv(session, "record_sample_rate", M.RECORD_SAMPLE_RATE)
-    -- Returns when: max length reached, silence-stop, '#', the caller hangs
-    -- up (the normal end — see "POST-HANGUP DEPOSIT" above), or the file
-    -- could not be opened/written (tmpfs full).
+    -- Args: <path> <max seconds> <silence threshold> <silence seconds>.
+    -- Returns when: max length reached, SILENCE_HITS (10) s of continuous
+    -- silence, '#', the caller hangs up (the normal end — see "POST-HANGUP
+    -- DEPOSIT" above), or the file could not be opened/written (tmpfs full).
     session:execute("record", string.format("%s %d %d %d",
         rec_path, max_secs, M.SILENCE_THRESHOLD, M.SILENCE_HITS))
 

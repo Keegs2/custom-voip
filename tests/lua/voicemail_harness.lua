@@ -257,6 +257,7 @@ local function run_scenario(sc)
         if v == "" then v = nil end
         session_vars[k] = v
         cap.setvars[k] = v
+        ev("setvar:" .. tostring(k) .. "=" .. tostring(v))
     end
     function session:ready() return up end
     function session:answer() cap.answered = true; ev("answer") end
@@ -488,6 +489,30 @@ local function assert_clean(tag, cap)
     check(tag .. ": script did not raise", cap.script_ok, cap.script_err)
 end
 
+-- Owner decision O6: the recording leg gets rtp_timer_name=soft and
+-- jitterbuffer_msec=60:200, both set BEFORE the answer (FS reads them only
+-- when the answer creates the RTP session). If `recorded`, the record must
+-- come after the answer.
+local function assert_jitterbuffer(tag, cap, recorded)
+    local ti = find_event(cap, "setvar:rtp_timer_name=")
+    local ji = find_event(cap, "setvar:jitterbuffer_msec=")
+    local ai = find_event(cap, "answer")
+    local ri = find_event(cap, "record:")
+    check(tag .. ": rtp_timer_name=soft, jitterbuffer_msec=60:200",
+        cap.setvars.rtp_timer_name == "soft" and cap.setvars.jitterbuffer_msec == "60:200",
+        tostring(cap.setvars.rtp_timer_name) .. " / " .. tostring(cap.setvars.jitterbuffer_msec))
+    check(tag .. ": timer + jitter buffer set BEFORE answer",
+        ti and ji and ai and ti < ai and ji < ai,
+        tostring(ti) .. "," .. tostring(ji) .. " vs answer " .. tostring(ai))
+    check(tag .. ": each set exactly once",
+        count(cap.events, function(e) return e:match("^setvar:rtp_timer_name=") ~= nil end) == 1
+        and count(cap.events, function(e) return e:match("^setvar:jitterbuffer_msec=") ~= nil end) == 1,
+        "set more than once")
+    if recorded then
+        check(tag .. ": answer -> record order", ai and ri and ai < ri, tostring(ai) .. " vs " .. tostring(ri))
+    end
+end
+
 print("== voicemail_harness ==")
 
 -- ==================================================================
@@ -521,8 +546,10 @@ do
         tostring(c.setvars.playback_terminators) .. "/" .. tostring(c.setvars.record_sample_rate))
     local rp = rec_path_of(c)
     check("record path = /dev/shm/vm/<uuid4>.wav", rp and rp:match("^/dev/shm/vm/" .. UUID4 .. "%.wav$"), rp)
-    check("record args: max_message_seconds from API, silence 200/5",
-        c.records[1] == rp .. " 120 200 5", c.records[1])
+    check("record args: max_message_seconds from API, silence 200/10",
+        c.records[1] == rp .. " 120 200 10", c.records[1])
+    check("record args end in '200 10'", c.records[1] and c.records[1]:match(" 200 10$") ~= nil, c.records[1])
+    assert_jitterbuffer("[1]", c, true)
     local msg_uuid = rp and rp:match("^/dev/shm/vm/(.*)%.wav$")
     check("vm_msg_uuid CDR var = record file uuid", c.setvars.vm_msg_uuid == msg_uuid, c.setvars.vm_msg_uuid)
     check("exactly 2 commands (mailbox GET, deposit POST)", #c.popen == 2, #c.popen)
@@ -581,6 +608,8 @@ do
         meta and meta.did == MAILBOX_DID and meta.caller_id_number == "+15085550777" and meta.caller_id_name == "Bob",
         meta and (tostring(meta.did) .. " " .. tostring(meta.caller_id_number) .. " " .. tostring(meta.caller_id_name)))
     check("vm_result=stored", v.vm_result == "stored", v.vm_result)
+    check("[2] record args end in '200 10'", c.records[1] and c.records[1]:match(" 300 200 10$") ~= nil, c.records[1])
+    assert_jitterbuffer("[2] on-net", c, true)
     assert_clean("[2]", c)
 
     print("[2b] on-net RCF (pass_caller_id=false) -> mailbox: masking DID presented")
@@ -806,7 +835,7 @@ do
     local pi, ri = find_event(c, "playback:" .. (gpath or "?")), find_event(c, "remove:" .. (gpath or "?"))
     check("[6a] unlink right after its playback", pi and ri and ri == pi + 1, tostring(pi) .. "/" .. tostring(ri))
     check("[6a] vm_greeting=custom", c.setvars.vm_greeting == "custom", c.setvars.vm_greeting)
-    check("[6a] record uses 300 s", c.records[1] and c.records[1]:match(" 300 200 5$"), c.records[1])
+    check("[6a] record uses 300 s", c.records[1] and c.records[1]:match(" 300 200 10$"), c.records[1])
     assert_clean("[6a]", c)
 
     c = run_scenario(direct({ mailbox = mb, greeting = { code = "200", content = "<html>not a wav</html>" } }))
@@ -883,14 +912,14 @@ do
         c = run_scenario(direct({ mailbox = f.m }))
         local rp = rec_path_of(c)
         check("[8d] lookup " .. f.tag .. " -> defaults: 300 s, default greeting, deposits",
-            rp and c.records[1] == rp .. " 300 200 5"
+            rp and c.records[1] == rp .. " 300 200 10"
             and c.playbacks[1] == "/usr/local/freeswitch/scripts/sounds/vm/default_greeting.wav"
             and c.setvars.vm_result == "stored", tostring(c.records[1]) .. " " .. tostring(c.setvars.vm_result))
         assert_clean("[8d " .. f.tag .. "]", c)
     end
 
     c = run_scenario(direct({ mailbox = { code = "200", body = '{"mailbox_id":42,"accepting":true,"max_message_seconds":99999}' } }))
-    check("[8e] out-of-range max_message_seconds -> 300", c.records[1] and c.records[1]:match(" 300 200 5$"), c.records[1])
+    check("[8e] out-of-range max_message_seconds -> 300", c.records[1] and c.records[1]:match(" 300 200 10$"), c.records[1])
     assert_clean("[8e]", c)
 end
 
@@ -915,6 +944,7 @@ do
             and c.playbacks[1] == "/usr/local/freeswitch/scripts/sounds/vm/unavailable.wav",
             tostring(c.setvars.vm_result) .. " popen=" .. #c.popen)
         check("[9] " .. k.tag .. ": ERROR logged", has_log(c, "ERR", "voicemail unavailable"), "no log")
+        assert_jitterbuffer("[9 " .. k.tag .. "]", c, false)
         assert_clean("[9 " .. k.tag .. "]", c)
     end
     local c = run_scenario(direct({ header = "X-Ingest-Secret: " .. string.rep("q", 40) .. "\r\n" }))
@@ -940,6 +970,11 @@ do
     check("[10b] off-net RCF still bridges to the carrier, no voicemail lookup/HTTP",
         #c.bridges >= 1 and #c.popen == 0 and count(c.db_calls, function(x) return x:match("^voicemail") end) == 0,
         #c.bridges)
+    check("[10b] off-net RCF: no jitter buffer / RTP timer (voicemail leg only)",
+        c.setvars.jitterbuffer_msec == nil and c.setvars.rtp_timer_name == nil
+        and not (table.concat(c.bridges, "\n"):find("jitterbuffer", 1, true))
+        and not (table.concat(c.bridges, "\n"):find("rtp_timer_name", 1, true)),
+        tostring(c.setvars.jitterbuffer_msec) .. " / " .. tostring(c.setvars.rtp_timer_name))
 end
 
 -- ==================================================================
@@ -1078,6 +1113,22 @@ do
     check("[13] wav_duration_ms unfinalized header -> file size", vbox.wav_duration_ms(wdir .. "/c.wav") == 4000,
         vbox.wav_duration_ms(wdir .. "/c.wav"))
     check("[13] wav_duration_ms non-WAV -> nil", vbox.wav_duration_ms(wdir .. "/d.wav") == nil, "parsed")
+    -- owner decision O5: threshold 200, 10 s of continuous silence ends the message
+    check("[13] silence stop = threshold 200, 10 s",
+        vbox.SILENCE_THRESHOLD == 200 and vbox.SILENCE_HITS == 10,
+        tostring(vbox.SILENCE_THRESHOLD) .. "/" .. tostring(vbox.SILENCE_HITS))
+    -- owner decision O6. The spec must be one FS check_jb() parses as
+    -- intended (switch_core_media.c:2386-2437 at FREESWITCH_REF 0a54a48):
+    -- "<min>:<max>" in ms with no 'p' (packet) suffix, 10 <= min <= 10000
+    -- (otherwise FS falls back to 1 frame), and max >= min (otherwise FS
+    -- uses 5 x min). At 20 ms ptime that is 3 to 10 frames.
+    check("[13] RTP timer = soft", vbox.RTP_TIMER_NAME == "soft", vbox.RTP_TIMER_NAME)
+    local jmin, jmax = tostring(vbox.JITTERBUFFER):match("^(%d+):(%d+)$")
+    jmin, jmax = tonumber(jmin), tonumber(jmax)
+    check("[13] jitterbuffer_msec = 60:200 (3..10 frames of 20 ms)",
+        vbox.JITTERBUFFER == "60:200" and jmin and jmax and jmin >= 10 and jmin <= 10000 and jmax >= jmin
+        and math.floor(jmin / 20) == 3 and math.floor(jmax / 20) == 10,
+        tostring(vbox.JITTERBUFFER))
 
     local long = string.rep("é", 150)
     local tr = dep.clean_text(long, 100)
