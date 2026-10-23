@@ -32,15 +32,23 @@ TRY_LOCK_SQL = "SELECT pg_try_advisory_xact_lock($1::bigint)"
 
 # §6.4 — crashed / killed process: its 'processing' rows come back after the
 # 600 s lease (idx_vm_transcripts_lease). $1 = MAX_ATTEMPTS.
+# The LIMITed FOR UPDATE SKIP LOCKED pick is a MATERIALIZED CTE (here and in
+# CLAIM_SQL): an inlined/IN-subquery form can be re-scanned by the planner, and
+# each re-scan skips rows this same command already updated, so the UPDATE
+# could touch more than LIMIT rows.
 REAP_SQL = """
+WITH pick AS MATERIALIZED (
+    SELECT message_id FROM voicemail_transcripts
+     WHERE status = 'processing' AND lease_until < now()
+     ORDER BY lease_until LIMIT 50
+     FOR UPDATE SKIP LOCKED
+)
 UPDATE voicemail_transcripts t
    SET status = CASE WHEN t.attempts >= $1::int THEN 'failed' ELSE 'pending' END,
        error_code = 'lease_expired', lease_until = NULL, attempt_id = NULL,
        next_attempt_at = now() + interval '1 minute', updated_at = now()
- WHERE t.message_id IN (SELECT message_id FROM voicemail_transcripts
-                         WHERE status = 'processing' AND lease_until < now()
-                         ORDER BY lease_until LIMIT 50
-                         FOR UPDATE SKIP LOCKED)
+  FROM pick
+ WHERE t.message_id = pick.message_id
 """
 
 # §6.3 — the stored message is the job source (idx_vm_messages_stored_created
@@ -82,7 +90,7 @@ ON CONFLICT (message_id) DO NOTHING
 # switched-off mailbox, voicemail-disabled customer, destroyed key. The
 # language is taken from the mailbox AT CLAIM TIME. $1 = attempt_id, $2 = lease s.
 CLAIM_SQL = """
-WITH pick AS (
+WITH pick AS MATERIALIZED (
     SELECT t.message_id
       FROM voicemail_transcripts t
       JOIN voicemail_messages m        ON m.id = t.message_id
