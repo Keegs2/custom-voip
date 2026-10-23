@@ -290,7 +290,7 @@ return { items: raw.items ?? [], total: raw.total ?? raw.items?.length ?? 0 };
 | `didInventory.ts` | `/dids` (inventory) | `listDidInventory`, `listAvailableDids`, `getDidStats`, `listMyDids`, `syncDidInventory`, `assignDid`, `unassignDid`, `requestDid` |
 | `onboarding.ts` | `/onboarding` | `submitOnboardingRequest`, `listOnboardingRequests`, `getOnboardingRequest`, `verifyBilling`, `approveOnboarding`, `rejectOnboarding` |
 | `sbc.ts` | (SBC stats) | `getSbcStats(minutes)` — per-SBC call distribution for the admin `SbcDistribution` panel |
-| `voicemail.ts` | `/v1/voicemail` | Visual Voicemail, typed 1:1 to `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md` §4.1–4.4 (summary, mailboxes, available-numbers, messages, playback tokens, greetings incl. raw-WAV upload, crypto-erase). See §17. |
+| `voicemail.ts` | `/v1/voicemail` | Visual Voicemail, typed 1:1 to `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md` §4.1–4.4 (summary, mailboxes, available-numbers, messages, playback tokens, greetings incl. raw-WAV upload, crypto-erase) + transcription v1.1 (`getTranscript`, `retryTranscript`, `getTranscriptSnippets` ≤ 50 ids, `backfillTranscripts`). See §17. |
 
 `apiRequestRaw<T>(method, path, body, contentType)` (client.ts) is the raw-body
 sibling of `apiRequest` (same auth / 401 / ApiError handling) — used for the
@@ -993,9 +993,11 @@ Contract: `docs/CALL_QUALITY_ACCURACY_PLAN.md` (§B.3 column semantics, §C.3
 ## 17. Visual Voicemail (`/voicemail`, encrypted voicemail v1)
 
 Contract: `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md` §4 (API) + §7 (UI); plan
-`docs/ENCRYPTED_VOICEMAIL_BUILD_PLAN.md`. v1 copy is trimmed to what ships —
-**no transcription, notifications, voicemail API or prices** (D3/D5), web
-retrieval only (D7; the PIN is stored for a future dial-in).
+`docs/ENCRYPTED_VOICEMAIL_BUILD_PLAN.md`. Transcription (v1.1):
+`docs/VOICEMAIL_TRANSCRIPTION_PLAN.md` §10–§11, owner decisions §0.1. Copy is
+trimmed to what ships — **no transcript search, notifications, voicemail API
+or prices** (D3/D5), web retrieval only (D7; the PIN is stored for a future
+dial-in).
 
 - **Route entry** `pages/VisualVoicemailPage.tsx` (lazy): tenant →
   `CustomerVoicemail` (own account; `readonly` = play + download only);
@@ -1029,5 +1031,29 @@ retrieval only (D7; the PIN is stored for a future dial-in).
 - **Admin create** (`NewMailboxDialog.tsx`): customer fixed (preview / console
   customer) or picked; DID from `GET /available-numbers?q=`; name, timezone,
   optional PIN. 409 = number taken (list refreshes); 503 = nothing created.
+- **Transcription (v1.1)** — everything keys off `summary.transcription_available`
+  (platform flag on + valid config), read once in `VoicemailWorkspace`.
+  - **Admin-only switch (owner decision O2):** on/off, language and "Transcribe
+    earlier messages" (backfill) are editable ONLY when `canManage` (platform
+    admin, incl. "View as Customer" with `customer_id = null`) —
+    `MailboxSettings` → `TranscriptionPanel`. Tenants (`user`/`readonly`) get a
+    read-only "Transcription: On — English (US)" line while it is on and no
+    panel while it is off. `NewMailboxDialog` (admin) offers "Transcribe new
+    messages", unchecked by default (O1), only while available.
+  - **Cache:** transcripts live under their OWN root `['voicemail-transcript']`
+    (`vmTranscriptKeys`) — `invalidateVoicemail()` must never refetch them
+    (each `done` fetch = KMS decrypt + audit row). `useTranscript`:
+    `staleTime: Infinity`, 5 s poll while pending/processing, stops after 3 min
+    ("Still transcribing — check back shortly."); refetched only after a retry
+    or when the list's status for that message changes. `useTranscriptSnippets`:
+    per-id cache (`staleTime`/`gcTime: Infinity`), ids batched ≤ 50 per
+    request via a per-mailbox loader. Folders poll every 10 s while a loaded
+    message is pending/processing (never Trash). Never persisted (D8).
+  - **UI:** `MessageList` third line (`vm-row-snippet`); `TranscriptPanel` in
+    `ReadingPane` between `Player` and the actions — every state of plan §11.4;
+    "disabled, mailbox off" shows the "Turn it on" link to admins only (O2);
+    retry buttons follow the API's `can_retry` (admins: forced re-run on
+    `done`); a rendered `done` transcript marks the message read once for
+    writers. `VoicemailIntro` mentions optional transcripts only while available.
 - Styles `styles/dl-voicemail.css` (`vm-`), container queries on `.vm-body`;
   dialogs are `VmDialog` (light portal, `.dl-scope` root). Brand blues only.

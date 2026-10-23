@@ -9,6 +9,10 @@
  *
  * Moving a message out of the open folder (save, unsave, delete, restore,
  * purge) selects its neighbour. Delete offers Undo in the toast.
+ *
+ * Transcription (v1.1): the open folder's done transcripts get a snippet line
+ * (batched, cached per id — useTranscriptSnippets); folders poll every 10 s
+ * while a loaded message is still being transcribed.
  */
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -30,6 +34,7 @@ import {
   patchCachedMessage,
   UNAVAILABLE_TEXT,
   useFolderMessages,
+  useTranscriptSnippets,
   vmErrorText,
   type VoicemailScope,
 } from './voicemailData';
@@ -55,9 +60,15 @@ export interface InboxViewProps {
   scope: VoicemailScope;
   mailbox: Mailbox;
   canEdit: boolean;
+  /** Platform admin (incl. "View as Customer") — owner decision O2. */
+  canManage: boolean;
+  /** summary.transcription_available. */
+  transcriptionAvailable: boolean;
+  /** Switches the workspace to "Greeting & settings". */
+  onOpenSettings: () => void;
 }
 
-export function InboxView({ scope, mailbox, canEdit }: InboxViewProps) {
+export function InboxView({ scope, mailbox, canEdit, canManage, transcriptionAvailable, onOpenSettings }: InboxViewProps) {
   // ── ALL hooks unconditionally at the top (React #310) ──
   const queryClient = useQueryClient();
   const { toast, toastErr } = useToast();
@@ -67,13 +78,14 @@ export function InboxView({ scope, mailbox, canEdit }: InboxViewProps) {
   const [purgeTarget, setPurgeTarget] = useState<VoicemailMessage | null>(null);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
-  const inbox = useFolderMessages(scope, mailbox.id, 'inbox');
-  const saved = useFolderMessages(scope, mailbox.id, 'saved');
-  const trash = useFolderMessages(scope, mailbox.id, 'trash');
+  const inbox = useFolderMessages(scope, mailbox.id, 'inbox', transcriptionAvailable);
+  const saved = useFolderMessages(scope, mailbox.id, 'saved', transcriptionAvailable);
+  const trash = useFolderMessages(scope, mailbox.id, 'trash', transcriptionAvailable);
   const byFolder = { inbox, saved, trash } as const;
   const current = byFolder[folder];
 
   const items = useMemo(() => folderItems(current.data), [current.data]);
+  const snippets = useTranscriptSnippets(scope, mailbox.id, items);
   const selected = items.find((m) => m.id === selectedSel) ?? items[0] ?? null;
   const timeZone = safeTimeZone(mailbox.timezone);
 
@@ -230,6 +242,8 @@ export function InboxView({ scope, mailbox, canEdit }: InboxViewProps) {
           onSelect={setSelectedSel}
           timeZone={timeZone}
           now={now}
+          snippets={snippets}
+          transcriptionAvailable={transcriptionAvailable}
         />
         {current.hasNextPage && (
           <div className="vm-more">
@@ -287,11 +301,15 @@ export function InboxView({ scope, mailbox, canEdit }: InboxViewProps) {
           {selected ? (
             <ReadingPane
               key={selected.id}
+              scope={scope}
               message={selected}
               mailbox={mailbox}
               folder={folder}
               timeZone={timeZone}
               canEdit={canEdit}
+              canManage={canManage}
+              transcriptionAvailable={transcriptionAvailable}
+              onOpenSettings={onOpenSettings}
               pending={pendingKind}
               onAction={onAction}
               onDownload={() => void onDownload()}

@@ -47,7 +47,7 @@ const CARDS: Record<DocProduct, ProductCardDef> = {
     name: 'Visual Voicemail',
     tag: 'Coming soon',
     icon: <IconVoicemail size={18} />,
-    blurb: 'Browser-first voicemail with transcription.',
+    blurb: 'Browser-first voicemail with optional transcripts.',
   },
   telemetry: {
     name: 'CDRs & Telemetry',

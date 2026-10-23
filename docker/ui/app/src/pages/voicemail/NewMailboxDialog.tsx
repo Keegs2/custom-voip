@@ -5,15 +5,19 @@
  *   Customer   fixed (preview customer / console scope) or picked here
  *   Number     GET /available-numbers?q= (digits) → pick one
  *   Name · Timezone · optional PIN (masked, 4–10 digits, confirmed)
+ *   Transcription (v1.1, only while available): "Transcribe new messages"
+ *              — unchecked by default (owner decision O1) — + language
  *
  * The API claims the DID, switches voicemail on for the customer and makes
  * sure the customer's KMS key exists — a 503 means nothing was created; a
- * 409 means someone took the number first (the list refreshes).
+ * 409 means someone took the number first (the list refreshes), or that
+ * transcription stopped being available (the checkbox goes away).
  */
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
-import type { Mailbox } from '../../types/voicemail';
+import type { Mailbox, TranscriptionLanguage } from '../../types/voicemail';
+import { TRANSCRIPTION_LANGUAGES } from '../../types/voicemail';
 import { createMailbox } from '../../api/voicemail';
 import { ApiError } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
@@ -26,11 +30,22 @@ import { DEFAULT_TIMEZONE, formatPhone, PIN_PATTERN, TIMEZONES } from './format'
 export interface NewMailboxDialogProps {
   /** The customer the mailbox is for, or null to pick one in the dialog. */
   customer: { id: number; name: string } | null;
+  /** summary.transcription_available — the transcription option shows only while true. */
+  transcriptionAvailable: boolean;
   onClose: () => void;
   onCreated: (mailbox: Mailbox) => void;
 }
 
-export function NewMailboxDialog({ customer, onClose, onCreated }: NewMailboxDialogProps) {
+/**
+ * A 409 caused by the transcription option rather than the number. The API
+ * has two 409 sentences on this route ("…number…" taken vs "Transcription
+ * isn't available yet."); only the latter mentions transcription.
+ */
+function isTranscriptionConflict(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && /transcri/i.test(err.message);
+}
+
+export function NewMailboxDialog({ customer, transcriptionAvailable, onClose, onCreated }: NewMailboxDialogProps) {
   // ── ALL hooks unconditionally at the top (React #310) ──
   const queryClient = useQueryClient();
   const { toastOk } = useToast();
@@ -43,7 +58,17 @@ export function NewMailboxDialog({ customer, onClose, onCreated }: NewMailboxDia
   const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
   const [pin, setPin] = useState('');
   const [pinConfirm, setPinConfirm] = useState('');
-  const ids = { customer: useId(), search: useId(), label: useId(), tz: useId(), pin: useId(), pin2: useId() };
+  const [transcribe, setTranscribe] = useState(false);
+  const [txLanguage, setTxLanguage] = useState<TranscriptionLanguage>('en-US');
+  const ids = {
+    customer: useId(),
+    search: useId(),
+    label: useId(),
+    tz: useId(),
+    pin: useId(),
+    pin2: useId(),
+    txLanguage: useId(),
+  };
 
   // Debounce the number search (digits only).
   useEffect(() => {
@@ -62,6 +87,10 @@ export function NewMailboxDialog({ customer, onClose, onCreated }: NewMailboxDia
         label: label.trim() || 'Voicemail',
         timezone,
         ...(pin ? { pin } : {}),
+        // Omitted unless chosen: the API defaults to off / en-US.
+        ...(transcriptionAvailable && transcribe
+          ? { transcription_enabled: true, transcription_language: txLanguage }
+          : {}),
       });
     },
     onSuccess: (mailbox) => {
@@ -70,7 +99,12 @@ export function NewMailboxDialog({ customer, onClose, onCreated }: NewMailboxDia
       onCreated(mailbox);
     },
     onError: (err) => {
-      if (err instanceof ApiError && err.status === 409) {
+      if (isTranscriptionConflict(err)) {
+        // Transcription went away since the page loaded: refresh the summary
+        // (hides the option) and keep everything else as typed.
+        setTranscribe(false);
+        invalidateVoicemail(queryClient);
+      } else if (err instanceof ApiError && err.status === 409) {
         setDid(null);
         void queryClient.invalidateQueries({ queryKey: vmKeys.available(query) });
       }
@@ -85,11 +119,13 @@ export function NewMailboxDialog({ customer, onClose, onCreated }: NewMailboxDia
   const customerName = customer?.name ?? customers.data?.find((c) => c.id === customerId)?.name ?? null;
 
   const errorText = create.isError
-    ? create.error instanceof ApiError && create.error.status === 409
-      ? 'That number was just taken. Pick another one.'
-      : isUnavailable(create.error)
-        ? 'Voicemail encryption is temporarily unavailable, so nothing was created. Try again in a few minutes.'
-        : vmErrorText(create.error, 'The mailbox couldn’t be created.')
+    ? isTranscriptionConflict(create.error)
+      ? `${create.error.message} Nothing was created — create the mailbox without transcription.`
+      : create.error instanceof ApiError && create.error.status === 409
+        ? 'That number was just taken. Pick another one.'
+        : isUnavailable(create.error)
+          ? 'Voicemail encryption is temporarily unavailable, so nothing was created. Try again in a few minutes.'
+          : vmErrorText(create.error, 'The mailbox couldn’t be created.')
     : null;
 
   const submit = (e: FormEvent) => {
@@ -245,6 +281,42 @@ export function NewMailboxDialog({ customer, onClose, onCreated }: NewMailboxDia
               ? 'The two PINs don’t match.'
               : 'For phone access later — the customer can set or change it themselves.'}
         </p>
+
+        {transcriptionAvailable && (
+          <>
+            <div className="vm-field-row">
+              <div className="vm-field">
+                <span className="dl-flabel">Transcription</span>
+                <label className="vm-check">
+                  <input type="checkbox" checked={transcribe} onChange={(e) => setTranscribe(e.target.checked)} />
+                  Transcribe new messages
+                </label>
+              </div>
+              <div className="vm-field">
+                <label className="dl-flabel" htmlFor={ids.txLanguage}>
+                  Language
+                </label>
+                <select
+                  id={ids.txLanguage}
+                  className="dl-input vm-input-full"
+                  value={txLanguage}
+                  disabled={!transcribe}
+                  onChange={(e) => setTxLanguage(e.target.value as TranscriptionLanguage)}
+                >
+                  {TRANSCRIPTION_LANGUAGES.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <p className="dl-help">
+              Off by default. Audio is transcribed by Google Cloud Speech-to-Text in the United States; you can change
+              this later in the mailbox’s settings.
+            </p>
+          </>
+        )}
 
         {errorText && (
           <div className="dl-banner dl-banner-err" role="alert">
