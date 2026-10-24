@@ -6,12 +6,12 @@ Kamailio acts as the Session Border Controller (SBC) for the RCF-V1 voice platfo
 
 - **Topology hiding**: Strips internal IPs (Docker, GCE VPC, loopback) from all outbound SIP headers and SDP bodies, presenting only the public IP to Bandwidth (the carrier).
 - **Rate limiting and attack prevention**: Pike module + htable-based IP blocking, scanner detection, OPTIONS flood protection. Trusted sources (Bandwidth, FreeSWITCH) bypass all rate limiting.
-- **Load balancing**: Dispatcher module distributes inbound calls across FreeSWITCH instances (currently one, horizontally scalable).
-- **NAT keepalive**: Dispatcher sends OPTIONS probes every 5 seconds to Bandwidth IPs, keeping the GCE UDP NAT pinhole open (GCE has a 30-second UDP idle timeout).
+- **FreeSWITCH selection (strict active/standby, LIVE all zones 2026-08-31)**: dispatcher group 1 holds the zone's FS-1 and FS-2, and `ds_select_dst("1", "8")` (alg 8, priority-first) chooses between them. FS-1 has priority 10 and FS-2 priority 5 when `FREESWITCH_IP_2` is set. FS-1 takes every new call while healthy. FS-2 is a probed hot standby that takes new calls only while FS-1 is marked INACTIVE, with automatic failback. Not round-robin and not load-sharing. With `FREESWITCH_IP_2` unset, the render is single-FS and byte-identical.
+- **NAT keepalive**: Dispatcher sends OPTIONS probes every 5 seconds to the carrier IPs (Bandwidth groups 2-5, Sinch groups 6-9 and 11-12), keeping the GCE UDP NAT pinhole open (GCE has a 30-second UDP idle timeout).
 - **SIP trunk IP authentication**: Queries PostgreSQL to authenticate customer PBX source IPs against the `trunk_auth_ips` table, with per-trunk CPS rate limiting.
 - **Session timer management**: Adds RFC 4028 headers (Session-Expires, Min-SE) on outbound INVITEs and normalizes carrier replies so FreeSWITCH always sees a value it will honor.
 - **HEP capture**: Sends all SIP messages to Homer via HEP3 for troubleshooting (capture ID from `HEP_CAPTURE_ID`, default 100). Exactly-once model: `sip_trace()` in request_route (received request) + `setflag(22)` transaction tracing (forwarded branches, received replies, relayed/local replies via tm callbacks; sl replies via SL callback). reply_route traces ONLY transaction-less (statelessly forwarded) replies — an unconditional `sip_trace()` there duplicates every received reply.
-- **Carrier failover**: Multi-IP, multi-trunk failover (500/503/408/480/404). Each Bandwidth trunk config (TC1/TC2/TC4) has two IPs; on failure Kamailio fails over within the trunk (flag 8, one retry), then cross-trunk to TC4 Dallas as a last resort (flag 9 guards against loops). See route[CARRIER_FAILURE].
+- **Carrier failover**: Multi-IP, multi-trunk failover (500/503/408/480/404) for **legacy `X-Carrier` legs**. Each Bandwidth trunk config (TC1/TC2/TC4) has two IPs; on failure Kamailio fails over within the trunk (flag 8, one retry), then cross-trunk to TC4 Dallas as a last resort (flag 9 guards against loops). See route[CARRIER_FAILURE]. Table-driven legs are different: every RCF attempt, plus trunk/API 8YY, carries `X-Carrier-IP`. Once validated, Step 1a sets flags 8+9 up front, so the negative reply goes back to FreeSWITCH, whose attempt loop dials the next `carrier_trunks` trunk or SBC path (§4.3).
 
 Kamailio does NOT handle media. RTP flows directly between Bandwidth and FreeSWITCH. There is no RTPEngine or RTPProxy.
 
@@ -303,7 +303,7 @@ Generic relay for non-carrier traffic (inbound Bandwidth->FS path, in-dialog req
 
 ### 4.5 route[DISPATCH]
 
-Selects a FreeSWITCH instance from dispatcher group 1 using round-robin (algorithm 4). Sets `t_on_failure(DISPATCH_FAILURE)` for failover to next FS instance.
+Selects a FreeSWITCH instance from dispatcher group 1 with `ds_select_dst("1", "8")`: alg 8, priority order, FS-1 (priority 10) ahead of FS-2 (priority 5). Selection always starts at the highest priority and skips only INACTIVE/DISABLED destinations, so FS-1 takes every new call while it is up. Sets `t_on_failure(DISPATCH_FAILURE)` so a 500/503/408 from the chosen FS retries the next destination (`ds_next_dst()`, marking the failed one probing).
 
 ### 4.6 route[TRUNK_AUTH]
 
@@ -470,7 +470,7 @@ Dispatcher groups (10 is the optional peer-SBC liveness group, §8.12):
 
 | Group | Destination(s) | Purpose |
 |---|---|---|
-| 1 | sip:__FS_IP__:5080 | FreeSWITCH load balancing (used by `ds_select_dst`) |
+| 1 | sip:__FS_IP__:5080 (FS-1, priority 10) + `__FS2_DISPATCHER_LINE__` = sip:FREESWITCH_IP_2:5080 (FS-2, priority 5, `duid=fs-standby`) | FreeSWITCH strict active/standby selection (`ds_select_dst` alg 8). Unset `FREESWITCH_IP_2` ⇒ FS-1 priority 0 and the FS-2 line renders as a comment |
 | 2 | sip:67.231.2.12:5060 | Bandwidth TC4 Dallas keepalive/health monitoring ONLY |
 | 3 | sip:216.82.238.134:5060 | Bandwidth TC4 LA keepalive/health monitoring ONLY |
 | 4 | sip:67.231.9.142 + sip:67.231.13.185 | Bandwidth TC1 New York + Atlanta keepalive/health ONLY |
@@ -605,12 +605,14 @@ Dispatcher parameters:
 - `ds_ping_reply_codes`: Accepts 2xx, 404, 405, 480, **500** as alive (500 added
   2026-09-02: Sinch orig TGs answer 500 to all OPTIONS as their standard
   response — see the modparam comment for the full trade-off).
-- Algorithm: Round-robin (4) for FS group. Weight (100) and maxload (2000) attrs configured but not currently used (would need algorithm 9 or 10).
+- Algorithm: **priority (8)** for the FS group — FS-1 priority 10, FS-2 priority 5 (entrypoint renders both from `FREESWITCH_IP` / `FREESWITCH_IP_2`). Weight (100) and maxload (2000) attrs are configured but unused (they would need algorithm 9 or 10).
 
-To add a FreeSWITCH instance for horizontal scaling:
+The FS-2 line is not hand-edited; it is rendered by `entrypoint.sh` when `FREESWITCH_IP_2` is set on both zone SBCs:
 ```
-1 sip:freeswitch-2:5080 0 0 weight=100;maxload=2000;duid=fs-secondary
+1 sip:__FS_IP__:5080 0 10 weight=100;maxload=2000;duid=fs-primary
+1 sip:<FREESWITCH_IP_2>:5080 0 5 weight=100;maxload=2000;duid=fs-standby
 ```
+To grow beyond the pair, add further group-1 lines with DESCENDING priority numbers (see the `dispatcher.list` comment). Each lower number is tried later, so this remains failover, not load-sharing.
 
 Runtime commands:
 - `kamcmd dispatcher.reload` - Reload dispatcher list without restart
@@ -623,7 +625,8 @@ Set in `.env` file on each SBC VM. Passed via `docker-compose.sbc.yml`.
 | Variable | Required | Example | Purpose |
 |---|---|---|---|
 | `EXTERNAL_SIP_IP` | Yes | 34.24.133.82 | ADVERTISE_IP — the NLB VIP. Used in listen advertise, Contact, From domain, and the OUTER Record-Route. NOT used for SDP. |
-| `FREESWITCH_IP` | Yes | 192.168.10.2 | FreeSWITCH's IP (GCE internal VPC/media-subnet IP, not 127.0.0.1, because FS binds to `local_ip_v4`). Dispatcher group 1 target. |
+| `FREESWITCH_IP` | Yes | 192.168.10.2 | The zone's FS-1 IP (GCE internal VPC/media-subnet IP, not 127.0.0.1, because FS binds to `local_ip_v4`). Dispatcher group 1 primary (priority 10 when FS-2 is set). |
+| `FREESWITCH_IP_2` | No (unset = single-FS) | 192.168.10.3 | The zone's FS-2 (hot standby) IP. It is rendered as the group-1 priority-5 line, and it enables the `FS_HA_PAIR` blocks (`fshealth` fs1/fs2 flags, `;fsn=` marker). It must differ from `FREESWITCH_IP`. Set it on BOTH SBCs of the zone. |
 | `SBC_INTERNAL_IP` | No (default 127.0.0.1) | 10.142.0.100 | This SBC's VPC IP. FS-facing listen socket, `alias=`, and the INNER Record-Route (bypasses NLB so in-dialog ACK/BYE reach THIS SBC). |
 | `SBC_PEER_INTERNAL_IP` | No (unset = compiled out) | 10.142.0.101 | The OTHER SBC's VPC IP (sbc-1 → sbc-2 and vice versa). Enables the peer reply hand-off (§8.12): `#!define SBC_PEER_HANDOFF`, `peerhealth` htable, dispatcher group 10 liveness probe. Must be a dotted-quad IPv4 and differ from `SBC_INTERNAL_IP` (else WARNING, treated as unset). Set on BOTH SBCs. |
 | `FS_PUBLIC_IP` | No (default `$EXTERNAL_SIP_IP`) | 34.139.119.135 | FS VM's OWN public IP, used in SDP body rewrites (RTP target). Distinct from the NLB VIP. |
@@ -1212,7 +1215,7 @@ on (`t_reply.c:1977` → `2058` → `msg_translator.c:2446-2458`
 
 **FreeSWITCH side.** `inbound_router.lua` / `trunk_outbound.lua` /
 `api_outbound.lua` call `stir_outcome_reset()` before and `stir_outcome_capture()`
-after EVERY bridge attempt (the RCF 4-attempt failover loop included). The reset
+after EVERY bridge attempt (every attempt of the RCF failover loop included — up to 8 table-driven, 4 legacy). The reset
 clears only the RAW `sip_rh_`/`sip_ph_` capture slots, so a header left over from
 attempt N can never be read as N+1's; the CDR variable `stir_outcome` **retains the
 last non-empty outcome** and is overwritten only when a newer non-empty one is
@@ -1348,11 +1351,13 @@ Modify the `#!define` values at the top of the config:
 
 ### Adding a FreeSWITCH Instance
 
-Add to `dispatcher.list`:
+**The zone's standby FS (FS-2):** set `FREESWITCH_IP_2=<FS-2 VPC IP>` in BOTH zone SBCs' `.env`, then recreate kamailio (standby SBC first, with the same compose files, root `CLAUDE.md` Gotcha 15). The entrypoint renders FS-1 priority 10 / FS-2 priority 5 and compiles in the `FS_HA_PAIR` blocks, including the `;fsn=` marker. Procedure: `docs/FS_MEDIA_HA_RUNBOOK.md`.
+
+**A further instance** beyond the pair: add a group-1 line with a lower priority than the existing ones:
 ```
-1 sip:NEW_FS_IP:5080 0 0 weight=100;maxload=2000;duid=fs-secondary
+1 sip:NEW_FS_IP:5080 0 <priority below 5> weight=100;maxload=2000;duid=fs-extra
 ```
-Reload: `kamcmd dispatcher.reload`. Dispatcher will automatically load-balance and health-check. Consider switching from round-robin (algorithm 4) to weight-based (9) or call-load (10) for uneven capacity.
+Reload: `kamcmd dispatcher.reload`. Alg 8 makes it a third-in-line standby, not a load-shared peer. Actually splitting load would need a different algorithm (weight-based 9 or call-load 10) and a review of the `;fsn=` per-call identity marker, which assumes the FS-1/FS-2 pair.
 
 ### Docker Compose Configuration
 

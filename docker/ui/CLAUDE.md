@@ -343,8 +343,40 @@ Standard query key conventions:
 ### Customer-facing pages (inside AppLayout)
 
 **`DashboardPage`** (`/`)
-Navigation hub. Static card grid linking to all product areas. No API calls.
-API Calling copy + product card render only while `API_CALLING_ENABLED` (src/config/features.ts) is true — the product is retired (2026-09), so they are hidden.
+The PUBLIC landing page (signed-in users are redirected to `productHome`). No
+API calls except the intake form's `POST /onboarding`. All landing styles
+live in `src/styles/landing.css` (imported by DashboardPage; the old
+"LANDING PAGE" block of index.css is gone). One continuous granite canvas;
+every section sits on `.landing-grid12` and opens on a hairline + split head.
+Every list (KPIs, pillars, products, capabilities) is data at the top of
+DashboardPage.tsx and the layouts take any count.
+- **Copy is fact-checked against the code (2026-10)** — keep it that way.
+  Never claim AI voice agents, API Calling (retired; nothing on the page reads
+  `API_CALLING_ENABLED` any more), DNS steering (not built), STIR/SHAKEN on
+  "every call" (signing fails open) or a "nationwide network" of Granite's
+  own. Owner rules: never name the cloud provider, any carrier or any PoP
+  city; 99.999% is shown as the availability DESIGN target (the paging SLO is
+  99.95%); design figures (~10 s SBC failover, up to 8 routes) carry a note.
+  Products: RCF generally available; SIP Trunking + Visual Voicemail early
+  access. TED is described neutrally (no "AI", no "verifies"); no follow-up SLA.
+- Hero: the H1 is the CRAG acrostic, one word per line (`ACROSTIC`), initials
+  coloured with `::first-letter` so the DOM text stays plain. Each initial has a
+  per-letter `margin-left` in landing.css that cancels its side bearing
+  (measured for Archivo 900 @ `font-stretch: 104%`) — re-measure if the H1
+  font, weight or width changes. Art: `public/crag-cube.{webp,png}` (nav +
+  viz: `crag-mark.{webp,png}`), transparent cut-outs of `crag.png`, which
+  stays for the Sidebar and the favicon. The tag and proof strip respond to
+  the copy column's width (container `lg-hero-copy`). `index.html` loads
+  Archivo as a variable font (`wdth 62..125`) for the wide wordmarks.
+- `components/layout/HaArchitectureViz.tsx` (landing only) models the real
+  inbound path: PSTN → three regions, each a health-checked load balancer →
+  active/standby SBC pair → FS-1 active / FS-2 hot standby → termination
+  routes A/B, with four scripted failover scenarios (standby SBC lost, region
+  drained by its health check, route lost, active SBC flip ~10 s) driving
+  the status chip and the numbered timeline. Generic labels only (see the
+  owner rules above). Below 760px the SVG scrolls sideways inside its frame.
+- `RequestAccessSection` groups the intake into six numbered groups
+  (`GroupHead`); fields, validation and payload are unchanged by that.
 
 **`AccountDashboard`** (`/dashboard`, `pages/dashboard/`)
 The account home — everything at a glance, as cards. `AccountDashboard.tsx` is
@@ -524,7 +556,8 @@ a Voicemail section on Products when the account has mailbox numbers (same
 
 **`TrunksPage`** (`/trunks`)
 Currently a placeholder/coming-soon shell. Shows the page header but no data.
-Full trunk management lives in `admin/TrunksAdminPage`.
+Trunk administration lives in TED (the CRAG console) — there are no admin
+pages in this SPA (see "Admin pages" below).
 
 **`ApiDidsPage`** (`/api-dids`)
 API Calling showcase. **Retired 2026-09** — the page is kept in code but the route
@@ -853,8 +886,12 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 ### Fully implemented and deployed
 
 - **RCF** (`account_type: 'rcf'`) — the primary product. Full CRUD, inline editing, bulk operations.
-- **SIP Trunks** (`account_type: 'trunk'`) — full management in admin, customer portal is a placeholder.
-- **Admin suite** — customers, trunks, CDRs, rates, tiers, carriers, SIPp, DID search, user lookup.
+- **SIP Trunks** (`account_type: 'trunk'`) — early access: the call path is live, trunk
+  administration lives in TED, the customer portal page is a placeholder.
+- **Admin** — lives in TED (the CRAG console), not this SPA. Staff pages here: the admin
+  dashboard, the admin `/rcf` console, Calls & Quality (`/cdrs`) and Troubleshooting.
+- **Visual Voicemail** — encrypted voicemail v1 + optional transcription (merged
+  2026-10-23), enabled per account; see §17.
 - **Call Quality** — platform-wide CDR quality analysis with MOS/jitter/packet-loss metrics.
 - **Troubleshooting** — native React SIP-trace search (`POST /homer/search`) with a
   custom `<SipLadder>` diagram and inline packet-detail inspection. Grafana
@@ -869,8 +906,9 @@ This is the RCF-V1 production architecture. Know what is and is not available:
   BOTH to restore): the `/api-dids` route (redirects to product home), the Sidebar
   "Coming Soon" item, My Account's API DID section/tiles, the IVR topbar DID fetch,
   the Guides + `/docs/api` "calling" sections (slug redirects to the hub default),
-  the Calls "API" product filter, the onboarding API product option, and the landing
-  page's API Calling copy. With the flag off nothing calls `/api-dids`. `productHome`
+  the Calls "API" product filter and the onboarding API product option. (The
+  landing page no longer has any API Calling copy, flag or not.) With the flag
+  off nothing calls `/api-dids`. `productHome`
   sends `api` accounts to `/my-account`.
 - **Hybrid** (`account_type: 'hybrid'`) now means **RCF + SIP Trunking** (no API
   section). Granite Telephony, the primary customer, is hybrid.
@@ -1023,7 +1061,8 @@ Border:        rgba(42,47,69,0.6)
 Text primary:  #e2e8f0
 Text muted:    #718096 / #94a3b8
 Text faint:    #475569 / #334155
-Accent blue:   #3b82f6
+Accent blue:   brand tokens only — `--brand-*` (index.css) / `styles/brand.ts`
+               (#2f7df6 accent, #4f92ff on dark). Never Tailwind #3b82f6 in new code.
 Success green: #22c55e / #065f46
 Warning amber: #f59e0b
 Danger red:    #ef4444 / #7f1d1d

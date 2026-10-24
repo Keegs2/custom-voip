@@ -234,15 +234,44 @@ inbound_router.lua (product_type == "rcf"):
      - sip_h_Diversion = RCF DID with reason=unconditional
      - sip_h_X-Original-CID = original caller (Kamailio builds P-Asserted-Identity from this)
      - sip_h_Remote-Party-ID = original caller (backup CID mechanism)
-  4. Carrier is PINNED to "primary" (TC4 Dallas) at ~:455 regardless of the
-     inbound trunk. X-Inbound-TC (set by Kamailio) is read but its
-     trunk-affinity mapping to tc1/tc2 is present-but-commented — do not
-     change until Bandwidth provisions all TCs for our IPs.
-  5. 4-ATTEMPT SBC + carrier failover loop (~:707-763), NOT a simple 2-step:
-        attempt 1: SBC_PROXY_IP          + X-Carrier=primary   (SBC-1, Dallas)
-        attempt 2: SBC_PROXY_IP_FAILOVER + X-Carrier=primary   (SBC-2, Dallas)
-        attempt 3: SBC_PROXY_IP          + X-Carrier=secondary (SBC-1, LA)
-        attempt 4: SBC_PROXY_IP_FAILOVER + X-Carrier=secondary (SBC-2, LA)
+  4. Termination path: TABLE-DRIVEN (primary) with a LEGACY fallback
+     (~:1485-1790). `get_termination_trunks(fs_zone)` reads `carrier_trunks`
+     through `lib/term_trunks.lua`:
+       SELECT ... WHERE direction IN ('outbound','both') AND enabled = true
+       ORDER BY COALESCE(priority_<FS_ZONE>, priority), id
+     The list is cached 60s process-wide as `term_trunks_<zone>`.
+     a. db path (term_trunks_source=db):
+        - Filter by classify_destination(forward_to). LD → 'any'/'ld' rows.
+          NANP 8YY → ONLY 'tollfree' rows; if there are none →
+          term_class_blocked=tollfree + NO_ROUTE_DESTINATION hard reject
+          (fail CLOSED, never Bandwidth).
+        - Cap at TERM_TRUNKS_MAX=4 AFTER the filter.
+        - Build TRUNK-MAJOR attempts × {SBC_PROXY_IP (signaling ILB VIP),
+          SBC_PROXY_IP_FAILOVER (SBC-1 direct)}, up to 8 attempts. Each
+          carries sip_h_X-Carrier-IP=<term_ip> + sip_h_X-Carrier-Label=<carrier>-<pop>,
+          and carrier_used=<carrier>-<pop> records the winner.
+        - Kamailio validates the IP and sets flags 8+9: this loop owns ALL
+          carrier failover. Two owners would double-dial the PSTN.
+        - LD order today: Bandwidth 10/20 (West swaps Dallas/LA) →
+          sinch/atlanta-ld 30 → sinch/denver-ld 35 (seeded disabled, migration 53).
+     b. fallback path (term_trunks_source=fallback) — runs when the DB
+        errors, there are zero usable rows, the cache entry is bad, or the
+        lib fails to load. It is the legacy 4-ATTEMPT loop, byte-identical
+        to the pre-table behavior. The carrier is PINNED to the enum
+        "primary"/"secondary" (`local carrier = "primary"` ~:1069; the
+        X-Inbound-TC trunk-affinity mapping to tc1/tc2 is
+        present-but-commented — do not change until Bandwidth provisions
+        all TCs for our IPs):
+        attempt 1: SBC_PROXY_IP          + X-Carrier=primary   (signaling VIP, zone primary PoP)
+        attempt 2: SBC_PROXY_IP_FAILOVER + X-Carrier=primary   (SBC-1 direct, zone primary PoP)
+        attempt 3: SBC_PROXY_IP          + X-Carrier=secondary (signaling VIP, zone secondary PoP)
+        attempt 4: SBC_PROXY_IP_FAILOVER + X-Carrier=secondary (SBC-1 direct, zone secondary PoP)
+        Kamailio maps the enum to BANDWIDTH_PRIMARY/SECONDARY_IP (East and
+        Central: Dallas first; West: LA first), and its CARRIER_FAILURE
+        flip applies. This path is class-blind: it CAN send 8YY via
+        Bandwidth. That is a deliberate RCF fail-open; trunk/API 8YY fail
+        closed instead.
+  5. Per-attempt mechanics (both paths):
      - Each attempt runs a CACHED TCP reachability pre-check (sbc_tcp_probe +
        is_sbc_reachable): opens a 1s TCP socket to the SBC:5060. If
        unreachable, the attempt is SKIPPED instantly instead of waiting for
@@ -250,12 +279,16 @@ inbound_router.lua (product_type == "rcf"):
        global variables (key sbc_health_<ip>, value up|down:<epoch>):
        reachable cached 30s, unreachable cached 10s, INFO log on state
        transitions. Fails open (with a WARNING log) if luasocket is
-       unavailable; fail-open results are never cached.
+       unavailable; fail-open results are never cached. Since the
+       active/standby cutover (2026-08-27) this is the ILB-bypass detector
+       (a dark signaling VIP → SBC-1 direct). An active-SBC death is still
+       the ~10-12s NLB/ILB flip. Skipped attempts launch no B-leg and are not
+       counted in cdr_leg_attempt.
      - Per-attempt dial string sets ignore_early_media=false, call_timeout,
        progress_timeout (env BRIDGE_PROGRESS_TIMEOUT, default 10 — bounds
        carrier PDD only; ringing then continues to call_timeout. NEVER use
        originate_timeout here: it caps time-to-ANSWER including ring time),
-       X-Carrier, X-CID (sip_call_id for Homer A/B correlation),
+       X-Carrier-IP/X-Carrier-Label (db) or X-Carrier (fallback), X-CID (sip_call_id for Homer A/B correlation),
        and the legacy session-timer trio (sip_session_timeout=1800,
        sip_minimum_session_expires=90, enable_timer=true) — INERT (mod_sofia
        reads none of them; kept only for byte-identical dial strings).
@@ -268,7 +301,8 @@ inbound_router.lua (product_type == "rcf"):
        level before any answer/bridge (the only per-call knob; read after the
        internal profile's NAT override 90/120). B-leg timers: Kamailio.
      - Uses EXTERNAL profile so Via/Contact/SDP get public IP.
-  6. If all 4 attempts fail -> NORMAL_TEMPORARY_FAILURE (SIP 503)
+  6. If every launched attempt fails (up to 8 on the db path, 4 on fallback)
+     -> NORMAL_TEMPORARY_FAILURE (SIP 503)
      - lua_routed=true prevents dialplan from masking with 404
   |
   Special case: forward_to is a local extension (is_local_extension, ^10xx)
@@ -335,8 +369,9 @@ inferred from leg topology), built from these vars:
 It operates on the **terminal** RCF DID (`dest.did`) and the **composed**
 presented CID (`ctx.presented_cid`); for a single-hop off-net call these equal
 the inbound DID and the original caller, so the emitted SIP/CID/failover is
-byte-identical to the pre-on-net script. The 4-attempt SBC×carrier loop, X-Carrier,
-X-CID=sip_call_id, session timers, and default media (no proxy_media) are unchanged.
+byte-identical to the pre-on-net script. The SBC×carrier attempt loop (table-driven
+`X-Carrier-IP`, or the legacy 4-attempt `X-Carrier` fallback), X-CID=sip_call_id,
+session timers, and default media (no proxy_media) are unchanged by on-net routing.
 
 ---
 
@@ -366,11 +401,14 @@ See "Complete Inbound Call Flow" above for full details.
 
 Key state: Redis code is fully REMOVED (RCF-V1 -- redis-lua threading issues; old code in git history). Only db_client is loaded.
 
-**RCF carrier/failover:** Carrier is pinned to `primary` (TC4 Dallas).
-The RCF PSTN bridge is a 4-attempt loop over `SBC_PROXY_IP` and
-`SBC_PROXY_IP_FAILOVER` × primary/secondary carrier, each guarded by a cached
-1-second TCP reachability pre-check (`is_sbc_reachable` — 30s up / 10s down
-cache via FS global variables). See "RCF Bridge Details" above. RCF uses
+**RCF carrier/failover:** the PSTN bridge is **table-driven**. It uses up to
+4 `carrier_trunks` trunks (filtered by traffic class; 8YY fails closed) ×
+{`SBC_PROXY_IP`, `SBC_PROXY_IP_FAILOVER`}, so up to 8 attempts, each with
+`X-Carrier-IP`. If the table can't be resolved, it falls back to the legacy
+4-attempt loop: `X-Carrier` pinned to `primary`/`secondary`, i.e. this zone's
+Bandwidth PoPs. Every attempt is guarded by a cached 1-second TCP
+reachability pre-check (`is_sbc_reachable` — 30s up / 10s down cache via FS
+global variables). See "RCF Bridge Details" above. RCF uses
 DEFAULT media — it does NOT set `proxy_media`.
 
 **183 SDP note:** Kamailio now PASSES THROUGH carrier 183 SDP for PSTN early
@@ -503,7 +541,7 @@ non-100 reply of the carrier leg and of the `X-PBX-Dest` leg
 
 `inbound_router.lua`, `trunk_outbound.lua` and `api_outbound.lua` call
 `stir_outcome_reset()` before and `stir_outcome_capture()` after EVERY bridge
-attempt (the RCF 4-attempt failover loop included), and pin the verbatim value in
+attempt (every attempt of the RCF failover loop included — up to 8 table-driven, 4 legacy), and pin the verbatim value in
 the A-leg channel variable **`stir_outcome`** — the name and value format are a
 contract with the CDR ingest; do not change either. The reset clears only the raw
 `sip_rh_`/`sip_ph_` slots; `stir_outcome` **retains the last non-empty value** and
@@ -780,14 +818,16 @@ number_routing    VIEW: UNION ALL over rcf_numbers/api_dids/trunk_dids[/voicemai
 
 ## Carrier Routing Summary
 
-| Product Type | X-Carrier Header | Bandwidth Endpoint | Failover |
+| Product / destination | Selector header | Endpoint order | Failover owner / on exhaustion |
 |---|---|---|---|
-| RCF | primary | Dallas 67.231.2.12 | secondary (LA 216.82.238.134) |
-| API Calling | primary | Dallas 67.231.2.12 | secondary (LA 216.82.238.134) |
-| Trunk | primary | Dallas 67.231.2.12 | secondary (LA 216.82.238.134) |
+| **RCF, LD (table-driven, PRIMARY path)** | `X-Carrier-IP` + `X-Carrier-Label` (`carrier_trunks` `any`/`ld` rows) | Per zone `COALESCE(priority_<zone>, priority)`: Bandwidth 10/20 (East/Central Dallas 67.231.2.12 first, West LA 216.82.238.134 first) → sinch/atlanta-ld 206.146.98.26 (30) → sinch/denver-ld 206.146.100.25 (35, seeded disabled) | FS loop (Kamailio flags 8+9 set); ≤4 trunks × 2 SBC paths; all fail → 503 |
+| **RCF, NANP 8YY (table-driven)** | `X-Carrier-IP` (`tollfree` rows only) | sinch/denver-tf 206.146.100.26 (40) → sinch/atlanta-tf 206.146.98.25 (45, seeded disabled) | FS loop; no enabled tollfree row → NO_ROUTE_DESTINATION (fail CLOSED) |
+| RCF, legacy fallback (DB/lib failure only) | `X-Carrier` = primary, then secondary | Zone `BANDWIDTH_PRIMARY_IP` → `BANDWIDTH_SECONDARY_IP` | Kamailio CARRIER_FAILURE flip (flags 8/9); class-blind (8YY can go to Bandwidth) |
+| Trunk, non-8YY | `X-Carrier` = primary, failover secondary | Zone `BANDWIDTH_PRIMARY_IP` → `BANDWIDTH_SECONDARY_IP` | Kamailio CARRIER_FAILURE flip + trunk_outbound's 2nd attempt |
+| API Calling (RETIRED — only with `API_CALLING_ENABLED=true`), non-8YY | `X-Carrier` = primary, failover secondary | as Trunk | as Trunk |
 | Trunk / API, NANP 8YY destination | X-Carrier-IP / X-Carrier-Label (carrier_trunks `tollfree` rows) | Sinch denver-tf 206.146.100.26, then atlanta-tf 206.146.98.25 | next tollfree row × SBC; none enabled → NO_ROUTE_DESTINATION (never Bandwidth) |
 
-All outbound bridges: `sofia/external/{dest}@{sbc_proxy_ip}:5060` with `sip_h_X-Carrier={carrier}`. Kamailio reads X-Carrier in `route[TO_CARRIER]` to set `$rd` / `$du`.
+All outbound bridges: `sofia/external/{dest}@{sbc_proxy_ip}:5060`, carrying either `sip_h_X-Carrier-IP` (table-driven) or `sip_h_X-Carrier={carrier}` (legacy enum). Kamailio `route[TO_CARRIER]` Step 1a validates `X-Carrier-IP` against an enabled outbound/both `carrier_trunks` row (or this zone's `BANDWIDTH_IP_1/2`) and sets `$rd` / `$du`. Otherwise it maps the `X-Carrier` enum. An 8YY R-URI with an unvalidated `X-Carrier-IP` gets `503` (fail-closed).
 
 ---
 

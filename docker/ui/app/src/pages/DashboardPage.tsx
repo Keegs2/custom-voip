@@ -1,77 +1,128 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type CSSProperties, type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import {
   Activity,
   ArrowRight,
-  ArrowUpRight,
   BadgeCheck,
-  Bot,
-  Braces,
+  Check,
+  FileSpreadsheet,
   Gauge,
   Layers,
   Lock,
+  Network,
+  PhoneCall,
+  PhoneForwarded,
   RefreshCw,
+  Route,
+  Server,
+  ServerCog,
   ShieldCheck,
+  SlidersHorizontal,
+  Timer,
+  Voicemail,
   Waypoints,
   type LucideIcon,
 } from 'lucide-react';
 import { HaArchitectureViz } from '../components/layout/HaArchitectureViz';
 import { useAuth } from '../contexts/AuthContext';
 import { productHome } from '../utils/productHome';
-import { API_CALLING_ENABLED } from '../config/features';
 import { SignInModal } from './landing/SignInModal';
 import { RequestAccessSection } from './landing/RequestAccessSection';
+import '../styles/landing.css';
 
 /* ─────────────────────────────────────────────────────────────
    Public landing page — Granite CRAG.
 
-   "Granite & Signal": industrial enterprise, color-blocked.
-   Full-bleed alternating granite-dark / cobalt / paper-light
-   bands (IBM/Cisco enterprise pattern). Display type: Archivo
-   800–900. Body: Public Sans. ALL load-bearing responsive
-   layout lives in index.css under "LANDING PAGE" as hand-written
-   @media rules (NOT Tailwind md:* — see the container-build
+   One continuous granite canvas (no colour-blocked bands): every
+   section sits on the same 12-column container, opens on a
+   container-width hairline and a split head (title left, blurb
+   right), and gets its own structural device so the page never
+   reads as a stack of identical cards — KPI readout, pillar rail,
+   product cards, a framed network instrument, a spec grid, the
+   intake form. Display type: Archivo. Body: Public Sans. All
+   styling lives in styles/landing.css (hand-written @media and
+   container queries — NOT Tailwind md:*, see the container-build
    gotcha in CLAUDE.md).
 
-   Positioning: Granite IS the carrier. CRAG is Granite's
-   next-generation platform for advanced voice — AI agents,
-   intelligent routing, programmable provisioning — built directly
-   on the carrier's own network. (API Calling was retired 2026-09;
-   its product card + copy only render while API_CALLING_ENABLED is on.) Never describe CRAG itself as
-   "our carrier-grade platform".
+   Positioning (every claim on this page was checked against the
+   code in 2026-10 — keep it that way): CRAG is the voice platform
+   Granite builds and runs — an active/standby SBC pair and an
+   active/hot-standby media server pair in each of three independent
+   US regions, health-checked failover, multiple termination routes
+   tried per call, on-net routing with no hairpin. Products: Remote
+   Call Forwarding (generally available), SIP Trunking and Visual
+   Voicemail (early access). Do NOT claim AI voice agents, API
+   Calling (retired 2026-09), a "nationwide network" of Granite's
+   own, DNS steering (not built), or STIR/SHAKEN on "every call"
+   (signing fails open). Owner rules for this public page: never
+   name the cloud provider, any carrier or any PoP city; the
+   availability figure is presented as a design target.
 
-   Narrative arc: what it is (hero) → proof (stats) → what you
-   can build (AI/API band) → products → the network under it →
-   platform capabilities → intake form (#request-access).
+   Hero: the H1 is the CRAG acrostic, one word per line so the blue
+   initials read C-R-A-G down one optically aligned left edge; the art is
+   a transparent cut-out of the cube (public/crag-cube.*) over a CSS halo.
+
+   Every list below (stats, pillars, products, capabilities) is data:
+   the layouts take any count, so copy can add or drop items without
+   touching markup.
+
+   Narrative arc: what it is (hero) → the numbers (KPI readout) →
+   who runs it → products → the network under it → platform
+   capabilities → intake form (#request-access).
    ───────────────────────────────────────────────────────────── */
 
+function scrollToId(id: string): void {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+}
+
 function scrollToRequestAccess(): void {
-  document
-    .getElementById('request-access')
-    ?.scrollIntoView({ behavior: 'smooth' });
+  scrollToId('request-access');
 }
 
 /* ─── Data ───────────────────────────────────────────────── */
 
+interface ProofPoint {
+  icon: LucideIcon;
+  title: string;
+  detail: string;
+}
+
+/* Hero proof strip — three equal columns (one stacked list on phones), so
+   it can never leave an orphan row. Titles stay one line; details may wrap. */
+const HERO_PROOF: ProofPoint[] = [
+  { icon: ShieldCheck, title: 'STIR/SHAKEN', detail: 'Signed at our SBCs' },
+  { icon: Network, title: 'Redundant SBCs', detail: 'Active/standby pairs' },
+  { icon: Activity, title: 'SIP capture', detail: 'Down to the packet' },
+];
+
+/* The H1 acrostic: one word per line, so the blue initials stack into a
+   column that reads C-R-A-G. The initials are styled with ::first-letter
+   (landing.css), so the DOM text stays "Call Routing Application Gateway". */
+const ACROSTIC = ['Call', 'Routing', 'Application', 'Gateway'] as const;
+
 interface Stat {
   value: string;
   label: string;
+  /** Set for numbers that are a design figure, not a measured fact. */
+  note?: string;
 }
 
+/* KPI readout under the hero. Any count works: N equal columns on the
+   hero's gutter (lands on the 12-column grid whenever N divides 12).
+   Sources: 99.999% — the owner's availability design target (the
+   documented monthly SLO is 99.95%, infra/monitoring/SLOS.md); 3 —
+   production topology; ~10 s — the SBC load balancer's health check,
+   5 s × 2 (flip drills passed but were not logged); 8 — the failover
+   list's cap, 4 trunks × 2 SBC paths (inbound_router.lua). Design
+   figures carry a visible note. */
 const STATS: Stat[] = [
   { value: '99.999%', label: 'Availability design target' },
-  { value: '3', label: 'Self-contained US regions' },
-  { value: '<1s', label: 'Failure detection & reroute' },
-  { value: '100%', label: 'Calls signed with STIR/SHAKEN' },
+  { value: '3', label: 'Independent US regions' },
+  { value: '~10 s', label: 'Automatic SBC failover', note: 'Design target' },
+  { value: 'Up to 8', label: 'Failover routes per call', note: 'Design limit' },
 ];
 
 type ProductStatus = 'ga' | 'early' | 'roadmap';
-
-interface Product {
-  name: string;
-  desc: string;
-  status: ProductStatus;
-}
 
 const STATUS_LABEL: Record<ProductStatus, string> = {
   ga: 'Generally available',
@@ -79,25 +130,60 @@ const STATUS_LABEL: Record<ProductStatus, string> = {
   roadmap: 'Roadmap',
 };
 
-const SIDE_PRODUCTS: Product[] = [
+interface Product {
+  name: string;
+  icon: LucideIcon;
+  desc: string;
+  status: ProductStatus;
+  /** Proof lines rendered as a check list on the card. */
+  specs: string[];
+}
+
+/* Products, in display order — one column each on desktop, any count.
+   API Calling (retired), IVR, toll-free, UCaaS and AI agents are NOT
+   products here; don't list them. */
+const PRODUCTS: Product[] = [
+  {
+    name: 'Remote Call Forwarding',
+    icon: PhoneForwarded,
+    status: 'ga',
+    desc: 'Nationwide number forwarding across three regions and multiple termination routes. In production today for nationwide enterprise traffic.',
+    specs: [
+      'Forwarding changes apply on the next call',
+      'A prioritized list of termination routes for every call',
+      'Per-call quality grades and full SIP capture',
+    ],
+  },
   {
     name: 'SIP Trunking',
-    desc: 'IP-authenticated enterprise trunks with multi-region inbound redundancy and automated DNS failover.',
+    icon: Server,
     status: 'early',
+    desc: 'IP-authenticated trunks to your PBX or SBC, accepted in all three regions.',
+    specs: [
+      'IP authentication — no SIP registration',
+      'Calls delivered to your PBX or SBC',
+      'Per-call records and full SIP capture',
+    ],
   },
-  ...(API_CALLING_ENABLED
-    ? [{
-        name: 'API Calling',
-        desc: 'Programmable voice for platforms and AI agents — originate, control, and observe calls over REST and webhooks.',
-        status: 'early' as const,
-      }]
-    : []),
   {
     name: 'Visual Voicemail',
-    desc: 'Platform-native mailboxes — every message can arrive with a written transcript alongside the audio.',
-    status: 'roadmap',
+    icon: Voicemail,
+    status: 'early',
+    desc: 'Encrypted mailboxes on dedicated numbers — listen, download and manage messages in the CRAG portal, with optional transcripts.',
+    specs: [
+      'Encrypted with your own key — audio is never stored in plaintext',
+      'Playback links expire after two minutes; every access is logged',
+      'Optional transcripts, processed in the US and stored encrypted',
+    ],
   },
 ];
+
+const COUNT_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'];
+
+/** "Three" for 3 — the products title counts the cards it introduces. */
+function countWord(n: number): string {
+  return COUNT_WORDS[n] ?? String(n);
+}
 
 interface Capability {
   icon: LucideIcon;
@@ -105,97 +191,212 @@ interface Capability {
   desc: string;
 }
 
+/* Who runs it — four pillars. */
+const BUILD_PILLARS: Capability[] = [
+  {
+    icon: Layers,
+    title: 'Run by the people who built it',
+    desc: 'Your calls land on SBCs and media servers Granite operates — not on a reseller’s platform. The engineers who run the network are the ones who handle your request.',
+  },
+  {
+    icon: Timer,
+    title: 'Predictable by design',
+    desc: 'Every route attempt has a 10-second post-dial bound, media stays in the region that took the call, and failover follows a fixed order set per region.',
+  },
+  {
+    icon: SlidersHorizontal,
+    title: 'Self-service control',
+    desc: 'Change forwarding in the portal and it applies on the next call. Every call is recorded with its outcome — and a quality grade when there’s enough audio to grade — ready for reports and CSV export.',
+  },
+  {
+    icon: BadgeCheck,
+    title: 'Signed with Granite’s own certificate',
+    desc: 'Calls leaving Granite are signed at our SBCs with Granite’s own SHAKEN certificate, and the attestation is recorded per call. Forwarded calls keep the caller’s original signature, with Granite’s signed diversion attached.',
+  },
+];
+
+/* Platform spec grid — 3 × 3: resilience, routing, visibility. */
 const CAPABILITIES: Capability[] = [
   {
-    icon: ShieldCheck,
-    title: 'Identity on every call',
-    desc: 'STIR/SHAKEN signing at the switch, on self-hosted certificates. Verified attestation travels with the call from origination to termination.',
+    icon: RefreshCw,
+    title: 'Failures routed around',
+    desc: 'The standby SBC takes over in about 10 seconds, an unreachable SBC path is skipped in under a second, and a route that rejects a call triggers an immediate retry on the next one.',
   },
   {
-    icon: Activity,
-    title: 'Packet-level observability',
-    desc: 'Full SIP capture in every region. Ladder diagrams, per-hop timing, and raw messages for any call — no ticket, no waiting.',
+    icon: PhoneCall,
+    title: 'Built to keep calls up',
+    desc: 'Calls already connected are designed to stay up when an SBC fails over: either SBC can carry an established call’s signaling.',
   },
   {
-    icon: Gauge,
-    title: 'Quality, measured',
-    desc: 'MOS, jitter, and packet-loss scoring on every session, surfaced in dashboards and exportable call records.',
+    icon: ServerCog,
+    title: 'Two media servers per region',
+    desc: 'Each region runs an active and a hot-standby media server, with automatic takeover.',
   },
   {
     icon: Waypoints,
-    title: 'Independent routes to termination',
-    desc: 'A redundant, highly available SBC layer and two carrier points of presence — Dallas and Los Angeles — give every call independent paths to termination.',
+    title: 'Multiple routes to termination',
+    desc: 'Each call works down a prioritized list of termination routes, set per region, over either SBC path — up to eight attempts before a call is given up.',
+  },
+  {
+    icon: Route,
+    title: 'On-net calls stay on-net',
+    desc: 'Calls between Granite numbers stay on Granite’s network — delivered internally, never sent out to the PSTN and back.',
   },
   {
     icon: Lock,
     title: 'Session hardening',
-    desc: 'Topology hiding, rate limiting, and session-timer normalization handled in the network core, before traffic reaches your systems.',
+    desc: 'Topology hiding, rate limiting and session-timer normalization happen at the SBC, before traffic reaches your systems — and duplicate INVITEs are merged, so a forwarded call rings once.',
   },
   {
-    icon: RefreshCw,
-    title: 'A network that reroutes itself',
-    desc: 'Sub-second failure detection with automatic reroute across border controllers and carriers — no manual intervention, no maintenance window.',
+    icon: Activity,
+    title: 'Monitoring built in',
+    desc: 'Packet-level SIP capture from every region, call-flow (ladder) diagrams, live NOC dashboards and alerting — the monitoring stack Granite’s operations team runs the network on.',
+  },
+  {
+    icon: Gauge,
+    title: 'Quality, measured',
+    desc: 'Every answered call with enough audio gets a quality grade — MOS from an ITU-T G.107 model over true RTP packet loss, plus RFC 3550 jitter — shown in the portal and report exports, with one-way audio flagged.',
+  },
+  {
+    icon: FileSpreadsheet,
+    title: 'Reports and call records',
+    desc: 'Call reports by number, day and outcome, with CSV export, in your time zone. Each call also records every route attempt and its STIR result.',
   },
 ];
 
-const BUILD_PILLARS: Capability[] = [
-  {
-    icon: Layers,
-    title: 'No middleman between you and the network',
-    desc: 'CRAG APIs terminate into Granite’s own switching core — no reseller layer, no CPaaS markup, no support-ticket relay. The team behind the API is the team that runs the network.',
-  },
-  {
-    icon: Bot,
-    title: 'Deterministic by design',
-    desc: 'Bounded post-dial delay, regional media anchoring, and a fixed failover order. Your AI agents get the same network behavior on every single call.',
-  },
-  {
-    icon: Braces,
-    title: 'Programmable control',
-    desc: API_CALLING_ENABLED
-      ? 'REST provisioning, webhook call control, intelligent routing, and structured per-call records with quality metrics. Build voice products on primitives, not tickets.'
-      : 'REST provisioning, intelligent routing, and structured per-call records with quality metrics. Build voice products on primitives, not tickets.',
-  },
-  {
-    icon: BadgeCheck,
-    title: 'Carrier identity that gets answered',
-    desc: 'Calls carry Granite’s own signed attestation, so machine-originated traffic arrives verified at the far end — answered by people, not screened out as spam.',
-  },
+/* Footer in-page navigation — anchors that exist on this page. */
+const FOOTER_LINKS: { label: string; target: string }[] = [
+  { label: 'Products', target: 'landing-products' },
+  { label: 'The network', target: 'landing-network' },
+  { label: 'Platform', target: 'landing-platform' },
+  { label: 'Request access', target: 'request-access' },
 ];
 
 /* ─── Building blocks ────────────────────────────────────── */
 
-function StatusChip({ status }: { status: ProductStatus }) {
+/**
+ * The CRAG stone cube, cut out of /crag.png onto a transparent ground
+ * (crag-cube.* is the full-size art, crag-mark.* a tight 160px crop for the
+ * nav). WebP first; the PNG is the fallback. The original /crag.png lockup
+ * stays in public/ for the sidebar and the favicon.
+ */
+function CragCube({
+  variant,
+  className,
+  alt,
+}: {
+  variant: 'hero' | 'mark';
+  className: string;
+  alt: string;
+}) {
+  const base = variant === 'hero' ? '/crag-cube' : '/crag-mark';
+  const size = variant === 'hero' ? 798 : 160;
   return (
-    <span className={`landing-chip landing-chip-${status}`}>
+    <picture>
+      <source srcSet={`${base}.webp`} type="image/webp" />
+      <img
+        src={`${base}.png`}
+        alt={alt}
+        className={className}
+        width={size}
+        height={size}
+        decoding="async"
+        fetchPriority={variant === 'hero' ? 'high' : 'auto'}
+      />
+    </picture>
+  );
+}
+
+/** The logo's signal line, redrawn crisp: hairline — waveform — hairline. */
+function SignalLine() {
+  // Bar heights echo the waveform glyph under the CRAG wordmark.
+  const bars = [3, 6, 10, 15, 9, 13, 6, 4];
+  return (
+    <span className="landing-hero-signal" aria-hidden="true">
+      <span className="landing-hero-signal-rule" />
+      <svg viewBox="0 0 30 16" width="30" height="16" focusable="false">
+        {bars.map((h, i) => (
+          <rect
+            key={i}
+            x={1 + i * 3.6}
+            y={(16 - h) / 2}
+            width="1.8"
+            height={h}
+            rx="0.9"
+          />
+        ))}
+      </svg>
+      <span className="landing-hero-signal-rule" />
+    </span>
+  );
+}
+
+function StatusPill({ status }: { status: ProductStatus }) {
+  return (
+    <span className={`landing-status landing-status-${status}`}>
       {STATUS_LABEL[status]}
     </span>
   );
 }
 
+/** One product card: status, name, description, proof list, CTA. */
+function ProductCard({ product: p }: { product: Product }) {
+  return (
+    <li className={`landing-product landing-product-${p.status}`}>
+      <div className="landing-product-head">
+        <span className="landing-icon-tile">
+          <p.icon size={20} strokeWidth={1.9} aria-hidden="true" />
+        </span>
+        <StatusPill status={p.status} />
+      </div>
+      <h3 className="landing-product-name">{p.name}</h3>
+      <p className="landing-item-desc">{p.desc}</p>
+      {p.specs.length > 0 && (
+        <ul className="landing-product-specs">
+          {p.specs.map((s) => (
+            <li key={s}>
+              <Check size={16} strokeWidth={2.5} aria-hidden="true" />
+              {s}
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        className="landing-product-cta"
+        onClick={scrollToRequestAccess}
+      >
+        Request access
+        <ArrowRight size={15} strokeWidth={2.5} aria-hidden="true" />
+      </button>
+    </li>
+  );
+}
+
+/**
+ * Section head — a kicker (the hero tag's bar motif, sentence case), the
+ * H2, and a blurb. Desktop splits it: title on the copy columns, blurb on
+ * the right. The H2 id labels the section landmark.
+ */
 function SectionHead({
+  id,
   kicker,
-  kickerInverse,
   title,
   blurb,
 }: {
+  id: string;
   kicker: string;
-  kickerInverse?: boolean;
-  title: React.ReactNode;
-  blurb: string;
+  title: ReactNode;
+  blurb: ReactNode;
 }) {
   return (
-    <header className="landing-section-head">
-      <span
-        className={
-          kickerInverse
-            ? 'landing-kicker landing-kicker-inverse'
-            : 'landing-kicker'
-        }
-      >
-        {kicker}
-      </span>
-      <h2 className="landing-h2">{title}</h2>
+    <header className="landing-grid12 landing-section-head">
+      <div className="landing-section-head-title">
+        <span className="landing-kicker">{kicker}</span>
+        <h2 className="landing-h2" id={id}>
+          {title}
+        </h2>
+      </div>
       <p className="landing-blurb">{blurb}</p>
     </header>
   );
@@ -238,10 +439,12 @@ export function DashboardPage() {
     return <Navigate to={redirectTo ?? productHome(user, isAdmin)} replace />;
   }
 
+  const statStyle = { '--lg-stat-count': STATS.length } as CSSProperties;
+
   return (
     <div className="landing-root">
-      {/* ── HERO — granite band (top nav + hero grid) ────── */}
-      <section className="landing-band landing-band-granite landing-hero">
+      {/* ── HERO (top nav + hero grid) ───────────────────── */}
+      <section className="landing-band landing-hero">
         <div className="landing-wrap landing-topnav landing-up">
           <a
             className="landing-topnav-brand"
@@ -251,14 +454,12 @@ export function DashboardPage() {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
           >
-            <img
-              src="/crag.png"
-              alt=""
-              className="landing-topnav-mark"
-              width={32}
-              height={32}
-            />
-            <span className="landing-topnav-word">GRANITE CRAG</span>
+            <CragCube variant="mark" className="landing-topnav-mark" alt="" />
+            <span className="landing-topnav-word">
+              <span className="landing-topnav-word-granite">GRANITE</span>
+              {' '}
+              CRAG
+            </span>
           </a>
           <button
             type="button"
@@ -269,35 +470,28 @@ export function DashboardPage() {
           </button>
         </div>
 
-        <div className="landing-wrap landing-hero-grid">
-          <div>
+        <div className="landing-wrap landing-grid12 landing-hero-grid">
+          <div className="landing-hero-copy">
             <p className="landing-tag landing-up">
-              Granite Telecommunications&ensp;·&ensp;Next-generation voice
+              <span className="landing-tag-org">Granite Telecommunications</span>
+              <span className="landing-tag-sep" aria-hidden="true" />
+              <span>Next-generation voice</span>
             </p>
 
-            <h1 className="landing-h1 landing-up landing-d1">
-              <span className="landing-acc">C</span>all{' '}
-              <span className="landing-acc">R</span>outing{' '}
-              <span className="landing-acc">A</span>pplication{' '}
-              <span className="landing-acc">G</span>ateway
+            <h1 className="landing-h1 landing-acrostic landing-up landing-d1">
+              {ACROSTIC.map((word, i) => (
+                <span key={word}>
+                  {word}
+                  {i < ACROSTIC.length - 1 ? ' ' : ''}
+                </span>
+              ))}
             </h1>
 
             <p className="landing-lede landing-up landing-d2">
-              {API_CALLING_ENABLED ? (
-                <>
-                  CRAG is Granite&rsquo;s next-generation voice platform — built by
-                  the carrier for what comes next: AI voice agents, programmable
-                  API calling, webhooks, and intelligent routing, running directly
-                  on Granite&rsquo;s own nationwide network.
-                </>
-              ) : (
-                <>
-                  CRAG is Granite&rsquo;s next-generation voice platform — built by
-                  the carrier for what comes next: AI voice agents, intelligent
-                  routing, and programmable provisioning, running directly on
-                  Granite&rsquo;s own nationwide network.
-                </>
-              )}
+              CRAG is Granite&rsquo;s voice platform for business call
+              routing: call forwarding, SIP trunking and encrypted voicemail
+              on a carrier-grade core that Granite builds and runs in three
+              independent US regions, managed through a self-service portal.
             </p>
 
             <div className="landing-cta-row landing-up landing-d3">
@@ -314,173 +508,211 @@ export function DashboardPage() {
                 href="#landing-network"
                 onClick={(e) => {
                   e.preventDefault();
-                  document
-                    .getElementById('landing-network')
-                    ?.scrollIntoView({ behavior: 'smooth' });
+                  scrollToId('landing-network');
                 }}
               >
                 See the network
               </a>
             </div>
 
-            <ul className="landing-hero-points landing-up landing-d4">
-              <li>STIR/SHAKEN on every call</li>
-              <li>Redundant, highly available SBC architecture</li>
-              <li>Packet-level SIP capture</li>
+            <ul className="landing-proof landing-up landing-d4">
+              {HERO_PROOF.map((p) => (
+                <li key={p.title} className="landing-proof-item">
+                  <p.icon
+                    className="landing-proof-icon"
+                    size={18}
+                    strokeWidth={2}
+                    aria-hidden="true"
+                  />
+                  <span className="landing-proof-title">{p.title}</span>
+                  <span className="landing-proof-detail">{p.detail}</span>
+                </li>
+              ))}
             </ul>
           </div>
 
-          <div className="landing-hero-mark landing-up landing-d2">
-            <img
-              src="/crag.png"
-              alt="CRAG — Call Routing Application Gateway"
-            />
+          <div className="landing-hero-art landing-up landing-d2">
+            <div className="landing-hero-stage">
+              <CragCube
+                variant="hero"
+                className="landing-hero-cube"
+                alt="CRAG — Call Routing Application Gateway"
+              />
+              <SignalLine />
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ── STAT BAND — cobalt ───────────────────────────── */}
-      <section className="landing-band landing-band-cobalt landing-stats">
-        <div className="landing-wrap landing-stats-grid">
-          {STATS.map((s) => (
-            <div key={s.label} className="landing-stat">
-              <div className="landing-stat-value">{s.value}</div>
-              <div className="landing-stat-label">{s.label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── BUILD ON THE CARRIER — granite band ──────────── */}
-      <section className="landing-band landing-band-granite landing-ai">
+      {/* ── KPI READOUT — N equal columns on the hero's grid ─ */}
+      <section className="landing-band landing-stats" aria-label="Platform at a glance">
         <div className="landing-wrap">
-          <SectionHead
-            kicker="Build what's next"
-            title="A programmable surface on the carrier itself."
-            blurb={
-              API_CALLING_ENABLED
-                ? "AI voice agents, API calling, webhooks, intelligent routing — CRAG puts modern voice primitives directly on Granite's nationwide network. When you build here, your software talks to the carrier — not to a reseller sitting on top of one."
-                : "AI voice agents, intelligent routing, programmable provisioning — CRAG puts modern voice primitives directly on Granite's nationwide network. When you build here, your software talks to the carrier — not to a reseller sitting on top of one."
-            }
-          />
-          <div className="landing-ai-grid">
-            {BUILD_PILLARS.map((p) => (
-              <div key={p.title} className="landing-ai-card">
-                <span className="landing-icon-tile landing-icon-tile-inverse">
-                  <p.icon size={19} strokeWidth={2.1} />
-                </span>
-                <h3 className="landing-card-title">{p.title}</h3>
-                <p className="landing-card-desc">{p.desc}</p>
+          <dl className="landing-stats-grid" style={statStyle}>
+            {STATS.map((s) => (
+              <div key={s.label} className="landing-stat">
+                <dt className="landing-stat-label">
+                  {s.label}
+                  {s.note && <span className="landing-stat-note">{s.note}</span>}
+                </dt>
+                <dd className="landing-stat-value">{s.value}</dd>
               </div>
             ))}
-          </div>
+          </dl>
         </div>
       </section>
 
-      {/* ── PRODUCTS — paper band ────────────────────────── */}
-      <section className="landing-band landing-band-paper">
-        <div className="landing-wrap">
-          <SectionHead
-            kicker="Products"
-            title="One network. Four ways to build on it."
-            blurb="Every product runs on the same signed, multi-region core — the same routing engine, the same failover discipline, the same telemetry. Pick the interface that fits your traffic."
-          />
-
-          <div className="landing-products">
-            <div
-              className="landing-card landing-card-featured"
-              role="button"
-              tabIndex={0}
-              onClick={scrollToRequestAccess}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') scrollToRequestAccess();
-              }}
-            >
-              <StatusChip status="ga" />
-              <h3 className="landing-card-title landing-card-title-lg">
-                Remote Call Forwarding
-              </h3>
-              <p className="landing-card-desc">
-                Nationwide number forwarding on redundant carrier routes —
-                provisioned in minutes and observable down to the packet.
-                Deployed today for utility-scale enterprise traffic.
-              </p>
-              <ul className="landing-spec-list">
-                <li>Forwarding changes take effect in seconds</li>
-                <li>Independent carrier routes for every call</li>
-                <li>Per-call quality scoring and SIP capture</li>
-              </ul>
-              <span className="landing-card-link">
-                Request access
-                <ArrowUpRight size={16} strokeWidth={2.5} />
-              </span>
-            </div>
-
-            <div className="landing-products-side">
-              {SIDE_PRODUCTS.map((p) => (
-                <div key={p.name} className="landing-card landing-card-side">
-                  <div className="landing-card-side-head">
-                    <h3 className="landing-card-title">{p.name}</h3>
-                    <StatusChip status={p.status} />
-                  </div>
-                  <p className="landing-card-desc">{p.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── NETWORK — granite band ───────────────────────── */}
+      {/* ── WHO RUNS IT — pillar rail ────────────────────── */}
       <section
-        className="landing-band landing-band-granite landing-network"
-        id="landing-network"
+        className="landing-band landing-section landing-build"
+        aria-labelledby="landing-build-title"
       >
         <div className="landing-wrap">
           <SectionHead
+            id="landing-build-title"
+            kicker="Built by Granite"
+            title="A voice core Granite builds and runs."
+            blurb="CRAG is Granite's own switching core — border controllers, media servers and routing that Granite engineers build and operate in three US regions, connected to the PSTN over multiple termination routes."
+          />
+          <ul className="landing-pillars">
+            {BUILD_PILLARS.map((p) => (
+              <li key={p.title} className="landing-pillar">
+                <span className="landing-icon-tile">
+                  <p.icon size={20} strokeWidth={1.9} aria-hidden="true" />
+                </span>
+                <h3 className="landing-item-title">{p.title}</h3>
+                <p className="landing-item-desc">{p.desc}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* ── PRODUCTS — data-driven cards ─────────────────── */}
+      <section
+        className="landing-band landing-section landing-products-band"
+        id="landing-products"
+        aria-labelledby="landing-products-title"
+      >
+        <div className="landing-wrap">
+          <SectionHead
+            id="landing-products-title"
+            kicker="Products"
+            title={`One network. ${countWord(PRODUCTS.length)} ways to use it.`}
+            blurb="Every product runs on the same three-region core — one routing engine, one failover design, one call record. Pick the one that fits your traffic."
+          />
+
+          <ul className="landing-products">
+            {PRODUCTS.map((p) => (
+              <ProductCard key={p.name} product={p} />
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* ── NETWORK — framed HA instrument ───────────────── */}
+      <section
+        className="landing-band landing-section landing-network"
+        id="landing-network"
+        aria-labelledby="landing-network-title"
+      >
+        <div className="landing-wrap">
+          <SectionHead
+            id="landing-network-title"
             kicker="The network"
-            title="Three regions. Zero shared fate."
-            blurb="Each region runs a complete, independent voice stack — a redundant, highly available SBC layer, dedicated media, local data. Signaling and media never cross regional boundaries, so a regional event is a reroute, not an outage. The model below shows SIP Trunking inbound: every customer trunk targets one health-checked hostname, and DNS steers each call to a healthy region — running the failover scenarios continuously."
+            title="Three regions. Independent call paths."
+            blurb="Each region runs a complete voice stack — an active/standby SBC pair, active/standby media servers and a local database replica. Signaling and media never cross regions, and a region whose media layer fails marks itself unhealthy so new calls land in the others. Shared services — the database primary, the API and SIP capture — run in East. The model below plays the failover scenarios on a loop."
           />
           <HaArchitectureViz />
         </div>
       </section>
 
-      {/* ── CAPABILITIES — paper band ────────────────────── */}
-      <section className="landing-band landing-band-paper">
+      {/* ── PLATFORM — spec grid ─────────────────────────── */}
+      <section
+        className="landing-band landing-section landing-platform"
+        id="landing-platform"
+        aria-labelledby="landing-platform-title"
+      >
         <div className="landing-wrap">
           <SectionHead
+            id="landing-platform-title"
             kicker="Platform"
             title="Carrier discipline. Modern tooling."
             blurb="The practices Granite uses to keep utility-scale voice traffic flowing, paired with the observability and control surfaces engineering teams actually want to use."
           />
-          <div className="landing-caps">
+          <ul className="landing-specgrid">
             {CAPABILITIES.map((c) => (
-              <div key={c.title} className="landing-card landing-cap">
-                <span className="landing-icon-tile">
-                  <c.icon size={19} strokeWidth={2.1} />
-                </span>
-                <h3 className="landing-card-title">{c.title}</h3>
-                <p className="landing-card-desc">{c.desc}</p>
-              </div>
+              <li key={c.title} className="landing-spec">
+                <c.icon
+                  className="landing-spec-icon"
+                  size={20}
+                  strokeWidth={1.9}
+                  aria-hidden="true"
+                />
+                <h3 className="landing-item-title">{c.title}</h3>
+                <p className="landing-item-desc">{c.desc}</p>
+              </li>
             ))}
-          </div>
+          </ul>
         </div>
       </section>
 
-      {/* ── INTAKE — cobalt band (#request-access) ───────── */}
+      {/* ── INTAKE (#request-access) ─────────────────────── */}
       {/* Only unauthenticated visitors ever reach this render — the
           intake band is always present. */}
       <RequestAccessSection />
 
       {/* ── FOOTER ───────────────────────────────────────── */}
-      <footer className="landing-band landing-foot">
-        <div className="landing-wrap landing-foot-inner">
-          <span className="landing-foot-brand">GRANITE · CRAG</span>
-          <span>
-            Next-generation voice — built and operated by Granite
-            Telecommunications
-          </span>
+      <footer className="landing-foot">
+        <div className="landing-wrap landing-grid12 landing-foot-top">
+          <div className="landing-foot-brand">
+            <a
+              className="landing-topnav-brand"
+              href="/"
+              onClick={(e) => {
+                e.preventDefault();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            >
+              <CragCube variant="mark" className="landing-topnav-mark" alt="" />
+              <span className="landing-topnav-word">
+                <span className="landing-topnav-word-granite">GRANITE</span>
+                {' '}
+                CRAG
+              </span>
+            </a>
+            <p className="landing-foot-tagline">
+              Next-generation voice — built and operated by Granite
+              Telecommunications.
+            </p>
+          </div>
+
+          <nav className="landing-foot-nav" aria-label="Footer">
+            <ul>
+              {FOOTER_LINKS.map((l) => (
+                <li key={l.target}>
+                  <a
+                    href={`#${l.target}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      scrollToId(l.target);
+                    }}
+                  >
+                    {l.label}
+                  </a>
+                </li>
+              ))}
+              <li>
+                <button type="button" onClick={() => setSignInOpen(true)}>
+                  Sign in
+                </button>
+              </li>
+            </ul>
+          </nav>
+        </div>
+
+        <div className="landing-wrap landing-foot-bottom">
+          <span>&copy; {new Date().getFullYear()} Granite Telecommunications</span>
+          <span>CRAG — Call Routing Application Gateway</span>
         </div>
       </footer>
 

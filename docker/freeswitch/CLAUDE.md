@@ -7,20 +7,22 @@ FreeSWITCH media server for the RevUp voice platform. Stripped to Remote Call Fo
 ## Architecture Position
 
 ```
-Bandwidth -> Kamailio SBC (VM1) -> FreeSWITCH (VM2, port 5080 internal profile)
+Bandwidth / Sinch -> zone NLB VIP -> ACTIVE Kamailio SBC -> FreeSWITCH FS-1 (FS-2 standby), port 5080 internal profile
                                       |
-                                      v  Lua routing scripts
+                                      v  Lua routing scripts (zone-local PG replica)
                                       |
-FreeSWITCH (port 5090 external profile) -> Kamailio SBC -> Bandwidth -> PSTN destination
+FreeSWITCH (port 5090 external profile) -> zone signaling ILB VIP -> ACTIVE SBC -> carrier_trunks route (Bandwidth / Sinch) -> PSTN destination
 ```
 
-FreeSWITCH is VM2 in a 4-VM GCP production deployment:
-- VM1: Kamailio SBC + Homer
-- VM2: FreeSWITCH + Redis (this image)
-- VM3: API server + PgBouncer
-- VM4: PostgreSQL + monitoring
+Production is 3 self-contained GCP zones (East/West/Central). Each zone has
+this layout; the full inventory is in root `CLAUDE.md` "GCP Production
+Topology" and `PRODUCTION_ARCHITECTURE.md` §2:
+- 2 Kamailio SBC VMs (active/standby behind the zone NLB VIP + internal signaling ILB VIP).
+- **2 media VMs running this image**: FS-1 active, FS-2 hot standby. Kamailio dispatcher alg 8 selects between them (live 2026-08-31). Redis runs in its own container on each media VM.
+- 1 PG replica + PgBouncer VM (East reads the primary on the `services` VM).
+- The East-only `services` VM: PG primary, API, UI, Homer.
 
-Deployed via `docker-compose.media.yml` at repo root.
+Deployed via `docker-compose.media.yml` at repo root on every media VM (FS-1 and FS-2 alike; `FS_NODE_ID` tells them apart).
 
 ## Multi-Stage Dockerfile Build
 
@@ -100,10 +102,12 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 |---|---|---|
 | `EXTERNAL_SIP_IP` | `auto-nat` | Public IP for Via/Contact/SDP headers. MUST be set in production. |
 | `EXTERNAL_RTP_IP` | `auto-nat` | Public IP for SDP c= line. Usually same as EXTERNAL_SIP_IP. |
-| `SBC_PROXY_IP` | `127.0.0.1` | Primary Kamailio SBC IP. Outbound bridges go to sofia/external/dest@SBC_PROXY_IP:5060 |
-| `SBC_PROXY_IP_FAILOVER` | `$SBC_PROXY_IP` | Secondary SBC IP for the SBC×trunk failover loops: inbound_router.lua (RCF) and the 8YY `carrier_trunks` loop in trunk_outbound.lua / api_outbound.lua (freeswitch.xml:71 -> `sbc_proxy_ip_failover` global). Defaults to SBC_PROXY_IP if unset. The non-8YY trunk/API Bandwidth bridges still use SBC_PROXY_IP only. |
+| `SBC_PROXY_IP` | `127.0.0.1` | The zone's **internal signaling ILB VIP** (East 10.142.0.250 / West 10.138.0.250 / Central 10.128.0.250). It always leads to the ACTIVE SBC. Outbound bridges go to `sofia/external/dest@SBC_PROXY_IP:5060`. Pre-cutover (before 2026-08-27) it was SBC-1's direct IP. |
+| `SBC_PROXY_IP_FAILOVER` | `$SBC_PROXY_IP` | SBC-1's **direct** VPC IP, the ILB-bypass fallback for the SBC×trunk failover loops: inbound_router.lua (RCF) and the 8YY `carrier_trunks` loop in trunk_outbound.lua / api_outbound.lua (freeswitch.xml:76 -> `sbc_proxy_ip_failover` global). The cached 1 s TCP pre-check marks a dark ILB dead and moves the attempt here. Defaults to SBC_PROXY_IP if unset. The non-8YY trunk/API Bandwidth bridges still use SBC_PROXY_IP only. |
 | `HOMER_IP` | `127.0.0.1` | Homer HEP capture endpoint IP |
-| `DB_HOST` | `postgres` | PostgreSQL host (via PgBouncer) |
+| `DB_HOST` | `postgres` | The zone-local PgBouncer (East: `services` primary; West/Central: the zone db VM's replica). Read-only on replicas; writes go through the East API. |
+| `FS_ZONE` | `east` | `east`/`west`/`central` — selects the `priority_<zone>` column for the `carrier_trunks` termination order |
+| `FS_NODE_ID` | (empty ⇒ `<zone>-fs`) | `<zone>-fs-1` / `<zone>-fs-2` — the CDR `freeswitch_node` + metrics identity of this node |
 | `DB_PORT` | `6432` | PgBouncer port (NOT 5432) |
 | `DB_NAME` | `voip` | Database name |
 | `DB_USER` | `freeswitch` | Database user |

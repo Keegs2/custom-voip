@@ -45,8 +45,9 @@ production; the `Full-System`/`unified` branches hold the UCaaS stack, which is
 
 | Product | Status | Notes |
 |---------|--------|-------|
-| **RCF** (Remote Call Forwarding) | **LIVE — primary product** | DID → forward_to mapping. No end-customer UI access. On-net short-circuit routing for platform-owned destinations. |
-| **SIP Trunking** | LIVE | IP-peering only (REGISTER declined). Multi-zone redundant inbound; FS-aware `/healthz` + `trunk.granitevoip.com` DNS failover. |
+| **RCF** (Remote Call Forwarding) | **LIVE — primary product** | DID → forward_to mapping. Customers use the revup portal: `/dashboard`, `/rcf`, Reporting, Calls & Quality. On-net short-circuit routing for platform-owned destinations. |
+| **SIP Trunking** | LIVE call path (customer portal page still a placeholder) | IP-peering only (REGISTER declined). Multi-zone redundant inbound: any zone VIP admits a trunk, and each zone drains via the FS-aware `/healthz`. DNS failover (`crag.granitevoip.com`) is **planned, not built** (§3.5). |
+| **Visual Voicemail** (encrypted) | **Merged 2026-10-23** (#149, #151) | Dedicated-DID mailboxes, enabled per customer and created by admins. Per-customer KMS keys, ciphertext-only storage, optional US-only transcription. See §5.9. |
 | API Calling | **RETIRED / disabled 2026-09** | Switched off; code kept behind `API_CALLING_ENABLED` (API + FreeSWITCH env, and `docker/ui/app/src/config/features.ts` in the UI) — flip all to restore. When it was live, outbound `/v1/calls` was East-only single-region (ESL pinned to East FS-1). Hybrid now means RCF + SIP Trunking. |
 | UCaaS (WebRTC/voicemail/conferencing/chat) | NOT on this branch | `Full-System`/`unified` only. RCF customers never see UCaaS features. |
 
@@ -56,10 +57,10 @@ production; the `Full-System`/`unified` branches hold the UCaaS stack, which is
 |-------|-------|
 | Zones | East (us-east1-b), West (us-west1-b), Central (us-central1-b) — **all LIVE since 2026-07-23**, each self-contained for SIP/RTP (calls never cross zones) |
 | Fleet | 16 production VMs + 1 banked load-test VM (see §2) |
-| SBC HA | **Active/standby** pair per zone via GCP NLB failover backends — deployed + drill-verified all zones **2026-08-27** (§4.1) |
-| FS media HA | **Strict active/standby** FS-2 per zone via dispatcher alg 8 — deployed + drilled all zones **2026-08-31** (§5.1) |
+| SBC HA | **Active/standby** pair per zone via GCP NLB failover backends. Deployed in all zones **2026-08-27**; drills were run but never logged (§4.1, §12 #14) |
+| FS media HA | **Strict active/standby** FS-2 per zone via dispatcher alg 8. Deployed in all zones **2026-08-31**; drills were run but the drill log is empty (§5.1) |
 | Maintenance plane | Kamailio `maint` drain htable + agent verbs + CRAG Maintenance tool — **LIVE 2026-09-03/04** (§4.6, §10.4) |
-| Carriers | Bandwidth (origination + all termination) + Sinch (origination live; termination trunks provisioned as backup, table-driven) (§6) |
+| Carriers | **Bandwidth:** origination + all long-distance termination (first in priority). **Sinch:** origination (Denver/Chicago + 8XX-T toll-free), the **only** toll-free (8YY) termination (fail-closed), and backup LD termination. Termination is table-driven via `carrier_trunks` with `traffic_class` + per-zone priority (§5.5, §6) |
 | STIR/SHAKEN | Signing LIVE on all 6 SBCs; self-hosted x5u; STI-PA trust pipeline live; inbound own-crypto verify deployed **DARK** (§7) |
 | Data | East PG primary → 3 physical replicas (east-standby / west / central); CDR export to Equinox via FTP, flag-gated (§8) |
 | Observability | Per-VM vmagent → East VictoriaMetrics (12-mo retention); 7 Grafana NOC boards; GCM alerting (email + Slack/PagerDuty paths); Homer HEP (§9) |
@@ -74,7 +75,7 @@ Bandwidth/Sinch  →  zone NLB VIP :5060  →  ACTIVE SBC (Kamailio)
   → Lua inbound_router.lua: DID lookup on the LOCAL PG replica
   → on-net check (number_routing view): platform-owned dest ⇒ internal delivery, no hairpin
   → else bridge B-leg :5090 → zone signaling ILB VIP :5060 → ACTIVE SBC
-  → table-driven carrier trunk selection (carrier_trunks) → Bandwidth PoP → PSTN
+  → table-driven carrier trunk selection (carrier_trunks) → Bandwidth PoP (LD) / Sinch (8YY, LD backup) → PSTN
 ```
 
 Full 9-step flow with header/RR details: root `CLAUDE.md` → "Call Flow (RCF)"
@@ -83,18 +84,20 @@ and "On-Net (Internal) Routing". Kamailio in-dialog mechanics:
 
 ### 1.4 HA failure matrix (what actually happens)
 
-All drilled states are drill-verified (SBC 2026-08-27, FS 2026-08-31, DB
-restore proven in a real recovery).
+Drills were run for SBC HA (2026-08-26/27) and FS HA (2026-08-31), but
+**neither drill log has any rows**: the SBC runbook §8 and FS runbook §9 are
+empty (§12 #14). Treat the SBC/FS rows below as design behavior until a logged
+drill records them. DB restore is proven in a real recovery.
 
 | Failure | Detection | Recovery | Behavior |
 |---------|-----------|----------|----------|
 | Active SBC dies | NLB fs-aware HC, ~10–12s | Auto (failover backends), auto failback | Both planes (carrier VIP + signaling ILB) flip to standby SBC. Established calls survive (`;fs=` stateless dispatch); setups in flight during the ~10–12s flip are lost (their CANCELs now draw 481 from the new active). Dialog entries the ex-active owned linger there as gauge-only ghosts ≤2h (§4.8). |
 | Standby SBC dies | HC + `sbc_failover.tf` log alert | Page (redundancy degraded) | No traffic impact; zone runs unprotected until restored |
 | Active FS dies | Dispatcher OPTIONS 3×5s; fs-watchdog pages | Auto (alg 8 → FS-2), auto failback | That FS's active calls are lost; new calls land on FS-2. East ESL/API originates fail while FS-1 is down (open item §12.3) |
-| Both FS in a zone down | `/healthz` → 503 on both SBCs | Auto | Zone drains at the NLB + DNS; carriers re-route to remaining zone VIPs |
+| Both FS in a zone down | `/healthz` → 503 on both SBCs; SIP OPTIONS from external sources → 503 (`FS_AWARE_OPTIONS`) | Auto | Zone drains at its NLB; carriers retry the remaining zone VIPs. There is no DNS layer today (§3.5) |
 | Entire zone dark | NLB all-backends-unhealthy + GCM VIP uptime CRITICAL | Auto + page | Carrier-side distribution to remaining zone VIPs; also achievable deliberately via the maintenance plane (§4.6) |
-| Carrier PoP failure | Kamailio 5xx/408/480 failover (flag 8) + dispatcher probe state | Auto | Retry alternate Bandwidth PoP; table-driven attempts continue down the priority list (§5.5) |
-| SBC unreachable from FS | TCP pre-check < 1s (cached) | Auto | 4-attempt loop: signaling VIP → SBC-1 direct, × primary/secondary carrier |
+| Carrier PoP failure | Table-driven legs: the negative reply goes back to FS (Kamailio sets flags 8+9 on a validated `X-Carrier-IP`). Legacy `X-Carrier` legs: Kamailio 5xx/408/480/404 in-trunk flip (flag 8) → TC4 cross-trunk (flag 9) | Auto | FS dials the next trunk/SBC attempt down the zone priority list (§5.5); legacy legs retry the alternate Bandwidth PoP |
+| SBC unreachable from FS | TCP pre-check ≤1 s (1 s connect timeout, cached 30 s up / 10 s down) | Auto | Attempt loop (up to 4 trunks × {signaling VIP, SBC-1 direct} = 8 attempts; legacy fallback = 4 attempts, §5.3). The pre-check is the ILB-bypass detector: an active-SBC death is still the ~10–12 s NLB/ILB flip |
 | Redis dies (media VM) | FS reconnect | Auto | Trunk/API caches fall through to PG; RCF path unaffected (already DB-only) |
 | Zone PG replica dies | postgres-exporter / replication guard | Manual repoint | Zone DID lookups fail → zone effectively drains; repoint `DB_HOST` per DB failover runbook |
 | PG primary dies | replication guard + GCM | Manual promote (`docs/runbooks/DB_FAILOVER_RUNBOOK.md`) | Active calls unaffected; provisioning + CDR ingest 503 until promotion (east-db-standby is the HA target) |
@@ -414,10 +417,32 @@ legacy per-SBC behavior (rolling-safe).
 
 | Name | Points at | Purpose |
 |------|-----------|---------|
-| Cloud DNS geo-routing policy (carrier-facing) | Nearest zone NLB VIP | Bandwidth/Sinch are additionally configured with all 3 VIPs directly (round-robin/distribution) |
-| `trunk.granitevoip.com` | Zone VIPs w/ failover | Customer SIP-trunk target; DNS failover rides the fs-aware `/healthz` (OPTIONS-503 drain) |
 | `fs-cert.granitevoip.com` | A 34.26.57.37 (services VM) | STIR x5u + trust-bundle endpoint (Caddy :443) |
 | `granitevoip.com` | ted LB (Cloud Run FE / GKE BE) | Public site + `/crag` console (§10.2) |
+
+**Inbound SIP today: no DNS steering.** Bandwidth and Sinch are configured with
+all 3 zone NLB VIPs directly and spread calls across them themselves. A zone
+whose media layer is down drains itself:
+- `/healthz` returns 503 on both SBCs, so the NLB stops sending to them (§4.7).
+- SIP OPTIONS from external sources are answered 503 (`FS_AWARE_OPTIONS`).
+
+Carriers then retry another VIP. No SIP-facing DNS record or routing policy
+exists in this repo or its IaC. An earlier revision of this table listed a
+"Cloud DNS geo-routing policy" and `trunk.granitevoip.com` failover; neither has
+any config behind it.
+
+**PLANNED (not built): Infoblox DTC geo/topology steering**
+(`docs/INFOBLOX_DTC_CRAG_DNS_ASK.md`, a request to Granite's DNS team that is
+still outstanding):
+- **Phase 1:** LBDN `crag.granitevoip.com` (A, TTL 30) over the three zone VIPs
+  for customer SIP trunks. The method is Topology: known-customer subnet rules,
+  then geography rules, then a fallback to any healthy zone. The health monitor
+  is SIP OPTIONS on UDP/5060 expecting 200; a 503 pulls the zone.
+- **Phase 2:** a separate LBDN `orig.granitevoip.com` for carrier origination,
+  listed first in Bandwidth's host list ahead of the static VIPs.
+
+The SBC side of the health contract (OPTIONS 200/503) is already live on all
+6 SBCs.
 
 There is deliberately **no global anycast UDP NLB** (GCP global passthrough
 NLB doesn't exist for UDP) — per-zone VIPs + carrier-side distribution instead.
@@ -594,8 +619,9 @@ Priority order: `maint=>drain` set ⇒ **503 DRAINING maint=1**; else FS group-1
 all-down (`fshealth` htable, maintained authoritatively by dispatcher
 dst-up/dst-down event routes) ⇒ **503** (fs-aware drain, `FS_AWARE_OPTIONS=1`
 default); else **200**. Any-FS semantics: healthy if ≥1 of FS-1/FS-2 is up.
-This one endpoint drives: external NLB, signaling ILB, DNS trunk failover, and
-the maintenance plane.
+This one endpoint drives the external NLB, the signaling ILB and the
+maintenance plane. The planned Infoblox DTC monitor (§3.5) would use the SIP
+OPTIONS 200/503 twin of this endpoint instead.
 
 ### 4.8 Key modparams (selected — timers and dialog behavior)
 
@@ -661,12 +687,21 @@ Never use `-nonat`; never remove `local-network-acl=loopback.auto` (root
    Redis is intentionally **removed** from the RCF path (mod_lua threading vs
    redis-lua pooling); trunk/API paths still use Redis fail-open.
 5. **On-net check** (§5.4) — platform-owned destination ⇒ internal delivery.
-6. Off-net: table-driven termination attempt list (§5.5), bridged as
-   `sofia/external/dest@SBC_PROXY_IP:5060` with `X-Carrier`/`X-Carrier-IP`
-   headers; TCP pre-check of the SBC (cached 30s up / 10s down) then up to 4
-   attempts; `progress_timeout` bounds carrier PDD
-   (`BRIDGE_PROGRESS_TIMEOUT`, default 10s — deliberately not
-   `originate_timeout`).
+6. Off-net: the table-driven termination attempt list (§5.5) is bridged as
+   `sofia/external/dest@SBC_PROXY_IP:5060` with
+   `X-Carrier-IP`/`X-Carrier-Label`.
+   - **Size:** up to 4 trunks (cap applied after the traffic-class filter)
+     × {`SBC_PROXY_IP` signaling VIP, `SBC_PROXY_IP_FAILOVER` SBC-1 direct},
+     so **up to 8 attempts** (`TERM_TRUNKS_MAX = 4`, `inbound_router.lua:466`).
+   - **Pre-check:** each attempt is guarded by a 1 s TCP pre-check of the SBC
+     target, cached 30 s up / 10 s down. A skipped attempt launches no B-leg.
+   - **Fallback:** if the DB errors, there are zero usable rows, or
+     `lib/term_trunks.lua` fails to load, the legacy loop runs instead: 4
+     attempts with the `X-Carrier` enum (`primary`/`secondary`). The CDR
+     records which path ran as `term_trunks_source=db|fallback`.
+   - **PDD bound:** `progress_timeout` bounds carrier PDD per attempt
+     (`BRIDGE_PROGRESS_TIMEOUT`, default 10 s — deliberately not
+     `originate_timeout`).
 7. Lua-handled failures reply 503 (not 404); `lua_routed=true` prevents
    dialplan 404 masking.
 
@@ -695,20 +730,26 @@ Design doc: `docs/ONNET_ROUTING_DESIGN.md`; summary in root `CLAUDE.md`.
 
 ### 5.5 Table-driven termination (multi-carrier egress) — LIVE
 
-Termination is driven by the **`carrier_trunks`** table (migrations 40/42/44),
-not code:
+Termination is driven by the **`carrier_trunks`** table (migrations
+40/42/44/52/53), not code:
 
 | Column | Role |
 |--------|------|
 | `carrier`, `pop`, `source_ip` | Identity + egress target (`X-Carrier-IP`) |
 | `direction` | `inbound`/`outbound`/`both` — termination reads `outbound`/`both` |
-| `priority` + `priority_east/west/central` | Per-zone attempt order (`COALESCE(priority_<zone>, priority)`); Bandwidth 10/20, Sinch backups 30/40 |
-| `traffic_class` | `any` / `ld` / `tollfree` — Sinch Denver-TF is 8YY-only |
+| `priority` + `priority_east/west/central` | Per-zone attempt order (`COALESCE(priority_<zone>, priority)`). Bandwidth is 10/20 (West swaps Dallas/LA). Sinch LD backups are atlanta-ld 30 and denver-ld 35. Sinch 8YY is denver-tf 40 and atlanta-tf 45. The 35/45 rows are seeded `enabled=false` (migration 53). |
+| `traffic_class` | `any` / `ld` / `tollfree`, filtered per call. LD uses `any`/`ld` rows. NANP 8YY uses ONLY `tollfree` rows and fails closed (`NO_ROUTE_DESTINATION`) when none is enabled; trunk/API 8YY share this via `lib/term_trunks.lua`. |
 | `cps_limit`, `enabled` | Per-trunk CPS (Kamailio `carrier_cps`) and rotation membership |
 
-FS builds the zone's priority-ordered attempt list per call with a **~60s
-cache** (plus a 60s table-unavailable fallback). Disabling a trunk in CRAG
-takes it out of rotation in ~60s — **no redeploy**. The `carrier_gateways`
+FS builds the zone's priority-ordered attempt list per call:
+- **Cache:** ~60 s process-wide. A table-unavailable result is negative-cached
+  for 60 s and the legacy 4-attempt loop runs meanwhile.
+- **Shape:** the class filter is applied, then the list is capped at 4 trunks
+  × 2 SBC paths.
+- **Kamailio:** it validates each `X-Carrier-IP` against an enabled
+  outbound/both row and sets flags 8+9, so FS owns the failover.
+- **Changes:** disabling a trunk in CRAG takes it out of rotation in ~60 s,
+  with **no redeploy**. The `carrier_gateways`
 table ("carrier gateway cards") is **display metadata only** — zero call-path
 consumers, read-only in CRAG, managed via migrations (§6.4).
 
@@ -718,6 +759,14 @@ consumers, read-only in CRAG, managed via migrations (§6.4).
 (retry-storm prevention; errors handled internally). All INSERT params use
 explicit `::type` casts (asyncpg + PgBouncer transaction mode). RTP quality
 stats (jitter variance→ms fix: migration 43) ride along.
+
+**A/B leg split:** `json_cdr.conf.xml` has `log-b-leg=true`, live since
+2026-09-24. Every carrier bridge attempt posts its own CDR, which lands as a
+`leg='B'` row when its dial string carries the `[cdr_leg=B,cdr_carrier_leg=true,…]`
+block (migrations 48/49; `docs/CDR_LEG_SPLIT_CONTRACT.md`). Call-counting
+queries use `leg IS DISTINCT FROM 'B'`. The call-quality grade is the worse of
+the A and answered-B directions (migrations 50/51, refresh function fixed in
+55). The STIR egress outcome comes from `X-Stir-Outcome` (migration 47).
 
 ### 5.7 Redis (per media VM)
 
@@ -735,6 +784,20 @@ persistence, `maxmemory`+LRU, dangerous commands renamed. Not on the RCF path
 | SBC (e2/n2-standard-4) | Signaling-only; headroom well past target CPS; `children=32` |
 | Growth trigger | Capacity review at 70% of rated peak (weekly CPS/concurrent trend on the Traffic Status board) |
 | Load harness | Banked SIPp rig on `west-loadtest` (re-enable via `TESTING_IP` on the target zone only — never in steady-state prod) |
+
+### 5.9 Encrypted voicemail (merged 2026-10-23 — pointer)
+
+The canonical summary is in root `CLAUDE.md` → "Encrypted Voicemail". The
+contract is `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md`.
+
+| Element | Detail |
+|---------|--------|
+| Routing | Dedicated-DID mailboxes (`voicemail_boxes`, migration 54) are the `number_routing` voicemail arm. A call reaches one by direct dial or as an on-net RCF terminal; FS `terminate_vvm` runs `lib/vm_box.lua`. A disabled box or customer gets 603. |
+| Media | Recorded on any FS node to RAM tmpfs `/dev/shm/vm`. Only on that leg: jitter buffer + `rtp_timer_name=soft`, and recording stops after 10 s of silence. The raw WAV is deposited to the East API `/v1/voicemail/fs/deposit` with `X-Ingest-Secret` from `/opt/revup/secrets/fs-voicemail/vm_ingest.header`. |
+| Crypto | AES-256-GCM envelope with one Cloud KMS key per customer (`vm-cust-<id>`, keyring `voicemail-prod`). Only ciphertext is stored in `gs://voip-voicemail`; plaintext exists only in RAM. Playback tokens last 120 s and the access audit is append-only. Crypto-erase is supported. KMS or config problems fail closed with 503. IaC lives in `infra/voicemail/`. |
+| Transcription (v1.1) | Google Speech-to-Text V2, US-only. Off unless `VOICEMAIL_TRANSCRIPTION_ENABLED=true`, and each mailbox is an admin opt-in (migration 56). Transcripts are sealed at rest. |
+| Product | Enabled per customer (`customers.voicemail_enabled`); mailbox create/delete is admin-only. Retrieval is web-only (`/voicemail`). CDRs are rated at $0. Retention defaults to 90 d; trash is purged after 30 d. |
+| Runbooks | `docs/runbooks/VOICEMAIL_GCP_SETUP.md`, `VOICEMAIL_DEPLOY_RUNBOOK.md`, `VOICEMAIL_TRANSCRIPTION_DEPLOY.md` |
 
 ---
 
@@ -875,6 +938,18 @@ The `sandbox_replica` slot (legacy fs-media 10.142.0.102 sandbox) is
 Slot/WAL growth is guarded by `revup-slot-wal-guard.timer`; lag by
 `revup-replication-guard.timer` (pages via `revup-alert`).
 
+**2026-10-23 PG primary incident** (`55_cdr_refresh_call_quality_fix.sql`
+header):
+- **Cause:** a runaway WAL writer (`cdr_refresh_call_quality()`
+  decompressing compressed chunks) filled the services disk, and the primary
+  went down.
+- **Slot loss:** the `central_standby` slot was **lost**. `central-db` has
+  since been **re-cloned** from the primary (owner-confirmed 2026-10-24).
+- **Fix:** migration 55 removed the cause.
+- **Lesson:** after any primary disk or WAL incident, check
+  `pg_replication_slots` for every standby before assuming replication is
+  intact.
+
 Failover/restore procedures: `docs/runbooks/DB_FAILOVER_RUNBOOK.md`,
 `docs/runbooks/DB_RESTORE_RUNBOOK.md` (proven in a real recovery — a prod
 data-dir wipe was recovered with zero loss;
@@ -888,7 +963,7 @@ drop-in `90-revup-32gb`: `shared_buffers=8GB`, `effective_cache_size=20GB`,
 `docs/SERVICES_VM_32GB_TUNING.md`; applier
 `scripts/services-tuning/apply_pg_32gb.sh`, inspector `show_pg_tuning.sh`).
 
-### 8.3 Migrations index (`docker/postgres/init/`, 01→46)
+### 8.3 Migrations index (`docker/postgres/init/`, 01→57)
 
 Init scripts run only on first initdb; on prod they're applied on the primary
 (`sudo -u postgres psql -d voip -f ...`) and replicate everywhere.
@@ -937,6 +1012,21 @@ Init scripts run only on first initdb; on prod they're applied on the primary
 | 44 | 44_sinch_termination.sql | Sinch term trunks (ATL-LD, DEN-TF) + traffic_class |
 | 45 | 45_orig_trunk_passive_health.sql | origination-trunk passive health |
 | 46 | 46_sinch_carrier_gateways.sql | Sinch gateway display cards |
+| 47 | 47_cdr_stir_outcome.sql | `cdrs.stir_outcome` / `stir_eff_actual` — actual STIR egress result (`X-Stir-Outcome`) |
+| 48 | 48_cdr_call_legs.sql | CDR A/B leg split columns (`leg`, `call_id`, `leg_attempt`) |
+| 49 | 49_cdr_call_legs_index_cagg.sql | `idx_cdrs_call_id` + `cdr_hourly_stats` rebuilt with the one-row-per-call predicate (psql script; never `-1`) |
+| 50 | 50_cdr_quality_accuracy.sql | G.107 call-quality columns + `cq_*` functions + `cdr_refresh_call_quality()` (function superseded by 55) |
+| 51 | 51_cdr_quality_no_media.sql | `no_rtp` (one-way) vs `no_media` (no audio either way) |
+| 52 | 52_sinch_tf_origination.sql | Sinch toll-free 8XX-T origination trunks + passive health |
+| 53 | 53_sinch_redundant_termination.sql | Sinch redundant LD/8YY termination rows (seeded disabled); per-direction `source_ip` unique indexes; `carrier_trunk_health.trunk_enabled` |
+| 54 | 54_voicemail.sql | Encrypted voicemail schema; `number_routing` voicemail arm; `rate_cdr()` rates voicemail at $0 |
+| 55 | 55_cdr_refresh_call_quality_fix.sql | **Incident fix 2026-10-23** — `cdr_refresh_call_quality()` never DMLs a compressed chunk. Re-apply it after any replay of 50 |
+| 56 | 56_voicemail_transcription.sql | Voicemail transcription (per-mailbox opt-in, sealed transcripts) |
+| 57 | 57_trunk_dids_trunk_index.sql | `idx_trunk_dids_trunk` — the `number_routing` trunk arm's customer path |
+
+Check state on the primary with `scripts/db/check_migrations.sql` (22..57).
+Since 45, replaying 40/44/45/52 fails on the `carrier_trunk_health` view, so
+re-apply 53 last. Replaying 50 reverts 55, so re-apply 55 after it.
 
 ### 8.4 CDR pipeline
 
@@ -1192,6 +1282,10 @@ default `Storage=auto` then turns persistent at its next restart/reboot.
 | `docs/SERVICES_VM_32GB_TUNING.md` | services memory budget + PG tuning |
 | `docs/OBSERVABILITY_METRICS_PLAN.md` | Metrics plane design |
 | `docs/ONNET_ROUTING_DESIGN.md` | On-net routing design |
+| `docs/INFOBLOX_DTC_CRAG_DNS_ASK.md` | PLANNED Infoblox DTC geo/topology DNS steering (§3.5) |
+| `docs/runbooks/VOICEMAIL_GCP_SETUP.md`, `VOICEMAIL_DEPLOY_RUNBOOK.md`, `VOICEMAIL_TRANSCRIPTION_DEPLOY.md` | Encrypted voicemail GCP setup, deploy, transcription rollout (§5.9) |
+| `docs/runbooks/SINCH_TF_ORIGINATION_RUNBOOK.md` | Sinch toll-free 8XX-T origination |
+| `docs/runbooks/MAINTENANCE_2026-10_ALL_OPEN_PRS.md` | 2026-10-23 maintenance window (#144, #145, #147, #148, #149) |
 | `docs/NATIONWIDE_PRODUCTION_ROLLOUT_PLAN.md` | 3-zone rollout record + beta gates |
 | `GCP_DEPLOYMENT_PLAN.md` | Zone bring-up, `.env` matrices |
 | `infra/OPENTOFU_PLAN.md` | IaC blueprint (§18 = SBC HA), import strategy |
@@ -1214,7 +1308,7 @@ Honest list — verified 2026-09-04. Remove entries here as they close.
 | 3 | ESL pinned to FS-1 | ESL tools (and `POST /v1/calls` if API Calling is re-enabled) fail when East FS-1 is down even though inbound rides FS-2. Fix option: healthz-aware ESL client fallback (`esl_client.py`). |
 | 4 | PDD is a proxy metric | `progress_timeout`-based PDD bounds are indirect; no true per-carrier PDD histogram yet. |
 | 5 | STIR verify canary | Own-crypto inbound verify deployed DARK; §6 canary (per implementation plan) pending before `STIR_SHAKEN_VERIFY=on`. |
-| 6 | `CLAUDE.md` machine-type drift | Root CLAUDE.md still lists `services` as e2-standard-4; actual is e2-highmem-4/32GB since 2026-09-02. |
+| 6 | ~~`CLAUDE.md` machine-type drift~~ **CLOSED** | Root CLAUDE.md now lists `services` as e2-highmem-4 (32 GB), matching §2.1 (closed 2026-10-24). |
 | 7 | Sinch termination sign-off | PCAP matrix to Sinch pending (2 term trunks × 6 SBC IPs, via ESL→direct SBC IP + `X-Carrier-IP`; beware silent Bandwidth fallback masking results). |
 | 8 | nginx verto proxy hardcode | `docker/ui/nginx.conf` `/ws/verto/` proxies to `10.142.0.100:8082` (East SBC-1) — breaks in West/Central; needs env-driven upstream (UCaaS-only surface, dormant on this branch). |
 | 9 | `zz_test_alert.tf` + `infra/test/` | Throwaway alert-pipeline test + scratch dir, untracked — delete or commit deliberately. |
@@ -1222,7 +1316,8 @@ Honest list — verified 2026-09-04. Remove entries here as they close.
 | 11 | `lb-health-check` tag hygiene | Shared-project tag overlap with the ted project flagged in the 2026-08 firewall audit — confirm scoping. |
 | 12 | CANCEL 481 covers flag-5 sources only | Post-flip CANCELs with no transaction get `481` only from static carrier IPs / FS / SIPp. Trunk PBXs and DB-admitted carriers (trust is per-INVITE) still get the silent drop → ~32s retransmit train. Fix: an htable of recently-authenticated sources consulted on bare CANCEL. |
 | 13 | re-INVITE/ACK still on stateful `t_relay` | Only BYE is forwarded statelessly. Safe under active/standby; a flip mid-transaction strands one session-timer refresh, which then tears the call down (no orphan). |
-| 14 | SBC failover drill logs empty | Runbook §8 has no rows despite drills run 2026-08-26/27 — no recorded evidence of established-call survival/teardown. Next drill per zone must fill the new evidence columns. |
+| 14 | SBC failover drill logs empty | Runbook §8 has no rows despite drills run 2026-08-26/27 — no recorded evidence of established-call survival/teardown. Next drill per zone must fill the new evidence columns. The FS media HA drill log (`docs/FS_MEDIA_HA_RUNBOOK.md` §9) is empty too. |
+| 15 | Infoblox DTC DNS steering not built | §3.5. `docs/INFOBLOX_DTC_CRAG_DNS_ASK.md` (`crag.granitevoip.com` Topology steering, Phase-2 `orig.granitevoip.com`) is still outstanding with Granite's DNS team; inbound relies on carrier-side multi-VIP distribution until it lands. |
 
 ---
 
@@ -1230,3 +1325,16 @@ Honest list — verified 2026-09-04. Remove entries here as they close.
 inventory + operator-confirmed live state (supersedes the 2026-05 design-era
 revision, which still described active/active SBCs, single-zone East, and
 "planned" replication/monitoring — all long since superseded by reality).
+
+**2026-10-24 doc pass.** This pass was checked against repo code only; it was
+**not** re-verified against production, so the "Last verified" date stays
+2026-09-04. Changes:
+- Carriers: Sinch is the 8YY and backup-LD termination carrier.
+- §3.5 DNS: today vs PLANNED Infoblox DTC.
+- Attempt loop: up to 8 table-driven attempts, with a 4-attempt legacy
+  fallback.
+- §1.4: drills noted as unlogged.
+- New §5.9 (voicemail).
+- §8.3: migrations 47–57.
+- §8.1: the `central_standby` slot loss and re-clone (owner-confirmed).
+- §12: #6 closed; #15 added.
