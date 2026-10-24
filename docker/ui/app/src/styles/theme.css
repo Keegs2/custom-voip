@@ -1,0 +1,472 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   THEME TOKENS — light / dark for the signed-in app (imported once, main.tsx)
+
+   The contract is docker/ui/CLAUDE.md § "Theming (light / dark)". Read it
+   before adding or changing a token.
+
+   Mechanism
+     <html data-theme="light|dark">   set before first paint by the inline
+                                      script in index.html, then owned by
+                                      ThemeProvider (contexts/ThemeContext).
+     <html data-landing>              set while the public landing page
+                                      (/ signed out) is on screen: it forces
+                                      the DARK set whatever the theme, so the
+                                      landing, its sign-in modal, the page
+                                      scrollbar and the body behind it stay
+                                      granite. (landing.css keeps its own
+                                      --lg-* palette; nothing here reaches
+                                      into it.)
+
+   Naming: --t-<role>[-<variant>]. Every token is defined for BOTH themes.
+   Sidebar-only tokens are --t-sb-*. Values are colors unless the comment
+   says "shorthand" (a full `background` value: gradients allowed) or
+   "shadow" (a full `box-shadow` list).
+
+   LIGHT is today's daylight console, value for value (the old --rcf-*
+   palette on .dl-scope now points here). DARK is the landing page's
+   granite: canvas #070c16, opaque raised panels with a hairline border and
+   a soft inner top highlight, cloud/mist text, azure fills with
+   azure-bright lines, links and glow.
+
+   Pinning a subtree: `data-force-theme="light|dark"` on any element
+   re-declares that theme's full set ON the element, so it and everything
+   inside use it whatever <html> says (the always-dark granite header
+   band, a print preview). Direct declarations beat inherited ones, so
+   specificity doesn't matter there.
+
+   Specificity at the root: the attribute selectors are (0,2,0), the bare
+   :root fallback (0,1,0); the DARK block comes last so [data-landing]
+   beats [data-theme="light"].
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── LIGHT (also the no-attribute fallback) ──────────────────────────── */
+:root,
+:root[data-theme='light'],
+[data-force-theme='light'] {
+  color-scheme: light;
+
+  /* Canvas + surfaces (elevation 0 → 2) */
+  --t-canvas: #f4f6f9;                 /* page paper (was --rcf-paper) */
+  --t-canvas-bg: #f4f6f9;              /* shorthand: canvas incl. any glow */
+  --t-surface: #ffffff;                /* cards, panels, tables (was --rcf-card) */
+  --t-panel-bg: #ffffff;               /* shorthand: a panel's full background */
+  --t-surface-raised: #ffffff;         /* menus, popovers, tooltips, modals */
+  --t-surface-sunken: #f7f9fc;         /* wells, code blocks, inset areas */
+  --t-tint: #f7f9fc;                   /* subtle fill inside a panel (was --rcf-tint) */
+  --t-tint-hover: #f2f7ff;             /* azure-leaning row hover (was --rcf-tint-hover) */
+  --t-hover: rgba(14, 23, 38, 0.04);   /* neutral hover wash, any surface */
+  --t-pressed: rgba(14, 23, 38, 0.07); /* neutral pressed wash */
+  --t-scrim: rgba(14, 23, 38, 0.34);   /* modal / drawer backdrop */
+
+  /* Lines */
+  --t-line: #e2e8f2;                   /* borders, dividers (was --rcf-line) */
+  --t-line-soft: #edf1f7;              /* row rules, skeletons (was --rcf-line-soft) */
+  --t-line-strong: #cdd8e8;            /* emphasised borders, chips, tracks */
+
+  /* Text */
+  --t-text: #0e1726;                   /* body + headings (was --rcf-ink) */
+  --t-text-strong: #0e1726;            /* display numerals, titles (white on dark) */
+  --t-text-soft: #46566f;              /* secondary (was --rcf-ink-soft) */
+  --t-text-dim: #5d6f8c;               /* labels, meta (was --rcf-ink-dim) */
+  --t-text-faint: #8b99b0;             /* decorative, disabled, hints */
+  --t-text-on-accent: #ffffff;         /* text on azure fills / solid status */
+
+  /* Accent — the brand blue family (index.css :root --brand-*) */
+  --t-accent: var(--brand-azure);              /* fills: buttons, selected, toggles */
+  --t-accent-hover: var(--brand-azure-deep);   /* fill hover / pressed */
+  --t-accent-line: var(--brand-azure);         /* indicators, active borders, ticks */
+  --t-accent-text: var(--brand-azure-deep);    /* links + accent text (5.4:1) */
+  --t-accent-text-hover: var(--brand-cobalt);
+  --t-accent-wash: #eef4fe;                    /* selected row / item background */
+  --t-accent-tint: rgba(47, 125, 246, 0.09);   /* chip / pill fill */
+  --t-accent-border: rgba(47, 125, 246, 0.24); /* chip / pill / selected border */
+  --t-cobalt: var(--brand-cobalt);             /* deep accent, gradients */
+
+  /* Focus */
+  --t-focus: var(--brand-azure);                       /* outline colour (2px) */
+  --t-focus-halo: 0 0 0 3px rgba(47, 125, 246, 0.16);  /* shadow: field focus */
+
+  /* Form fields */
+  --t-field-bg: #ffffff;
+  --t-field-border: #c9d5e6;
+  --t-field-border-hover: #a3b6d3;
+  --t-field-placeholder: #9aa9c0;
+  --t-field-disabled-bg: #f1f4f9;
+
+  /* Status — fg (text/icon on surface), bg + border (pill/banner), solid
+     (dots, bars, accent edges). quality.ts / callOutcome.ts tones. */
+  --t-ok-fg: #15803d;
+  --t-ok-bg: rgba(22, 163, 74, 0.1);
+  --t-ok-border: rgba(22, 163, 74, 0.26);
+  --t-ok-solid: #16a34a;
+  --t-warn-fg: #b45309;
+  --t-warn-bg: rgba(180, 83, 9, 0.09);
+  --t-warn-border: rgba(180, 83, 9, 0.26);
+  --t-warn-solid: #d97706;
+  --t-danger-fg: #b91c1c;
+  --t-danger-bg: rgba(220, 38, 38, 0.07);
+  --t-danger-border: rgba(220, 38, 38, 0.26);
+  --t-danger-solid: #dc2626;
+  --t-info-fg: var(--brand-azure-deep);
+  --t-info-bg: rgba(47, 125, 246, 0.09);
+  --t-info-border: rgba(47, 125, 246, 0.24);
+  --t-info-solid: var(--brand-azure);
+  --t-neutral-fg: #5d6f8c;
+  --t-neutral-bg: rgba(93, 111, 140, 0.08);
+  --t-neutral-border: rgba(93, 111, 140, 0.2);
+  --t-neutral-solid: #8b99b0;
+
+  /* Categorical hues (SIP ladder roles, product tags) — fg strength */
+  --t-violet: #7c3aed;
+  --t-teal: #0e7490;
+
+  /* Elevation (shadows) */
+  --t-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --t-shadow-xs: 0 1px 2px rgba(14, 23, 38, 0.05);
+  --t-shadow-card:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(14, 23, 38, 0.06),
+    0 10px 28px -12px rgba(14, 23, 38, 0.18);
+  --t-shadow-card-hover:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 4px rgba(14, 23, 38, 0.05),
+    0 18px 36px -14px rgba(29, 99, 221, 0.32);
+  --t-shadow-pop:
+    0 2px 6px rgba(14, 23, 38, 0.06),
+    0 14px 32px -10px rgba(14, 23, 38, 0.22);
+  --t-shadow-modal:
+    0 4px 12px rgba(14, 23, 38, 0.08),
+    0 30px 80px -24px rgba(14, 23, 38, 0.35);
+
+  /* Glow — dark-theme light effects; transparent no-ops on light */
+  --t-glow: 0 0 0 0 transparent;               /* shadow layer: azure bloom */
+  --t-glow-text: none;                         /* text-shadow for accent numerals */
+  --t-keyline: none;                           /* shorthand: 1px top keyline */
+
+  /* Inverse band — the granite header strip (DashboardHeader). Dark in BOTH
+     themes; on dark it is set apart by its edge + keyline instead. */
+  --t-band-bg: linear-gradient(180deg, #0c1424 0%, #070c16 100%);
+  --t-band-edge: rgba(7, 12, 22, 0.9);
+  --t-band-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 2px 4px rgba(7, 12, 22, 0.18),
+    0 22px 44px -20px rgba(7, 12, 22, 0.55);
+  --t-band-text: #e8eef9;
+  --t-band-text-strong: #ffffff;
+  --t-band-text-soft: #b4c2d9;
+  --t-band-text-dim: #93a4c0;
+  --t-band-line: rgba(255, 255, 255, 0.1);
+  --t-band-tint: rgba(255, 255, 255, 0.05);
+  --t-band-accent: var(--brand-azure-bright);
+
+  /* Charts (screen only — the Reporting PDF keeps print hex) */
+  --t-chart-1: var(--brand-azure);             /* primary series */
+  --t-chart-2: var(--brand-cobalt);            /* secondary series */
+  --t-chart-3: var(--brand-azure-bright);      /* tertiary (usually dashed) */
+  --t-chart-neutral: #c3cede;                  /* "didn't happen" (missed calls) */
+  --t-chart-grid: rgba(14, 23, 38, 0.07);
+  --t-chart-axis: rgba(14, 23, 38, 0.16);
+  --t-chart-label: #5d6f8c;
+  --t-chart-label-strong: #0e1726;
+  --t-chart-hover-band: rgba(47, 125, 246, 0.07);
+  --t-chart-tooltip-bg: #ffffff;
+  --t-chart-tooltip-border: #e2e8f2;
+  --t-chart-tooltip-text: #0e1726;
+
+  /* Document chrome */
+  --t-selection-bg: rgba(47, 125, 246, 0.2);
+  --t-selection-fg: #0e1726;
+  --t-scrollbar: #b7c7dd;
+  --t-scrollbar-hover: #94a9c9;
+
+  /* ── Sidebar (light: white panel in the daylight family) ── */
+  --t-sb-bg: #ffffff;                          /* shorthand */
+  --t-sb-bg-solid: #ffffff;                    /* mobile topbar, solid fills */
+  --t-sb-border: #e2e8f2;
+  --t-sb-divider: #e2e8f2;
+  --t-sb-glow: rgba(47, 125, 246, 0.06);       /* brand-area radial */
+  --t-sb-wordmark: #0e1726;
+  --t-sb-wordmark-dim: #5d6f8c;
+  --t-sb-mark-glow: drop-shadow(0 1px 2px rgba(14, 23, 38, 0.18)); /* filter */
+  --t-sb-text: #46566f;                        /* resting nav label */
+  --t-sb-text-hover: #0e1726;
+  --t-sb-text-active: #0e1726;
+  --t-sb-hover: rgba(14, 23, 38, 0.04);
+  --t-sb-icon: #5d6f8c;
+  --t-sb-icon-bg: #f4f6f9;
+  --t-sb-icon-border: #e2e8f2;
+  --t-sb-icon-hover: #0e1726;
+  --t-sb-icon-bg-hover: #eef3fa;
+  --t-sb-icon-border-hover: #d5deeb;
+  --t-sb-head: #5d6f8c;                        /* group header (PRODUCTS …) */
+  --t-sb-head-hover: #0e1726;
+  --t-sb-subhead: #8b99b0;
+  --t-sb-muted: #7d8ba3;                       /* Coming Soon label + header */
+  --t-sb-muted-hover: #46566f;
+  --t-sb-muted-icon: #9aa9c0;
+  --t-sb-muted-icon-bg: #f7f9fc;
+  --t-sb-muted-icon-border: #edf1f7;
+  --t-sb-muted-hover-bg: rgba(14, 23, 38, 0.035);
+  --t-sb-muted-active-bg: #f4f6f9;
+  --t-sb-muted-active-border: #e2e8f2;
+  --t-sb-muted-active-text: #46566f;
+  --t-sb-pill-text: #7d8ba3;                   /* "Soon" pill */
+  --t-sb-pill-bg: #f4f6f9;
+  --t-sb-pill-border: #e2e8f2;
+  --t-sb-accent-azure: var(--brand-azure);     /* per-item accents (active) */
+  --t-sb-accent-green: #15803d;
+  --t-sb-accent-amber: #b45309;
+  --t-sb-card-bg: #f7f9fc;                     /* user footer card */
+  --t-sb-card-border: #e2e8f2;
+  --t-sb-name: #0e1726;
+  --t-sb-meta: #5d6f8c;
+  --t-sb-avatar-bg: linear-gradient(135deg, rgba(47, 125, 246, 0.16) 0%, rgba(47, 125, 246, 0.07) 100%);
+  --t-sb-avatar-border: rgba(47, 125, 246, 0.3);
+  --t-sb-avatar-text: var(--brand-azure-deep);
+  --t-sb-btn-border: #e2e8f2;                  /* footer icon buttons */
+  --t-sb-btn-icon: #5d6f8c;
+  --t-sb-scrollbar: #d5deeb;
+  --t-sb-field-bg: #ffffff;                    /* sidebar sign-in form */
+  --t-sb-field-border: #c9d5e6;
+  --t-sb-field-text: #0e1726;
+  /* Customer-view (amber) banner + View-as control */
+  --t-sb-banner-bg: #fff6e5;
+  --t-sb-banner-border: rgba(217, 119, 6, 0.38);
+  --t-sb-banner-text: #92400e;
+  --t-sb-banner-icon: #b45309;
+  --t-sb-banner-label: #92400e;
+  --t-sb-banner-pill-bg: rgba(217, 119, 6, 0.12);
+  --t-sb-banner-pill-border: rgba(217, 119, 6, 0.32);
+  --t-sb-banner-field-bg: #ffffff;
+  --t-sb-banner-field-text: #78350f;
+  --t-sb-banner-field-border: rgba(217, 119, 6, 0.45);
+  --t-sb-banner-field-border-hover: #d97706;
+  --t-sb-banner-field-focus: #b45309;
+  --t-sb-banner-field-halo: rgba(217, 119, 6, 0.22);
+  --t-sb-banner-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='none' stroke='%23b45309' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 4l3 3 3-3'/%3E%3C/svg%3E");
+  --t-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='none' stroke='%231d63dd' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 4l3 3 3-3'/%3E%3C/svg%3E");
+}
+
+/* ─── DARK (and the landing page, whatever the theme) ─────────────────── */
+:root[data-theme='dark'],
+:root[data-landing],
+[data-force-theme='dark'] {
+  color-scheme: dark;
+
+  /* Canvas + surfaces. Panels are OPAQUE (sticky headers, nested cards and
+     popovers must not show what scrolls beneath); their lift comes from the
+     hairline border, the inner top highlight and the deep shadow. */
+  --t-canvas: #070c16;                 /* granite (= --lg-granite) */
+  --t-canvas-bg:
+    radial-gradient(1200px 560px at 78% -10%, rgba(47, 125, 246, 0.09), transparent 64%),
+    #070c16;
+  --t-surface: #0f1727;
+  --t-panel-bg:
+    linear-gradient(180deg, rgba(148, 170, 214, 0.05) 0%, rgba(148, 170, 214, 0) 52%),
+    #0f1727;
+  --t-surface-raised: #151f33;
+  --t-surface-sunken: #0a101c;
+  --t-tint: #121b2d;
+  --t-tint-hover: #142036;
+  --t-hover: rgba(151, 168, 198, 0.08);
+  --t-pressed: rgba(151, 168, 198, 0.13);
+  --t-scrim: rgba(3, 7, 15, 0.72);
+
+  /* Lines — translucent hairlines (= --lg-hairline family) */
+  --t-line: rgba(151, 168, 198, 0.16);
+  --t-line-soft: rgba(151, 168, 198, 0.1);
+  --t-line-strong: rgba(151, 168, 198, 0.28);
+
+  /* Text (= --lg-text / --lg-text-2 / --lg-cloud) */
+  --t-text: #f2f6ff;
+  --t-text-strong: #ffffff;
+  --t-text-soft: #c6d3ea;
+  --t-text-dim: #97a8c6;
+  --t-text-faint: #6f7f9d;
+  --t-text-on-accent: #ffffff;
+
+  /* Accent — azure fills stay azure (white labels need the depth);
+     lines, links and highlights go azure-bright, as on the landing. */
+  --t-accent: var(--brand-azure);
+  --t-accent-hover: var(--brand-azure-deep);
+  --t-accent-line: var(--brand-azure-bright);
+  --t-accent-text: var(--brand-azure-bright);
+  --t-accent-text-hover: #8ab6ff;
+  --t-accent-wash: #172743;
+  --t-accent-tint: rgba(79, 146, 255, 0.14);
+  --t-accent-border: rgba(79, 146, 255, 0.36);
+  --t-cobalt: #6d8ff0;                 /* cobalt lifted to read on granite */
+
+  --t-focus: var(--brand-azure-bright);
+  --t-focus-halo: 0 0 0 3px rgba(79, 146, 255, 0.3);
+
+  --t-field-bg: #0a101c;               /* the landing's input well */
+  --t-field-border: rgba(151, 168, 198, 0.28);
+  --t-field-border-hover: rgba(151, 168, 198, 0.46);
+  --t-field-placeholder: #6f7f9d;
+  --t-field-disabled-bg: #0c1220;
+
+  --t-ok-fg: #6ee7b7;
+  --t-ok-bg: rgba(52, 211, 153, 0.12);
+  --t-ok-border: rgba(52, 211, 153, 0.34);
+  --t-ok-solid: #34d399;
+  --t-warn-fg: #fbbf24;
+  --t-warn-bg: rgba(245, 158, 11, 0.12);
+  --t-warn-border: rgba(245, 158, 11, 0.36);
+  --t-warn-solid: #f59e0b;
+  --t-danger-fg: #f87171;
+  --t-danger-bg: rgba(248, 113, 113, 0.12);
+  --t-danger-border: rgba(248, 113, 113, 0.36);
+  --t-danger-solid: #ef4444;
+  --t-info-fg: #a9c8ff;
+  --t-info-bg: rgba(79, 146, 255, 0.13);
+  --t-info-border: rgba(79, 146, 255, 0.38);
+  --t-info-solid: var(--brand-azure-bright);
+  --t-neutral-fg: #a9b6cf;
+  --t-neutral-bg: rgba(151, 168, 198, 0.08);
+  --t-neutral-border: rgba(151, 168, 198, 0.24);
+  --t-neutral-solid: #6f7f9d;
+
+  --t-violet: #b49cfc;
+  --t-teal: #5eead4;
+
+  --t-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --t-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --t-shadow-card:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 24px 48px -30px rgba(0, 0, 0, 0.85);
+  --t-shadow-card-hover:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 2px 4px rgba(0, 0, 0, 0.4),
+    0 22px 44px -18px rgba(47, 125, 246, 0.34);
+  --t-shadow-pop:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 2px 6px rgba(0, 0, 0, 0.45),
+    0 18px 44px -12px rgba(0, 0, 0, 0.8);
+  --t-shadow-modal:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 40px 90px -30px rgba(0, 0, 0, 0.85);
+
+  --t-glow: 0 0 24px -6px rgba(79, 146, 255, 0.55);
+  --t-glow-text: 0 0 24px rgba(47, 125, 246, 0.32);
+  --t-keyline: linear-gradient(90deg, transparent, var(--brand-azure-bright), transparent);
+
+  --t-band-bg:
+    radial-gradient(120% 140% at 50% -40%, rgba(47, 125, 246, 0.16), transparent 62%),
+    linear-gradient(180deg, #111b2f 0%, #0c1424 100%);
+  --t-band-edge: rgba(151, 168, 198, 0.2);
+  --t-band-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 2px 4px rgba(0, 0, 0, 0.4),
+    0 22px 44px -20px rgba(0, 0, 0, 0.8);
+  --t-band-text: #e8eef9;
+  --t-band-text-strong: #ffffff;
+  --t-band-text-soft: #b4c2d9;
+  --t-band-text-dim: #93a4c0;
+  --t-band-line: rgba(255, 255, 255, 0.1);
+  --t-band-tint: rgba(255, 255, 255, 0.05);
+  --t-band-accent: var(--brand-azure-bright);
+
+  --t-chart-1: var(--brand-azure-bright);
+  --t-chart-2: #a3c2ff;
+  --t-chart-3: var(--brand-azure);
+  --t-chart-neutral: #56647e;
+  --t-chart-grid: rgba(151, 168, 198, 0.1);
+  --t-chart-axis: rgba(151, 168, 198, 0.28);
+  --t-chart-label: #97a8c6;
+  --t-chart-label-strong: #f2f6ff;
+  --t-chart-hover-band: rgba(79, 146, 255, 0.1);
+  --t-chart-tooltip-bg: #151f33;
+  --t-chart-tooltip-border: rgba(151, 168, 198, 0.22);
+  --t-chart-tooltip-text: #f2f6ff;
+
+  /* = the pre-theme globals, so the landing (always dark) is unchanged */
+  --t-selection-bg: rgba(47, 125, 246, 0.28);
+  --t-selection-fg: #e2e8f0;
+  --t-scrollbar: #2a2f45;
+  --t-scrollbar-hover: #363c57;
+
+  /* ── Sidebar (dark: TODAY's sidebar colour; labels lifted to AA) ── */
+  --t-sb-bg: linear-gradient(180deg, #0c0e16 0%, #0a0c13 100%);
+  --t-sb-bg-solid: #0a0c12;
+  --t-sb-border: rgba(42, 47, 69, 0.7);
+  --t-sb-divider: rgba(42, 47, 69, 0.8);
+  --t-sb-glow: rgba(47, 125, 246, 0.1);
+  --t-sb-wordmark: #f2f6ff;
+  --t-sb-wordmark-dim: #97a8c6;
+  --t-sb-mark-glow: drop-shadow(0 0 8px rgba(47, 125, 246, 0.35));
+  --t-sb-text: #74839b;
+  --t-sb-text-hover: #b4c2d9;
+  --t-sb-text-active: #f1f5f9;
+  --t-sb-hover: rgba(255, 255, 255, 0.06);
+  --t-sb-icon: #64748b;
+  --t-sb-icon-bg: rgba(255, 255, 255, 0.04);
+  --t-sb-icon-border: rgba(255, 255, 255, 0.06);
+  --t-sb-icon-hover: #b4c2d9;
+  --t-sb-icon-bg-hover: rgba(255, 255, 255, 0.07);
+  --t-sb-icon-border-hover: rgba(255, 255, 255, 0.12);
+  --t-sb-head: #6e7d95;
+  --t-sb-head-hover: #b4c2d9;
+  --t-sb-subhead: #56647b;
+  --t-sb-muted: #56647b;
+  --t-sb-muted-hover: #8291a9;
+  --t-sb-muted-icon: #475569;
+  --t-sb-muted-icon-bg: rgba(255, 255, 255, 0.02);
+  --t-sb-muted-icon-border: rgba(255, 255, 255, 0.04);
+  --t-sb-muted-hover-bg: rgba(255, 255, 255, 0.03);
+  --t-sb-muted-active-bg: rgba(255, 255, 255, 0.045);
+  --t-sb-muted-active-border: rgba(255, 255, 255, 0.07);
+  --t-sb-muted-active-text: #a3b0c4;
+  --t-sb-pill-text: #56647b;
+  --t-sb-pill-bg: rgba(148, 163, 184, 0.06);
+  --t-sb-pill-border: rgba(148, 163, 184, 0.12);
+  --t-sb-accent-azure: var(--brand-azure);
+  --t-sb-accent-green: #22c55e;
+  --t-sb-accent-amber: #fbbf24;
+  --t-sb-card-bg: rgba(255, 255, 255, 0.02);
+  --t-sb-card-border: rgba(42, 47, 69, 0.4);
+  --t-sb-name: #a3b0c4;
+  --t-sb-meta: #6e7d95;
+  --t-sb-avatar-bg: linear-gradient(135deg, rgba(47, 125, 246, 0.3) 0%, rgba(47, 125, 246, 0.15) 100%);
+  --t-sb-avatar-border: rgba(47, 125, 246, 0.3);
+  --t-sb-avatar-text: var(--brand-azure-bright);
+  --t-sb-btn-border: rgba(42, 47, 69, 0.55);
+  --t-sb-btn-icon: #74839b;
+  --t-sb-scrollbar: rgba(42, 47, 69, 0.6);
+  --t-sb-field-bg: rgba(13, 15, 21, 0.8);
+  --t-sb-field-border: rgba(42, 47, 69, 0.8);
+  --t-sb-field-text: #e2e8f0;
+  --t-sb-banner-bg: rgba(245, 158, 11, 0.12);
+  --t-sb-banner-border: rgba(245, 158, 11, 0.35);
+  --t-sb-banner-text: #f59e0b;
+  --t-sb-banner-icon: #f59e0b;
+  --t-sb-banner-label: rgba(251, 191, 36, 0.8);
+  --t-sb-banner-pill-bg: rgba(245, 158, 11, 0.15);
+  --t-sb-banner-pill-border: rgba(245, 158, 11, 0.3);
+  --t-sb-banner-field-bg: rgba(13, 15, 21, 0.85);
+  --t-sb-banner-field-text: #fde68a;
+  --t-sb-banner-field-border: rgba(245, 158, 11, 0.4);
+  --t-sb-banner-field-border-hover: rgba(245, 158, 11, 0.65);
+  --t-sb-banner-field-focus: #f59e0b;
+  --t-sb-banner-field-halo: rgba(245, 158, 11, 0.25);
+  --t-sb-banner-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='none' stroke='%23f59e0b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 4l3 3 3-3'/%3E%3C/svg%3E");
+  --t-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='none' stroke='%234f92ff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 4l3 3 3-3'/%3E%3C/svg%3E");
+}
+
+/* ─── Theme switch: one cross-fade, no per-element races ─────────────────
+   ThemeProvider adds .theme-switching to <html> for two frames around a
+   switch so the dozens of `transition: background …` rules don't animate
+   out of step (the View Transition, where supported, does the fade). */
+:root.theme-switching *,
+:root.theme-switching *::before,
+:root.theme-switching *::after {
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}

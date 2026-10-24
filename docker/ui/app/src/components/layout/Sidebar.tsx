@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type FormEvent } from 'react';
+import { useState, useEffect, useCallback, type CSSProperties, type FormEvent } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
@@ -7,18 +7,37 @@ import {
   IconRCF, IconTrunk, IconAPI, IconVoicemail, IconDocs,
   IconSignal, IconTroubleshoot,
 } from '../icons/ProductIcons';
-import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen, BarChart3, LayoutDashboard } from 'lucide-react';
+import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen, BarChart3, LayoutDashboard, LogOut, Menu, X } from 'lucide-react';
 import { CustomerPreviewPicker } from '../preview/CustomerPreviewPicker';
 import { API_CALLING_ENABLED } from '../../config/features';
 import { canSeeReporting } from '../../utils/reportingAccess';
 import { staffScope, tenantScope, useVoicemailSummary } from '../../pages/voicemail/voicemailData';
+import { T } from '../../styles/theme';
+import { ThemeToggle } from './ThemeToggle';
+
+/* ─────────────────────────────────────────────────────────────
+   Every colour here is a theme token: the rows, groups, banner and
+   footer are classes in styles/app-shell.css (`sb-*`), and the only
+   inline colour is each row's product accent (`--sb-accent`, a
+   --t-sb-accent-* token). Light = a white daylight panel; dark = the
+   original dark shell. See docker/ui/CLAUDE.md "Theming".
+   ───────────────────────────────────────────────────────────── */
 
 /* ─── Types ───────────────────────────────────────────────── */
+
+/** Product accent of a live nav row (active wash, icon, dot). */
+type SidebarAccent = 'azure' | 'green' | 'amber';
+
+const ACCENT_VAR: Record<SidebarAccent, string> = {
+  azure: T.sbAccentAzure,
+  green: T.sbAccentGreen,
+  amber: T.sbAccentAmber,
+};
 
 interface NavItemDef {
   label: string;
   to: string;
-  color: string;
+  accent: SidebarAccent;
   icon: React.ReactNode;
   accountTypes?: string[];
   adminOnly?: boolean;
@@ -33,7 +52,7 @@ interface NavItemDef {
 // Live products only. SIP Trunking moved to Coming Soon (2026-10) — the
 // /trunks route still works and is reached from its linked Coming Soon row.
 const allProductNavItems: NavItemDef[] = [
-  { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', color: '#2f7df6', accountTypes: ['rcf', 'hybrid'] },
+  { label: 'RCF', icon: <IconRCF size={18} />, to: '/rcf', accent: 'azure', accountTypes: ['rcf', 'hybrid'] },
 ];
 
 // Visual Voicemail is live per ACCOUNT, not per account type: it joins
@@ -44,7 +63,7 @@ const voicemailNavItem: NavItemDef = {
   label: 'Visual Voicemail',
   icon: <IconVoicemail size={18} />,
   to: '/voicemail',
-  color: '#2f7df6',
+  accent: 'azure',
 };
 const VOICEMAIL_SOON_LABEL = 'Visual Voicemail';
 
@@ -59,7 +78,7 @@ const dashboardNavItem: NavItemDef = {
   label: 'Dashboard',
   icon: <LayoutDashboard size={18} />,
   to: '/dashboard',
-  color: '#2f7df6',
+  accent: 'azure',
 };
 
 /* ─── Insights nav items ──────────────────────────────────── */
@@ -70,7 +89,7 @@ const reportingNavItem: NavItemDef = {
   label: 'Reporting',
   icon: <BarChart3 size={18} />,
   to: '/reporting',
-  color: '#2f7df6',
+  accent: 'azure',
   isActiveFn: (p) => p.startsWith('/reporting'),
 };
 
@@ -155,26 +174,35 @@ function saveGroupState(state: Record<string, boolean>): void {
   }
 }
 
-/* ─── Icons ───────────────────────────────────────────────── */
+/* ─── Brand lockup — the landing nav's cube mark + wide wordmark ── */
 
-const IconSignOut = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 14, height: 14 }}>
-    <path d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
+/**
+ * The transparent cube cut-out (crag-mark.*) + "GRANITE CRAG" set wide,
+ * as on the landing page's top nav. Legible on the white light-theme
+ * panel and on the dark shell alike (the old /crag.png is a dark square).
+ */
+function BrandLockup() {
+  return (
+    <>
+      <picture>
+        <source srcSet="/crag-mark.webp" type="image/webp" />
+        <img src="/crag-mark.png" alt="" className="sb-brand-mark" width={32} height={32} decoding="async" />
+      </picture>
+      <span className="sb-wordmark">
+        <span className="sb-wordmark-dim">GRANITE</span> CRAG
+      </span>
+    </>
+  );
+}
 
 /* ─── Inline button spinner ───────────────────────────────── */
 
 function SpinnerInline() {
+  // Ring + arc in the label colour (currentColor = white on the azure button).
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      style={{ width: 13, height: 13, animation: 'sidebar-spin 0.75s linear infinite', flexShrink: 0 }}
-    >
-      <style>{`@keyframes sidebar-spin { to { transform: rotate(360deg); } }`}</style>
-      <circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,0.25)" strokeWidth="3" />
-      <path d="M21 12a9 9 0 0 0-9-9" stroke="white" strokeWidth="3" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" fill="none" className="sb-spin" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity={0.25} strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
   );
 }
@@ -189,8 +217,6 @@ function SidebarLoginForm() {
   const [password, setPassword]     = useState('');
   const [error, setError]           = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [emailFocused, setEmailFocused] = useState(false);
-  const [passFocused, setPassFocused]   = useState(false);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -217,114 +243,40 @@ function SidebarLoginForm() {
     }
   }
 
-  const inputBase: React.CSSProperties = {
-    width: '100%',
-    boxSizing: 'border-box',
-    background: 'rgba(13,15,21,0.8)',
-    borderRadius: 8,
-    padding: '8px 10px',
-    fontSize: '0.78rem',
-    color: '#e2e8f0',
-    outline: 'none',
-    transition: 'border-color 0.15s, box-shadow 0.15s',
-  };
-
   return (
-    <div style={{ padding: '14px 16px 16px', flexShrink: 0 }}>
-      <p
-        style={{
-          fontSize: '0.6rem',
-          fontWeight: 600,
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase',
-          color: '#334155',
-          marginBottom: 10,
-          userSelect: 'none',
-        }}
-      >
-        Sign In
-      </p>
+    <div className="sb-login">
+      <p className="sb-login-title">Sign In</p>
 
-      <form onSubmit={handleSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {/* Email */}
+      <form onSubmit={handleSubmit} noValidate className="sb-login-form">
         <input
           type="email"
           autoComplete="email"
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          onFocus={() => setEmailFocused(true)}
-          onBlur={() => setEmailFocused(false)}
           placeholder="Email"
-          style={{
-            ...inputBase,
-            border: `1px solid ${emailFocused ? '#2f7df6' : 'rgba(42,47,69,0.8)'}`,
-            boxShadow: emailFocused ? '0 0 0 2px rgba(47,125,246,0.12)' : 'none',
-          }}
+          aria-label="Email"
+          className="sb-login-field"
         />
 
-        {/* Password */}
         <input
           type="password"
           autoComplete="current-password"
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          onFocus={() => setPassFocused(true)}
-          onBlur={() => setPassFocused(false)}
           placeholder="Password"
-          style={{
-            ...inputBase,
-            border: `1px solid ${passFocused ? '#2f7df6' : 'rgba(42,47,69,0.8)'}`,
-            boxShadow: passFocused ? '0 0 0 2px rgba(47,125,246,0.12)' : 'none',
-          }}
+          aria-label="Password"
+          className="sb-login-field"
         />
 
-        {/* Error */}
         {error && (
-          <div
-            role="alert"
-            style={{
-              fontSize: '0.7rem',
-              color: '#f87171',
-              lineHeight: 1.45,
-              padding: '6px 8px',
-              borderRadius: 6,
-              background: 'rgba(239,68,68,0.07)',
-              border: '1px solid rgba(239,68,68,0.18)',
-            }}
-          >
+          <div role="alert" className="sb-login-error">
             {error}
           </div>
         )}
 
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            borderRadius: 8,
-            background: isSubmitting
-              ? 'rgba(47,125,246,0.45)'
-              : 'var(--brand-btn-bg)',
-            border: 'none',
-            color: '#fff',
-            fontSize: '0.78rem',
-            fontWeight: 700,
-            letterSpacing: '-0.01em',
-            cursor: isSubmitting ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            boxShadow: isSubmitting
-              ? 'none'
-              : 'var(--brand-btn-shadow)',
-            transition: 'background 0.15s, box-shadow 0.15s',
-          }}
-        >
+        <button type="submit" disabled={isSubmitting} className="sb-login-submit">
           {isSubmitting ? (
             <>
               <SpinnerInline />
@@ -348,7 +300,7 @@ function SoonBadge() {
 
 /**
  * Pre-launch product row. Deliberately DARKENED at rest (dim icon + label +
- * slate "Soon" pill — see .sb-soon-row in index.css) so it always reads as
+ * quiet "Soon" pill — see .sb-soon-row in styles/app-shell.css) so it reads as
  * subordinate to live nav items. No product accent anywhere: the linked
  * variant gets only a faint neutral hover lift, and even its active state
  * (you are on the preview page) is a quiet neutral wash, never the live
@@ -359,35 +311,6 @@ function ComingSoonNavItem({ item, onNavigate }: { item: ComingSoonItemDef; onNa
   const { pathname } = useLocation();
   const isActive = isSoonItemActive(item, pathname);
 
-  const rowStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '5px 10px 5px 14px',
-    borderRadius: 10,
-    overflow: 'hidden',
-    fontSize: '0.76rem',
-    fontWeight: 500,
-    letterSpacing: '-0.01em',
-    userSelect: 'none',
-    textDecoration: 'none',
-  };
-  const iconStyle: React.CSSProperties = {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  };
-  const labelStyle: React.CSSProperties = {
-    flex: 1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  };
-
   // Linked variant — a real NavLink to the product's coming-soon preview page.
   if (item.to) {
     return (
@@ -396,11 +319,10 @@ function ComingSoonNavItem({ item, onNavigate }: { item: ComingSoonItemDef; onNa
         onClick={onNavigate}
         title={`${item.label} — coming soon (preview)`}
         aria-current={isActive ? 'page' : undefined}
-        className={cn('block no-underline sb-soon-row sb-soon-row--link', isActive && 'sb-soon-row--active')}
-        style={rowStyle}
+        className={cn('sb-soon-row sb-soon-row--link', isActive && 'sb-soon-row--active')}
       >
-        <span className="sb-soon-icon" style={iconStyle}>{item.icon}</span>
-        <span style={labelStyle}>{item.label}</span>
+        <span className="sb-soon-icon">{item.icon}</span>
+        <span className="sb-nav-label">{item.label}</span>
         <SoonBadge />
       </NavLink>
     );
@@ -408,9 +330,9 @@ function ComingSoonNavItem({ item, onNavigate }: { item: ComingSoonItemDef; onNa
 
   // Static variant — no page yet; non-interactive.
   return (
-    <div title={`${item.label} — coming soon`} className="sb-soon-row" style={{ ...rowStyle, cursor: 'default' }}>
-      <span className="sb-soon-icon" style={iconStyle}>{item.icon}</span>
-      <span style={labelStyle}>{item.label}</span>
+    <div title={`${item.label} — coming soon`} className="sb-soon-row">
+      <span className="sb-soon-icon">{item.icon}</span>
+      <span className="sb-nav-label">{item.label}</span>
       <SoonBadge />
     </div>
   );
@@ -427,111 +349,35 @@ interface SidebarNavItemProps {
 function SidebarNavItem({ item, onNavigate, small }: SidebarNavItemProps) {
   const location = useLocation();
   const customActive = item.isActiveFn ? item.isActiveFn(location.pathname) : undefined;
+  // The row's product accent, consumed by every active/hover rule in CSS.
+  const accentStyle = { '--sb-accent': ACCENT_VAR[item.accent] } as CSSProperties;
 
   return (
     <NavLink
       to={item.to}
       end={!item.isActiveFn}
       onClick={onNavigate}
-      className="block no-underline sb-nav-row"
-      style={({ isActive: routerActive }) => {
-        const isActive = customActive ?? routerActive;
-        return {
-          display: 'flex',
-          alignItems: 'center',
-          gap: small ? 8 : 10,
-          padding: small ? '5px 10px 5px 14px' : '7px 10px',
-          borderRadius: 10,
-          overflow: 'hidden',
-          fontSize: small ? '0.76rem' : '0.825rem',
-          fontWeight: isActive ? 600 : 500,
-          letterSpacing: '-0.01em',
-          cursor: 'pointer',
-          userSelect: 'none',
-          textDecoration: 'none',
-          // Non-active resting/hover colors live in CSS (.sb-nav-row in
-          // index.css) so :hover / :focus-visible can restyle them — inline
-          // styles would win over the class. Active keeps its exact inline
-          // treatment (gradient + border + glow), which also beats the hover
-          // tint, so hovering an active item changes nothing.
-          ['--sb-accent-tint' as string]: `${item.color}14`,
-          color: isActive ? '#f1f5f9' : undefined,
-          background: isActive
-            ? `linear-gradient(135deg, ${item.color}22 0%, ${item.color}10 100%)`
-            : undefined,
-          border: isActive
-            ? `1px solid ${item.color}40`
-            : '1px solid transparent',
-          boxShadow: isActive
-            ? `0 2px 12px -4px ${item.color}40`
-            : 'none',
-        };
-      }}
+      className={({ isActive: routerActive }) =>
+        cn(
+          'sb-nav-row',
+          small && 'sb-nav-row--small',
+          (customActive ?? routerActive) && 'sb-nav-row--active',
+        )
+      }
+      style={accentStyle}
     >
       {({ isActive: routerActive }) => {
         const isActive = customActive ?? routerActive;
         return (
           <>
-            <span
-              className="sb-nav-icon"
-              style={{
-                width: small ? 24 : 28,
-                height: small ? 24 : 28,
-                borderRadius: small ? 6 : 7,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                // Non-active swatch colors come from .sb-nav-icon (index.css)
-                // so the row's :hover can brighten them; active stays inline.
-                ...(isActive
-                  ? {
-                      background: `linear-gradient(135deg, ${item.color}30 0%, ${item.color}18 100%)`,
-                      border: `1px solid ${item.color}40`,
-                      color: item.color,
-                    }
-                  : null),
-              }}
-            >
-              {item.icon}
-            </span>
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {item.label}
-            </span>
+            <span className="sb-nav-icon">{item.icon}</span>
+            <span className="sb-nav-label">{item.label}</span>
             {item.badge !== undefined && item.badge > 0 && (
-              <span
-                aria-label={`${item.badge} unread`}
-                style={{
-                  minWidth: 18,
-                  height: 18,
-                  padding: '0 5px',
-                  borderRadius: 999,
-                  background: 'var(--brand-azure)',
-                  color: '#ffffff',
-                  fontSize: '0.62rem',
-                  fontWeight: 700,
-                  lineHeight: '18px',
-                  textAlign: 'center',
-                  fontVariantNumeric: 'tabular-nums',
-                  flexShrink: 0,
-                }}
-              >
+              <span className="sb-count" aria-label={`${item.badge} unread`}>
                 {item.badge > 99 ? '99+' : item.badge}
               </span>
             )}
-            {/* Active dot */}
-            {isActive && (
-              <span
-                style={{
-                  width: 5,
-                  height: 5,
-                  borderRadius: '50%',
-                  background: item.color,
-                  flexShrink: 0,
-                  boxShadow: `0 0 6px ${item.color}`,
-                }}
-              />
-            )}
+            {isActive && <span className="sb-dot" aria-hidden="true" />}
           </>
         );
       }}
@@ -568,34 +414,17 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to, mut
   };
 
   return (
-    <div style={{ marginBottom: 4 }}>
-      {/* Group header */}
+    <div className="sb-group">
+      {/* Group header — resting/hover colours live in CSS (.sb-group-head) */}
       <button
         type="button"
         onClick={handleClick}
         aria-expanded={isOpen}
         title={to && isOpen ? `Go to ${label}` : undefined}
-        // Resting/hover colors live in CSS (.sb-group-head in index.css) so
-        // :hover / :focus-visible share one treatment across all nav rows.
         className={muted ? 'sb-group-head sb-group-head--muted' : 'sb-group-head'}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 7,
-          width: '100%',
-          padding: '5px 10px',
-          borderRadius: 7,
-          border: 'none',
-          cursor: 'pointer',
-          userSelect: 'none',
-          fontSize: '0.6rem',
-          fontWeight: 600,
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase',
-        }}
       >
-        <span style={{ display: 'flex', alignItems: 'center', color: 'inherit' }}>{icon}</span>
-        <span style={{ flex: 1, textAlign: 'left' }}>{label}</span>
+        <span className="sb-group-head-icon">{icon}</span>
+        <span className="sb-group-head-label">{label}</span>
         {/* Small arrow indicator when this group is navigable and expanded */}
         {to && isOpen && (
           <svg
@@ -605,14 +434,8 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to, mut
             strokeWidth={2}
             strokeLinecap="round"
             strokeLinejoin="round"
-            style={{
-              width: 10,
-              height: 10,
-              flexShrink: 0,
-              color: '#2f7df6',
-              opacity: 0.7,
-              transition: 'opacity 0.15s',
-            }}
+            className="sb-group-go"
+            aria-hidden="true"
           >
             <path d="M4 12 12 4M12 4H5M12 4v7" />
           </svg>
@@ -620,24 +443,14 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to, mut
         <ChevronDown
           size={12}
           strokeWidth={2.5}
-          style={{
-            flexShrink: 0,
-            transition: 'transform 0.2s ease',
-            transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
-          }}
+          aria-hidden="true"
+          className={cn('sb-group-chevron', !isOpen && 'sb-group-chevron--closed')}
         />
       </button>
 
       {/* Animated content panel */}
-      <div
-        style={{
-          overflow: 'hidden',
-          maxHeight: isOpen ? 600 : 0,
-          opacity: isOpen ? 1 : 0,
-          transition: 'max-height 0.25s ease, opacity 0.2s ease',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingTop: 2 }}>
+      <div className={cn('sb-group-panel', !isOpen && 'sb-group-panel--closed')}>
+        <div className="sb-group-list">
           {children}
         </div>
       </div>
@@ -648,22 +461,7 @@ function CollapsibleGroup({ id, label, icon, isOpen, onToggle, children, to, mut
 /* ─── SubGroupLabel — simple static divider, not collapsible ── */
 
 function SubGroupLabel({ label }: { label: string }) {
-  return (
-    <div
-      style={{
-        padding: '6px 10px 2px',
-        fontSize: '0.52rem',
-        fontWeight: 600,
-        letterSpacing: '0.05em',
-        textTransform: 'uppercase',
-        color: 'rgba(71, 85, 105, 0.6)',
-        marginTop: 8,
-        userSelect: 'none',
-      }}
-    >
-      {label}
-    </div>
-  );
+  return <div className="sb-subhead">{label}</div>;
 }
 
 /* ─── Sidebar ─────────────────────────────────────────────── */
@@ -777,6 +575,16 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
+  // Escape closes the mobile drawer.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
+
   const toggleGroup = useCallback((id: string) => {
     setGroupOpen((prev) => {
       const next = { ...prev, [id]: !prev[id] };
@@ -800,129 +608,60 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
   // one). Staff enter via /cdrs; the tenant-facing entry keeps the familiar
   // "Call Quality" label via /call-quality — both routes render the same page.
   const callsQualityItem: NavItemDef = {
-    label: 'Calls & Quality', to: '/cdrs', color: '#22c55e', icon: <IconSignal size={17} />,
+    label: 'Calls & Quality', to: '/cdrs', accent: 'green', icon: <IconSignal size={17} />,
     // Light up on either alias of the merged page.
     isActiveFn: (p) => p.startsWith('/cdrs') || p.startsWith('/call-quality'),
   };
-  const callQualityItem: NavItemDef = { label: 'Call Quality',        to: '/call-quality',    color: '#22c55e', icon: <IconSignal size={17} /> };
-  const troubleItem: NavItemDef     = { label: 'Troubleshooting',     to: '/troubleshooting', color: '#fbbf24', icon: <IconTroubleshoot size={17} /> };
+  const callQualityItem: NavItemDef = { label: 'Call Quality',        to: '/call-quality',    accent: 'green', icon: <IconSignal size={17} /> };
+  const troubleItem: NavItemDef     = { label: 'Troubleshooting',     to: '/troubleshooting', accent: 'amber', icon: <IconTroubleshoot size={17} /> };
 
   /* ─────────────────────────────────────────────────────── */
 
   return (
     <>
-      {/* Mobile topbar */}
-      <div
-        style={{
-          display: 'none',
-          alignItems: 'center',
-          gap: 12,
-          padding: '0 20px',
-          height: 56,
-          background: '#0a0c12',
-          borderBottom: '1px solid rgba(42, 47, 69, 0.8)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 50,
-        }}
-        className="md:hidden"
-      >
+      {/* Mobile topbar (<768px): menu, brand, theme toggle */}
+      <div className="sb-topbar">
         <button
           type="button"
           onClick={() => setMobileOpen((o) => !o)}
-          style={{
-            color: '#e2e8f0',
-            padding: '6px 8px',
-            borderRadius: 8,
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: 18,
-            lineHeight: 1,
-          }}
-          aria-label="Toggle navigation"
+          className="sb-iconbtn"
+          aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
+          aria-expanded={mobileOpen}
         >
-          &#9776;
+          {mobileOpen
+            ? <X size={20} strokeWidth={2} aria-hidden="true" />
+            : <Menu size={20} strokeWidth={2} aria-hidden="true" />}
         </button>
-        <span
-          style={{
-            fontSize: '0.875rem',
-            fontWeight: 800,
-            color: '#e2e8f0',
-            letterSpacing: '-0.02em',
-            textShadow: '0 0 20px rgba(47,125,246,0.5)',
-          }}
-        >
-          Custom <span style={{ color: '#4f92ff' }}>VoIP</span>
-        </span>
+        <button type="button" onClick={handleBrandClick} className="sb-brand" aria-label="Granite CRAG — home">
+          <BrandLockup />
+        </button>
+        {isAuthenticated && <ThemeToggle placement="topbar" />}
       </div>
 
       {/* Mobile overlay */}
-      {mobileOpen && (
-        <div
-          onClick={closeMobile}
-          aria-hidden="true"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.65)',
-            zIndex: 40,
-            backdropFilter: 'blur(4px)',
-          }}
-          className="md:hidden"
-        />
-      )}
+      {mobileOpen && <div onClick={closeMobile} aria-hidden="true" className="sb-scrim" />}
 
       {/* Sidebar panel */}
       <aside
         className={cn(
-          'app-sidebar fixed top-0 left-0 bottom-0 z-[100]',
+          'sb app-sidebar fixed top-0 left-0 bottom-0 z-[100]',
           'flex flex-col',
           'md:translate-x-0',
           mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
-          // Desktop collapse — applied ≥768px only (see index.css). Uses
+          // Desktop collapse — applied ≥768px only (see app-shell.css). Uses
           // `transform` so it composes with the Tailwind `translate` classes
           // above instead of fighting them.
           collapsed && 'app-sidebar--collapsed',
+          customerViewMode && 'sb--customer-view',
         )}
-        style={{
-          width: 240,
-          background: 'linear-gradient(180deg, #0c0e16 0%, #0a0c13 100%)',
-          borderRight: customerViewMode
-            ? '1px solid rgba(245, 158, 11, 0.35)'
-            : '1px solid rgba(42, 47, 69, 0.7)',
-          // `translate` covers the Tailwind mobile-drawer utilities (v4 uses
-          // the translate property); `transform` covers the desktop collapse.
-          transition: 'transform 200ms ease, translate 250ms ease-in-out, border-color 0.2s ease',
-        }}
         aria-label="Main navigation"
       >
         {/* ── Customer view banner ────────────────────────── */}
         {customerViewMode && (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 7,
-              padding: '7px 14px 10px',
-              background: 'rgba(245, 158, 11, 0.12)',
-              borderBottom: '1px solid rgba(245, 158, 11, 0.35)',
-              flexShrink: 0,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-              <Eye size={11} style={{ color: '#f59e0b', flexShrink: 0 }} />
-              <span
-                style={{
-                  fontSize: '0.6rem',
-                  fontWeight: 600,
-                  letterSpacing: '0.05em',
-                  textTransform: 'uppercase',
-                  color: '#f59e0b',
-                }}
-              >
-                Viewing as Customer
-              </span>
+          <div className="sb-banner">
+            <div className="sb-banner-head">
+              <Eye size={11} aria-hidden="true" style={{ flexShrink: 0 }} />
+              <span className="sb-banner-title">Viewing as Customer</span>
             </div>
             {/* Which customer the customer pages show (admin preview only). */}
             {isActualAdmin && <CustomerPreviewPicker tone="dark" label="Customer" />}
@@ -930,92 +669,22 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
         )}
 
         {/* ── Brand area ─────────────────────────────────── */}
-        <div
-          onClick={handleBrandClick}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === 'Enter' && handleBrandClick()}
-          style={{
-            padding: '22px 20px 16px',
-            cursor: 'pointer',
-            userSelect: 'none',
-            position: 'relative',
-            flexShrink: 0,
-          }}
-        >
-          {/* Subtle blue ambient glow */}
-          <div
-            style={{
-              position: 'absolute',
-              top: 0, left: 0, right: 0,
-              height: 80,
-              background: 'radial-gradient(ellipse 140% 100% at 50% 0%, rgba(47,125,246,0.10) 0%, transparent 70%)',
-              pointerEvents: 'none',
-            }}
-          />
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <img
-              src="/crag.png"
-              alt="Granite CRAG"
-              style={{
-                height: 40,
-                width: 'auto',
-                flexShrink: 0,
-                filter: 'drop-shadow(0 0 4px rgba(47,125,246,0.2))',
-                transition: 'filter 0.3s ease',
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLImageElement).style.filter =
-                  'drop-shadow(0 0 8px rgba(47,125,246,0.5)) drop-shadow(0 0 16px rgba(47,125,246,0.2))';
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLImageElement).style.filter =
-                  'drop-shadow(0 0 4px rgba(47,125,246,0.2))';
-              }}
-            />
-          </div>
-        </div>
+        <button type="button" onClick={handleBrandClick} className="sb-brand" aria-label="Granite CRAG — home">
+          <BrandLockup />
+        </button>
 
-        {/* Divider */}
-        <div
-          style={{
-            margin: '0 16px',
-            height: 1,
-            flexShrink: 0,
-            background: 'linear-gradient(90deg, transparent, rgba(42, 47, 69, 0.8) 20%, rgba(42, 47, 69, 0.8) 80%, transparent)',
-          }}
-        />
+        <div className="sb-divider" aria-hidden="true" />
 
-        {/* ── Unauthenticated: login + request access ──────── */}
+        {/* ── Unauthenticated: sign-in form ─────────────────── */}
         {!isAuthenticated && (
-          <div
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              overflowX: 'hidden',
-              scrollbarWidth: 'thin',
-              scrollbarColor: 'rgba(42,47,69,0.6) transparent',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
+          <div className="sb-scroll" style={{ display: 'flex', flexDirection: 'column' }}>
             <SidebarLoginForm />
           </div>
         )}
 
         {/* ── Scrollable nav area (authenticated only) ────── */}
         {isAuthenticated && (
-          <nav
-            style={{
-              flex: 1,
-              padding: '12px 16px',
-              overflowY: 'auto',
-              overflowX: 'visible',
-              // Thin scrollbar
-              scrollbarWidth: 'thin',
-              scrollbarColor: 'rgba(42,47,69,0.6) transparent',
-            }}
-          >
+          <nav className="sb-scroll sb-nav" aria-label="Sections">
             {/* ── Dashboard — the account home (admin: all customers), top-level ─ */}
             {showDashboard && (
               <div style={{ marginBottom: 10 }}>
@@ -1134,201 +803,57 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
         {/* ── Authenticated bottom section ─────────────────── */}
         {isAuthenticated && (
           <>
-            {/* Divider before user footer */}
-            <div
-              style={{
-                margin: '0 16px',
-                height: 1,
-                flexShrink: 0,
-                background: 'linear-gradient(90deg, transparent, rgba(42, 47, 69, 0.7) 20%, rgba(42, 47, 69, 0.7) 80%, transparent)',
-              }}
-            />
+            <div className="sb-divider" aria-hidden="true" />
 
             {/* ── Customer view toggle (admin only) ───────── */}
             {isActualAdmin && (
-              <div style={{ padding: '8px 16px 2px', flexShrink: 0 }}>
+              <div className="sb-viewas-wrap">
                 <button
                   type="button"
                   onClick={toggleCustomerView}
                   title={customerViewMode ? 'Return to admin view' : 'Preview the app as a customer'}
-                  // Resting/hover colors live in CSS (.sb-viewas in index.css);
-                  // the amber customer-view treatment stays inline and wins.
-                  className="sb-viewas"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    width: '100%',
-                    padding: '6px 10px',
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    ...(customerViewMode
-                      ? {
-                          background: 'rgba(245, 158, 11, 0.10)',
-                          border: '1px solid rgba(245, 158, 11, 0.30)',
-                        }
-                      : null),
-                  }}
+                  aria-pressed={customerViewMode}
+                  className={cn('sb-viewas', customerViewMode && 'sb-viewas--on')}
                 >
-                  {/* Icon */}
                   {customerViewMode
-                    ? <EyeOff size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
-                    : <Eye    size={13} className="sb-viewas-glyph" style={{ flexShrink: 0 }} />
-                  }
-
-                  {/* Label */}
-                  <span
-                    className="sb-viewas-label"
-                    style={{
-                      flex: 1,
-                      textAlign: 'left',
-                      fontSize: '0.75rem',
-                      fontWeight: 500,
-                      ...(customerViewMode ? { color: '#f59e0b' } : null),
-                      letterSpacing: '-0.01em',
-                    }}
-                  >
+                    ? <EyeOff size={13} className="sb-viewas-glyph" aria-hidden="true" />
+                    : <Eye    size={13} className="sb-viewas-glyph" aria-hidden="true" />}
+                  <span className="sb-viewas-label">
                     {customerViewMode ? 'Exit Customer View' : 'View as Customer'}
                   </span>
-
-                  {/* Active pill */}
-                  {customerViewMode && (
-                    <span
-                      style={{
-                        fontSize: '0.55rem',
-                        fontWeight: 700,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        color: '#f59e0b',
-                        background: 'rgba(245,158,11,0.15)',
-                        border: '1px solid rgba(245,158,11,0.30)',
-                        borderRadius: 999,
-                        padding: '2px 6px',
-                        lineHeight: 1.6,
-                        flexShrink: 0,
-                      }}
-                    >
-                      ON
-                    </span>
-                  )}
+                  {customerViewMode && <span className="sb-viewas-pill">ON</span>}
                 </button>
               </div>
             )}
 
             {/* ── User profile footer ──────────────────────── */}
-            <div style={{ padding: '12px 16px 18px', flexShrink: 0 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '8px 10px',
-                  borderRadius: 10,
-                  background: 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(42,47,69,0.4)',
-                  position: 'relative',
-                }}
-              >
+            <div className="sb-footer">
+              <div className="sb-user">
                 {/* Clickable area: avatar + name — THE entry to /my-account */}
                 <NavLink
                   to="/my-account"
                   onClick={closeMobile}
                   title="My account"
                   aria-label="My account"
-                  // Resting/hover tint lives in CSS (.sb-account-link in
-                  // index.css); the active blue wash stays inline and wins.
-                  className="sb-account-link"
-                  style={({ isActive }) => ({
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    flex: 1,
-                    minWidth: 0,
-                    textDecoration: 'none',
-                    borderRadius: 7,
-                    padding: '2px 4px',
-                    margin: '-2px -4px',
-                    background: isActive ? 'rgba(47,125,246,0.08)' : undefined,
-                    cursor: 'pointer',
-                  })}
+                  className={({ isActive }) => cn('sb-account-link', isActive && 'sb-account-link--active')}
                 >
-                  {/* Avatar */}
-                  <div style={{ position: 'relative', flexShrink: 0 }}>
-                    <div
-                      style={{
-                        width: 30,
-                        height: 30,
-                        borderRadius: '50%',
-                        background: 'linear-gradient(135deg, rgba(47,125,246,0.30) 0%, rgba(47,125,246,0.15) 100%)',
-                        border: '1px solid rgba(47,125,246,0.3)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '0.7rem',
-                        fontWeight: 700,
-                        color: '#4f92ff',
-                        letterSpacing: '0.02em',
-                        textTransform: 'uppercase',
-                      }}
-                      aria-hidden="true"
-                    >
-                      {displayName.charAt(0) || '?'}
-                    </div>
+                  <div className="sb-avatar" aria-hidden="true">
+                    {displayName.charAt(0) || '?'}
                   </div>
-
-                  {/* Name + context label */}
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        color: '#94a3b8',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        lineHeight: 1.3,
-                      }}
-                    >
-                      {displayName}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '0.65rem',
-                        color: '#334155',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        marginTop: 1,
-                      }}
-                    >
-                      {contextLabel ?? displayEmail}
-                    </div>
+                  <div className="sb-user-text">
+                    <div className="sb-name">{displayName}</div>
+                    <div className="sb-meta">{contextLabel ?? displayEmail}</div>
                   </div>
                 </NavLink>
 
-                {/* Sign out */}
-                <button
-                  type="button"
-                  onClick={logout}
-                  title="Sign out"
-                  aria-label="Sign out"
-                  // Resting + red hover colors live in CSS (.sb-signout in
-                  // index.css) so keyboard :focus-visible matches hover.
-                  className="sb-signout"
-                  style={{
-                    flexShrink: 0,
-                    width: 26,
-                    height: 26,
-                    borderRadius: 7,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    padding: 0,
-                  }}
-                >
-                  <IconSignOut />
-                </button>
+                {/* Account actions: light/dark + sign out */}
+                <div className="sb-user-actions">
+                  <ThemeToggle placement="sidebar" />
+                  <button type="button" onClick={logout} className="sb-action sb-signout">
+                    <LogOut size={13} strokeWidth={2} aria-hidden="true" />
+                    Sign out
+                  </button>
+                </div>
               </div>
             </div>
           </>

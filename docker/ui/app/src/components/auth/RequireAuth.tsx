@@ -1,7 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import type { ReactNode } from 'react';
-import { BRAND_AZURE, brandAzureAlpha } from '../../styles/brand';
+import { T, tMix } from '../../styles/theme';
 
 interface RequireAuthProps {
   /** When provided, renders children (wrapper usage). Omit to use as a layout route. */
@@ -47,13 +47,15 @@ export function RequireAuth({ children }: RequireAuthProps) {
 
 /* ─── Full-page loading state ────────────────────────────── */
 
+// Theme tokens: on the light theme this is paper, on dark granite — a
+// reload of any signed-in page never flashes the other theme.
 function FullPageSpinner() {
   return (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        background: '#0f1117',
+        background: T.canvasBg,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -72,10 +74,10 @@ function FullPageSpinner() {
           }}
         >
           <style>{`@keyframes auth-spin { to { transform: rotate(360deg); } }`}</style>
-          <circle cx="24" cy="24" r="18" stroke={brandAzureAlpha(0.15)} strokeWidth="4" />
+          <circle cx="24" cy="24" r="18" style={{ stroke: tMix('accent', 15) }} strokeWidth="4" />
           <path
             d="M42 24a18 18 0 0 0-18-18"
-            stroke={BRAND_AZURE}
+            style={{ stroke: T.accent }}
             strokeWidth="4"
             strokeLinecap="round"
           />
@@ -84,7 +86,7 @@ function FullPageSpinner() {
           style={{
             fontSize: '0.8rem',
             fontWeight: 600,
-            color: '#334155',
+            color: T.textDim,
           }}
         >
           Authenticating

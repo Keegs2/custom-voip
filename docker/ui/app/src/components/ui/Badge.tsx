@@ -31,30 +31,52 @@ interface BadgeProps {
   className?: string;
 }
 
-const variantClasses: Record<BadgeVariant, string> = {
-  active:    'bg-emerald-500/[0.12] text-emerald-400 border border-emerald-500/20 ring-1 ring-emerald-500/10',
-  disabled:  'bg-red-500/[0.10] text-red-400 border border-red-500/20',
-  suspended: 'bg-red-500/[0.10] text-red-400 border border-red-500/20',
-  closed:    'bg-slate-500/[0.10] text-slate-400 border border-slate-500/20',
-  rcf:       'bg-blue-500/[0.12] text-blue-300 border border-blue-500/25',
-  api:       'bg-violet-500/[0.12] text-violet-300 border border-violet-500/25',
-  trunk:     'bg-emerald-500/[0.10] text-emerald-300 border border-emerald-500/20',
-  hybrid:    'bg-amber-500/[0.10] text-amber-300 border border-amber-500/25',
-  ucaas:     'bg-sky-500/[0.12] text-sky-300 border border-sky-500/25',
-  inbound:   'bg-blue-500/[0.12] text-blue-300 border border-blue-500/25',
-  outbound:  'bg-amber-500/[0.10] text-amber-300 border border-amber-500/25',
-  premium:   'bg-blue-500/[0.12] text-blue-300 border border-blue-500/25',
-  standard:  'bg-slate-500/[0.10] text-slate-400 border border-slate-500/20',
-  economy:   'bg-amber-500/[0.10] text-amber-300 border border-amber-500/25',
-  pass:      'bg-emerald-500/[0.12] text-emerald-300 border border-emerald-500/20',
-  warn:      'bg-amber-500/[0.10] text-amber-300 border border-amber-500/25',
-  fail:      'bg-red-500/[0.10] text-red-400 border border-red-500/20',
-  sbc1:             'bg-blue-500/[0.12] text-blue-300 border border-blue-500/25',
-  sbc2:             'bg-cyan-500/[0.10] text-cyan-300 border border-cyan-500/25',
-  pending:          'bg-amber-500/[0.10] text-amber-300 border border-amber-500/25',
-  billing_verified: 'bg-blue-500/[0.12] text-blue-300 border border-blue-500/25',
-  provisioning:     'bg-cyan-500/[0.10] text-cyan-300 border border-cyan-500/25',
-  rejected:         'bg-red-500/[0.10] text-red-400 border border-red-500/20',
+/** The tone family each variant draws from (src/styles/theme.css). */
+type BadgeTone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral' | 'violet' | 'teal';
+
+const VARIANT_TONE: Record<BadgeVariant, BadgeTone> = {
+  active: 'ok',
+  disabled: 'danger',
+  suspended: 'danger',
+  closed: 'neutral',
+  rcf: 'info',
+  api: 'violet',
+  trunk: 'ok',
+  hybrid: 'warn',
+  ucaas: 'teal',
+  inbound: 'info',
+  outbound: 'warn',
+  premium: 'info',
+  standard: 'neutral',
+  economy: 'warn',
+  pass: 'ok',
+  warn: 'warn',
+  fail: 'danger',
+  sbc1: 'info',
+  sbc2: 'teal',
+  pending: 'warn',
+  billing_verified: 'info',
+  provisioning: 'teal',
+  rejected: 'danger',
+};
+
+/** fg / bg / border per tone — status tokens, or a categorical hue mixed. */
+const TONE_STYLE: Record<BadgeTone, React.CSSProperties> = {
+  ok: { color: 'var(--t-ok-fg)', background: 'var(--t-ok-bg)', borderColor: 'var(--t-ok-border)' },
+  warn: { color: 'var(--t-warn-fg)', background: 'var(--t-warn-bg)', borderColor: 'var(--t-warn-border)' },
+  danger: { color: 'var(--t-danger-fg)', background: 'var(--t-danger-bg)', borderColor: 'var(--t-danger-border)' },
+  info: { color: 'var(--t-info-fg)', background: 'var(--t-info-bg)', borderColor: 'var(--t-info-border)' },
+  neutral: { color: 'var(--t-neutral-fg)', background: 'var(--t-neutral-bg)', borderColor: 'var(--t-neutral-border)' },
+  violet: {
+    color: 'var(--t-violet)',
+    background: 'color-mix(in srgb, var(--t-violet) 10%, transparent)',
+    borderColor: 'color-mix(in srgb, var(--t-violet) 28%, transparent)',
+  },
+  teal: {
+    color: 'var(--t-teal)',
+    background: 'color-mix(in srgb, var(--t-teal) 10%, transparent)',
+    borderColor: 'color-mix(in srgb, var(--t-teal) 28%, transparent)',
+  },
 };
 
 export function Badge({ variant, children, className }: BadgeProps) {
@@ -62,11 +84,11 @@ export function Badge({ variant, children, className }: BadgeProps) {
     <span
       className={cn(
         'inline-flex items-center justify-center text-[0.65rem] font-semibold',
-        'uppercase whitespace-nowrap',
-        variantClasses[variant],
+        'uppercase whitespace-nowrap border',
         className,
       )}
       style={{
+        ...TONE_STYLE[VARIANT_TONE[variant]],
         padding: '4px 10px',
         borderRadius: 6,
         lineHeight: 1.4,
