@@ -23,9 +23,6 @@ import {
 import { ProductSelector } from './ProductSelector';
 import { API_PRODUCTS, isApiProduct } from './docProducts';
 
-const BLUE = '#2f7df6';
-const AMBER = '#b45309';
-
 /* ═══════════════════════════════════════════════════════════
    Shared: authentication + conventions (rendered for every product)
    ═══════════════════════════════════════════════════════════ */
@@ -75,7 +72,7 @@ function AuthSection() {
 
       <H3>Base URL</H3>
       <div className="dlx-endpoint" style={{ alignItems: 'center', marginBottom: 20 }}>
-        <Server size={16} style={{ color: BLUE, flexShrink: 0 }} />
+        <Server size={16} style={{ color: C.accent, flexShrink: 0 }} />
         <div>
           <div style={{ fontSize: '0.72rem', fontWeight: 700, color: C.textFaint, marginBottom: 3 }}>Base URL</div>
           <code style={{ color: C.text, fontFamily: MONO, fontSize: '0.82rem', fontWeight: 600 }}>
@@ -131,7 +128,7 @@ function AuthSection() {
 }`}
       />
 
-      <Callout accent={BLUE}>
+      <Callout>
         <strong style={{ color: C.text }}>Phone number format:</strong> phone numbers are E.164 —
         a leading <IC>+</IC>, country code, and subscriber number with no spaces or dashes
         (US example <IC>+17745551234</IC>). When a number appears in a URL path, URL-encode
@@ -242,7 +239,7 @@ function RcfEndpointsSection() {
   "customer_name": "Acme Utilities"
 }`}
       />
-      <Callout accent={BLUE}>
+      <Callout>
         Updates take effect on the very next call — the platform invalidates its routing cache
         the moment the change commits. Calls already in progress are unaffected.
       </Callout>
@@ -377,7 +374,7 @@ function NumberLifecycleSection() {
   "message": "Release requested. An administrator will review and complete the release."
 }`}
       />
-      <Callout accent={BLUE}>
+      <Callout>
         <IC>request-release</IC> returns <IC>409</IC> if the number is not currently{' '}
         <IC>assigned</IC> (including when a release is already pending), and{' '}
         <IC>cancel-release</IC> returns <IC>409</IC> if there is no pending release to cancel —
@@ -469,7 +466,7 @@ function TrunkEndpointsSection() {
   }
 }`}
       />
-      <Callout accent={BLUE}>
+      <Callout>
         <IC>current_channels</IC> is read live from the media layer, so this endpoint is ideal
         for a wallboard — poll it at a modest interval (the portal refreshes every 15 seconds).
       </Callout>
@@ -529,7 +526,7 @@ function TrunkDidsSection() {
       <Endpoint method="GET" path="/v1/trunks/call-paths" description="List the available call-path packages (capacity tiers)." />
       <P>
         To add numbers, use the number lifecycle endpoints (
-        <Link to="/docs/api/rcf" style={{ color: BLUE, fontWeight: 600 }}>documented under RCF</Link>
+        <Link to="/docs/api/rcf" style={{ color: C.accent, fontWeight: 600 }}>documented under RCF</Link>
         ) with <IC>product_type: "trunk"</IC> — the same request-and-review flow applies.
       </P>
 
@@ -559,7 +556,7 @@ function TrunkReference() {
 function CallsReference() {
   return (
     <>
-      <Callout accent={AMBER}>
+      <Callout tone="warn">
         <strong style={{ color: C.text }}>Early access.</strong> API Calling is live for enrolled
         accounts. Endpoints below are stable; pushed webhook delivery is still maturing — build
         on status polling and CDRs (see the note at the end of this section).
@@ -703,11 +700,11 @@ curl "https://your-portal-url/api/v1/calls/b0a4f1e2-..." \\
         />
 
         <H3>Webhook events</H3>
-        <Callout accent={AMBER}>
+        <Callout tone="warn">
           A <IC>webhook_url</IC> is accepted per call and stored with it, but pushed event
           delivery is still maturing during early access — do not build your only integration
           path on it yet. Status polling and CDRs (see{' '}
-          <Link to="/docs/api/telemetry" style={{ color: BLUE, fontWeight: 600 }}>CDRs &amp; Telemetry</Link>
+          <Link to="/docs/api/telemetry" style={{ color: C.accent, fontWeight: 600 }}>CDRs &amp; Telemetry</Link>
           ) are the reliable interfaces today.
         </Callout>
       </AccordionSection>
@@ -782,7 +779,7 @@ function TelemetryReference() {
   "limit": 1
 }`}
       />
-      <Callout accent={BLUE}>
+      <Callout>
         <strong style={{ color: C.text }}>Quality fields:</strong> <IC>mos</IC> is an ITU-T G.107
         E-model score (1–5) computed from true RTP sequence loss — a clean G.711 call scores 4.41, the
         maximum — and <IC>r_factor</IC> is the G.107 transmission rating (0–100) behind it. Both are{' '}
@@ -874,7 +871,7 @@ export function ApiDocsPage() {
   const Content = API_CONTENT[active];
 
   return (
-    <div className="dl-scope">
+    <div className="dl-scope dlx-docs">
       <div className="dl-shell">
         <DocsHeader
           crumb="API Reference"
@@ -891,7 +888,7 @@ export function ApiDocsPage() {
 
           <div className="dl-stack">
             <div className="dlx-item" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <Key size={15} style={{ color: BLUE, flexShrink: 0 }} />
+              <Key size={15} style={{ color: C.accent, flexShrink: 0 }} />
               <span style={{ fontSize: '0.82rem', color: C.textMuted, lineHeight: 1.6 }}>
                 {PRODUCT_INTRO[active]} Authenticate every request with a bearer token
                 from <IC>POST /v1/auth/login</IC>, base URL <IC>/api/v1</IC> — details below.

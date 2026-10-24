@@ -15,7 +15,8 @@
  *                                        403 for support)
  *
  * The product UI lives in pages/voicemail/ (VoicemailWorkspace and friends);
- * styles are `vm-*` in styles/dl-voicemail.css on the daylight `dl-*` system.
+ * styles are `vm-*` in styles/dl-voicemail.css on the daylight `dl-*` system,
+ * themed light / dark through the `--t-*` tokens (docker/ui/CLAUDE.md §18).
  */
 import { useCallback, useId, useMemo } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
