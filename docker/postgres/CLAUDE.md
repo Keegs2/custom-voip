@@ -133,7 +133,7 @@ File: `pgbouncer.ini`
 
 **Critical:** asyncpg (used by FastAPI) must use `statement_cache_size=0` because PgBouncer transaction mode doesn't support prepared statements. This is configured in the API's `database.py`.
 
-## Multi-Zone Replication — LIVE (as of 2026-07-22)
+## Multi-Zone Replication — LIVE (since 2026-07-22; `central-db` serving Central by the 2026-07-23 3-zone go-live)
 
 > **Status: implemented in production.** Streaming physical replication is live.
 > The local-dev Docker setup in this directory is still single-node
@@ -143,17 +143,19 @@ File: `pgbouncer.ini`
 
 **Production topology (bare-metal, not Docker):**
 
-| Node | Role | IP | Zone |
-|------|------|----|------|
-| `services` | **Primary** (read-write) | 10.142.0.103 | us-east1-b |
-| `east-db-standby` | HA hot standby (failover target) | 10.142.0.87 | us-east1-c |
-| `west-db` | West-zone read replica (local DID lookups) | 10.138.0.2 | us-west1-b |
-| `sandbox_replica` | Dev/unified sandbox replica | 10.142.0.102 | us-east1-b |
+| Node | Role | IP | Zone | Slot |
+|------|------|----|------|------|
+| `services` | **Primary** (read-write) | 10.142.0.103 | us-east1-b | — |
+| `east-db-standby` | HA hot standby (failover target) | 10.142.0.87 | us-east1-c | `east_standby` |
+| `west-db` | West-zone read replica (local DID lookups) | 10.138.0.2 | us-west1-b | `west_standby` |
+| `central-db` | Central-zone read replica (local DID lookups) | 10.128.0.2 | us-central1-b | `central_standby` |
 
-- Streaming replication via the `replicator` role + one physical slot per standby (`east_standby`, `west_standby`, `sandbox_replica`). Replay lag ~2ms same-region, ~130ms cross-region. TimescaleDB 2.26.3, PG 16.
+- Streaming replication uses the `replicator` role + one physical slot per standby (`east_standby`, `west_standby`, `central_standby`). Replay lag is ~2ms same-region, ~130ms cross-region. TimescaleDB 2.26.3, PG 16.
+- **`sandbox_replica` is gone.** The legacy dev/unified sandbox replica (fs-media 10.142.0.102) has **no slot** on the primary (`PRODUCTION_ARCHITECTURE.md` §8.1, verified 2026-09-04). Its status is unknown, and it is tracked as §12 #2 there. Do not count it as a replica.
+- **2026-10-23 slot loss:** during the PG primary disk-full incident (runaway WAL from `cdr_refresh_call_quality()` decompressing compressed chunks — fixed by migration 55), the `central_standby` slot was **lost**. `central-db` has since been **re-cloned** from the primary (owner-confirmed 2026-10-24). After any primary disk/WAL incident, check `SELECT slot_name, active FROM pg_replication_slots` for all three standbys before assuming replication is intact; a missing slot means that replica must be re-cloned (procedure below).
 - **Each zone runs its OWN PgBouncer** on the local replica (`:6432` → local `:5432`, transaction pool, `scram-sha-256`). Zone FS/SBC point `DB_HOST` at the local replica; **all writes (CDRs, provisioning) go to the East primary via the API** (`API_HOST` stays East — a replica is read-only).
 - **Runbooks:** failover = `docs/runbooks/DB_FAILOVER_RUNBOOK.md` (promote `east-db-standby`); restore/PITR = `docs/runbooks/DB_RESTORE_RUNBOOK.md` (pgBackRest).
-- **Adding a new zone replica (Central reuses this):** `pg_basebackup` from the primary → recovery params (`max_worker_processes` etc.) **≥ primary** → **TimescaleDB pinned to the EXACT primary extension version** (`timescaledb-2-postgresql-16=<ver>` or PG won't start) → strip any `recovery_target`/`restore_command` from `postgresql.auto.conf` (clones inherit them from a prior `--type=immediate` restore and then pause instead of streaming) → stand up local PgBouncer (userlist generated from the replica's own `pg_authid`) + a `voip-media-<zone>`→replica `:6432` firewall rule (the media subnet is not covered by `default-allow-internal`).
+- **Adding (or re-cloning) a zone replica (the Central procedure):** `pg_basebackup` from the primary → recovery params (`max_worker_processes` etc.) **≥ primary** → **TimescaleDB pinned to the EXACT primary extension version** (`timescaledb-2-postgresql-16=<ver>` or PG won't start) → strip any `recovery_target`/`restore_command` from `postgresql.auto.conf` (clones inherit them from a prior `--type=immediate` restore and then pause instead of streaming) → stand up local PgBouncer (userlist generated from the replica's own `pg_authid`) + a `voip-media-<zone>`→replica `:6432` firewall rule (the media subnet is not covered by `default-allow-internal`).
 - **Gotchas:** replication slots are NOT in pgBackRest backups — recreate them after any restore before re-cloning standbys; Debian keeps PG config in `/etc`, so use `pg_ctlcluster` (not `pg_ctl -D`).
 
 ## Adding a New Table

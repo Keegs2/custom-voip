@@ -317,7 +317,7 @@ RCF (Remote Call Forwarding) number provisioning. The core RCF product.
 - E.164 validation for DIDs, flexible validation for forward destinations (E.164 or 3-6 digit local extensions for PBX/Zoiper testing)
 - `ring_timeout` validated between 5-120 seconds
 - Update/Delete accept both numeric ID and E.164 DID string as the `{identifier}` path param
-- On update, invalidates the Redis `rcf:{did}` cache so FreeSWITCH picks up changes immediately
+- On update, still deletes the Redis `rcf:{did}` key (harmless legacy). FreeSWITCH no longer reads that cache — it looks up PostgreSQL on every call (`inbound_router.lua`), so a change applies on the next call regardless
 - PATCH is an alias for PUT (both call `update_rcf`)
 
 ### calls.py

@@ -20,8 +20,8 @@ Every configurable value follows the same pattern -- set a default, then overrid
 **Network/NAT:**
 - `external_rtp_ip`, `external_sip_ip` -- Public IP for SDP and SIP headers. Default `auto-nat`, overridden by `EXTERNAL_RTP_IP`/`EXTERNAL_SIP_IP` env vars. Auto-nat fails in Docker (resolves to container IP).
 - `homer_ip` -- Homer HEP capture endpoint. From `HOMER_IP` env var.
-- `sbc_proxy_ip` -- Primary Kamailio SBC address. From `SBC_PROXY_IP` env var.
-- `sbc_proxy_ip_failover` -- Secondary SBC address for the inbound_router.lua 4-attempt failover loop (freeswitch.xml:71). From `SBC_PROXY_IP_FAILOVER` env var; falls back to `SBC_PROXY_IP` if unset.
+- `sbc_proxy_ip` -- The zone's internal **signaling ILB VIP**, which always leads to the ACTIVE SBC (East 10.142.0.250 / West 10.138.0.250 / Central 10.128.0.250 since the 2026-08-27 active/standby cutover; before that, SBC-1's direct IP). From `SBC_PROXY_IP` env var (freeswitch.xml:75).
+- `sbc_proxy_ip_failover` -- SBC-1's **direct** VPC IP, the ILB-bypass fallback for the outbound attempt loops (freeswitch.xml:76). These are the inbound_router.lua table-driven loop (up to 4 `carrier_trunks` trunks × {sbc_proxy_ip, sbc_proxy_ip_failover} = 8 attempts, or the 4-attempt legacy loop on a DB/lib failure) and the trunk/API 8YY loop. From `SBC_PROXY_IP_FAILOVER` env var; falls back to `SBC_PROXY_IP` if unset.
 
 **SIP Ports:**
 - `internal_sip_port=5080` -- Receives from Kamailio
@@ -125,7 +125,7 @@ Context: public (all calls enter public dialplan context)
 - Capture ID 200 distinguishes FreeSWITCH from Kamailio (100) in Homer ladder diagrams.
 
 **Gateways:**
-All carrier gateways are DISABLED (commented out). Outbound calls use `sofia/external/dest@proxy` with `X-Carrier` header instead. The deprecated gateway definitions are kept as documentation of Bandwidth trunk configurations:
+All carrier gateways are DISABLED (commented out). Outbound calls use `sofia/external/dest@proxy` instead, with an `X-Carrier-IP` header (table-driven `carrier_trunks` attempts) or the legacy `X-Carrier` enum. The deprecated gateway definitions are kept as documentation of Bandwidth trunk configurations:
 - `carrier_primary` -> Dallas 67.231.2.12 (primary carrier for all products)
 - `carrier_secondary` -> LA 216.82.238.134 (secondary/failover carrier)
 - `test_echo` -> Loopback (still active, for testing)
