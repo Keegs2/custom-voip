@@ -16,28 +16,53 @@
    everything fades/rises in once on load, staggered ≤ ~340ms; nothing moves
    under prefers-reduced-motion.
 
-   Palette = existing tokens only: granite #070c16/#0c1424, cobalt #113398,
-   azure #2f7df6/#1d63dd/#4f92ff, --rcf-* paper/card/line/ink, green
-   #15803d, red #b91c1c; quality tones come from quality.ts via --ad-tone.
+   Colour = theme tokens only (docker/ui/CLAUDE.md §18): --t-* for paper,
+   cards, lines, ink and the brand blues; quality tones arrive from
+   quality.ts as token strings via --ad-tone. LIGHT is the daylight look
+   value for value; DARK is the landing carried in — granite canvas, raised
+   panels (sheen + hairline + inner highlight + deep drop), cloud/mist text,
+   azure-bright lines and a glow on primary actions. The granite header is
+   dark in both themes (its own --t-band-* frame; its contents are pinned
+   with data-force-theme="dark").
    ══════════════════════════════════════════════════════════════════════════ */
 
 .ad-scope {
-  --ad-granite: #070c16;
-  --ad-granite-hi: #0c1424;
-  --ad-cobalt: var(--brand-cobalt, #113398);
-  --ad-azure-bright: var(--brand-azure-bright, #4f92ff);
-  --ad-live: #22c55e; /* app success green — legible on granite */
-  --ad-slate: #8b99b0;
+  --ad-cobalt: var(--brand-cobalt);
+  --ad-azure-bright: var(--brand-azure-bright);
+  --ad-slate: var(--t-text-faint);
   --ad-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --ad-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 1px 2px rgba(14, 23, 38, 0.06),
-    0 10px 28px -12px rgba(14, 23, 38, 0.18);
-  --ad-shadow-lift:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 2px 4px rgba(14, 23, 38, 0.05),
-    0 18px 36px -14px rgba(29, 99, 221, 0.32);
-  --ad-focus: 0 0 0 3px rgba(47, 125, 246, 0.3);
+  --ad-shadow: var(--t-shadow-card);
+  --ad-shadow-lift: var(--t-shadow-card-hover);
+  --ad-focus: 0 0 0 3px color-mix(in srgb, var(--t-focus) 30%, transparent);
+}
+
+/* Page tokens (§18.3 rule 2): the dashboard's three soft card gradients end
+   on a daylight tint no token carries — LIGHT keeps those stops exactly;
+   DARK uses the landing's panel. The search well and the open row follow
+   the dark recipe (wells for fields, the accent wash for a selection). */
+:root,
+[data-force-theme='light'] {
+  --ad-card-bg: linear-gradient(180deg, var(--t-surface) 0%, #fdfdfe 100%);
+  --ad-kpi-bg: linear-gradient(180deg, var(--t-surface) 0%, #fbfcfe 100%);
+  --ad-action-hover-bg: linear-gradient(180deg, var(--t-surface) 0%, #f7faff 100%);
+  --ad-bar-hover-top: #6aa3ff;
+  --ad-bar-track-top: rgba(237, 241, 247, 0.4); /* = line-soft at 40 % (gradient stop: a plain colour) */
+  --ad-search-bg: var(--t-tint);
+  --ad-search-focus-bg: var(--t-surface);
+  --ad-selected-bg: var(--t-tint-hover);
+}
+
+:root[data-theme='dark'],
+:root[data-landing],
+[data-force-theme='dark'] {
+  --ad-card-bg: var(--t-panel-bg);
+  --ad-kpi-bg: var(--t-panel-bg);
+  --ad-action-hover-bg: var(--t-tint-hover);
+  --ad-bar-hover-top: var(--t-accent-text-hover);
+  --ad-bar-track-top: color-mix(in srgb, var(--t-line-soft) 40%, transparent);
+  --ad-search-bg: var(--t-field-bg);
+  --ad-search-focus-bg: var(--t-field-bg);
+  --ad-selected-bg: var(--t-accent-wash);
 }
 
 .ad-shell {
@@ -87,8 +112,8 @@
   background: currentColor;
 }
 
-.ad-dot-on { background: var(--rcf-green); box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.14); }
-.ad-dot-off { background: var(--ad-slate); box-shadow: 0 0 0 3px rgba(139, 153, 176, 0.16); }
+.ad-dot-on { background: var(--rcf-green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-ok-fg) 14%, transparent); }
+.ad-dot-off { background: var(--ad-slate); box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-text-faint) 16%, transparent); }
 
 .ad-num {
   font-family: var(--ad-mono);
@@ -140,7 +165,7 @@
   font-size: 10.5px;
   font-weight: 700;
   color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.1);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
   border-radius: 4px;
   padding: 1px 6px;
   line-height: 1.5;
@@ -166,8 +191,8 @@
   letter-spacing: 0;
   line-height: 1.4;
   color: var(--ad-tone);
-  background: color-mix(in srgb, var(--ad-tone) 10%, #fff);
-  border: 1px solid color-mix(in srgb, var(--ad-tone) 26%, #fff);
+  background: color-mix(in srgb, var(--ad-tone) 10%, var(--t-surface));
+  border: 1px solid color-mix(in srgb, var(--ad-tone) 26%, var(--t-surface));
   border-radius: 999px;
   padding: 1px 8px;
   white-space: nowrap;
@@ -203,57 +228,58 @@
 }
 
 .ad-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
-.ad-btn:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+.ad-btn:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 .ad-btn-block { width: 100%; }
 
-/* Primary on granite — the header's call to action, lit from within. */
+/* Primary on granite — the header's call to action, lit from within.
+   (Header only: the band's colours are the same in both themes.) */
 .ad-btn-glow {
-  color: #fff;
-  background: linear-gradient(180deg, var(--ad-azure-bright) 0%, var(--rcf-azure) 100%);
-  border-color: rgba(79, 146, 255, 0.6);
+  color: var(--t-band-text-strong);
+  background: linear-gradient(180deg, var(--t-band-accent) 0%, var(--t-accent) 100%);
+  border-color: color-mix(in srgb, var(--t-band-accent) 60%, transparent);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 8px 22px -8px rgba(47, 125, 246, 0.85),
-    0 0 0 4px rgba(47, 125, 246, 0.1);
+    inset 0 1px 0 color-mix(in srgb, var(--t-band-text-strong) 28%, transparent),
+    0 8px 22px -8px color-mix(in srgb, var(--t-accent) 85%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--t-accent) 10%, transparent);
 }
 
 .ad-btn-glow:hover {
-  background: var(--ad-azure-bright);
+  background: var(--t-band-accent);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    0 10px 28px -8px rgba(47, 125, 246, 0.95),
-    0 0 0 5px rgba(47, 125, 246, 0.14);
+    inset 0 1px 0 color-mix(in srgb, var(--t-band-text-strong) 32%, transparent),
+    0 10px 28px -8px color-mix(in srgb, var(--t-accent) 95%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--t-accent) 14%, transparent);
   transform: translateY(-1px);
 }
 
 .ad-btn-glow:active { transform: none; }
-.ad-btn-glow:focus-visible { outline-color: var(--ad-azure-bright); }
+.ad-btn-glow:focus-visible { outline-color: var(--t-band-accent); }
 
 .ad-btn-primary {
-  color: #fff;
-  background: var(--brand-btn-bg, linear-gradient(180deg, #2f7df6 0%, #1d63dd 62%));
-  border-color: var(--brand-btn-edge, rgba(17, 51, 152, 0.28));
-  box-shadow: var(--brand-btn-shadow, inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 6px 16px -8px rgba(47, 125, 246, 0.7));
+  color: var(--t-text-on-accent);
+  background: var(--brand-btn-bg);
+  border-color: var(--brand-btn-edge);
+  box-shadow: var(--brand-btn-shadow), var(--t-glow);
 }
 
 .ad-btn-primary:hover {
-  background: var(--brand-btn-bg-hover, #1d63dd);
-  box-shadow: var(--brand-btn-shadow-hover, 0 10px 24px -8px rgba(47, 125, 246, 0.85));
+  background: var(--brand-btn-bg-hover);
+  box-shadow: var(--brand-btn-shadow-hover), var(--t-glow);
 }
 
-.ad-btn-primary:active { background: var(--brand-btn-bg-active, #1d63dd); }
+.ad-btn-primary:active { background: var(--brand-btn-bg-active); }
 
 .ad-btn-quiet {
   color: var(--rcf-azure-deep);
   background: var(--rcf-card);
   border-color: var(--rcf-line);
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.05);
+  box-shadow: var(--t-shadow-xs);
 }
 
 .ad-btn-quiet:hover {
   background: var(--rcf-tint-hover);
-  border-color: rgba(47, 125, 246, 0.4);
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.05), 0 4px 12px -6px rgba(47, 125, 246, 0.35);
+  border-color: color-mix(in srgb, var(--t-accent-line) 40%, transparent);
+  box-shadow: var(--t-shadow-xs), 0 4px 12px -6px color-mix(in srgb, var(--t-accent) 35%, transparent);
 }
 
 .ad-linkbtn {
@@ -274,13 +300,28 @@
 }
 
 .ad-linkbtn:hover { text-decoration: underline; text-underline-offset: 3px; }
-.ad-linkbtn:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+.ad-linkbtn:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 .ad-linkbtn-arrow svg { transition: transform var(--rcf-ease); }
 .ad-linkbtn-arrow:hover svg { transform: translateX(2px); }
 
-/* ─── Header (granite) ──────────────────────────────────────────────────── */
+/* ─── Header (granite) ──────────────────────────────────────────────────────
+   Dark in BOTH themes. The frame reads the --t-band-* set of the page's
+   theme (light: today's granite; dark: lifted off the granite canvas by a
+   hairline edge and an azure pool). Its two content columns carry
+   data-force-theme="dark" (DashboardHeader.tsx), so every token inside —
+   and the native <select> popup — is the dark set whatever the theme. The
+   --adh-* constants are the band's own: they don't vary by theme. The
+   gradient stops among them stay plain colours on purpose: a color-mix()
+   stop switches a gradient to float interpolation and shifts its pixels. */
 
 .ad-header {
+  --adh-live: #22c55e;                          /* live dot: app success green, legible on granite */
+  --adh-shade: rgba(0, 0, 0, 0.35);             /* inset shade of the pill + select wells */
+  --adh-glow-cobalt: rgba(17, 51, 152, 0.7);    /* the band's three radial glows */
+  --adh-glow-azure: rgba(47, 125, 246, 0.22);
+  --adh-glow-bright: rgba(79, 146, 255, 0.08);
+  --adh-pill-top: rgba(79, 146, 255, 0.95);     /* active product option */
+  --adh-pill-bottom: rgba(47, 125, 246, 0.95);
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -292,13 +333,9 @@
   min-height: 120px;
   padding: 22px 28px 24px;
   border-radius: 16px;
-  color: #e8eef9;
-  background: linear-gradient(180deg, var(--ad-granite-hi) 0%, var(--ad-granite) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 0 0 1px rgba(7, 12, 22, 0.9),
-    0 2px 4px rgba(7, 12, 22, 0.18),
-    0 22px 44px -20px rgba(7, 12, 22, 0.55);
+  color: var(--t-band-text);
+  background: var(--t-band-bg);
+  box-shadow: 0 0 0 1px var(--t-band-edge), var(--t-band-shadow);
 }
 
 /* Soft cobalt radial glow. */
@@ -308,9 +345,9 @@
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 50% 160% at 12% 120%, rgba(17, 51, 152, 0.7) 0%, transparent 70%),
-    radial-gradient(ellipse 40% 120% at 88% 130%, rgba(47, 125, 246, 0.22) 0%, transparent 70%),
-    radial-gradient(ellipse 30% 70% at 100% 0%, rgba(79, 146, 255, 0.08) 0%, transparent 70%);
+    radial-gradient(ellipse 50% 160% at 12% 120%, var(--adh-glow-cobalt) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 120% at 88% 130%, var(--adh-glow-azure) 0%, transparent 70%),
+    radial-gradient(ellipse 30% 70% at 100% 0%, var(--adh-glow-bright) 0%, transparent 70%);
 }
 
 /* The 2px azure light-line along the bottom edge. */
@@ -323,13 +360,13 @@
   height: 2px;
   background: linear-gradient(
     90deg,
-    rgba(47, 125, 246, 0) 0%,
-    var(--rcf-azure) 18%,
-    var(--ad-azure-bright) 50%,
-    var(--rcf-azure) 82%,
-    rgba(47, 125, 246, 0) 100%
+    transparent 0%,
+    var(--t-accent) 18%,
+    var(--t-band-accent) 50%,
+    var(--t-accent) 82%,
+    transparent 100%
   );
-  box-shadow: 0 0 12px 1px rgba(47, 125, 246, 0.55);
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--t-accent) 55%, transparent);
 }
 
 .ad-header-id { min-width: 0; flex: 1 1 300px; }
@@ -342,15 +379,16 @@
   margin: 0 0 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #93a4c0;
+  color: var(--t-band-text-dim);
 }
 
+/* Amber staff tag — the forced-dark warn set (#fbbf24 on amber 12 %). */
 .ad-preview-tag {
   font-size: 11px;
   font-weight: 700;
-  color: #fbbf24;
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: var(--t-warn-fg);
+  background: var(--t-warn-bg);
+  border: 1px solid color-mix(in srgb, var(--t-warn-solid) 35%, transparent);
   border-radius: 999px;
   padding: 1px 8px;
 }
@@ -361,7 +399,7 @@
   font-weight: 700;
   line-height: 1.15;
   letter-spacing: -0.02em;
-  color: #fff;
+  color: var(--t-band-text-strong);
   overflow-wrap: anywhere;
 }
 
@@ -372,7 +410,7 @@
   gap: 6px 18px;
   margin-top: 9px;
   font-size: 13.5px;
-  color: #b4c2d9;
+  color: var(--t-band-text-soft);
 }
 
 .ad-header-status {
@@ -380,15 +418,20 @@
   align-items: center;
   gap: 8px;
   font-weight: 600;
-  color: #fff;
+  color: var(--t-band-text-strong);
 }
 
 .ad-header-status-on .ad-dot {
-  background: var(--ad-live);
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.16), 0 0 10px rgba(34, 197, 94, 0.55);
+  background: var(--adh-live);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--adh-live) 16%, transparent),
+    0 0 10px color-mix(in srgb, var(--adh-live) 55%, transparent);
 }
 
-.ad-header-status-off .ad-dot { background: #f87171; box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.16); }
+.ad-header-status-off .ad-dot {
+  background: var(--t-danger-fg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-danger-fg) 16%, transparent);
+}
 
 .ad-header-tools {
   display: flex;
@@ -416,9 +459,9 @@
   gap: 2px;
   padding: 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  background: var(--t-band-tint);
+  border: 1px solid var(--t-band-line);
+  box-shadow: inset 0 1px 2px var(--adh-shade);
 }
 
 .ad-switch-opt {
@@ -433,13 +476,16 @@
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;
-  color: #b4c2d9;
+  color: var(--t-band-text-soft);
   white-space: nowrap;
   cursor: pointer;
   transition: background-color var(--rcf-ease), color var(--rcf-ease), box-shadow var(--rcf-ease);
 }
 
-.ad-switch-opt:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
+.ad-switch-opt:hover {
+  color: var(--t-band-text-strong);
+  background: color-mix(in srgb, var(--t-band-text-strong) 6%, transparent);
+}
 
 /* A product with its own page (Visual Voicemail when switched on): a plain
    link in the pill — same resting/hover look as an available option, plus a
@@ -447,21 +493,21 @@
 .ad-switch-opt-link { text-decoration: none; }
 .ad-switch-go { width: 12px; height: 12px; opacity: 0.75; flex-shrink: 0; }
 .ad-switch-opt-link:hover .ad-switch-go { opacity: 1; }
-.ad-switch-opt:focus-visible { outline: 2px solid var(--ad-azure-bright); outline-offset: 1px; }
+.ad-switch-opt:focus-visible { outline: 2px solid var(--t-band-accent); outline-offset: 1px; }
 
 .ad-switch-opt-active,
 .ad-switch-opt-active:hover {
-  color: #fff;
-  background: linear-gradient(180deg, rgba(79, 146, 255, 0.95) 0%, rgba(47, 125, 246, 0.95) 100%);
+  color: var(--t-band-text-strong);
+  background: linear-gradient(180deg, var(--adh-pill-top) 0%, var(--adh-pill-bottom) 100%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    0 0 0 1px rgba(79, 146, 255, 0.55),
-    0 4px 16px -4px rgba(47, 125, 246, 0.9);
+    inset 0 1px 0 color-mix(in srgb, var(--t-band-text-strong) 25%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--t-band-accent) 55%, transparent),
+    0 4px 16px -4px color-mix(in srgb, var(--t-accent) 90%, transparent);
 }
 
 .ad-switch-opt-soon,
 .ad-switch-opt-soon:hover {
-  color: rgba(255, 255, 255, 0.4);
+  color: color-mix(in srgb, var(--t-band-text-strong) 40%, transparent);
   background: transparent;
   cursor: not-allowed;
 }
@@ -469,8 +515,8 @@
 .ad-soon {
   font-size: 10px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: color-mix(in srgb, var(--t-band-text-strong) 50%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-band-text-strong) 14%, transparent);
   border-radius: 999px;
   padding: 0 6px;
   line-height: 1.6;
@@ -496,7 +542,7 @@
   padding: 16px 16px 14px;
   border-radius: 14px;
   border: 1px solid var(--rcf-line);
-  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+  background: var(--ad-kpi-bg);
   box-shadow: var(--ad-shadow);
   overflow: hidden;
   color: var(--rcf-ink);
@@ -521,12 +567,17 @@
   opacity: 0.9;
 }
 
+/* Dark: the tone edge glows into the panel, like the landing's keylines. */
+:root[data-theme='dark'] .ad-kpi::before {
+  box-shadow: 0 0 14px 1px color-mix(in srgb, var(--ad-tone) 60%, transparent);
+}
+
 button.ad-kpi { cursor: pointer; }
 
 .ad-kpi-live:hover,
 .ad-kpi-live:focus-visible {
   transform: translateY(-2px);
-  border-color: rgba(47, 125, 246, 0.3);
+  border-color: color-mix(in srgb, var(--t-accent-line) 30%, transparent);
   box-shadow: var(--ad-shadow-lift);
 }
 
@@ -548,8 +599,8 @@ button.ad-kpi { cursor: pointer; }
   flex-shrink: 0;
   border-radius: 9px;
   color: var(--ad-tone);
-  background: color-mix(in srgb, var(--ad-tone) 11%, #fff);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ad-tone) 18%, #fff);
+  background: color-mix(in srgb, var(--ad-tone) 11%, var(--t-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ad-tone) 18%, var(--t-surface));
 }
 
 .ad-kpi-label {
@@ -625,7 +676,7 @@ button.ad-kpi { cursor: pointer; }
   min-width: 0;
   border-radius: 14px;
   border: 1px solid var(--rcf-line);
-  background: linear-gradient(180deg, #fff 0%, #fdfdfe 100%);
+  background: var(--ad-card-bg);
   box-shadow: var(--ad-shadow);
   overflow: hidden;
 }
@@ -649,8 +700,8 @@ button.ad-kpi { cursor: pointer; }
   flex-shrink: 0;
   border-radius: 8px;
   color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.09);
-  box-shadow: inset 0 0 0 1px rgba(47, 125, 246, 0.14);
+  background: var(--t-accent-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-accent-line) 14%, transparent);
 }
 
 .ad-card-titles { min-width: 0; }
@@ -765,7 +816,7 @@ button.ad-kpi { cursor: pointer; }
   padding: 0 12px 0 34px;
   border-radius: 9px;
   border: 1px solid var(--rcf-line);
-  background: var(--rcf-tint);
+  background: var(--ad-search-bg);
   font-family: inherit;
   font-size: 13px;
   color: var(--rcf-ink);
@@ -773,12 +824,12 @@ button.ad-kpi { cursor: pointer; }
 }
 
 .ad-search input::placeholder { color: var(--ad-slate); }
-.ad-search input:hover { border-color: #cdd7e6; }
+.ad-search input:hover { border-color: var(--dl-field-hover); }
 
 .ad-search input:focus-visible {
   outline: none;
-  background: #fff;
-  border-color: var(--rcf-azure);
+  background: var(--ad-search-focus-bg);
+  border-color: var(--t-focus);
   box-shadow: var(--ad-focus);
 }
 
@@ -792,7 +843,7 @@ button.ad-kpi { cursor: pointer; }
   padding: 0 12px;
   border-radius: 999px;
   border: 1px solid var(--rcf-line);
-  background: #fff;
+  background: var(--t-surface);
   font-family: inherit;
   font-size: 12.5px;
   font-weight: 600;
@@ -801,15 +852,15 @@ button.ad-kpi { cursor: pointer; }
   transition: background-color var(--rcf-ease), border-color var(--rcf-ease), color var(--rcf-ease), box-shadow var(--rcf-ease);
 }
 
-.ad-chipbtn:hover { border-color: rgba(47, 125, 246, 0.35); color: var(--rcf-ink); }
-.ad-chipbtn:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+.ad-chipbtn:hover { border-color: color-mix(in srgb, var(--t-accent-line) 35%, transparent); color: var(--rcf-ink); }
+.ad-chipbtn:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 
 .ad-chipbtn-active,
 .ad-chipbtn-active:hover {
   color: var(--rcf-azure-deep);
-  border-color: rgba(47, 125, 246, 0.45);
-  background: var(--rcf-tint-hover);
-  box-shadow: 0 2px 8px -4px rgba(47, 125, 246, 0.45);
+  border-color: color-mix(in srgb, var(--t-accent-line) 45%, transparent);
+  background: var(--ad-selected-bg);
+  box-shadow: 0 2px 8px -4px color-mix(in srgb, var(--t-accent) 45%, transparent);
 }
 
 .ad-chipbtn-count {
@@ -859,8 +910,8 @@ button.ad-kpi { cursor: pointer; }
 }
 
 .ad-row:hover { background: var(--rcf-tint-hover); }
-.ad-row:focus-visible { outline: none; background: var(--rcf-tint-hover); box-shadow: inset 0 0 0 2px var(--rcf-azure); }
-.ad-row-open { background: #f2f7ff; box-shadow: inset 3px 0 0 var(--rcf-azure); }
+.ad-row:focus-visible { outline: none; background: var(--rcf-tint-hover); box-shadow: inset 0 0 0 2px var(--t-focus); }
+.ad-row-open { background: var(--ad-selected-bg); box-shadow: inset 3px 0 0 var(--t-accent-line); }
 
 .ad-col-chev { width: 28px; text-align: right; }
 
@@ -884,9 +935,9 @@ button.ad-kpi { cursor: pointer; }
 }
 
 .ad-status-on { color: var(--rcf-green); }
-.ad-status-on .ad-dot { box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.14); }
+.ad-status-on .ad-dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-ok-fg) 14%, transparent); }
 .ad-status-off { color: var(--rcf-ink-soft); }
-.ad-status-off .ad-dot { background: var(--ad-slate); box-shadow: 0 0 0 3px rgba(139, 153, 176, 0.16); }
+.ad-status-off .ad-dot { background: var(--ad-slate); box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-text-faint) 16%, transparent); }
 
 /* Every-product rows (NumbersCard). A voicemail row is a link (→ chevron);
    a SIP trunk row (or an rcf row past the /rcf list cap) is plain text —
@@ -906,10 +957,10 @@ button.ad-kpi { cursor: pointer; }
 
 .ad-row-hint { text-decoration: none; }
 .ad-row-hint:hover { color: var(--rcf-azure-deep); text-decoration: underline; text-underline-offset: 3px; }
-.ad-row-hint:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; border-radius: 3px; }
+.ad-row-hint:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; border-radius: 3px; }
 
 /* Product tag — a small brand-blue pill naming a number's product (activity
-   picker options). Uses --rcf-* tokens only: it also renders inside the
+   picker options). Theme tokens only: it also renders inside the
    portalled .rcf-scope overlay, outside .ad-scope. */
 .ad-prodtag {
   display: inline-flex;
@@ -919,9 +970,9 @@ button.ad-kpi { cursor: pointer; }
   font-weight: 700;
   letter-spacing: 0.04em;
   line-height: 1.5;
-  color: var(--rcf-azure-deep, #1d63dd);
-  background: rgba(47, 125, 246, 0.09);
-  border: 1px solid rgba(47, 125, 246, 0.24);
+  color: var(--t-accent-text);
+  background: var(--t-accent-tint);
+  border: 1px solid var(--t-accent-border);
   border-radius: 999px;
   padding: 0 7px;
   white-space: nowrap;
@@ -931,7 +982,7 @@ button.ad-kpi { cursor: pointer; }
 
 .ad-editor .rcf-xpanel {
   border-bottom: none;
-  background: #f8fafd;
+  background: var(--dl-well-soft);
 }
 
 .ad-editor .rcf-xsection-title,
@@ -1005,7 +1056,7 @@ button.ad-kpi { cursor: pointer; }
   display: flex;
   align-items: flex-end;
   border-radius: 7px;
-  background: linear-gradient(180deg, rgba(237, 241, 247, 0.4) 0%, var(--rcf-line-soft) 100%);
+  background: linear-gradient(180deg, var(--ad-bar-track-top) 0%, var(--rcf-line-soft) 100%);
 }
 
 .ad-bar-stack {
@@ -1018,7 +1069,7 @@ button.ad-kpi { cursor: pointer; }
   transform-origin: bottom;
   animation: ad-grow 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: calc(240ms + var(--i, 0) * 30ms);
-  box-shadow: 0 4px 10px -4px rgba(29, 99, 221, 0.45);
+  box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--t-accent-hover) 45%, transparent);
 }
 
 @keyframes ad-grow {
@@ -1026,10 +1077,12 @@ button.ad-kpi { cursor: pointer; }
   to   { transform: none; }
 }
 
-.ad-bar-answered { background: linear-gradient(180deg, var(--ad-azure-bright) 0%, var(--rcf-azure-deep) 100%); }
-.ad-bar-missed { background: #c3cede; }
+/* Answered: azure-bright → azure-deep (a fill in both themes); missed: the
+   chart's neutral "didn't happen" slate. */
+.ad-bar-answered { background: linear-gradient(180deg, var(--ad-azure-bright) 0%, var(--t-accent-hover) 100%); }
+.ad-bar-missed { background: var(--t-chart-neutral); }
 
-.ad-bar-col:hover .ad-bar-answered { background: linear-gradient(180deg, #6aa3ff 0%, var(--rcf-azure) 100%); }
+.ad-bar-col:hover .ad-bar-answered { background: linear-gradient(180deg, var(--ad-bar-hover-top) 0%, var(--t-accent) 100%); }
 
 .ad-bar-tick {
   font-size: 11px;
@@ -1050,8 +1103,8 @@ button.ad-kpi { cursor: pointer; }
 .ad-legend > span { display: inline-flex; align-items: center; gap: 6px; }
 
 .ad-swatch { width: 10px; height: 10px; border-radius: 3px; }
-.ad-swatch-answered { background: var(--rcf-azure); }
-.ad-swatch-missed { background: #c3cede; }
+.ad-swatch-answered { background: var(--t-accent); }
+.ad-swatch-missed { background: var(--t-chart-neutral); }
 
 .ad-facts {
   display: grid;
@@ -1243,7 +1296,7 @@ button.ad-kpi { cursor: pointer; }
   font-size: 11px;
   font-weight: 700;
   color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.09);
+  background: var(--t-accent-tint);
 }
 
 .ad-busiest-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -1262,7 +1315,7 @@ button.ad-kpi { cursor: pointer; }
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--rcf-azure-deep) 0%, var(--ad-azure-bright) 100%);
+  background: linear-gradient(90deg, var(--t-accent-hover) 0%, var(--ad-azure-bright) 100%);
 }
 
 .ad-busiest-calls {
@@ -1305,9 +1358,11 @@ button.ad-kpi { cursor: pointer; }
   border-radius: 50%;
   font-size: 12px;
   font-weight: 700;
-  color: #fff;
-  background: linear-gradient(135deg, var(--ad-cobalt) 0%, var(--rcf-azure) 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 3px 8px -3px rgba(17, 51, 152, 0.55);
+  color: var(--t-text-on-accent);
+  background: linear-gradient(135deg, var(--ad-cobalt) 0%, var(--t-accent) 100%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--t-text-on-accent) 25%, transparent),
+    0 3px 8px -3px color-mix(in srgb, var(--brand-cobalt) 55%, transparent);
 }
 
 .ad-member-inactive .ad-avatar { background: var(--ad-slate); box-shadow: none; }
@@ -1389,8 +1444,8 @@ button.ad-kpi { cursor: pointer; }
   padding: 10px 12px;
   border-radius: 11px;
   border: 1px solid var(--rcf-line);
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.04);
+  background: var(--t-surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--dl-shadow-ink) 4%, transparent);
   font-family: inherit;
   text-align: left;
   text-decoration: none;
@@ -1402,12 +1457,17 @@ button.ad-kpi { cursor: pointer; }
 .ad-action:hover,
 .ad-action:focus-visible {
   transform: translateY(-2px);
-  border-color: rgba(47, 125, 246, 0.3);
-  background: linear-gradient(180deg, #fff 0%, #f7faff 100%);
-  box-shadow: 0 12px 24px -14px rgba(29, 99, 221, 0.45), 0 1px 2px rgba(14, 23, 38, 0.04);
+  border-color: color-mix(in srgb, var(--t-accent-line) 30%, transparent);
+  background: var(--ad-action-hover-bg);
+  box-shadow:
+    0 12px 24px -14px color-mix(in srgb, var(--t-accent-hover) 45%, transparent),
+    0 1px 2px color-mix(in srgb, var(--dl-shadow-ink) 4%, transparent);
 }
 
-.ad-action:focus-visible { outline: none; box-shadow: 0 12px 24px -14px rgba(29, 99, 221, 0.45), var(--ad-focus); }
+.ad-action:focus-visible {
+  outline: none;
+  box-shadow: 0 12px 24px -14px color-mix(in srgb, var(--t-accent-hover) 45%, transparent), var(--ad-focus);
+}
 
 .ad-action-icon {
   display: inline-flex;
@@ -1418,15 +1478,15 @@ button.ad-kpi { cursor: pointer; }
   flex-shrink: 0;
   border-radius: 9px;
   color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.09);
-  box-shadow: inset 0 0 0 1px rgba(47, 125, 246, 0.14);
+  background: var(--t-accent-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-accent-line) 14%, transparent);
   transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 .ad-action:hover .ad-action-icon,
 .ad-action:focus-visible .ad-action-icon {
-  color: #fff;
-  background: linear-gradient(180deg, var(--ad-azure-bright) 0%, var(--rcf-azure) 100%);
+  color: var(--t-text-on-accent);
+  background: linear-gradient(180deg, var(--ad-azure-bright) 0%, var(--t-accent) 100%);
 }
 
 .ad-action-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
@@ -1452,9 +1512,9 @@ button.ad-kpi { cursor: pointer; }
   width: 48px;
   height: 48px;
   border-radius: 14px;
-  color: #b45309;
-  background: rgba(245, 158, 11, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.3);
+  color: var(--t-warn-fg);
+  background: color-mix(in srgb, var(--dl-amber) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dl-amber) 30%, transparent);
 }
 
 .ad-prompt-title {
@@ -1470,7 +1530,8 @@ button.ad-kpi { cursor: pointer; }
 /* ─── Admin dashboard (AdminDashboard / AdminCards / AdminScopeSelect) ─────
    The admin's "Viewing" dropdown sits in the granite header's tools row as
    dark glass; the header can also carry a quiet glass secondary action
-   ("View as customer"). The customers table reuses .ad-table / .ad-row. */
+   ("View as customer"). Both live in the band (band tokens + the forced
+   dark set). The customers table reuses .ad-table / .ad-row. */
 
 .ad-header-actions {
   display: flex;
@@ -1480,19 +1541,19 @@ button.ad-kpi { cursor: pointer; }
 }
 
 .ad-btn-glass {
-  color: #e8eef9;
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.16);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: var(--t-band-text);
+  background: color-mix(in srgb, var(--t-band-text-strong) 6%, transparent);
+  border-color: color-mix(in srgb, var(--t-band-text-strong) 16%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t-band-text-strong) 8%, transparent);
 }
 
 .ad-btn-glass:hover {
-  color: #fff;
-  background: rgba(79, 146, 255, 0.14);
-  border-color: color-mix(in srgb, var(--ad-azure-bright) 55%, transparent);
+  color: var(--t-band-text-strong);
+  background: color-mix(in srgb, var(--t-band-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--t-band-accent) 55%, transparent);
 }
 
-.ad-btn-glass:focus-visible { outline-color: var(--ad-azure-bright); }
+.ad-btn-glass:focus-visible { outline-color: var(--t-band-accent); }
 
 .ad-scope-pick {
   display: flex;
@@ -1507,7 +1568,7 @@ button.ad-kpi { cursor: pointer; }
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #93a4c0;
+  color: var(--t-band-text-dim);
   white-space: nowrap;
 }
 
@@ -1527,32 +1588,32 @@ button.ad-kpi { cursor: pointer; }
   height: 40px;
   padding: 0 38px 0 14px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  border: 1px solid color-mix(in srgb, var(--t-band-text-strong) 16%, transparent);
+  background: color-mix(in srgb, var(--t-band-text-strong) 6%, transparent);
+  box-shadow: inset 0 1px 2px var(--adh-shade);
   font-family: inherit;
   font-size: 13.5px;
   font-weight: 600;
-  color: #fff;
+  color: var(--t-band-text-strong);
   text-overflow: ellipsis;
   cursor: pointer;
   transition: border-color var(--rcf-ease), background-color var(--rcf-ease), box-shadow var(--rcf-ease);
 }
 
 .ad-scope-select:hover {
-  border-color: color-mix(in srgb, var(--ad-azure-bright) 55%, transparent);
-  background: rgba(79, 146, 255, 0.1);
+  border-color: color-mix(in srgb, var(--t-band-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--t-band-accent) 10%, transparent);
 }
 
 .ad-scope-select:focus-visible {
   outline: none;
-  border-color: var(--ad-azure-bright);
-  box-shadow: 0 0 0 3px var(--brand-glow, rgba(47, 125, 246, 0.35));
+  border-color: var(--t-band-accent);
+  box-shadow: 0 0 0 3px var(--brand-glow);
 }
 
-/* Native option popups render on a light OS surface. */
+/* The native option popup follows the band's forced dark color-scheme. */
 .ad-scope-select option,
-.ad-scope-select optgroup { color: #0e1726; background: #fff; }
+.ad-scope-select optgroup { color: var(--t-text); background: var(--t-surface-raised); }
 
 .ad-scope-caret {
   position: absolute;
@@ -1561,7 +1622,7 @@ button.ad-kpi { cursor: pointer; }
   width: 15px;
   height: 15px;
   transform: translateY(-50%);
-  color: #b4c2d9;
+  color: var(--t-band-text-soft);
   pointer-events: none;
 }
 
@@ -1628,7 +1689,7 @@ button.ad-kpi { cursor: pointer; }
 }
 
 .ad-cust-btn:hover { text-decoration: underline; text-underline-offset: 3px; }
-.ad-cust-btn:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+.ad-cust-btn:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 
 .ad-calltable .ad-col-cust { max-width: 180px; }
 
