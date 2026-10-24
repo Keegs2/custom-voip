@@ -13,31 +13,36 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: React.ReactNode;
 }
 
+// Every colour is a theme token (src/styles/theme.css) so each variant
+// reads right on daylight paper and on granite. Arbitrary values carry an
+// explicit `color:` type hint so Tailwind never guesses.
 const variantClasses: Record<ButtonVariant, string> = {
   // The brand primary (index.css :root --brand-btn-*): azure → azure-deep
   // gradient with a 1px inner top highlight; the azure glow blooms on hover.
+  // Same recipe in both themes (it is the landing page's primary).
   primary: [
-    'bg-[image:var(--brand-btn-bg)] text-white border border-transparent',
+    'bg-[image:var(--brand-btn-bg)] text-[color:var(--t-text-on-accent)] border border-[color:var(--brand-btn-edge)]',
     'shadow-[var(--brand-btn-shadow)]',
     'hover:bg-[image:var(--brand-btn-bg-hover)] hover:shadow-[var(--brand-btn-shadow-hover)] hover:scale-[1.02]',
     'disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100',
   ].join(' '),
 
+  // Quiet secondary — hairline border, no fill (the landing's ghost).
   ghost: [
-    'bg-transparent text-[#718096] border border-[#2a2f45]',
-    'hover:bg-white/[0.05] hover:text-[#e2e8f0] hover:border-[#363c57]',
+    'bg-transparent text-[color:var(--t-text-soft)] border border-[color:var(--t-line-strong)]',
+    'hover:bg-[color:var(--t-hover)] hover:text-[color:var(--t-text)] hover:border-[color:var(--t-field-border-hover)]',
     'disabled:opacity-40 disabled:cursor-not-allowed',
   ].join(' '),
 
   danger: [
-    'bg-[#7f1d1d] text-[#fca5a5] border border-red-500/25',
-    'hover:bg-[#991b1b] hover:shadow-[0_0_14px_rgba(239,68,68,0.2)] hover:scale-[1.02]',
-    'disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100',
+    'bg-[color:var(--t-danger-bg)] text-[color:var(--t-danger-fg)] border border-[color:var(--t-danger-border)]',
+    'hover:bg-[color:color-mix(in_srgb,var(--t-danger-solid)_18%,transparent)] hover:scale-[1.02]',
+    'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100',
   ].join(' '),
 
   success: [
-    'bg-[#065f46] text-[#6ee7b7] border border-emerald-300/20',
-    'hover:bg-emerald-800/60 hover:scale-[1.02]',
+    'bg-[color:var(--t-ok-bg)] text-[color:var(--t-ok-fg)] border border-[color:var(--t-ok-border)]',
+    'hover:bg-[color:color-mix(in_srgb,var(--t-ok-solid)_18%,transparent)] hover:scale-[1.02]',
     'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100',
   ].join(' '),
 };
@@ -74,7 +79,8 @@ export function Button({
         'inline-flex items-center justify-center gap-1.5 whitespace-nowrap leading-none',
         'transition-all duration-150',
         'active:scale-[0.97] active:transition-none',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--brand-focus-ring)]',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+        'focus-visible:ring-[color:var(--t-focus)] focus-visible:ring-offset-[color:var(--t-surface)]',
         'disabled:active:scale-100',
         variantClasses[variant],
         sizeClasses[size],

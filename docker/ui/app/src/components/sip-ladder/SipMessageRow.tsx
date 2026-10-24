@@ -2,6 +2,9 @@ import { useCallback } from 'react';
 import type { LadderMessage, LadderNode } from './sipLadderTypes';
 import { formatTimeDelta, LADDER_COLORS } from './sipLadderUtils';
 
+/** The open (expanded) row's wash — azure line 7 %, theme-aware. */
+const ROW_OPEN_BG = LADDER_COLORS.accentRowOpen;
+
 // ─── Arrow rendering ────────────────────────────────────────────────────────
 //
 // Arrows are rendered as CSS horizontal lines spanning the cells between source
@@ -33,7 +36,7 @@ function ArrowHead({ direction, color }: { direction: 'right' | 'left'; color: s
         viewBox="0 0 8 10"
         style={{ display: 'block', flexShrink: 0 }}
       >
-        <polygon points="0,0 8,5 0,10" fill={color} />
+        <polygon points="0,0 8,5 0,10" style={{ fill: color }} />
       </svg>
     );
   }
@@ -44,7 +47,7 @@ function ArrowHead({ direction, color }: { direction: 'right' | 'left'; color: s
       viewBox="0 0 8 10"
       style={{ display: 'block', flexShrink: 0 }}
     >
-      <polygon points="8,0 0,5 8,10" fill={color} />
+      <polygon points="8,0 0,5 8,10" style={{ fill: color }} />
     </svg>
   );
 }
@@ -165,7 +168,7 @@ export function SipMessageRow({
   const rowOpacity = isRetrans ? 0.55 : internalHandoff ? 0.9 : 1;
 
   // Row hover background
-  const rowBg = isExpanded ? 'rgba(47,125,246,0.07)' : 'transparent';
+  const rowBg = isExpanded ? ROW_OPEN_BG : 'transparent';
 
   // The connector is not a captured packet — no packet panel to open. Explain it
   // on hover rather than inviting a click.
@@ -190,7 +193,7 @@ export function SipMessageRow({
         }
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = isExpanded ? 'rgba(47,125,246,0.07)' : 'transparent';
+        e.currentTarget.style.background = isExpanded ? ROW_OPEN_BG : 'transparent';
       }}
       title={rowTitle}
     >
@@ -255,13 +258,13 @@ export function SipMessageRow({
                   <path
                     d="M 5 13 V 6 A 4.5 4.5 0 0 1 14 6 V 10"
                     fill="none"
-                    stroke={color}
                     strokeWidth={1.6}
+                    style={{ stroke: color }}
                   />
                   {/* arrowhead pointing back down at the column */}
-                  <polygon points="11,10 17,10 14,15" fill={color} />
+                  <polygon points="11,10 17,10 14,15" style={{ fill: color }} />
                   {/* origin dot on the column line */}
-                  <circle cx={5} cy={13} r={2} fill={color} />
+                  <circle cx={5} cy={13} r={2} style={{ fill: color }} />
                 </svg>
               </div>
             )}

@@ -11,10 +11,10 @@ export function Pagination({ shown, total, onLoadMore, loading = false }: Pagina
   const hasMore = shown < total;
 
   return (
-    <div className="flex items-center justify-between mt-4 text-[0.82rem] text-[#718096]">
+    <div className="flex items-center justify-between mt-4 text-[0.82rem] text-[color:var(--t-text-dim)]">
       <span>
-        Showing <span className="text-[#e2e8f0] font-semibold">{shown}</span> of{' '}
-        <span className="text-[#e2e8f0] font-semibold">{total}</span>
+        Showing <span className="text-[color:var(--t-text)] font-semibold">{shown}</span> of{' '}
+        <span className="text-[color:var(--t-text)] font-semibold">{total}</span>
       </span>
       {hasMore && (
         <Button

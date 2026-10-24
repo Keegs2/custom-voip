@@ -2,11 +2,10 @@ import {
   createContext,
   useCallback,
   useContext,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
-import { BRAND_AZURE_BRIGHT } from '../../styles/brand';
+import { T, TONE, type StatusTone } from '../../styles/theme';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,60 +48,65 @@ const ERROR_DURATION_MS = 6000;
 const EXIT_ANIMATION_MS = 200;
 const MAX_VISIBLE = 5;
 
-const VARIANT_COLOR: Record<ToastVariant, string> = {
-  success: '#4ade80',
-  error:   '#ef4444',
-  warning: '#f59e0b',
-  info:    BRAND_AZURE_BRIGHT, // toasts sit on the dark shell
+/** Each variant's status tone — theme tokens, so a toast reads right over
+    daylight paper and over granite (and portals need no scope class). */
+const VARIANT_TONE: Record<ToastVariant, StatusTone> = {
+  success: 'ok',
+  error:   'danger',
+  warning: 'warn',
+  info:    'info',
 };
 
 // ---------------------------------------------------------------------------
 // Per-toast icon SVGs (inline, no extra deps)
 // ---------------------------------------------------------------------------
 
-function IconSuccess({ color }: { color: string }) {
+// Icons paint with currentColor; the wrapper sets the tone colour (a var()
+// string — CSS custom properties are reliable in `style`, not in SVG
+// presentation attributes).
+function IconSuccess() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-      <circle cx="9" cy="9" r="8.25" stroke={color} strokeWidth="1.5" />
-      <path d="M5.5 9l2.5 2.5 4.5-4.5" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="9" cy="9" r="8.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M5.5 9l2.5 2.5 4.5-4.5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
-function IconError({ color }: { color: string }) {
+function IconError() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-      <circle cx="9" cy="9" r="8.25" stroke={color} strokeWidth="1.5" />
-      <path d="M6.5 6.5l5 5M11.5 6.5l-5 5" stroke={color} strokeWidth="1.75" strokeLinecap="round" />
+      <circle cx="9" cy="9" r="8.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M6.5 6.5l5 5M11.5 6.5l-5 5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
     </svg>
   );
 }
 
-function IconWarning({ color }: { color: string }) {
+function IconWarning() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-      <path d="M9 2L16.5 15H1.5L9 2z" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
-      <path d="M9 7.5v3.5" stroke={color} strokeWidth="1.75" strokeLinecap="round" />
-      <circle cx="9" cy="13" r="0.75" fill={color} />
+      <path d="M9 2L16.5 15H1.5L9 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M9 7.5v3.5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+      <circle cx="9" cy="13" r="0.75" fill="currentColor" />
     </svg>
   );
 }
 
-function IconInfo({ color }: { color: string }) {
+function IconInfo() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-      <circle cx="9" cy="9" r="8.25" stroke={color} strokeWidth="1.5" />
-      <path d="M9 8.5v4.5" stroke={color} strokeWidth="1.75" strokeLinecap="round" />
-      <circle cx="9" cy="5.75" r="0.75" fill={color} />
+      <circle cx="9" cy="9" r="8.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M9 8.5v4.5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+      <circle cx="9" cy="5.75" r="0.75" fill="currentColor" />
     </svg>
   );
 }
 
-const VARIANT_ICON: Record<ToastVariant, (color: string) => ReactNode> = {
-  success: (c) => <IconSuccess color={c} />,
-  error:   (c) => <IconError color={c} />,
-  warning: (c) => <IconWarning color={c} />,
-  info:    (c) => <IconInfo color={c} />,
+const VARIANT_ICON: Record<ToastVariant, ReactNode> = {
+  success: <IconSuccess />,
+  error:   <IconError />,
+  warning: <IconWarning />,
+  info:    <IconInfo />,
 };
 
 // ---------------------------------------------------------------------------
@@ -115,13 +119,12 @@ interface ToastCardProps {
 }
 
 function ToastCard({ toast, onDismiss }: ToastCardProps) {
-  const color = VARIANT_COLOR[toast.variant];
+  const tone = TONE[VARIANT_TONE[toast.variant]];
+  // Solid tone for the icon, accent bar and progress; fg for the action.
+  const color = tone.solid;
   const [hovered, setHovered] = useState(false);
 
-  // Pause progress bar while hovered
-  const pausedRef = useRef(hovered);
-  pausedRef.current = hovered;
-
+  // Pause the progress bar while hovered.
   const animationState = hovered ? 'paused' : 'running';
   const animationClass = toast.dismissing ? 'toast-exit' : 'toast-enter';
 
@@ -136,11 +139,9 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
         minWidth: 320,
         maxWidth: 420,
         borderRadius: 10,
-        background: 'rgba(19, 21, 29, 0.92)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        border: `1px solid ${color}25`,
-        boxShadow: `0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px ${color}10`,
+        background: T.surfaceRaised,
+        border: `1px solid ${tone.border}`,
+        boxShadow: T.shadowPop,
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -163,8 +164,8 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
       {/* Main content row */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px 12px 18px' }}>
         {/* Icon */}
-        <div style={{ flexShrink: 0, marginTop: 1 }}>
-          {VARIANT_ICON[toast.variant](color)}
+        <div style={{ flexShrink: 0, marginTop: 1, color, display: 'flex' }}>
+          {VARIANT_ICON[toast.variant]}
         </div>
 
         {/* Text */}
@@ -173,7 +174,7 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
             <div style={{
               fontSize: '0.85rem',
               fontWeight: 700,
-              color: '#e2e8f0',
+              color: T.textStrong,
               lineHeight: 1.3,
               marginBottom: toast.message ? 3 : 0,
             }}>
@@ -182,7 +183,7 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
           )}
           <div style={{
             fontSize: '0.8rem',
-            color: '#94a3b8',
+            color: T.textSoft,
             lineHeight: 1.5,
             wordBreak: 'break-word',
           }}>
@@ -203,9 +204,9 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
                 alignItems: 'center',
                 padding: '3px 10px',
                 borderRadius: 999,
-                border: `1px solid ${color}60`,
-                background: `${color}18`,
-                color: color,
+                border: `1px solid ${tone.border}`,
+                background: tone.bg,
+                color: tone.fg,
                 fontSize: '0.75rem',
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -217,11 +218,13 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
           )}
         </div>
 
-        {/* Dismiss button — always in DOM, opacity controlled by hover */}
+        {/* Dismiss button — always in DOM, shown on hover / keyboard focus */}
         <button
           type="button"
           onClick={() => onDismiss(toast.id)}
           aria-label="Dismiss notification"
+          className="toast-dismiss"
+          data-shown={hovered ? 'true' : undefined}
           style={{
             flexShrink: 0,
             marginTop: -2,
@@ -234,12 +237,8 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
             border: 'none',
             background: 'transparent',
             cursor: 'pointer',
-            color: '#475569',
-            opacity: hovered ? 1 : 0,
             transition: 'opacity 150ms, color 150ms',
           }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#475569'; }}
         >
           {/* X icon */}
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
@@ -258,7 +257,7 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
             left: 0,
             right: 0,
             height: 2,
-            background: 'rgba(255,255,255,0.06)',
+            background: T.lineSoft,
           }}
         >
           <div
@@ -378,6 +377,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         .toast-exit {
           animation: toast-exit ${EXIT_ANIMATION_MS}ms ease-in both;
         }
+        .toast-dismiss { color: var(--t-text-faint); opacity: 0; }
+        .toast-dismiss[data-shown], .toast-dismiss:focus-visible { opacity: 1; }
+        .toast-dismiss:hover { color: var(--t-text-soft); }
+        .toast-dismiss:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 1px; }
+        @media (prefers-reduced-motion: reduce) {
+          .toast-enter, .toast-exit { animation-duration: 1ms; }
+        }
       `}</style>
 
       {/* Toast container */}
@@ -407,9 +413,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 // ---------------------------------------------------------------------------
-// Hook
+// Hook — lives beside its provider by design (Fast Refresh falls back to a
+// full reload for this file).
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useToast(): ToastContextValue {
   const ctx = useContext(ToastContext);
   if (!ctx) {

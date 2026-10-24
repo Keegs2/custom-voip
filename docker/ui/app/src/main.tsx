@@ -2,8 +2,13 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from './components/ui/ToastContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { App } from './App';
 import './index.css';
+// Light/dark tokens (--t-*) — see docker/ui/CLAUDE.md "Theming".
+import './styles/theme.css';
+// App shell chrome: sidebar, canvas, collapse tab, theme toggle.
+import './styles/app-shell.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,10 +36,12 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <App />
-      </ToastProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <App />
+        </ToastProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 );

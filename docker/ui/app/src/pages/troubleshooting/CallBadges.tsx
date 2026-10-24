@@ -10,12 +10,15 @@
 import { summarizeAttempts, type CorrelationNotice, type LegAttempt } from './callGrouping';
 import type { MessageAttestation } from '../../types/stir';
 import {
+  ATTEST_TONES,
   attestLabel,
   attestDescription,
   verstatVerdict,
   resolveStirBadge,
+  type AttestToneKey,
+  type ColorToken,
 } from '../../components/stir/attestationColors';
-import { INK_FAINT, MONO, type ZoneInfo } from './callDisplay';
+import { INK_FAINT, INK_GHOST, MONO, type ZoneInfo } from './callDisplay';
 
 // ─── Status pill ─────────────────────────────────────────────────────────────
 
@@ -84,7 +87,7 @@ export function CorrelationBanner({ notice }: { notice: CorrelationNotice }) {
 
 /** HEP-capture zone (East/West/Central); an unmapped capture id shows raw. */
 export function ZonePill({ zone }: { zone: ZoneInfo | null }) {
-  if (zone === null) return <span style={{ color: '#b6c2d4' }}>—</span>;
+  if (zone === null) return <span style={{ color: INK_GHOST }}>—</span>;
   return (
     <span
       className={zone.known ? 'dlx5-zone' : 'dlx5-zone dlx5-zone-raw'}
@@ -97,34 +100,15 @@ export function ZonePill({ zone }: { zone: ZoneInfo | null }) {
 
 // ─── Attestation badge ───────────────────────────────────────────────────────
 
-interface AttestTone {
-  text: string;
-  bg: string;
-  border: string;
-}
-
-/** Light-canvas STIR tones — same semantic mapping as the shared
- *  `attestationColors` palette (A=green, B=amber, C=gray, div=azure) but with
- *  ink-dark variants legible on white (the shared tokens are tuned for the
- *  dark surfaces they still serve elsewhere). */
-const ATTEST_TONES: Record<'A' | 'B' | 'C' | 'div' | 'base-only' | 'unsigned' | 'none', AttestTone> = {
-  A: { text: '#15803d', bg: 'rgba(22,163,74,0.1)', border: 'rgba(22,163,74,0.26)' },
-  B: { text: '#b45309', bg: 'rgba(180,83,9,0.09)', border: 'rgba(180,83,9,0.26)' },
-  C: { text: '#5d6f8c', bg: 'rgba(93,111,140,0.08)', border: 'rgba(93,111,140,0.2)' },
-  div: { text: '#1d63dd', bg: 'rgba(47,125,246,0.09)', border: 'rgba(47,125,246,0.26)' },
-  // Wire-outcome labels (Kamailio `eff=`): a base PASSporT went out but no div
-  // could be chained (amber), or nothing was signed at all (red — the
-  // compliance-risk case).
-  'base-only': { text: '#b45309', bg: 'rgba(180,83,9,0.09)', border: 'rgba(180,83,9,0.26)' },
-  unsigned: { text: '#b91c1c', bg: 'rgba(220,38,38,0.08)', border: 'rgba(220,38,38,0.26)' },
-  none: { text: '#8b99b0', bg: 'rgba(93,111,140,0.08)', border: 'rgba(93,111,140,0.2)' },
-};
+// STIR tones come from the ONE shared palette (components/stir/
+// attestationColors — A=green, B=amber, C=gray, div=azure, base-only=amber,
+// unsigned=red, none=faint), theme tokens legible on both grounds.
 
 const KNOWN_TONES = new Set<string>(['A', 'B', 'C', 'div', 'base-only', 'unsigned']);
 
-function attestTone(level: string | null | undefined): AttestTone {
+function attestTone(level: string | null | undefined): ColorToken {
   if (level && KNOWN_TONES.has(level)) {
-    return ATTEST_TONES[level as keyof typeof ATTEST_TONES];
+    return ATTEST_TONES[level as AttestToneKey];
   }
   return ATTEST_TONES.none;
 }
@@ -166,7 +150,7 @@ export function AttestationBadge({ attestation }: { attestation: MessageAttestat
     return (
       <span
         title="No STIR/SHAKEN attestation on record for this call (legacy, unsigned, or pre-deploy)."
-        style={{ fontSize: '0.78rem', fontFamily: MONO, color: '#b6c2d4' }}
+        style={{ fontSize: '0.78rem', fontFamily: MONO, color: INK_GHOST }}
       >
         —
       </span>

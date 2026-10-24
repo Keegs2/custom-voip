@@ -6,11 +6,18 @@
  * the two never disagree. Moved verbatim from RecentCallsTable.
  *
  * Quality words and colours come only from pages/calls/quality.ts.
+ *
+ * Tones are theme tokens (docker/ui/CLAUDE.md §18). Light resolves to
+ * exactly the old paper pills — including their slightly lighter borders
+ * (green 24 %, red 22 %) and the 10 % slate wash — so those three stay
+ * `tMix()` of the solid tone rather than the shared TONE border; dark
+ * follows the granite status set.
  */
 import type { Cdr } from '../../types/cdr';
 import { hasTalkTime } from '../../utils/callDuration';
 import { gradeColor, gradeLabel, qualityStatusReason, qualityStatusShort } from '../calls/quality';
-import { AZURE_DEEP, GREEN, INK_FAINT, INK_SOFT, RED } from './theme';
+import { TONE, tMix } from '../../styles/theme';
+import { GREEN, INK_FAINT, INK_SOFT, RED } from './theme';
 
 // ─── Call quality label (the ONE grade definition — pages/calls/quality.ts) ───
 
@@ -49,10 +56,10 @@ export function callQualityLabel(cdr: Cdr): CallQualityLabel {
 }
 
 export function callStatusInfo(cdr: Cdr): { label: string; bg: string; color: string; border: string } {
-  const GOOD    = { bg: 'rgba(22,163,74,0.1)',   color: GREEN,    border: '1px solid rgba(22,163,74,0.24)' };
-  const NEUTRAL = { bg: 'rgba(93,111,140,0.1)',  color: INK_SOFT, border: '1px solid rgba(93,111,140,0.24)' };
-  const BAD     = { bg: 'rgba(220,38,38,0.07)',  color: RED,      border: '1px solid rgba(220,38,38,0.22)' };
-  const INFO    = { bg: 'rgba(47,125,246,0.09)', color: AZURE_DEEP, border: '1px solid rgba(47,125,246,0.24)' };
+  const GOOD    = { bg: TONE.ok.bg,                color: GREEN,        border: `1px solid ${tMix('ok-solid', 24)}` };
+  const NEUTRAL = { bg: tMix('neutral-fg', 10),    color: INK_SOFT,     border: `1px solid ${tMix('neutral-fg', 24)}` };
+  const BAD     = { bg: TONE.danger.bg,            color: RED,          border: `1px solid ${tMix('danger-solid', 22)}` };
+  const INFO    = { bg: TONE.info.bg,              color: TONE.info.fg, border: `1px solid ${TONE.info.border}` };
 
   const cause = (cdr.hangup_cause ?? '').toUpperCase();
 

@@ -23,6 +23,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { fmtMoneySmart } from '../../utils/format';
 import { ROWS_MODE_NOTE, rowsModeOf } from './callsFilters';
 import type { CdrSearchParams, CdrSummaryRow } from '../../types/cdr';
+import { T } from '../../styles/theme';
 
 type GroupBy = 'day' | 'hour' | 'destination';
 
@@ -35,9 +36,9 @@ function formatTotalDuration(totalSeconds: number): string {
 }
 
 function asrColor(asr: number): string {
-  if (asr > 50) return 'var(--rcf-green)';
-  if (asr >= 30) return '#b45309';
-  return 'var(--rcf-red)';
+  if (asr > 50) return T.okFg;
+  if (asr >= 30) return T.warnFg;
+  return T.dangerFg;
 }
 
 function groupLabel(row: CdrSummaryRow, groupBy: GroupBy): string {
@@ -89,7 +90,7 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
           role="note"
           style={{
             fontSize: '0.7rem',
-            color: rowsMode === 'calls' ? 'var(--rcf-ink-dim)' : 'var(--rcf-ink-soft)',
+            color: rowsMode === 'calls' ? T.textDim : T.textSoft,
           }}
         >
           {ROWS_MODE_NOTE[rowsMode]}
@@ -103,7 +104,7 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            color: 'var(--rcf-ink-dim)',
+            color: T.textDim,
             fontSize: '0.85rem',
             padding: '24px 0',
           }}
@@ -118,7 +119,7 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
 
       {data && data.summary.length === 0 && (
         <div className="dl-empty">
-          <p style={{ fontWeight: 600, margin: 0, color: 'var(--rcf-ink)' }}>No summary data</p>
+          <p style={{ fontWeight: 600, margin: 0, color: T.text }}>No summary data</p>
           <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>
             No CDRs match the current filters — adjust them and search again.
           </p>
@@ -151,7 +152,7 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
                   return (
                     <tr key={i} className="dl-row">
                       <td className="dlx-td">
-                        <span className="dlx4-mono" style={{ color: 'var(--rcf-ink)' }}>
+                        <span className="dlx4-mono" style={{ color: T.text }}>
                           {groupLabel(row, groupBy)}
                         </span>
                       </td>
@@ -159,7 +160,7 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
                         {row.product_type ? (
                           <span className="dl-tag">{row.product_type.toUpperCase()}</span>
                         ) : (
-                          <span style={{ color: 'var(--rcf-ink-dim)' }}>--</span>
+                          <span style={{ color: T.textDim }}>--</span>
                         )}
                       </td>
                       <td className="dlx-td">
@@ -168,16 +169,16 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
                             {row.direction}
                           </span>
                         ) : (
-                          <span style={{ color: 'var(--rcf-ink-dim)' }}>--</span>
+                          <span style={{ color: T.textDim }}>--</span>
                         )}
                       </td>
                       <td className="dlx-td">
-                        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink)' }}>
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: T.text }}>
                           {row.total_calls.toLocaleString()}
                         </span>
                       </td>
                       <td className="dlx-td">
-                        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink)' }}>
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: T.text }}>
                           {row.answered_calls.toLocaleString()}
                         </span>
                       </td>
@@ -193,7 +194,7 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
                         </span>
                       </td>
                       <td className="dlx-td">
-                        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink)' }}>
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: T.text }}>
                           {formatTotalDuration(row.total_duration_sec ?? 0)}
                         </span>
                       </td>
@@ -203,7 +204,7 @@ export function CdrSummaryView({ params, nonce }: CdrSummaryViewProps) {
                             fontVariantNumeric: 'tabular-nums',
                             fontWeight: 600,
                             // Color only meaningful nonzero money; zero reads neutral.
-                            color: (row.total_cost ?? 0) > 0 ? 'var(--rcf-azure-deep)' : 'var(--rcf-ink-dim)',
+                            color: (row.total_cost ?? 0) > 0 ? T.accentText : T.textDim,
                           }}
                         >
                           {fmtMoneySmart(row.total_cost)}

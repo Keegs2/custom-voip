@@ -33,6 +33,8 @@ import { Spinner } from '../components/ui/Spinner';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { fmt } from '../utils/format';
+import { T, TONE, tMix } from '../styles/theme';
+import '../styles/dl-portal-pages.css';
 
 import type { Trunk, TrunkIp, TrunkDid, TrunkAuthType } from '../types/trunk';
 import {
@@ -45,14 +47,16 @@ import {
 } from '../api/trunks';
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Constants + shared tokens (mirror the .rcf-scope / .dl-scope CSS vars)
+   Constants + colour roles — theme tokens (light / dark, docker/ui/CLAUDE.md
+   §18); light resolves to the old daylight values exactly. Page tokens
+   --dlx-* live on .dlx-trunks (styles/dl-portal-pages.css).
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const INK = '#0e1726';
-const INK_SOFT = '#46566f';
-const INK_DIM = '#5d6f8c';
-const AZURE_DEEP = '#1d63dd';
-const RED = '#b91c1c';
+const INK = T.text;
+const INK_SOFT = T.textSoft;
+const INK_DIM = T.textDim;
+const AZURE_DEEP = T.accentText;
+const RED = T.dangerFg;
 
 const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
 
@@ -139,7 +143,7 @@ function InfoBadge() {
         width: 15,
         height: 15,
         borderRadius: '50%',
-        border: '1px solid rgba(47,125,246,0.45)',
+        border: `1px solid ${tMix('accent-line', 45)}`,
         color: AZURE_DEEP,
         fontSize: '0.6rem',
         fontWeight: 700,
@@ -168,7 +172,7 @@ function LiveActivity({ trunkId, maxChannels }: { trunkId: number; maxChannels: 
   const active = s?.current_channels ?? s?.active_channels ?? 0;
   const cap = s?.max_channels ?? maxChannels ?? 0;
   const utilPct = cap > 0 ? Math.min(100, Math.round((active / cap) * 100)) : 0;
-  const utilBarColor = utilPct >= 80 ? '#dc2626' : utilPct >= 50 ? '#d97706' : '#16a34a';
+  const utilBarColor = utilPct >= 80 ? TONE.danger.solid : utilPct >= 50 ? TONE.warn.solid : TONE.ok.solid;
   const lastHour = s?.last_hour;
 
   const loading = statsQuery.isLoading;
@@ -192,7 +196,7 @@ function LiveActivity({ trunkId, maxChannels }: { trunkId: number; maxChannels: 
               width: 6,
               height: 6,
               borderRadius: '50%',
-              background: statsQuery.isError ? '#dc2626' : '#16a34a',
+              background: statsQuery.isError ? TONE.danger.solid : TONE.ok.solid,
               flexShrink: 0,
             }}
           />
@@ -447,7 +451,6 @@ function IpRow({
   onDelete: (ip: TrunkIp) => void;
   deleting: boolean;
 }) {
-  const [hovered, setHovered] = useState(false);
   return (
     <div
       className="dl-item"
@@ -479,13 +482,11 @@ function IpRow({
           disabled={deleting}
           title={`Remove ${ip.ip_address}`}
           aria-label={`Remove authorized IP ${ip.ip_address}`}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
+          className="dlx-ip-remove"
           style={{
             marginLeft: 'auto',
             background: 'none',
             border: 'none',
-            color: hovered ? RED : INK_DIM,
             cursor: deleting ? 'not-allowed' : 'pointer',
             padding: '0 2px',
             fontSize: '1.05rem',
@@ -596,7 +597,7 @@ function AuthIpManager({ trunkId, canManage }: { trunkId: number; canManage: boo
       )}
 
       {!ipsQuery.isLoading && !ipsQuery.isError && ips !== null && ips.length === 0 && (
-        <p style={{ fontSize: '0.82rem', color: '#92400e', margin: '0 0 4px' }}>
+        <p style={{ fontSize: '0.82rem', color: 'var(--dlx-warn-ink)', margin: '0 0 4px' }}>
           No authorized IPs yet — add your PBX or SBC address below to start sending traffic.
         </p>
       )}
@@ -633,7 +634,7 @@ function AuthIpManager({ trunkId, canManage }: { trunkId: number; canManage: boo
               style={{
                 width: 170,
                 fontSize: '0.82rem',
-                borderColor: showError ? 'rgba(220,38,38,0.6)' : undefined,
+                borderColor: showError ? tMix('danger-solid', 60) : undefined,
               }}
             />
             {showError && (
@@ -720,7 +721,7 @@ function DidList({ trunkId }: { trunkId: number }) {
                   width: 6,
                   height: 6,
                   borderRadius: '50%',
-                  background: d.enabled ? '#16a34a' : '#b6c2d4',
+                  background: d.enabled ? TONE.ok.solid : 'var(--dlx-dot-off)',
                   flexShrink: 0,
                 }}
               />
@@ -882,7 +883,7 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
       <div
         className="dl-center-icon"
         aria-hidden="true"
-        style={{ background: 'rgba(220,38,38,0.08)', color: '#dc2626' }}
+        style={{ background: tMix('danger-solid', 8), color: TONE.danger.solid }}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 26, height: 26 }}>
           <path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" strokeLinecap="round" strokeLinejoin="round" />
@@ -1007,7 +1008,7 @@ export function TrunksPage() {
   }
 
   return (
-    <div className="dl-scope">
+    <div className="dl-scope dlx-trunks">
       <div className="dl-shell">
         <TrunksPageHeader
           title={user?.customer_name ?? 'SIP Trunking Console'}

@@ -8,14 +8,18 @@
 import type { HomerSearchResult } from '../../api/homer';
 import { fmt } from '../../utils/format';
 import type { CallGroup } from './callGrouping';
+import { T } from '../../styles/theme';
 
-// ─── Daylight palette constants (mirror the .dl-scope CSS vars) ──────────────
+// ─── Palette — theme tokens (docker/ui/CLAUDE.md §18). `var()` strings that
+// follow light / dark; on light they resolve to the old daylight ink ramp.
 
 export const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
-export const INK_SOFT = '#46566f';
-export const INK_DIM = '#5d6f8c';
-export const INK_FAINT = '#8b99b0';
-export const AZURE_DEEP = '#1d63dd';
+export const INK_SOFT = T.textSoft;
+export const INK_DIM = T.textDim;
+export const INK_FAINT = T.textFaint;
+export const AZURE_DEEP = T.accentText;
+/** Separators, arrows and the empty "—" (a page token in dl-troubleshoot.css). */
+export const INK_GHOST = 'var(--ts-ghost)';
 
 // ─── Phone / time formatting ─────────────────────────────────────────────────
 

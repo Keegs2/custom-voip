@@ -1,21 +1,41 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   dl-trend-chart.css — shared daylight styles for <QualityTrendChart>
-   (src/components/charts/QualityTrendChart.tsx).
-
-   The `dl-qtc-` prefix marks these as shared chart-component scope — used by
-   CallQualityPage's Quality Trends row today, safe for any daylight page.
-   Colors reference the shared `--rcf-*` custom properties declared on
-   `.dl-scope`. Responsive layout is hand-written @media only (never Tailwind
+   dl-trend-chart.css — shared chart-card styles (`dl-qtc-*`): the plot frame,
+   the hover tooltip and the no-data state. Imported today by the Reporting
+   page's CallsTrendChart (the Calls page's QualityTrendChart that first used
+   them was removed in 2026-10); safe for any daylight page.
+   Responsive layout is hand-written @media only (never Tailwind
    md:* — see CLAUDE.md); the chart measures its container via ResizeObserver
    and renders the SVG at true pixel scale, so text sizes here and in the SVG
    are real pixels — nothing is viewBox-shrunk.
+   Colour is THEME TOKENS only (`--t-*`, chart roles `--t-chart-*`;
+   docker/ui/CLAUDE.md §18).
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Page tokens: the tooltip's lift and the Reporting trend chart's tick /
+   grid ink (CallsTrendChart paints its SVG with them). Light keeps today's
+   values (ink = --t-text on light: shadow 8 / 28 %, grid 5.5 %; ticks
+   ink-soft); dark takes the theme's popover elevation and chart roles. */
+:root,
+[data-force-theme='light'] {
+  --qtc-tip-shadow:
+    0 2px 6px color-mix(in srgb, var(--t-text) 8%, transparent),
+    0 12px 28px -12px color-mix(in srgb, var(--t-text) 28%, transparent);
+  --rpt-chart-tick: var(--t-text-soft);
+  --rpt-chart-grid: color-mix(in srgb, var(--t-text) 5.5%, transparent);
+}
+
+:root[data-theme='dark'],
+[data-force-theme='dark'] {
+  --qtc-tip-shadow: var(--t-shadow-pop);
+  --rpt-chart-tick: var(--t-chart-label);
+  --rpt-chart-grid: var(--t-chart-grid);
+}
 
 /* Card — tint fill + soft hairline (dl-tile family) */
 .dl-qtc {
   min-width: 0;
-  background: var(--rcf-tint);
-  border: 1px solid var(--rcf-line-soft);
+  background: var(--t-tint);
+  border: 1px solid var(--t-line-soft);
   border-radius: 10px;
   padding: 14px 14px 10px;
 }
@@ -40,7 +60,7 @@
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 /* Plot frame — position context for the tooltip; fixed height so the grid
@@ -64,12 +84,10 @@
   min-width: 132px;
   max-width: 216px;
   padding: 8px 11px;
-  background: var(--rcf-card);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-chart-tooltip-bg);
+  border: 1px solid var(--t-chart-tooltip-border);
   border-radius: 8px;
-  box-shadow:
-    0 2px 6px rgba(14, 23, 38, 0.08),
-    0 12px 28px -12px rgba(14, 23, 38, 0.28);
+  box-shadow: var(--qtc-tip-shadow);
 }
 
 .dl-qtc-tip-date {
@@ -77,7 +95,7 @@
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
 }
 
@@ -86,14 +104,14 @@
   font-family: "Archivo", "IBM Plex Sans", sans-serif;
   font-size: 1.02rem;
   font-weight: 700;
-  color: var(--rcf-ink);
+  color: var(--t-chart-tooltip-text);
   font-variant-numeric: tabular-nums;
 }
 
 .dl-qtc-tip-sub {
   margin-top: 3px;
   font-size: 0.7rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   font-variant-numeric: tabular-nums;
 }
 
@@ -105,10 +123,10 @@
   justify-content: center;
   text-align: center;
   padding: 0 22px;
-  border: 1px dashed var(--rcf-line);
+  border: 1px dashed var(--t-line);
   border-radius: 8px;
-  background: var(--rcf-card);
-  color: var(--rcf-ink-dim);
+  background: var(--t-surface);
+  color: var(--t-text-dim);
   font-size: 0.76rem;
   line-height: 1.55;
 }
