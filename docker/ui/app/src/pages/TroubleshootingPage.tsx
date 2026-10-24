@@ -64,6 +64,7 @@ import {
   AZURE_DEEP,
   INK_DIM,
   INK_FAINT,
+  INK_GHOST,
   INK_SOFT,
   MONO,
   carrierEndpointLabel,
@@ -503,7 +504,7 @@ function ResultsTable({
                     <span style={{ fontFamily: MONO, fontSize: '0.72rem', fontWeight: 500, color: INK_SOFT }}>
                       {displayUser(row.from_user)}
                     </span>
-                    <span style={{ color: '#b6c2d4', margin: '0 6px' }}>→</span>
+                    <span style={{ color: INK_GHOST, margin: '0 6px' }}>→</span>
                     <span style={{ fontFamily: MONO, fontSize: '0.72rem', fontWeight: 600, color: AZURE_DEEP }}>
                       {displayUser(row.to_user)}
                     </span>

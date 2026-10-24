@@ -78,6 +78,7 @@ import '../../styles/dl-admin.css';
 import '../../styles/dl-platform.css';
 import '../../styles/dl-platform-b.css';
 import '../../styles/dl-call-quality.css';
+import { T } from '../../styles/theme';
 
 /** Initial rows per page — must be one of CdrPaginationBar's size options. */
 const DEFAULT_PAGE_SIZE = 50;
@@ -435,7 +436,7 @@ export function CallsPage() {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
-                    color: 'var(--rcf-ink-dim)',
+                    color: T.textDim,
                     fontSize: '0.85rem',
                     padding: '40px 0',
                   }}
@@ -457,7 +458,7 @@ export function CallsPage() {
                       // full-page heuristic can't see the boundary). Distinct
                       // from "no matches" — the search DID match rows.
                       <div className="dl-empty">
-                        <p style={{ fontWeight: 600, margin: 0, color: 'var(--rcf-ink)' }}>
+                        <p style={{ fontWeight: 600, margin: 0, color: T.text }}>
                           Nothing on this page
                         </p>
                         <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>

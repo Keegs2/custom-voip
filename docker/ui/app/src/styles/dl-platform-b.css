@@ -8,11 +8,72 @@
    Management `dlx-` layer in dl-admin.css and the platform `dlx2-` layer in
    dl-platform.css, both of which these pages import and reuse — never
    duplicate). If a page outside this area reaches for one of these, promote
-   it into the shared `dl-*` block. Every value references the shared
-   `--rcf-*` custom properties declared on `.dl-scope` — no re-stated magic
-   numbers for color or rhythm.
+   it into the shared `dl-*` block. Colour is THEME TOKENS only (`--t-*`,
+   src/styles/theme.css — docker/ui/CLAUDE.md §18); rhythm and motion still
+   come from the `--rcf-zone/-stack/-ease` scale on `.dl-scope`.
    Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Page tokens (§18.3 rule 2) — Calls & Quality ───────────────────────────
+   The handful of colours this page draws that have no exact --t-* twin.
+   LIGHT keeps today's value so the daylight console is pixel-identical (the
+   hex lines below are this file's only colour literals, and the light
+   shadows are ink = --t-text at the old alphas); DARK aliases the theme's
+   granite set, so every rule below reads one name in both themes. Declared
+   on :root (not .dl-scope) because CdrDetailModal's backdrop sits outside
+   the page scope, and re-declared on [data-force-theme] like the theme. */
+:root,
+[data-force-theme='light'] {
+  --cq-ghost: #b6c2d4;              /* "—" for ungraded, separators, disabled pager text */
+  --cq-note: #8a9ab3;               /* lowercase label notes ("(local)") */
+  --cq-link-off: #a9b6ca;           /* disabled text link */
+  --cq-ctl-border: #d5deeb;         /* pager buttons, page-size select, chip ✕ */
+  --cq-ctl-border-hover: #b7c7dd;
+  --cq-ghost-hover-bg: #f2f6fc;     /* ghost-button hover (modal close) */
+  --cq-ghost-hover-border: #b5c4da;
+  --cq-amber-ink: #92400e;          /* per-leg row-model note, amber tag */
+  --cq-shadow-card:
+    0 1px 2px color-mix(in srgb, var(--t-text) 5%, transparent),
+    0 10px 26px -20px color-mix(in srgb, var(--t-text) 18%, transparent);
+  --cq-shadow-strip: 0 1px 2px color-mix(in srgb, var(--t-text) 4%, transparent);
+  --cq-shadow-seg: 0 1px 3px color-mix(in srgb, var(--t-text) 8%, transparent);
+  --cq-shadow-pop:
+    0 1px 2px color-mix(in srgb, var(--t-text) 8%, transparent),
+    0 22px 48px -18px color-mix(in srgb, var(--t-text) 32%, transparent);
+  --cq-shadow-modal:
+    0 1px 2px color-mix(in srgb, var(--t-text) 8%, transparent),
+    0 32px 80px -24px color-mix(in srgb, var(--t-text) 45%, transparent);
+  --cq-scrim: color-mix(in srgb, var(--t-text) 38%, transparent);
+  --cq-tile-bg: var(--t-surface);
+  /* The dark-only top keylines (KPI strip, call modal) are not generated at
+     all on light — `content: none` — and the strip stays unpositioned (so the
+     search card's shadow tail still paints over its top edge as before):
+     the paper renders exactly as it did. */
+  --cq-keyline-content: none;
+  --cq-strip-position: static;
+}
+
+:root[data-theme='dark'],
+[data-force-theme='dark'] {
+  --cq-ghost: var(--t-text-faint);
+  --cq-note: var(--t-text-faint);
+  --cq-link-off: var(--t-text-faint);
+  --cq-ctl-border: var(--t-line-strong);
+  --cq-ctl-border-hover: var(--t-field-border-hover);
+  --cq-ghost-hover-bg: var(--t-hover);
+  --cq-ghost-hover-border: var(--t-field-border-hover);
+  --cq-amber-ink: var(--t-warn-fg);
+  --cq-shadow-card: var(--t-shadow-card);
+  --cq-shadow-strip: var(--t-shadow-card);
+  --cq-shadow-seg: var(--t-shadow-xs);
+  --cq-shadow-pop: var(--t-shadow-pop);
+  --cq-shadow-modal: var(--t-shadow-modal);
+  --cq-scrim: var(--t-scrim);
+  /* KPI cells catch the landing readout's top sheen */
+  --cq-tile-bg: var(--t-panel-bg);
+  --cq-keyline-content: '';
+  --cq-strip-position: relative;
+}
 
 /* ─── Wide content shell — Calls & Quality page ONLY. The shared `.dl-shell`
    caps content at 1200px (index.css DAYLIGHT block), which starves the wide
@@ -42,12 +103,10 @@
    staff "More" popover must hang outside the card. ─── */
 .cqf-card {
   position: relative;
-  background: var(--rcf-card);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-panel-bg);
+  border: 1px solid var(--t-line);
   border-radius: 12px;
-  box-shadow:
-    0 1px 2px rgba(14, 23, 38, 0.05),
-    0 10px 26px -20px rgba(14, 23, 38, 0.18);
+  box-shadow: var(--cq-shadow-card);
   padding: 14px 16px;
 }
 
@@ -79,7 +138,7 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: lowercase;
-  color: #8a9ab3;
+  color: var(--cq-note);
 }
 
 /* Uniform 36px controls (selects, text, datetime) */
@@ -119,9 +178,9 @@
   height: 36px;
   padding: 0 12px;
   border-radius: 8px;
-  border: 1px solid #c9d5e6;
-  background: #ffffff;
-  color: var(--rcf-ink-soft);
+  border: 1px solid var(--t-field-border);
+  background: var(--t-field-bg);
+  color: var(--t-text-soft);
   font-family: inherit;
   font-size: 0.8rem;
   font-weight: 600;
@@ -131,13 +190,13 @@
 }
 
 .cqf-btn:hover:not(:disabled) {
-  background: var(--rcf-tint-hover);
-  border-color: #a3b6d3;
-  color: var(--rcf-ink);
+  background: var(--t-tint-hover);
+  border-color: var(--t-field-border-hover);
+  color: var(--t-text);
 }
 
 .cqf-btn:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
@@ -151,9 +210,9 @@
 .cqf-more { position: relative; flex: 0 0 auto; }
 
 .cqf-more-btn-on {
-  border-color: rgba(47, 125, 246, 0.5);
-  background: rgba(47, 125, 246, 0.07);
-  color: var(--rcf-azure-deep);
+  border-color: color-mix(in srgb, var(--t-accent-line) 50%, transparent);
+  background: color-mix(in srgb, var(--t-accent-line) 7%, transparent);
+  color: var(--t-accent-text);
 }
 
 .cqf-count {
@@ -164,8 +223,8 @@
   height: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--rcf-azure-deep); /* 5.4:1 for 10.5px white digits */;
-  color: #ffffff;
+  background: var(--t-accent-hover); /* azure-deep in both themes: 5.4:1 for 10.5px white digits */
+  color: var(--t-text-on-accent);
   font-size: 0.66rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -216,12 +275,10 @@
   right: 0;
   z-index: 40;
   width: 300px;
-  background: var(--rcf-card);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-surface-raised);
+  border: 1px solid var(--t-line);
   border-radius: 12px;
-  box-shadow:
-    0 1px 2px rgba(14, 23, 38, 0.08),
-    0 22px 48px -18px rgba(14, 23, 38, 0.32);
+  box-shadow: var(--cq-shadow-pop);
   text-align: left;
   animation: cqf-pop-in 0.14s ease-out;
 }
@@ -261,7 +318,7 @@
   margin: 5px 0 0;
   font-size: 0.7rem;
   line-height: 1.35;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .cqf-check {
@@ -277,7 +334,7 @@
   height: 15px;
   margin: 1px 0 0;
   flex-shrink: 0;
-  accent-color: var(--rcf-azure);
+  accent-color: var(--t-accent);
   cursor: pointer;
 }
 
@@ -285,7 +342,7 @@
   display: block;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .cqf-check .cqf-pop-hint { margin-top: 2px; }
@@ -295,8 +352,8 @@
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
-  border-top: 1px solid var(--rcf-line-soft);
-  background: var(--rcf-tint);
+  border-top: 1px solid var(--t-line-soft);
+  background: var(--t-tint);
   border-radius: 0 0 12px 12px;
 }
 
@@ -304,7 +361,7 @@
   flex: 1;
   text-align: right;
   font-size: 0.68rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .cqf-link {
@@ -314,12 +371,12 @@
   font-family: inherit;
   font-size: 0.76rem;
   font-weight: 600;
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
   cursor: pointer;
 }
 
-.cqf-link:disabled { color: #a9b6ca; cursor: default; }
-.cqf-link:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; border-radius: 3px; }
+.cqf-link:disabled { color: var(--cq-link-off); cursor: default; }
+.cqf-link:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; border-radius: 3px; }
 
 /* Narrow screens: anchor the popover to the card instead of the button so
    it can never run off the left edge. */
@@ -337,7 +394,7 @@
   gap: 8px 12px;
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid var(--rcf-line-soft);
+  border-top: 1px solid var(--t-line-soft);
 }
 
 .cqf-callchip.dl-chip {
@@ -351,7 +408,7 @@
 
 .cqf-callchip-key {
   font-weight: 700;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .cqf-callchip-id {
@@ -370,14 +427,14 @@
   height: 22px;
   padding: 0;
   border-radius: 6px;
-  border: 1px solid #d5deeb;
-  background: #ffffff;
-  color: var(--rcf-ink-dim);
+  border: 1px solid var(--cq-ctl-border);
+  background: var(--t-surface);
+  color: var(--t-text-dim);
   cursor: pointer;
 }
 
-.cqf-callchip-x:hover { background: var(--rcf-tint-hover); color: var(--rcf-ink); }
-.cqf-callchip-x:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 1px; }
+.cqf-callchip-x:hover { background: var(--t-tint-hover); color: var(--t-text); }
+.cqf-callchip-x:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 1px; }
 
 /* ─── KPI row — one bordered band of EQUAL-width tiles (flex: 1 1 0) on
    hairline seams. Single row at ~1440px; below that the tiles wrap into
@@ -390,14 +447,28 @@
 }
 
 .cqk-strip {
+  position: var(--cq-strip-position); /* containing block for the dark keyline */
   display: flex;
   flex-wrap: wrap;
   gap: 1px;
-  background: var(--rcf-line);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-line);
+  border: 1px solid var(--t-line);
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.04);
+  box-shadow: var(--cq-shadow-strip);
+}
+
+/* Dark: the landing KPI readout's azure keyline along the top edge (not
+   generated on light — see --cq-keyline-content). */
+.cqk-strip::before {
+  content: var(--cq-keyline-content);
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: var(--t-keyline);
+  pointer-events: none;
 }
 
 .cqk-tile {
@@ -409,7 +480,7 @@
   text-align: center;
   gap: 5px;
   padding: 13px 12px 12px;
-  background: var(--rcf-card);
+  background: var(--cq-tile-bg);
 }
 
 .cqk-label {
@@ -418,7 +489,7 @@
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -430,7 +501,7 @@
   font-size: 1.3rem;
   line-height: 1.05;
   letter-spacing: -0.01em;
-  color: var(--rcf-ink);
+  color: var(--t-text-strong);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -440,7 +511,7 @@
   min-height: calc(2 * 1.35em);
   font-size: 0.68rem;
   line-height: 1.35;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   font-variant-numeric: tabular-nums;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -454,7 +525,7 @@
   text-align: center;
   font-size: 0.7rem;
   font-weight: 600;
-  color: #92400e;
+  color: var(--cq-amber-ink);
 }
 
 /* Below the single-row width, wrap into BALANCED rows instead of letting
@@ -479,14 +550,14 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
   gap: 1px;
-  background: var(--rcf-line-soft);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-line-soft);
+  border: 1px solid var(--t-line);
   border-radius: 12px;
   overflow: hidden;
 }
 
 .dlx4-statcell {
-  background: var(--rcf-card);
+  background: var(--t-surface);
   padding: 14px 16px 12px;
   min-width: 0;
 }
@@ -497,7 +568,7 @@
   font-size: 1.22rem;
   line-height: 1.05;
   letter-spacing: -0.01em;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -508,7 +579,7 @@
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -517,7 +588,7 @@
 .dlx4-statcell-hint {
   margin-top: 2px;
   font-size: 0.66rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -541,19 +612,24 @@
 .dlx4-ferr {
   font-size: 0.76rem;
   font-weight: 600;
-  color: var(--rcf-red);
+  color: var(--t-danger-fg);
 }
 
 /* ─── CDR results table — horizontal scroll INSIDE the card. All columns
    are kept; at laptop widths the table pans within the panel instead of
    running past the viewport edge (min-width lives on the table itself).
    The scrollbar is styled to stay VISIBLE on the paper canvas — an explicit
-   affordance, so a clipped last column reads as "scroll", not "broken". ─── */
+   affordance, so a clipped last column reads as "scroll", not "broken".
+   `position: relative` makes the scroller the containing block of the
+   visually-hidden (position: absolute) captions/labels inside its tables;
+   without it they sat at their static x far right of the viewport and
+   widened the whole page (Reporting at 390px scrolled sideways by 215px). ─── */
 .dlx4-tablewrap {
+  position: relative;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;                        /* Firefox */
-  scrollbar-color: #b7c7dd var(--rcf-tint);     /* Firefox: thumb / track */
+  scrollbar-color: var(--t-scrollbar) var(--t-tint); /* Firefox: thumb / track */
 }
 
 .dlx4-tablewrap::-webkit-scrollbar {
@@ -561,16 +637,16 @@
 }
 
 .dlx4-tablewrap::-webkit-scrollbar-track {
-  background: var(--rcf-tint);
+  background: var(--t-tint);
 }
 
 .dlx4-tablewrap::-webkit-scrollbar-thumb {
-  background: #b7c7dd;
+  background: var(--t-scrollbar);
   border-radius: 999px;
 }
 
 .dlx4-tablewrap::-webkit-scrollbar-thumb:hover {
-  background: #94a9c9;
+  background: var(--t-scrollbar-hover);
 }
 
 /* ─── Mono numeric value (DIDs, timestamps, UUIDs) ─── */
@@ -589,27 +665,28 @@
    bundle, so a bare single-class modifier would lose to `.dl-tag` on
    source order — the extra specificity keeps the tone in charge. ─── */
 .dl-tag.dlx4-tag-green {
-  color: var(--rcf-green);
-  background: rgba(22, 163, 74, 0.08);
-  border-color: rgba(22, 163, 74, 0.28);
+  color: var(--t-ok-fg);
+  background: color-mix(in srgb, var(--t-ok-solid) 8%, transparent);
+  border-color: color-mix(in srgb, var(--t-ok-solid) 28%, transparent);
 }
 
 .dl-tag.dlx4-tag-amber {
-  color: #92400e;
-  background: rgba(180, 83, 9, 0.08);
-  border-color: rgba(180, 83, 9, 0.28);
+  color: var(--cq-amber-ink);
+  background: color-mix(in srgb, var(--t-warn-fg) 8%, transparent);
+  border-color: color-mix(in srgb, var(--t-warn-fg) 28%, transparent);
 }
 
 .dl-tag.dlx4-tag-red {
-  color: var(--rcf-red);
-  background: rgba(220, 38, 38, 0.06);
-  border-color: rgba(220, 38, 38, 0.26);
+  color: var(--t-danger-fg);
+  background: color-mix(in srgb, var(--t-danger-solid) 6%, transparent);
+  border-color: var(--t-danger-border);
 }
 
+/* The lifecycle "sky" state — the theme's info tone (no page uses it today) */
 .dl-tag.dlx4-tag-sky {
-  color: #0369a1;
-  background: rgba(2, 132, 199, 0.08);
-  border-color: rgba(2, 132, 199, 0.3);
+  color: var(--t-info-fg);
+  background: var(--t-info-bg);
+  border-color: var(--t-info-border);
 }
 
 /* Status tag with a leading glyph (lucide icon) */
@@ -619,8 +696,8 @@
    Compound selector beats `.dl-row:hover` from the later-injected index.css. ─── */
 tr.dl-row.dlx4-row-open,
 tr.dl-row.dlx4-row-open:hover {
-  background: #eef4fe;
-  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+  background: var(--t-accent-wash);
+  box-shadow: inset 2px 0 0 0 var(--t-accent-line);
 }
 
 /* ─── Micro section heading inside an expanded detail panel ─── */
@@ -629,14 +706,14 @@ tr.dl-row.dlx4-row-open:hover {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   margin: 0 0 10px;
 }
 
 .dlx4-xsection {
   margin-top: 18px;
   padding-top: 14px;
-  border-top: 1px solid var(--rcf-line);
+  border-top: 1px solid var(--t-line);
 }
 
 /* ─── STIR breakdown card grid ─── */
@@ -678,28 +755,28 @@ tr.dl-row.dlx4-row-open:hover {
   font-size: 0.74rem;
   font-weight: 600;
   font-family: inherit;
-  border: 1px solid #d5deeb;
-  background: #ffffff;
-  color: var(--rcf-ink-dim);
+  border: 1px solid var(--cq-ctl-border);
+  background: var(--t-surface);
+  color: var(--t-text-dim);
   cursor: pointer;
   user-select: none;
   transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
 }
 
 .dlx4-pgbtn:hover:not(:disabled) {
-  background: var(--rcf-tint-hover);
-  border-color: #b7c7dd;
-  color: var(--rcf-ink-soft);
+  background: var(--t-tint-hover);
+  border-color: var(--cq-ctl-border-hover);
+  color: var(--t-text-soft);
 }
 
 .dlx4-pgbtn:disabled {
-  color: #b6c2d4;
+  color: var(--cq-ghost);
   opacity: 0.55;
   cursor: not-allowed;
 }
 
 .dlx4-pgbtn:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
@@ -716,13 +793,13 @@ tr.dl-row.dlx4-row-open:hover {
 
 .dlx4-pager-range {
   font-size: 0.78rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
 }
 
 .dlx4-pager-range strong {
   font-weight: 600;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -751,9 +828,9 @@ tr.dl-row.dlx4-row-open:hover {
    is disabled: it is the one control that is CORRECTLY inert. */
 .dlx4-pgbtn.dlx4-pgbtn-active,
 .dlx4-pgbtn.dlx4-pgbtn-active:disabled {
-  color: var(--rcf-azure-deep);
-  background: var(--rcf-tint-hover);
-  border-color: rgba(47, 125, 246, 0.45);
+  color: var(--t-accent-text);
+  background: var(--t-tint-hover);
+  border-color: color-mix(in srgb, var(--t-accent-line) 45%, transparent);
   font-weight: 700;
   opacity: 1;
   cursor: default;
@@ -764,7 +841,7 @@ tr.dl-row.dlx4-row-open:hover {
   min-width: 18px;
   text-align: center;
   font-size: 0.74rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   user-select: none;
 }
 
@@ -773,7 +850,7 @@ tr.dl-row.dlx4-row-open:hover {
   padding: 0 8px;
   font-size: 0.76rem;
   font-weight: 600;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -784,7 +861,7 @@ tr.dl-row.dlx4-row-open:hover {
   padding: 0 6px;
   font-size: 0.74rem;
   font-weight: 600;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -794,7 +871,7 @@ tr.dl-row.dlx4-row-open:hover {
   align-items: center;
   gap: 7px;
   font-size: 0.74rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
   user-select: none;
 }
@@ -803,23 +880,23 @@ tr.dl-row.dlx4-row-open:hover {
   height: 30px;
   padding: 0 8px;
   border-radius: 7px;
-  border: 1px solid #d5deeb;
-  background: #ffffff;
+  border: 1px solid var(--cq-ctl-border);
+  background: var(--t-field-bg);
   font-size: 0.74rem;
   font-weight: 600;
   font-family: inherit;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   cursor: pointer;
   transition: background var(--rcf-ease), border-color var(--rcf-ease);
 }
 
 .dlx4-pgsize:hover:not(:disabled) {
-  background: var(--rcf-tint-hover);
-  border-color: #b7c7dd;
+  background: var(--t-tint-hover);
+  border-color: var(--cq-ctl-border-hover);
 }
 
 .dlx4-pgsize:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
@@ -852,7 +929,7 @@ tr.dl-row.dlx4-row-open:hover {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(14, 23, 38, 0.38);
+  background: var(--cq-scrim);
   animation: dlx4-fade 0.18s ease;
 }
 
@@ -863,13 +940,23 @@ tr.dl-row.dlx4-row-open:hover {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  background: var(--rcf-card);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-surface-raised);
+  border: 1px solid var(--t-line);
   border-radius: 14px;
-  box-shadow:
-    0 1px 2px rgba(14, 23, 38, 0.08),
-    0 32px 80px -24px rgba(14, 23, 38, 0.45);
+  box-shadow: var(--cq-shadow-modal);
   animation: dlx4-pop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Dark: the landing modal's azure keyline (not generated on light) */
+.dlx4-modal::before {
+  content: var(--cq-keyline-content);
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: var(--t-keyline);
+  pointer-events: none;
 }
 
 @keyframes dlx4-fade {
@@ -893,7 +980,7 @@ tr.dl-row.dlx4-row-open:hover {
   justify-content: space-between;
   gap: 12px;
   padding: 16px 20px 13px;
-  border-bottom: 1px solid var(--rcf-line);
+  border-bottom: 1px solid var(--t-line);
 }
 
 .dlx4-modal-title {
@@ -901,7 +988,7 @@ tr.dl-row.dlx4-row-open:hover {
   font-size: 0.95rem;
   font-weight: 700;
   letter-spacing: -0.01em;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   margin: 0;
 }
 
@@ -914,21 +1001,21 @@ tr.dl-row.dlx4-row-open:hover {
   height: 28px;
   padding: 0;
   border-radius: 7px;
-  border: 1px solid #cdd8e8;
-  background: #ffffff;
-  color: var(--rcf-ink-dim);
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-surface-raised);
+  color: var(--t-text-dim);
   cursor: pointer;
   transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
 }
 
 .dlx4-modal-close:hover {
-  background: #f2f6fc;
-  border-color: #b5c4da;
-  color: var(--rcf-ink);
+  background: var(--cq-ghost-hover-bg);
+  border-color: var(--cq-ghost-hover-border);
+  color: var(--t-text);
 }
 
 .dlx4-modal-close:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
@@ -944,7 +1031,7 @@ tr.dl-row.dlx4-row-open:hover {
   justify-content: flex-end;
   gap: 10px;
   padding: 13px 20px;
-  border-top: 1px solid var(--rcf-line);
+  border-top: 1px solid var(--t-line);
 }
 
 /* ─── Group header row inside the Assignments panel ─── */
@@ -953,7 +1040,7 @@ tr.dl-row.dlx4-row-open:hover {
   align-items: center;
   gap: 8px;
   padding: 10px 20px 9px;
-  background: var(--rcf-tint);
-  border-top: 1px solid var(--rcf-line);
-  border-bottom: 1px solid var(--rcf-line-soft);
+  background: var(--t-tint);
+  border-top: 1px solid var(--t-line);
+  border-bottom: 1px solid var(--t-line-soft);
 }

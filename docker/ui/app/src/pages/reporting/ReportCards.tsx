@@ -19,9 +19,10 @@ import {
   GRADE_WORD,
   honestWhole,
   plural,
-  TREND_COLORS,
+  TREND_SERIES,
 } from './reportFormat';
 import type { SentenceSegment } from './summarySentence';
+import { T } from '../../styles/theme';
 
 /* ─── Shared query-state props ──────────────────────────────────────────── */
 
@@ -78,12 +79,12 @@ export function SummaryHero({
                   label="Calls"
                   hint={`${fmtCount(data.totals.inbound)} in · ${fmtCount(data.totals.outbound)} out`}
                 />
-                <Stat value={fmtCount(data.totals.answered)} label="Answered" hint={fmtPct(data.totals.answer_rate_pct)} tone="#15803d" />
+                <Stat value={fmtCount(data.totals.answered)} label="Answered" hint={fmtPct(data.totals.answer_rate_pct)} tone={T.okFg} />
                 <Stat
                   value={fmtCount(data.totals.missed)}
                   label="Missed"
                   hint={data.totals.missed > 0 && data.totals.answer_rate_pct != null ? fmtPct(100 - data.totals.answer_rate_pct) : 'none'}
-                  tone={data.totals.missed > 0 ? '#b45309' : undefined}
+                  tone={data.totals.missed > 0 ? T.warnFg : undefined}
                 />
                 <Stat value={fmtMinutes(data.totals.minutes)} label="Time on the phone" hint="whole minutes" />
                 <Stat value={fmtAvgMinutes(data.totals.avg_minutes)} label="Typical call" hint="answered calls" />
@@ -135,10 +136,10 @@ export function TrendCard({ trend }: { trend: QueryState<ReportTrend> }) {
       headExtra={
         <div className="rpt-legend" style={{ marginLeft: 'auto' }} aria-hidden="true">
           <span className="rpt-legend-item">
-            <span className="rpt-legend-swatch" style={{ background: TREND_COLORS.answered }} /> Answered
+            <span className="rpt-legend-swatch" style={{ background: TREND_SERIES.answered }} /> Answered
           </span>
           <span className="rpt-legend-item">
-            <span className="rpt-legend-swatch" style={{ background: TREND_COLORS.missed }} /> Missed
+            <span className="rpt-legend-swatch" style={{ background: TREND_SERIES.missed }} /> Missed
           </span>
         </div>
       }
@@ -146,7 +147,7 @@ export function TrendCard({ trend }: { trend: QueryState<ReportTrend> }) {
         <>
           <p>
             Each bar is one {per}. Its height is how many calls you had; the blue part were answered and the
-            orange part on top were missed.
+            grey part on top were missed.
           </p>
           <p>Point at a bar (or click the chart and use the arrow keys) to see the exact numbers.</p>
         </>
@@ -248,7 +249,7 @@ export function MissedCard({ overview }: { overview: QueryState<ReportOverview> 
         data.totals.calls === 0 ? (
           <div className="dl-empty">No calls yet in this period.</div>
         ) : missedTotal === 0 ? (
-          <div className="dl-empty" style={{ color: '#15803d' }}>No missed calls — every call was answered.</div>
+          <div className="dl-empty" style={{ color: T.okFg }}>No missed calls — every call was answered.</div>
         ) : (
           <>
             <div>

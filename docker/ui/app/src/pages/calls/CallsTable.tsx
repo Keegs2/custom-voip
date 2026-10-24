@@ -51,6 +51,10 @@ import { carrierLabel, isOnNetCall, trunkLabel, EMPTY } from './callsFormat';
 import { fmtCallDuration } from '../../utils/callDuration';
 import type { Cdr, CdrRowsMode, ProductType, CallDirection } from '../../types/cdr';
 import { productTag } from '../../config/products';
+import { T } from '../../styles/theme';
+
+/** The ungraded "—" — the Calls page token (dl-platform-b.css), faint on both grounds. */
+const GHOST = 'var(--cq-ghost)';
 
 /** Table timestamps render in the operator's LOCAL timezone (matches the
     local-time filter pickers, so what you search is what you read). */
@@ -97,7 +101,7 @@ export function GradePill({ grade, status, mos, isStaff }: GradePillProps) {
   const reason = qualityStatusReason(status, isStaff ? 'staff' : 'customer');
   if (grade == null) {
     return (
-      <span style={{ color: '#b6c2d4' }} title={reason ?? undefined} aria-label={reason ?? 'Not graded'}>
+      <span style={{ color: GHOST }} title={reason ?? undefined} aria-label={reason ?? 'Not graded'}>
         —
       </span>
     );
@@ -161,11 +165,12 @@ function SearchIcon() {
     <svg
       viewBox="0 0 16 16"
       fill="none"
-      stroke="#9aa9c0"
+      stroke="currentColor"
       strokeWidth={1.5}
       strokeLinecap="round"
       strokeLinejoin="round"
       style={{
+        color: T.fieldPlaceholder, // the field's own hint grey
         width: 14,
         height: 14,
         position: 'absolute',
@@ -227,8 +232,8 @@ export function CallsTable({
           alignItems: 'center',
           gap: 12,
           padding: '12px 20px',
-          borderBottom: '1px solid var(--rcf-line)',
-          background: 'var(--rcf-tint)',
+          borderBottom: `1px solid ${T.line}`,
+          background: T.tint,
         }}
       >
         <div style={{ position: 'relative', flex: 1, maxWidth: 400 }}>
@@ -243,7 +248,7 @@ export function CallsTable({
             style={{ width: '100%', padding: '7px 12px 7px 32px', fontSize: '0.8rem' }}
           />
         </div>
-        <span style={{ fontSize: '0.72rem', color: 'var(--rcf-ink-dim)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ fontSize: '0.72rem', color: T.textDim, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
           {quickFilter
             ? `${cdrs.length.toLocaleString()} of ${pageRowCount.toLocaleString()} on this page`
             : `${cdrs.length.toLocaleString()} on this page`}
@@ -281,12 +286,12 @@ export function CallsTable({
                   <div className="dl-empty">
                     {pageRowCount === 0 ? (
                       <>
-                        <p style={{ fontWeight: 600, margin: 0, color: 'var(--rcf-ink)' }}>No records found</p>
+                        <p style={{ fontWeight: 600, margin: 0, color: T.text }}>No records found</p>
                         <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>Adjust your filters and search again.</p>
                       </>
                     ) : (
                       <>
-                        <p style={{ fontWeight: 600, margin: 0, color: 'var(--rcf-ink)' }}>No rows match the quick filter</p>
+                        <p style={{ fontWeight: 600, margin: 0, color: T.text }}>No rows match the quick filter</p>
                         <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>
                           It only scans this page — clear it or use Destination Prefix to search server-side.
                         </p>
@@ -305,8 +310,8 @@ export function CallsTable({
               const trunk = trunkLabel(cdr.trunk_id, trunkNames);
               const billedColor =
                 cdr.total_cost != null && cdr.total_cost > 0
-                  ? 'var(--rcf-azure-deep)'
-                  : 'var(--rcf-ink-dim)';
+                  ? T.accentText
+                  : T.textDim;
 
               return (
                 <tr
@@ -316,7 +321,7 @@ export function CallsTable({
                   onClick={() => onSelect(cdr)}
                 >
                   <td className="dlx-td">
-                    <span className="dlx4-mono" style={{ color: 'var(--rcf-ink-dim)' }}>
+                    <span className="dlx4-mono" style={{ color: T.textDim }}>
                       {fmtTime(cdr.start_time)}
                     </span>
                   </td>
@@ -324,24 +329,24 @@ export function CallsTable({
                     <td className="dlx-td"><LegBadge cdr={cdr} /></td>
                   )}
                   {isStaff && (
-                    <td className="dlx-td" style={{ color: 'var(--rcf-ink-dim)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td className="dlx-td" style={{ color: T.textDim, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {customerNames?.[cdr.customer_id] ?? `#${cdr.customer_id}`}
                     </td>
                   )}
                   <td className="dlx-td"><ProductTag pt={cdr.product_type} /></td>
                   <td className="dlx-td"><DirectionTag dir={cdr.direction} /></td>
                   <td className="dlx-td">
-                    <span style={{ color: 'var(--rcf-ink)', whiteSpace: 'nowrap' }}>
+                    <span style={{ color: T.text, whiteSpace: 'nowrap' }}>
                       {fmt(cdr.caller_id) || cdr.caller_id || '--'}
                     </span>
                   </td>
                   <td className="dlx-td">
-                    <span style={{ color: 'var(--rcf-ink)', whiteSpace: 'nowrap' }}>
+                    <span style={{ color: T.text, whiteSpace: 'nowrap' }}>
                       {fmt(cdr.destination) || cdr.destination || '--'}
                     </span>
                   </td>
                   <td className="dlx-td">
-                    <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--rcf-ink)' }}>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', color: T.text }}>
                       {fmtCallDuration(cdr, fmtDurationSec)}
                     </span>
                   </td>
@@ -372,7 +377,7 @@ export function CallsTable({
                         <span
                           style={{
                             whiteSpace: 'nowrap',
-                            color: carrier === EMPTY ? INK_FAINT : 'var(--rcf-ink)',
+                            color: carrier === EMPTY ? INK_FAINT : T.text,
                           }}
                         >
                           {carrier}
@@ -384,7 +389,7 @@ export function CallsTable({
                     className="dlx-td"
                     style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                   >
-                    <span style={{ color: trunk === EMPTY ? INK_FAINT : 'var(--rcf-ink)' }}>
+                    <span style={{ color: trunk === EMPTY ? INK_FAINT : T.text }}>
                       {trunk}
                     </span>
                   </td>
