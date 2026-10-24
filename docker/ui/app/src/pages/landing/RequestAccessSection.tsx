@@ -6,7 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
-import { ArrowRight, Check, CheckCircle, Lock, X } from 'lucide-react';
+import { ArrowRight, Check, CheckCircle, Inbox, Lock, X } from 'lucide-react';
 import { submitOnboardingRequest } from '../../api/onboarding';
 import { ApiError } from '../../api/client';
 import { LandingSelect } from './LandingSelect';
@@ -39,7 +39,7 @@ import {
    1 call/sec OR more than 1,000 concurrent call paths (the backend
    422s over-threshold submissions without the HV block; monthly
    volume is informational only).
-   Layout: a shallow header row (identity copy + TED card), then a
+   Layout: a shallow header row (identity copy + onboarding card), then a
    full-width panel with two parallel form tracks — WHO THEY ARE left
    (Contact + Business verification/KYC), WHAT THEY NEED right (product
    picker + per-product setup blocks, then Capacity & timeline, then
@@ -55,8 +55,13 @@ import {
    name is no longer asked directly — it's populated from the KYC
    legal business name. Client-side validation mirrors the backend so
    most 422s never happen. Success renders a composed receipt —
-   request #, product chips, high-volume status, TED next steps.
-   Styling lives in index.css ("LANDING PAGE").
+   request #, product chips, high-volume status, next steps. The six
+   field groups are numbered in reading order (GroupHead). Copy here was
+   checked against the code (2026-10): TED is Granite's separate
+   onboarding system and KYC review is done by people — never call it
+   an AI or say it "verifies"; FCC 26-27 is a proposed rulemaking
+   (FNPRM); no follow-up SLA is promised.
+   Styling lives in styles/landing.css.
    ───────────────────────────────────────────────────────────── */
 
 /* ─── Form model (top-level mirrors AccessRequestForm) ─────── */
@@ -666,6 +671,38 @@ function Field({
   );
 }
 
+/* ─── Group head ─────────────────────────────────────────────
+   The form is six numbered groups (contact → business verification →
+   products → capacity → high-volume → IP addresses); the numbers are the
+   order the groups are read in, left track then right. Each group is a
+   role="group" labelled by this head's title. */
+
+function GroupHead({
+  n,
+  id,
+  title,
+  desc,
+}: {
+  n: number;
+  id: string;
+  title: string;
+  desc?: ReactNode;
+}) {
+  return (
+    <div className="landing-fgroup-head">
+      <span className="landing-fgroup-num" aria-hidden="true">
+        {n}
+      </span>
+      <div className="landing-fgroup-text">
+        <h3 className="landing-fgroup-title" id={id}>
+          {title}
+        </h3>
+        {desc && <p className="landing-fgroup-desc">{desc}</p>}
+      </div>
+    </div>
+  );
+}
+
 function inputClass(hasError: boolean): string {
   return hasError ? 'landing-input landing-input-invalid' : 'landing-input';
 }
@@ -1088,40 +1125,42 @@ export function RequestAccessSection() {
 
   return (
     <section
-      className="landing-band landing-band-cobalt landing-intake"
+      className="landing-band landing-section landing-intake"
       id="request-access"
+      aria-labelledby="landing-intake-title"
     >
       <div className="landing-wrap">
-        {/* ── Header row — identity left, TED presence right ── */}
-        <div className="landing-intake-head">
-          <div>
-            <span className="landing-kicker landing-kicker-inverse">
-              Get started
-            </span>
-            <h2 className="landing-h2">Bring your traffic.</h2>
+        {/* ── Header row — identity left, onboarding card right ── */}
+        <div className="landing-grid12 landing-intake-head">
+          <div className="landing-intake-head-copy">
+            <span className="landing-kicker">Get started</span>
+            <h2 className="landing-h2" id="landing-intake-title">
+              Bring your traffic.
+            </h2>
             <p className="landing-blurb">
-              Tell us about your numbers, your volume, and where calls need to
-              land. Your request goes to work the moment you submit — porting,
-              forwarding, and cutover included.
+              Tell us about your numbers, your volume and where calls need to
+              land. Granite engineering takes it from there — porting,
+              forwarding setup and cutover.
             </p>
             <ul className="landing-intake-points">
-              <li>Intake starts the moment you submit</li>
-              <li>Porting managed end to end by Granite</li>
-              <li>Talk directly to the engineers who run the network</li>
+              <li>Your request is logged the moment you submit</li>
+              <li>Number porting handled by Granite</li>
+              <li>Granite&rsquo;s engineering team follows up directly</li>
             </ul>
           </div>
+          {/* Neutral on purpose: this repo only stores the request (status
+              pending); review + activation happen in Granite's onboarding
+              system (TED) and are done by people. Don't call it an AI or
+              say it verifies anything. */}
           <div className="landing-ted">
             <span className="landing-ted-mark" aria-hidden="true">
-              TED
+              <Inbox size={20} strokeWidth={2} />
             </span>
             <div>
-              <p className="landing-ted-name">
-                TED
-                <span className="landing-ted-role">Granite Onboarding AI</span>
-              </p>
+              <p className="landing-ted-name">Granite onboarding</p>
               <p className="landing-ted-line">
-                TED intakes your request the moment you submit, then works
-                directly with Granite Telephony Engineering to activate your
+                Your request goes straight to Granite&rsquo;s onboarding queue,
+                and Granite Telephony Engineering works with you to activate
                 service.
               </p>
             </div>
@@ -1132,7 +1171,7 @@ export function RequestAccessSection() {
         <div className="landing-intake-panel">
           {receipt ? (
             /* ── Composed receipt — reference #, what was requested,
-                high-volume status, TED next steps. ── */
+                high-volume status, next steps. ── */
             <div className="landing-intake-success" role="status">
               <span className="landing-intake-success-ring">
                 <CheckCircle size={26} strokeWidth={2} />
@@ -1140,7 +1179,7 @@ export function RequestAccessSection() {
               <span className="landing-intake-success-ref">
                 Request #{receipt.id}
               </span>
-              <h3 className="landing-intake-success-title">TED has your request.</h3>
+              <h3 className="landing-intake-success-title">Request received.</h3>
               <div
                 className="landing-intake-success-chips"
                 aria-label="Requested products"
@@ -1163,10 +1202,9 @@ export function RequestAccessSection() {
                 </span>
               </div>
               <p className="landing-intake-success-note">
-                Granite&rsquo;s Onboarding AI is processing your intake and will
-                work directly with Granite Telephony Engineering to activate
-                your service. Expect a follow-up within one business day —
-                reference request #{receipt.id} in any correspondence.
+                Granite Telephony Engineering will review your request and
+                contact you to activate service. Please reference request #
+                {receipt.id} in any correspondence.
               </p>
               <button
                 type="button"
@@ -1179,761 +1217,807 @@ export function RequestAccessSection() {
           ) : (
             <form onSubmit={handleSubmit} noValidate>
               <div className="landing-intake-columns">
-                {/* ── Left track — who they are ── */}
-                <div className="landing-intake-fields landing-intake-col-a">
-                  <span className="landing-intake-sub landing-field-full">
-                    Contact
-                  </span>
-
-                  {/* Company name comes from the KYC legal business name —
-                      no separate field (it was a duplicate ask). */}
-                  <Field
-                    id="ra-contact"
-                    label="Contact name"
-                    error={errors.contact_name}
-                    full
+                {/* ── Left track — who they are (groups 1–2) ── */}
+                <div className="landing-intake-track">
+                  <div
+                    className="landing-fgroup"
+                    role="group"
+                    aria-labelledby="ra-g-contact"
                   >
-                    <input
-                      id="ra-contact"
-                      className={inputClass(!!errors.contact_name)}
-                      type="text"
-                      placeholder="John Smith"
-                      autoComplete="name"
-                      value={form.contact_name}
-                      onChange={(e) => handleChange('contact_name', e.target.value)}
-                      disabled={submitting}
+                    <GroupHead
+                      n={1}
+                      id="ra-g-contact"
+                      title="Contact"
+                      desc="Who we’ll work with on activation."
                     />
-                  </Field>
+                    <div className="landing-intake-fields">
+                      {/* Company name comes from the KYC legal business name —
+                          no separate field (it was a duplicate ask). */}
+                      <Field
+                        id="ra-contact"
+                        label="Contact name"
+                        error={errors.contact_name}
+                        full
+                      >
+                        <input
+                          id="ra-contact"
+                          className={inputClass(!!errors.contact_name)}
+                          type="text"
+                          placeholder="John Smith"
+                          autoComplete="name"
+                          value={form.contact_name}
+                          onChange={(e) => handleChange('contact_name', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
 
-                  <Field id="ra-email" label="Work email" error={errors.email}>
-                    <input
-                      id="ra-email"
-                      className={inputClass(!!errors.email)}
-                      type="email"
-                      placeholder="john@acme.com"
-                      autoComplete="email"
-                      value={form.email}
-                      onChange={(e) => handleChange('email', e.target.value)}
-                      disabled={submitting}
-                    />
-                  </Field>
+                      <Field id="ra-email" label="Work email" error={errors.email}>
+                        <input
+                          id="ra-email"
+                          className={inputClass(!!errors.email)}
+                          type="email"
+                          placeholder="john@acme.com"
+                          autoComplete="email"
+                          value={form.email}
+                          onChange={(e) => handleChange('email', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
 
-                  <Field id="ra-phone" label="Phone number" error={errors.phone}>
-                    <input
-                      id="ra-phone"
-                      className={inputClass(!!errors.phone)}
-                      type="tel"
-                      placeholder="+1 (617) 555-0100"
-                      autoComplete="tel"
-                      value={form.phone}
-                      onChange={(e) => handleChange('phone', e.target.value)}
-                      disabled={submitting}
-                    />
-                  </Field>
-
-                  <span className="landing-intake-sub landing-field-full">
-                    Business verification
-                  </span>
-                  <p className="landing-intake-intro landing-field-full">
-                    FCC Know-Your-Customer rules require voice providers to
-                    verify who is originating calls on their network. TED
-                    verifies these details during intake.
-                  </p>
-
-                  <Field
-                    id="ra-legalname"
-                    label="Legal business name"
-                    error={errors.legal_business_name}
-                    full
-                  >
-                    <input
-                      id="ra-legalname"
-                      className={inputClass(!!errors.legal_business_name)}
-                      type="text"
-                      placeholder="Acme Corporation, Inc."
-                      autoComplete="organization"
-                      value={form.legal_business_name}
-                      onChange={(e) => handleChange('legal_business_name', e.target.value)}
-                      disabled={submitting}
-                    />
-                  </Field>
-
-                  <Field
-                    id="ra-addr1"
-                    label="Address line 1"
-                    error={errors.address_line1}
-                    full
-                  >
-                    <input
-                      id="ra-addr1"
-                      className={inputClass(!!errors.address_line1)}
-                      type="text"
-                      placeholder="100 Newport Ave Ext"
-                      autoComplete="address-line1"
-                      value={form.address_line1}
-                      onChange={(e) => handleChange('address_line1', e.target.value)}
-                      disabled={submitting}
-                    />
-                  </Field>
-
-                  <Field id="ra-addr2" label="Address line 2 (optional)" error={errors.address_line2}>
-                    <input
-                      id="ra-addr2"
-                      className={inputClass(!!errors.address_line2)}
-                      type="text"
-                      placeholder="Suite 200"
-                      autoComplete="address-line2"
-                      value={form.address_line2}
-                      onChange={(e) => handleChange('address_line2', e.target.value)}
-                      disabled={submitting}
-                    />
-                  </Field>
-
-                  <Field id="ra-city" label="City" error={errors.city}>
-                    <input
-                      id="ra-city"
-                      className={inputClass(!!errors.city)}
-                      type="text"
-                      placeholder="Quincy"
-                      autoComplete="address-level2"
-                      value={form.city}
-                      onChange={(e) => handleChange('city', e.target.value)}
-                      disabled={submitting}
-                    />
-                  </Field>
-
-                  <Field id="ra-state" label="State" error={errors.state}>
-                    <LandingSelect
-                      id="ra-state"
-                      labelId="ra-state-label"
-                      value={form.state}
-                      options={US_STATE_OPTIONS}
-                      placeholder="Select a state…"
-                      onChange={(v) => handleChange('state', v)}
-                      disabled={submitting}
-                      invalid={!!errors.state}
-                    />
-                  </Field>
-
-                  <Field id="ra-zip" label="ZIP code" error={errors.postal_code}>
-                    <input
-                      id="ra-zip"
-                      className={inputClass(!!errors.postal_code)}
-                      type="text"
-                      placeholder="02171"
-                      autoComplete="postal-code"
-                      value={form.postal_code}
-                      onChange={(e) => handleChange('postal_code', e.target.value)}
-                      disabled={submitting}
-                    />
-                  </Field>
-
-                  {/* Neutral self-disclosure, not a gate */}
-                  <div className="landing-field-full">
-                    <label className="landing-check">
-                      <input
-                        type="checkbox"
-                        checked={form.address_is_registered_agent_or_virtual}
-                        onChange={(e) =>
-                          handleChange(
-                            'address_is_registered_agent_or_virtual',
-                            e.target.checked,
-                          )
-                        }
-                        disabled={submitting}
-                      />
-                      <span className="landing-check-box" aria-hidden="true">
-                        <Check size={13} strokeWidth={3} />
-                      </span>
-                      <span className="landing-check-text">
-                        This address is a registered agent or virtual office
-                      </span>
-                    </label>
+                      <Field id="ra-phone" label="Phone number" error={errors.phone}>
+                        <input
+                          id="ra-phone"
+                          className={inputClass(!!errors.phone)}
+                          type="tel"
+                          placeholder="+1 (617) 555-0100"
+                          autoComplete="tel"
+                          value={form.phone}
+                          onChange={(e) => handleChange('phone', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
+                    </div>
                   </div>
 
-                  <Field id="ra-govidtype" label="Government ID type" error={errors.gov_id_type}>
-                    <LandingSelect
-                      id="ra-govidtype"
-                      labelId="ra-govidtype-label"
-                      value={form.gov_id_type}
-                      options={GOV_ID_OPTIONS}
-                      placeholder="Select an ID type…"
-                      onChange={(v) => handleChange('gov_id_type', v)}
-                      disabled={submitting}
-                      invalid={!!errors.gov_id_type}
-                    />
-                  </Field>
-
-                  <Field
-                    id="ra-govid"
-                    label="ID number"
-                    error={errors.gov_id_number}
-                    hint={govIdHint?.hint}
+                  <div
+                    className="landing-fgroup"
+                    role="group"
+                    aria-labelledby="ra-g-kyc"
                   >
-                    <input
-                      id="ra-govid"
-                      className={inputClass(!!errors.gov_id_number)}
-                      type="text"
-                      autoComplete="off"
-                      spellCheck={false}
-                      placeholder={govIdHint?.placeholder ?? 'Select an ID type first'}
-                      value={form.gov_id_number}
-                      onChange={(e) => handleChange('gov_id_number', e.target.value)}
-                      disabled={submitting}
+                    <GroupHead
+                      n={2}
+                      id="ra-g-kyc"
+                      title="Business verification"
+                      desc="Under the FCC’s proposed Know-Your-Customer rules (FCC 26-27), voice providers verify who originates calls on their network. Granite reviews these details before activation."
                     />
-                  </Field>
+                    <div className="landing-intake-fields">
+                      <Field
+                        id="ra-legalname"
+                        label="Legal business name"
+                        error={errors.legal_business_name}
+                        full
+                      >
+                        <input
+                          id="ra-legalname"
+                          className={inputClass(!!errors.legal_business_name)}
+                          type="text"
+                          placeholder="Acme Corporation, Inc."
+                          autoComplete="organization"
+                          value={form.legal_business_name}
+                          onChange={(e) => handleChange('legal_business_name', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
 
-                  {/* Required for state registrations; hidden otherwise */}
-                  {govType === 'state_registration' && (
-                    <Field
-                      id="ra-regstate"
-                      label="State of registration"
-                      error={errors.state_of_registration}
-                    >
-                      <LandingSelect
-                        id="ra-regstate"
-                        labelId="ra-regstate-label"
-                        value={form.state_of_registration}
-                        options={US_STATE_OPTIONS}
-                        placeholder="Select a state…"
-                        onChange={(v) => handleChange('state_of_registration', v)}
-                        disabled={submitting}
-                        invalid={!!errors.state_of_registration}
-                      />
-                    </Field>
-                  )}
+                      <Field
+                        id="ra-addr1"
+                        label="Address line 1"
+                        error={errors.address_line1}
+                        full
+                      >
+                        <input
+                          id="ra-addr1"
+                          className={inputClass(!!errors.address_line1)}
+                          type="text"
+                          placeholder="100 Newport Ave Ext"
+                          autoComplete="address-line1"
+                          value={form.address_line1}
+                          onChange={(e) => handleChange('address_line1', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
 
-                  <Field
-                    id="ra-altphone"
-                    label="Alternate phone"
-                    error={errors.alternate_phone}
-                    hint="Must differ from the primary phone above"
-                  >
-                    <input
-                      id="ra-altphone"
-                      className={inputClass(!!errors.alternate_phone)}
-                      type="tel"
-                      placeholder="+1 (617) 555-0199"
-                      autoComplete="tel"
-                      value={form.alternate_phone}
-                      onChange={(e) => handleChange('alternate_phone', e.target.value)}
-                      disabled={submitting}
-                    />
-                  </Field>
+                      <Field id="ra-addr2" label="Address line 2 (optional)" error={errors.address_line2}>
+                        <input
+                          id="ra-addr2"
+                          className={inputClass(!!errors.address_line2)}
+                          type="text"
+                          placeholder="Suite 200"
+                          autoComplete="address-line2"
+                          value={form.address_line2}
+                          onChange={(e) => handleChange('address_line2', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
 
-                  <Field id="ra-website" label="Website (optional)" error={errors.website}>
-                    <input
-                      id="ra-website"
-                      className={inputClass(!!errors.website)}
-                      type="url"
-                      placeholder="https://acme.com"
-                      autoComplete="url"
-                      value={form.website}
-                      onChange={(e) => handleChange('website', e.target.value)}
-                      disabled={submitting}
-                    />
-                  </Field>
+                      <Field id="ra-city" label="City" error={errors.city}>
+                        <input
+                          id="ra-city"
+                          className={inputClass(!!errors.city)}
+                          type="text"
+                          placeholder="Quincy"
+                          autoComplete="address-level2"
+                          value={form.city}
+                          onChange={(e) => handleChange('city', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
+
+                      <Field id="ra-state" label="State" error={errors.state}>
+                        <LandingSelect
+                          id="ra-state"
+                          labelId="ra-state-label"
+                          value={form.state}
+                          options={US_STATE_OPTIONS}
+                          placeholder="Select a state…"
+                          onChange={(v) => handleChange('state', v)}
+                          disabled={submitting}
+                          invalid={!!errors.state}
+                        />
+                      </Field>
+
+                      <Field id="ra-zip" label="ZIP code" error={errors.postal_code}>
+                        <input
+                          id="ra-zip"
+                          className={inputClass(!!errors.postal_code)}
+                          type="text"
+                          placeholder="02171"
+                          autoComplete="postal-code"
+                          value={form.postal_code}
+                          onChange={(e) => handleChange('postal_code', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
+
+                      {/* Neutral self-disclosure, not a gate */}
+                      <div className="landing-field-full">
+                        <label className="landing-check">
+                          <input
+                            type="checkbox"
+                            checked={form.address_is_registered_agent_or_virtual}
+                            onChange={(e) =>
+                              handleChange(
+                                'address_is_registered_agent_or_virtual',
+                                e.target.checked,
+                              )
+                            }
+                            disabled={submitting}
+                          />
+                          <span className="landing-check-box" aria-hidden="true">
+                            <Check size={13} strokeWidth={3} />
+                          </span>
+                          <span className="landing-check-text">
+                            This address is a registered agent or virtual office
+                          </span>
+                        </label>
+                      </div>
+
+                      <Field id="ra-govidtype" label="Government ID type" error={errors.gov_id_type}>
+                        <LandingSelect
+                          id="ra-govidtype"
+                          labelId="ra-govidtype-label"
+                          value={form.gov_id_type}
+                          options={GOV_ID_OPTIONS}
+                          placeholder="Select an ID type…"
+                          onChange={(v) => handleChange('gov_id_type', v)}
+                          disabled={submitting}
+                          invalid={!!errors.gov_id_type}
+                        />
+                      </Field>
+
+                      <Field
+                        id="ra-govid"
+                        label="ID number"
+                        error={errors.gov_id_number}
+                        hint={govIdHint?.hint}
+                      >
+                        <input
+                          id="ra-govid"
+                          className={inputClass(!!errors.gov_id_number)}
+                          type="text"
+                          autoComplete="off"
+                          spellCheck={false}
+                          placeholder={govIdHint?.placeholder ?? 'Select an ID type first'}
+                          value={form.gov_id_number}
+                          onChange={(e) => handleChange('gov_id_number', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
+
+                      {/* Required for state registrations; hidden otherwise */}
+                      {govType === 'state_registration' && (
+                        <Field
+                          id="ra-regstate"
+                          label="State of registration"
+                          error={errors.state_of_registration}
+                        >
+                          <LandingSelect
+                            id="ra-regstate"
+                            labelId="ra-regstate-label"
+                            value={form.state_of_registration}
+                            options={US_STATE_OPTIONS}
+                            placeholder="Select a state…"
+                            onChange={(v) => handleChange('state_of_registration', v)}
+                            disabled={submitting}
+                            invalid={!!errors.state_of_registration}
+                          />
+                        </Field>
+                      )}
+
+                      <Field
+                        id="ra-altphone"
+                        label="Alternate phone"
+                        error={errors.alternate_phone}
+                        hint="Must differ from the primary phone above"
+                      >
+                        <input
+                          id="ra-altphone"
+                          className={inputClass(!!errors.alternate_phone)}
+                          type="tel"
+                          placeholder="+1 (617) 555-0199"
+                          autoComplete="tel"
+                          value={form.alternate_phone}
+                          onChange={(e) => handleChange('alternate_phone', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
+
+                      <Field id="ra-website" label="Website (optional)" error={errors.website}>
+                        <input
+                          id="ra-website"
+                          className={inputClass(!!errors.website)}
+                          type="url"
+                          placeholder="https://acme.com"
+                          autoComplete="url"
+                          value={form.website}
+                          onChange={(e) => handleChange('website', e.target.value)}
+                          disabled={submitting}
+                        />
+                      </Field>
+                    </div>
+                  </div>
                 </div>
 
-                {/* ── Right track — what they need ── */}
-                <div className="landing-intake-fields landing-intake-col-b">
-                  <span className="landing-intake-sub landing-field-full">
-                    Products &amp; requirements
-                  </span>
-
-                  {/* ── Product picker — multi-select toggle cards ── */}
-                  <div className="landing-field landing-field-full">
-                    <span className="landing-label" id="ra-products-label">
-                      Which products are you interested in?
-                    </span>
-                    <div className="landing-field-body">
-                      <div
-                        className={
-                          errors.products
-                            ? 'landing-product-grid landing-product-grid-invalid'
-                            : 'landing-product-grid'
-                        }
-                        role="group"
-                        aria-labelledby="ra-products-label"
-                      >
-                        {PRODUCT_ORDER.map((key) => (
-                          <button
-                            key={key}
-                            type="button"
-                            className="landing-product-card"
-                            aria-pressed={form.products.includes(key)}
-                            onClick={() => toggleProduct(key)}
-                            disabled={submitting}
+                {/* ── Right track — what they need (groups 3–6) ── */}
+                <div className="landing-intake-track">
+                  <div
+                    className="landing-fgroup"
+                    role="group"
+                    aria-labelledby="ra-g-products"
+                  >
+                    <GroupHead
+                      n={3}
+                      id="ra-g-products"
+                      title="Products & requirements"
+                      desc="Pick one or more — each adds a few setup questions."
+                    />
+                    <div className="landing-intake-fields">
+                      {/* ── Product picker — multi-select toggle cards ── */}
+                      <div className="landing-field landing-field-full">
+                        <span className="landing-label" id="ra-products-label">
+                          Which products are you interested in?
+                        </span>
+                        <div className="landing-field-body">
+                          <div
+                            className={
+                              errors.products
+                                ? 'landing-product-grid landing-product-grid-invalid'
+                                : 'landing-product-grid'
+                            }
+                            role="group"
+                            aria-labelledby="ra-products-label"
                           >
-                            <span className="landing-product-check" aria-hidden="true">
-                              <Check size={12} strokeWidth={3.5} />
-                            </span>
-                            <span className="landing-product-name">
-                              {PRODUCT_CARDS[key].name}
-                            </span>
-                            <span className="landing-product-desc">
-                              {PRODUCT_CARDS[key].desc}
-                            </span>
-                          </button>
-                        ))}
+                            {PRODUCT_ORDER.map((key) => (
+                              <button
+                                key={key}
+                                type="button"
+                                className="landing-product-card"
+                                aria-pressed={form.products.includes(key)}
+                                onClick={() => toggleProduct(key)}
+                                disabled={submitting}
+                              >
+                                <span className="landing-product-check" aria-hidden="true">
+                                  <Check size={12} strokeWidth={3.5} />
+                                </span>
+                                <span className="landing-product-name">
+                                  {PRODUCT_CARDS[key].name}
+                                </span>
+                                <span className="landing-product-desc">
+                                  {PRODUCT_CARDS[key].desc}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                          {errors.products && (
+                            <span className="landing-field-err">{errors.products}</span>
+                          )}
+                        </div>
                       </div>
-                      {errors.products && (
-                        <span className="landing-field-err">{errors.products}</span>
+
+                      {/* ── RCF setup ── */}
+                      {form.products.includes('rcf') && (
+                        <div className="landing-field-full landing-product-block landing-hv-reveal">
+                          <span className="landing-product-block-title">
+                            RCF — Remote Call Forwarding
+                          </span>
+                          <div className="landing-intake-fields">
+                            <Field id="ra-didcount" label="How many phone numbers?" error={errors.did_count}>
+                              <LandingSelect
+                                id="ra-didcount"
+                                labelId="ra-didcount-label"
+                                value={form.did_count}
+                                options={DID_COUNT_OPTIONS}
+                                placeholder="Select a range…"
+                                onChange={(v) => handleChange('did_count', v)}
+                                disabled={submitting}
+                                invalid={!!errors.did_count}
+                              />
+                            </Field>
+
+                            <Field id="ra-porting" label="Porting existing numbers?" error={errors.porting}>
+                              <LandingSelect
+                                id="ra-porting"
+                                labelId="ra-porting-label"
+                                value={form.porting}
+                                options={PORTING_OPTIONS}
+                                placeholder="Select an option…"
+                                onChange={(v) => handleChange('porting', v)}
+                                disabled={submitting}
+                                invalid={!!errors.porting}
+                              />
+                            </Field>
+
+                            {/* Conditional: only when porting is Yes or Both */}
+                            {showCarrier && (
+                              <Field
+                                id="ra-carrier"
+                                label="Current carrier"
+                                error={errors.current_carrier}
+                                full
+                              >
+                                <input
+                                  id="ra-carrier"
+                                  className={inputClass(!!errors.current_carrier)}
+                                  type="text"
+                                  placeholder="e.g. AT&T, Lumen, Verizon"
+                                  value={form.current_carrier}
+                                  onChange={(e) => handleChange('current_carrier', e.target.value)}
+                                  disabled={submitting}
+                                />
+                              </Field>
+                            )}
+
+                            <Field id="ra-forwarding" label="Forwarding setup" error={errors.forwarding_setup}>
+                              <LandingSelect
+                                id="ra-forwarding"
+                                labelId="ra-forwarding-label"
+                                value={form.forwarding_setup}
+                                options={FORWARDING_OPTIONS}
+                                placeholder="Select an option…"
+                                onChange={(v) => handleChange('forwarding_setup', v)}
+                                disabled={submitting}
+                                invalid={!!errors.forwarding_setup}
+                              />
+                            </Field>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── SIP Trunking setup ── */}
+                      {form.products.includes('trunk') && (
+                        <div className="landing-field-full landing-product-block landing-hv-reveal">
+                          <span className="landing-product-block-title">
+                            SIP Trunking
+                          </span>
+                          {/* Signaling IPs are captured once in the unified
+                              "IP addresses" block below — trunks authenticate
+                              by IP, no registration. */}
+                          <div className="landing-intake-fields">
+                            <Field id="ra-callpaths" label="Concurrent call paths" error={errors.trunk_call_paths}>
+                              <input
+                                id="ra-callpaths"
+                                className={inputClass(!!errors.trunk_call_paths)}
+                                type="number"
+                                min={1}
+                                max={1000}
+                                step={1}
+                                placeholder="20"
+                                value={form.trunk_call_paths}
+                                onChange={(e) => handleChange('trunk_call_paths', e.target.value)}
+                                disabled={submitting}
+                              />
+                            </Field>
+
+                            <Field id="ra-pbx" label="PBX vendor (optional)" error={errors.trunk_pbx_vendor}>
+                              <input
+                                id="ra-pbx"
+                                className={inputClass(!!errors.trunk_pbx_vendor)}
+                                type="text"
+                                maxLength={100}
+                                placeholder="e.g. Asterisk, 3CX, Avaya"
+                                value={form.trunk_pbx_vendor}
+                                onChange={(e) => handleChange('trunk_pbx_vendor', e.target.value)}
+                                disabled={submitting}
+                              />
+                            </Field>
+
+                            <Field
+                              id="ra-trunkdids"
+                              label="DIDs needed (optional)"
+                              error={errors.trunk_dids_needed}
+                              full
+                            >
+                              <input
+                                id="ra-trunkdids"
+                                className={inputClass(!!errors.trunk_dids_needed)}
+                                type="text"
+                                maxLength={200}
+                                placeholder="e.g. 25 new numbers, Boston metro"
+                                value={form.trunk_dids_needed}
+                                onChange={(e) => handleChange('trunk_dids_needed', e.target.value)}
+                                disabled={submitting}
+                              />
+                            </Field>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── API Calling setup ── */}
+                      {form.products.includes('api') && (
+                        <div className="landing-field-full landing-product-block landing-hv-reveal">
+                          <span className="landing-product-block-title">
+                            API Calling
+                          </span>
+                          <div className="landing-intake-fields">
+                            <Field id="ra-usecase" label="Use case" error={errors.api_use_case} full>
+                              <input
+                                id="ra-usecase"
+                                className={inputClass(!!errors.api_use_case)}
+                                type="text"
+                                maxLength={USE_CASE_MAX}
+                                placeholder="e.g. Outbound appointment reminders from our CRM"
+                                value={form.api_use_case}
+                                onChange={(e) => handleChange('api_use_case', e.target.value)}
+                                disabled={submitting}
+                              />
+                            </Field>
+
+                            <Field
+                              id="ra-cps"
+                              label="Expected calls / second (optional)"
+                              error={errors.api_expected_cps}
+                            >
+                              <input
+                                id="ra-cps"
+                                className={inputClass(!!errors.api_expected_cps)}
+                                type="number"
+                                min={1}
+                                max={1000}
+                                step={1}
+                                placeholder="10"
+                                value={form.api_expected_cps}
+                                onChange={(e) => handleChange('api_expected_cps', e.target.value)}
+                                disabled={submitting}
+                              />
+                            </Field>
+
+                            <Field id="ra-webhook" label="Webhook URL (optional)" error={errors.api_webhook_url}>
+                              <input
+                                id="ra-webhook"
+                                className={inputClass(!!errors.api_webhook_url)}
+                                type="url"
+                                maxLength={255}
+                                placeholder="https://api.acme.com/voice/events"
+                                value={form.api_webhook_url}
+                                onChange={(e) => handleChange('api_webhook_url', e.target.value)}
+                                disabled={submitting}
+                              />
+                            </Field>
+
+                            <div className="landing-field-full">
+                              <label className="landing-mini-toggle">
+                                <input
+                                  type="checkbox"
+                                  role="switch"
+                                  aria-checked={form.api_needs_numbers}
+                                  checked={form.api_needs_numbers}
+                                  onChange={(e) => handleChange('api_needs_numbers', e.target.checked)}
+                                  disabled={submitting}
+                                />
+                                <span className="landing-mini-toggle-q">
+                                  Do you need us to provide numbers?
+                                </span>
+                                <span className="landing-mini-toggle-a" aria-hidden="true">
+                                  {form.api_needs_numbers ? 'Yes' : 'No'}
+                                </span>
+                                <span className="landing-switch" aria-hidden="true" />
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── Visual Voicemail setup ── */}
+                      {form.products.includes('voicemail') && (
+                        <div className="landing-field-full landing-product-block landing-hv-reveal">
+                          <span className="landing-product-block-title">
+                            Visual Voicemail
+                          </span>
+                          <div className="landing-intake-fields">
+                            <Field id="ra-mailboxes" label="How many mailboxes?" error={errors.vm_mailbox_count}>
+                              <input
+                                id="ra-mailboxes"
+                                className={inputClass(!!errors.vm_mailbox_count)}
+                                type="number"
+                                min={1}
+                                max={10_000}
+                                step={1}
+                                placeholder="50"
+                                value={form.vm_mailbox_count}
+                                onChange={(e) => handleChange('vm_mailbox_count', e.target.value)}
+                                disabled={submitting}
+                              />
+                            </Field>
+
+                            <Field id="ra-attachto" label="Attach mailboxes to" error={errors.vm_attach_to}>
+                              <LandingSelect
+                                id="ra-attachto"
+                                labelId="ra-attachto-label"
+                                value={form.vm_attach_to}
+                                options={ATTACH_TO_OPTIONS}
+                                placeholder="Select an option…"
+                                onChange={(v) => handleChange('vm_attach_to', v)}
+                                disabled={submitting}
+                                invalid={!!errors.vm_attach_to}
+                              />
+                            </Field>
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>
-
-                  {/* ── RCF setup ── */}
-                  {form.products.includes('rcf') && (
-                    <div className="landing-field-full landing-product-block landing-hv-reveal">
-                      <span className="landing-product-block-title">
-                        RCF — Remote Call Forwarding
-                      </span>
-                      <div className="landing-intake-fields">
-                        <Field id="ra-didcount" label="How many phone numbers?" error={errors.did_count}>
-                          <LandingSelect
-                            id="ra-didcount"
-                            labelId="ra-didcount-label"
-                            value={form.did_count}
-                            options={DID_COUNT_OPTIONS}
-                            placeholder="Select a range…"
-                            onChange={(v) => handleChange('did_count', v)}
-                            disabled={submitting}
-                            invalid={!!errors.did_count}
-                          />
-                        </Field>
-
-                        <Field id="ra-porting" label="Porting existing numbers?" error={errors.porting}>
-                          <LandingSelect
-                            id="ra-porting"
-                            labelId="ra-porting-label"
-                            value={form.porting}
-                            options={PORTING_OPTIONS}
-                            placeholder="Select an option…"
-                            onChange={(v) => handleChange('porting', v)}
-                            disabled={submitting}
-                            invalid={!!errors.porting}
-                          />
-                        </Field>
-
-                        {/* Conditional: only when porting is Yes or Both */}
-                        {showCarrier && (
-                          <Field
-                            id="ra-carrier"
-                            label="Current carrier"
-                            error={errors.current_carrier}
-                            full
-                          >
-                            <input
-                              id="ra-carrier"
-                              className={inputClass(!!errors.current_carrier)}
-                              type="text"
-                              placeholder="e.g. AT&T, Lumen, Verizon"
-                              value={form.current_carrier}
-                              onChange={(e) => handleChange('current_carrier', e.target.value)}
-                              disabled={submitting}
-                            />
-                          </Field>
-                        )}
-
-                        <Field id="ra-forwarding" label="Forwarding setup" error={errors.forwarding_setup}>
-                          <LandingSelect
-                            id="ra-forwarding"
-                            labelId="ra-forwarding-label"
-                            value={form.forwarding_setup}
-                            options={FORWARDING_OPTIONS}
-                            placeholder="Select an option…"
-                            onChange={(v) => handleChange('forwarding_setup', v)}
-                            disabled={submitting}
-                            invalid={!!errors.forwarding_setup}
-                          />
-                        </Field>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── SIP Trunking setup ── */}
-                  {form.products.includes('trunk') && (
-                    <div className="landing-field-full landing-product-block landing-hv-reveal">
-                      <span className="landing-product-block-title">
-                        SIP Trunking
-                      </span>
-                      {/* Signaling IPs are captured once in the unified
-                          "IP addresses" block below — trunks authenticate
-                          by IP, no registration. */}
-                      <div className="landing-intake-fields">
-                        <Field id="ra-callpaths" label="Concurrent call paths" error={errors.trunk_call_paths}>
-                          <input
-                            id="ra-callpaths"
-                            className={inputClass(!!errors.trunk_call_paths)}
-                            type="number"
-                            min={1}
-                            max={1000}
-                            step={1}
-                            placeholder="20"
-                            value={form.trunk_call_paths}
-                            onChange={(e) => handleChange('trunk_call_paths', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <Field id="ra-pbx" label="PBX vendor (optional)" error={errors.trunk_pbx_vendor}>
-                          <input
-                            id="ra-pbx"
-                            className={inputClass(!!errors.trunk_pbx_vendor)}
-                            type="text"
-                            maxLength={100}
-                            placeholder="e.g. Asterisk, 3CX, Avaya"
-                            value={form.trunk_pbx_vendor}
-                            onChange={(e) => handleChange('trunk_pbx_vendor', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <Field
-                          id="ra-trunkdids"
-                          label="DIDs needed (optional)"
-                          error={errors.trunk_dids_needed}
-                          full
-                        >
-                          <input
-                            id="ra-trunkdids"
-                            className={inputClass(!!errors.trunk_dids_needed)}
-                            type="text"
-                            maxLength={200}
-                            placeholder="e.g. 25 new numbers, Boston metro"
-                            value={form.trunk_dids_needed}
-                            onChange={(e) => handleChange('trunk_dids_needed', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── API Calling setup ── */}
-                  {form.products.includes('api') && (
-                    <div className="landing-field-full landing-product-block landing-hv-reveal">
-                      <span className="landing-product-block-title">
-                        API Calling
-                      </span>
-                      <div className="landing-intake-fields">
-                        <Field id="ra-usecase" label="Use case" error={errors.api_use_case} full>
-                          <input
-                            id="ra-usecase"
-                            className={inputClass(!!errors.api_use_case)}
-                            type="text"
-                            maxLength={USE_CASE_MAX}
-                            placeholder="e.g. Outbound appointment reminders from our CRM"
-                            value={form.api_use_case}
-                            onChange={(e) => handleChange('api_use_case', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <Field
-                          id="ra-cps"
-                          label="Expected calls / second (optional)"
-                          error={errors.api_expected_cps}
-                        >
-                          <input
-                            id="ra-cps"
-                            className={inputClass(!!errors.api_expected_cps)}
-                            type="number"
-                            min={1}
-                            max={1000}
-                            step={1}
-                            placeholder="10"
-                            value={form.api_expected_cps}
-                            onChange={(e) => handleChange('api_expected_cps', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <Field id="ra-webhook" label="Webhook URL (optional)" error={errors.api_webhook_url}>
-                          <input
-                            id="ra-webhook"
-                            className={inputClass(!!errors.api_webhook_url)}
-                            type="url"
-                            maxLength={255}
-                            placeholder="https://api.acme.com/voice/events"
-                            value={form.api_webhook_url}
-                            onChange={(e) => handleChange('api_webhook_url', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <div className="landing-field-full">
-                          <label className="landing-mini-toggle">
-                            <input
-                              type="checkbox"
-                              role="switch"
-                              aria-checked={form.api_needs_numbers}
-                              checked={form.api_needs_numbers}
-                              onChange={(e) => handleChange('api_needs_numbers', e.target.checked)}
-                              disabled={submitting}
-                            />
-                            <span className="landing-mini-toggle-q">
-                              Do you need us to provide numbers?
-                            </span>
-                            <span className="landing-mini-toggle-a" aria-hidden="true">
-                              {form.api_needs_numbers ? 'Yes' : 'No'}
-                            </span>
-                            <span className="landing-switch" aria-hidden="true" />
-                          </label>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── Visual Voicemail setup ── */}
-                  {form.products.includes('voicemail') && (
-                    <div className="landing-field-full landing-product-block landing-hv-reveal">
-                      <span className="landing-product-block-title">
-                        Visual Voicemail
-                      </span>
-                      <div className="landing-intake-fields">
-                        <Field id="ra-mailboxes" label="How many mailboxes?" error={errors.vm_mailbox_count}>
-                          <input
-                            id="ra-mailboxes"
-                            className={inputClass(!!errors.vm_mailbox_count)}
-                            type="number"
-                            min={1}
-                            max={10_000}
-                            step={1}
-                            placeholder="50"
-                            value={form.vm_mailbox_count}
-                            onChange={(e) => handleChange('vm_mailbox_count', e.target.value)}
-                            disabled={submitting}
-                          />
-                        </Field>
-
-                        <Field id="ra-attachto" label="Attach mailboxes to" error={errors.vm_attach_to}>
-                          <LandingSelect
-                            id="ra-attachto"
-                            labelId="ra-attachto-label"
-                            value={form.vm_attach_to}
-                            options={ATTACH_TO_OPTIONS}
-                            placeholder="Select an option…"
-                            onChange={(v) => handleChange('vm_attach_to', v)}
-                            disabled={submitting}
-                            invalid={!!errors.vm_attach_to}
-                          />
-                        </Field>
-                      </div>
-                    </div>
-                  )}
 
                   {/* ── Capacity & timeline — the technical declarations.
                       The capacity pair (KYC v2, REQUIRED) drives Granite's
                       high-volume threshold live: >1 CPS or >1,000 concurrent
                       call paths locks the declaration toggle on (see the
                       High-volume well below). ── */}
-                  <span className="landing-intake-sub landing-field-full">
-                    Capacity &amp; timeline
-                  </span>
-
-                  <Field
-                    id="ra-peakcps"
-                    label="Peak calls per second"
-                    error={errors.declared_peak_cps}
-                    hint="How many calls you'll start per second at peak"
+                  <div
+                    className="landing-fgroup"
+                    role="group"
+                    aria-labelledby="ra-g-capacity"
                   >
-                    <input
-                      id="ra-peakcps"
-                      className={inputClass(!!errors.declared_peak_cps)}
-                      type="number"
-                      min={1}
-                      max={1000}
-                      step={1}
-                      placeholder="1"
-                      value={form.declared_peak_cps}
-                      onChange={(e) => handleChange('declared_peak_cps', e.target.value)}
-                      disabled={submitting}
+                    <GroupHead
+                      n={4}
+                      id="ra-g-capacity"
+                      title="Capacity & timeline"
+                      desc="Your peak load and when you need service live."
                     />
-                  </Field>
-
-                  <Field
-                    id="ra-peakconcurrent"
-                    label="Peak concurrent calls"
-                    error={errors.declared_max_concurrent_calls}
-                    hint="Simultaneous active calls (call paths) at peak"
-                  >
-                    <input
-                      id="ra-peakconcurrent"
-                      className={inputClass(!!errors.declared_max_concurrent_calls)}
-                      type="number"
-                      min={1}
-                      max={100_000}
-                      step={1}
-                      placeholder="100"
-                      value={form.declared_max_concurrent_calls}
-                      onChange={(e) =>
-                        handleChange('declared_max_concurrent_calls', e.target.value)
-                      }
-                      disabled={submitting}
-                    />
-                  </Field>
-
-                  {/* One-line label — pairs with the timeline select.
-                      Informational only — no longer a high-volume trigger. */}
-                  <Field id="ra-volume" label="Expected monthly volume" error={errors.monthly_volume}>
-                    <LandingSelect
-                      id="ra-volume"
-                      labelId="ra-volume-label"
-                      value={form.monthly_volume}
-                      options={VOLUME_OPTIONS}
-                      placeholder="Select a range…"
-                      onChange={(v) => handleChange('monthly_volume', v)}
-                      disabled={submitting}
-                      invalid={!!errors.monthly_volume}
-                    />
-                  </Field>
-
-                  <Field id="ra-timeline" label="When do you need this live?" error={errors.timeline}>
-                    <LandingSelect
-                      id="ra-timeline"
-                      labelId="ra-timeline-label"
-                      value={form.timeline}
-                      options={TIMELINE_OPTIONS}
-                      placeholder="Select a timeline…"
-                      onChange={(v) => handleChange('timeline', v)}
-                      disabled={submitting}
-                      invalid={!!errors.timeline}
-                    />
-                  </Field>
-
-                  {/* ── High-volume calling declaration ── */}
-                  <span className="landing-intake-sub landing-field-full">
-                    High-volume calling
-                  </span>
-
-                  {/* Threshold statement — always visible. FCC 26-27 sets the
-                      enhanced-KYC requirement but leaves the numeric threshold
-                      to each provider; Granite defines two, and crossing
-                      EITHER makes the declaration mandatory. */}
-                  <p className="landing-intake-intro landing-field-full">
-                    Under the FCC&rsquo;s Know-Your-Customer rules (FCC 26-27),
-                    high-volume calling requires enhanced verification —
-                    intended use and originating IP addresses. The FCC leaves
-                    the threshold to each provider; Granite&rsquo;s thresholds
-                    are more than <strong>1 call per second</strong> or more
-                    than <strong>1,000 concurrent call paths</strong> —
-                    crossing either one requires the declaration.
-                  </p>
-
-                  <div className="landing-field-full">
-                    <label
-                      className={
-                        hvLocked
-                          ? 'landing-hv-toggle landing-hv-toggle-locked'
-                          : 'landing-hv-toggle'
-                      }
-                    >
-                      <input
-                        type="checkbox"
-                        role="switch"
-                        aria-checked={form.is_high_volume}
-                        checked={form.is_high_volume}
-                        onChange={(e) => handleHighVolumeToggle(e.target.checked)}
-                        disabled={submitting || hvLocked}
-                      />
-                      <span className="landing-hv-toggle-text">
-                        <span className="landing-hv-toggle-q">
-                          Will you run high-volume outbound calling?
-                        </span>
-                        {hvLocked ? (
-                          <span className="landing-hv-toggle-sub landing-hv-toggle-sub-lock">
-                            <Lock size={11} strokeWidth={2.5} aria-hidden="true" />
-                            Required above 1 call/sec or 1,000 concurrent call paths
-                          </span>
-                        ) : (
-                          <span className="landing-hv-toggle-sub">
-                            {form.is_high_volume
-                              ? 'Declared voluntarily — required only above 1 call/sec or 1,000 concurrent call paths'
-                              : 'Automated campaigns, dialers, AI voice agents — voluntary at or below 1 call/sec and 1,000 concurrent call paths'}
-                          </span>
-                        )}
-                      </span>
-                      <span className="landing-switch" aria-hidden="true" />
-                    </label>
-                  </div>
-
-                  {form.is_high_volume && (
-                    <div className="landing-field-full landing-intake-fields landing-hv-reveal">
-                      <p className="landing-intake-intro landing-field-full">
-                        For high-volume callers, FCC Know-Your-Customer rules
-                        also ask how the service will be used and where calls
-                        will originate.
-                      </p>
-
+                    <div className="landing-intake-fields">
                       <Field
-                        id="ra-intendeduse"
-                        label="Intended use of service"
-                        error={errors.intended_use}
-                      >
-                        <LandingSelect
-                          id="ra-intendeduse"
-                          labelId="ra-intendeduse-label"
-                          value={form.intended_use}
-                          options={INTENDED_USE_OPTIONS}
-                          placeholder="Select an intended use…"
-                          onChange={(v) => handleChange('intended_use', v)}
-                          disabled={submitting}
-                          invalid={!!errors.intended_use}
-                        />
-                      </Field>
-
-                      <Field
-                        id="ra-dailycalls"
-                        label="Expected daily calls (optional)"
-                        error={errors.expected_daily_calls}
+                        id="ra-peakcps"
+                        label="Peak calls per second"
+                        error={errors.declared_peak_cps}
+                        hint="How many calls you'll start per second at peak"
                       >
                         <input
-                          id="ra-dailycalls"
-                          className={inputClass(!!errors.expected_daily_calls)}
+                          id="ra-peakcps"
+                          className={inputClass(!!errors.declared_peak_cps)}
                           type="number"
-                          min={0}
-                          max={10_000_000}
+                          min={1}
+                          max={1000}
                           step={1}
-                          placeholder="50000"
-                          value={form.expected_daily_calls}
-                          onChange={(e) =>
-                            handleChange('expected_daily_calls', e.target.value)
-                          }
+                          placeholder="1"
+                          value={form.declared_peak_cps}
+                          onChange={(e) => handleChange('declared_peak_cps', e.target.value)}
                           disabled={submitting}
                         />
                       </Field>
 
                       <Field
-                        id="ra-usedesc"
-                        label={
-                          descriptionRequired
-                            ? 'Describe the intended use'
-                            : 'Describe the intended use (optional)'
-                        }
-                        error={errors.intended_use_description}
-                        full
+                        id="ra-peakconcurrent"
+                        label="Peak concurrent calls"
+                        error={errors.declared_max_concurrent_calls}
+                        hint="Simultaneous active calls (call paths) at peak"
                       >
-                        <textarea
-                          id="ra-usedesc"
-                          className={`${inputClass(!!errors.intended_use_description)} landing-textarea`}
-                          rows={3}
-                          maxLength={DESCRIPTION_MAX}
-                          placeholder="e.g. Appointment reminders for utility service visits"
-                          value={form.intended_use_description}
+                        <input
+                          id="ra-peakconcurrent"
+                          className={inputClass(!!errors.declared_max_concurrent_calls)}
+                          type="number"
+                          min={1}
+                          max={100_000}
+                          step={1}
+                          placeholder="100"
+                          value={form.declared_max_concurrent_calls}
                           onChange={(e) =>
-                            handleChange('intended_use_description', e.target.value)
+                            handleChange('declared_max_concurrent_calls', e.target.value)
                           }
                           disabled={submitting}
                         />
-                        <span className="landing-charcount" aria-hidden="true">
-                          {form.intended_use_description.length}/{DESCRIPTION_MAX}
-                        </span>
                       </Field>
 
+                      {/* One-line label — pairs with the timeline select.
+                          Informational only — no longer a high-volume trigger. */}
+                      <Field id="ra-volume" label="Expected monthly volume" error={errors.monthly_volume}>
+                        <LandingSelect
+                          id="ra-volume"
+                          labelId="ra-volume-label"
+                          value={form.monthly_volume}
+                          options={VOLUME_OPTIONS}
+                          placeholder="Select a range…"
+                          onChange={(v) => handleChange('monthly_volume', v)}
+                          disabled={submitting}
+                          invalid={!!errors.monthly_volume}
+                        />
+                      </Field>
+
+                      <Field id="ra-timeline" label="When do you need this live?" error={errors.timeline}>
+                        <LandingSelect
+                          id="ra-timeline"
+                          labelId="ra-timeline-label"
+                          value={form.timeline}
+                          options={TIMELINE_OPTIONS}
+                          placeholder="Select a timeline…"
+                          onChange={(v) => handleChange('timeline', v)}
+                          disabled={submitting}
+                          invalid={!!errors.timeline}
+                        />
+                      </Field>
                     </div>
-                  )}
+                  </div>
+
+                  {/* ── High-volume calling declaration ── */}
+                  <div
+                    className="landing-fgroup"
+                    role="group"
+                    aria-labelledby="ra-g-hv"
+                  >
+                    {/* Threshold statement — always visible. FCC 26-27 sets the
+                        enhanced-KYC requirement but leaves the numeric threshold
+                        to each provider; Granite defines two, and crossing
+                        EITHER makes the declaration mandatory. */}
+                    <GroupHead
+                      n={5}
+                      id="ra-g-hv"
+                      title="High-volume calling"
+                      desc={
+                        <>
+                          For high-volume calling, the FCC&rsquo;s proposed
+                          Know-Your-Customer framework (FCC 26-27) calls for
+                          enhanced verification — intended use and originating
+                          IP addresses — and leaves the threshold to each
+                          provider. Granite&rsquo;s threshold is more than{' '}
+                          <strong>1 call per second</strong> or more than{' '}
+                          <strong>1,000 concurrent call paths</strong>;
+                          crossing either requires the declaration.
+                        </>
+                      }
+                    />
+                    <div className="landing-intake-fields">
+                      <div className="landing-field-full">
+                        <label
+                          className={
+                            hvLocked
+                              ? 'landing-hv-toggle landing-hv-toggle-locked'
+                              : 'landing-hv-toggle'
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            role="switch"
+                            aria-checked={form.is_high_volume}
+                            checked={form.is_high_volume}
+                            onChange={(e) => handleHighVolumeToggle(e.target.checked)}
+                            disabled={submitting || hvLocked}
+                          />
+                          <span className="landing-hv-toggle-text">
+                            <span className="landing-hv-toggle-q">
+                              Will you run high-volume outbound calling?
+                            </span>
+                            {hvLocked ? (
+                              <span className="landing-hv-toggle-sub landing-hv-toggle-sub-lock">
+                                <Lock size={11} strokeWidth={2.5} aria-hidden="true" />
+                                Required above 1 call/sec or 1,000 concurrent call paths
+                              </span>
+                            ) : (
+                              <span className="landing-hv-toggle-sub">
+                                {form.is_high_volume
+                                  ? 'Declared voluntarily — required only above 1 call/sec or 1,000 concurrent call paths'
+                                  : 'Automated campaigns, dialers, AI voice agents — voluntary at or below 1 call/sec and 1,000 concurrent call paths'}
+                              </span>
+                            )}
+                          </span>
+                          <span className="landing-switch" aria-hidden="true" />
+                        </label>
+                      </div>
+
+                      {form.is_high_volume && (
+                        <div className="landing-field-full landing-intake-fields landing-hv-reveal">
+                          <p className="landing-intake-intro landing-field-full">
+                            For high-volume callers, the KYC framework also asks
+                            how the service will be used and where calls will
+                            originate.
+                          </p>
+
+                          <Field
+                            id="ra-intendeduse"
+                            label="Intended use of service"
+                            error={errors.intended_use}
+                          >
+                            <LandingSelect
+                              id="ra-intendeduse"
+                              labelId="ra-intendeduse-label"
+                              value={form.intended_use}
+                              options={INTENDED_USE_OPTIONS}
+                              placeholder="Select an intended use…"
+                              onChange={(v) => handleChange('intended_use', v)}
+                              disabled={submitting}
+                              invalid={!!errors.intended_use}
+                            />
+                          </Field>
+
+                          <Field
+                            id="ra-dailycalls"
+                            label="Expected daily calls (optional)"
+                            error={errors.expected_daily_calls}
+                          >
+                            <input
+                              id="ra-dailycalls"
+                              className={inputClass(!!errors.expected_daily_calls)}
+                              type="number"
+                              min={0}
+                              max={10_000_000}
+                              step={1}
+                              placeholder="50000"
+                              value={form.expected_daily_calls}
+                              onChange={(e) =>
+                                handleChange('expected_daily_calls', e.target.value)
+                              }
+                              disabled={submitting}
+                            />
+                          </Field>
+
+                          <Field
+                            id="ra-usedesc"
+                            label={
+                              descriptionRequired
+                                ? 'Describe the intended use'
+                                : 'Describe the intended use (optional)'
+                            }
+                            error={errors.intended_use_description}
+                            full
+                          >
+                            <textarea
+                              id="ra-usedesc"
+                              className={`${inputClass(!!errors.intended_use_description)} landing-textarea`}
+                              rows={3}
+                              maxLength={DESCRIPTION_MAX}
+                              placeholder="e.g. Appointment reminders for utility service visits"
+                              value={form.intended_use_description}
+                              onChange={(e) =>
+                                handleChange('intended_use_description', e.target.value)
+                              }
+                              disabled={submitting}
+                            />
+                            <span className="landing-charcount" aria-hidden="true">
+                              {form.intended_use_description.length}/{DESCRIPTION_MAX}
+                            </span>
+                          </Field>
+
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
                   {/* ── Unified IP capture — ONE field, TWO payload slots.
                       Appears when SIP Trunking is selected (IP-authenticated
@@ -1942,9 +2026,14 @@ export function RequestAccessSection() {
                       entries fill products.trunk.signaling_ips (cap 10) and
                       kyc.high_volume.originating_ips. ── */}
                   {ipFieldVisible && (
-                    <div className="landing-field-full landing-product-block landing-hv-reveal">
-                      {/* No block title — the adaptive field label leads the
-                          well (a second all-caps line read as a duplicate). */}
+                    <div
+                      className="landing-fgroup landing-hv-reveal"
+                      role="group"
+                      aria-labelledby="ra-g-ips"
+                    >
+                      {/* Group 6 only exists while trunking or high-volume
+                          needs it; the adaptive field label says which. */}
+                      <GroupHead n={6} id="ra-g-ips" title="IP addresses" />
                       <div className="landing-intake-fields">
                         <Field
                           id="ra-ips"
@@ -1977,7 +2066,7 @@ export function RequestAccessSection() {
               <div className="landing-intake-actions">
                 <button
                   type="submit"
-                  className="landing-btn landing-btn-onblue"
+                  className="landing-btn landing-btn-primary landing-intake-submit"
                   disabled={submitting}
                 >
                   {submitting ? (
@@ -1990,8 +2079,8 @@ export function RequestAccessSection() {
                   )}
                 </button>
                 <p className="landing-intake-note">
-                  TED, Granite&rsquo;s Onboarding AI, picks this up instantly —
-                  engineering follow-up within one business day.
+                  Your request is logged instantly, and Granite&rsquo;s
+                  engineering team follows up directly.
                 </p>
               </div>
             </form>

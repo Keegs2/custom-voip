@@ -14,7 +14,7 @@ import { useAuth } from '../../contexts/AuthContext';
    Compact granite panel over a dimmed backdrop. Closes on
    Escape, backdrop click, or the X control. On success the
    parent decides where to navigate (post-login redirect).
-   All styling lives in index.css under "LANDING PAGE".
+   All styling lives in styles/landing.css.
    ───────────────────────────────────────────────────────────── */
 
 interface SignInModalProps {
@@ -96,7 +96,8 @@ export function SignInModal({ onClose, onSuccess }: SignInModalProps) {
         <span className="landing-modal-kicker">Granite CRAG</span>
         <h2 className="landing-modal-title">Sign in</h2>
         <p className="landing-modal-sub">
-          Access the CRAG console with your Granite-issued credentials.
+          Sign in to the CRAG customer portal with the credentials Granite
+          issued you.
         </p>
 
         <form onSubmit={handleSubmit} noValidate className="landing-modal-form">
@@ -158,9 +159,8 @@ export function SignInModal({ onClose, onSuccess }: SignInModalProps) {
         </form>
 
         <p className="landing-modal-foot">
-          Need an account? Request access below — TED, Granite&rsquo;s Onboarding
-          AI, intakes it instantly and works with Granite Telephony Engineering
-          on activation.
+          Need an account? Request access below and Granite Telephony
+          Engineering will set you up.
         </p>
       </div>
     </div>

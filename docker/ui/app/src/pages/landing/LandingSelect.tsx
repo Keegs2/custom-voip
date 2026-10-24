@@ -17,7 +17,7 @@ import { Check, ChevronDown } from 'lucide-react';
    panel. Focus stays on the button (aria-activedescendant), so
    Escape "returns" focus for free and Tab order is untouched.
 
-   Styling: .landing-select-* in index.css ("LANDING PAGE").
+   Styling: .landing-select-* in styles/landing.css.
    ───────────────────────────────────────────────────────────── */
 
 interface LandingSelectProps {
