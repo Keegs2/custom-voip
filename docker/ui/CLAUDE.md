@@ -345,6 +345,17 @@ Standard query key conventions:
 **`DashboardPage`** (`/`)
 Navigation hub. Static card grid linking to all product areas. No API calls.
 API Calling copy + product card render only while `API_CALLING_ENABLED` (src/config/features.ts) is true — the product is retired (2026-09), so they are hidden.
+Hero (2026-10): the H1 is the CRAG acrostic, one word per line (`ACROSTIC`),
+initials coloured with `::first-letter` so the DOM text stays plain. Each
+initial has a per-letter `margin-left` in index.css that cancels its side
+bearing (measured for Archivo 900 @ `font-stretch: 104%`). Re-measure them if the
+H1 font, weight or width changes. The art is `public/crag-cube.{webp,png}`
+(nav: `crag-mark.{webp,png}`), transparent cut-outs of `crag.png`. The
+original `crag.png` stays because the Sidebar, HaArchitectureViz and the
+favicon use it. Hero + stat band share `.landing-grid12` (copy 1–6 · art
+7–12 · stats 4 × 3). The tag and proof strip respond to the copy column's
+width (container `lg-hero-copy`), not to the viewport. `index.html` loads
+Archivo as a variable font (`wdth 62..125`) for the wide nav wordmark.
 
 **`AccountDashboard`** (`/dashboard`, `pages/dashboard/`)
 The account home — everything at a glance, as cards. `AccountDashboard.tsx` is

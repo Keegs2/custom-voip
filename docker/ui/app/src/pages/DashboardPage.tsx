@@ -10,6 +10,7 @@ import {
   Gauge,
   Layers,
   Lock,
+  Network,
   RefreshCw,
   ShieldCheck,
   Waypoints,
@@ -40,6 +41,11 @@ import { RequestAccessSection } from './landing/RequestAccessSection';
    its product card + copy only render while API_CALLING_ENABLED is on.) Never describe CRAG itself as
    "our carrier-grade platform".
 
+   Hero: the H1 is the CRAG acrostic, one word per line so the blue
+   initials read C-R-A-G down one optically aligned left edge; the art is
+   a transparent cut-out of the cube (public/crag-cube.*) over a CSS halo.
+   Hero and stat band share one 12-column grid (.landing-grid12).
+
    Narrative arc: what it is (hero) → proof (stats) → what you
    can build (AI/API band) → products → the network under it →
    platform capabilities → intake form (#request-access).
@@ -52,6 +58,25 @@ function scrollToRequestAccess(): void {
 }
 
 /* ─── Data ───────────────────────────────────────────────── */
+
+interface ProofPoint {
+  icon: LucideIcon;
+  title: string;
+  detail: string;
+}
+
+/* Hero proof strip — three equal columns (one stacked list on phones), so
+   it can never leave an orphan row. Titles stay one line; details may wrap. */
+const HERO_PROOF: ProofPoint[] = [
+  { icon: ShieldCheck, title: 'STIR/SHAKEN', detail: 'On every call' },
+  { icon: Network, title: 'Redundant SBCs', detail: 'In every region' },
+  { icon: Activity, title: 'SIP capture', detail: 'Down to the packet' },
+];
+
+/* The H1 acrostic: one word per line, so the blue initials stack into a
+   column that reads C-R-A-G. The initials are styled with ::first-letter
+   (index.css), so the DOM text stays "Call Routing Application Gateway". */
+const ACROSTIC = ['Call', 'Routing', 'Application', 'Gateway'] as const;
 
 interface Stat {
   value: string;
@@ -165,6 +190,63 @@ const BUILD_PILLARS: Capability[] = [
 
 /* ─── Building blocks ────────────────────────────────────── */
 
+/**
+ * The CRAG stone cube, cut out of /crag.png onto a transparent ground
+ * (crag-cube.* is the full-size art, crag-mark.* a tight 160px crop for the
+ * nav). WebP first; the PNG is the fallback. The original /crag.png lockup
+ * stays in public/ for the sidebar, the network viz and the favicon.
+ */
+function CragCube({
+  variant,
+  className,
+  alt,
+}: {
+  variant: 'hero' | 'mark';
+  className: string;
+  alt: string;
+}) {
+  const base = variant === 'hero' ? '/crag-cube' : '/crag-mark';
+  const size = variant === 'hero' ? 798 : 160;
+  return (
+    <picture>
+      <source srcSet={`${base}.webp`} type="image/webp" />
+      <img
+        src={`${base}.png`}
+        alt={alt}
+        className={className}
+        width={size}
+        height={size}
+        decoding="async"
+        fetchPriority={variant === 'hero' ? 'high' : 'auto'}
+      />
+    </picture>
+  );
+}
+
+/** The logo's signal line, redrawn crisp: hairline — waveform — hairline. */
+function SignalLine() {
+  // Bar heights echo the waveform glyph under the CRAG wordmark.
+  const bars = [3, 6, 10, 15, 9, 13, 6, 4];
+  return (
+    <span className="landing-hero-signal" aria-hidden="true">
+      <span className="landing-hero-signal-rule" />
+      <svg viewBox="0 0 30 16" width="30" height="16" focusable="false">
+        {bars.map((h, i) => (
+          <rect
+            key={i}
+            x={1 + i * 3.6}
+            y={(16 - h) / 2}
+            width="1.8"
+            height={h}
+            rx="0.9"
+          />
+        ))}
+      </svg>
+      <span className="landing-hero-signal-rule" />
+    </span>
+  );
+}
+
 function StatusChip({ status }: { status: ProductStatus }) {
   return (
     <span className={`landing-chip landing-chip-${status}`}>
@@ -251,14 +333,12 @@ export function DashboardPage() {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
           >
-            <img
-              src="/crag.png"
-              alt=""
-              className="landing-topnav-mark"
-              width={32}
-              height={32}
-            />
-            <span className="landing-topnav-word">GRANITE CRAG</span>
+            <CragCube variant="mark" className="landing-topnav-mark" alt="" />
+            <span className="landing-topnav-word">
+              <span className="landing-topnav-word-granite">GRANITE</span>
+              {' '}
+              CRAG
+            </span>
           </a>
           <button
             type="button"
@@ -269,17 +349,21 @@ export function DashboardPage() {
           </button>
         </div>
 
-        <div className="landing-wrap landing-hero-grid">
-          <div>
+        <div className="landing-wrap landing-grid12 landing-hero-grid">
+          <div className="landing-hero-copy">
             <p className="landing-tag landing-up">
-              Granite Telecommunications&ensp;·&ensp;Next-generation voice
+              <span className="landing-tag-org">Granite Telecommunications</span>
+              <span className="landing-tag-sep" aria-hidden="true" />
+              <span>Next-generation voice</span>
             </p>
 
-            <h1 className="landing-h1 landing-up landing-d1">
-              <span className="landing-acc">C</span>all{' '}
-              <span className="landing-acc">R</span>outing{' '}
-              <span className="landing-acc">A</span>pplication{' '}
-              <span className="landing-acc">G</span>ateway
+            <h1 className="landing-h1 landing-acrostic landing-up landing-d1">
+              {ACROSTIC.map((word, i) => (
+                <span key={word}>
+                  {word}
+                  {i < ACROSTIC.length - 1 ? ' ' : ''}
+                </span>
+              ))}
             </h1>
 
             <p className="landing-lede landing-up landing-d2">
@@ -323,25 +407,40 @@ export function DashboardPage() {
               </a>
             </div>
 
-            <ul className="landing-hero-points landing-up landing-d4">
-              <li>STIR/SHAKEN on every call</li>
-              <li>Redundant, highly available SBC architecture</li>
-              <li>Packet-level SIP capture</li>
+            <ul className="landing-proof landing-up landing-d4">
+              {HERO_PROOF.map((p) => (
+                <li key={p.title} className="landing-proof-item">
+                  <p.icon
+                    className="landing-proof-icon"
+                    size={18}
+                    strokeWidth={2}
+                    aria-hidden="true"
+                  />
+                  <span className="landing-proof-title">{p.title}</span>
+                  <span className="landing-proof-detail">{p.detail}</span>
+                </li>
+              ))}
             </ul>
           </div>
 
-          <div className="landing-hero-mark landing-up landing-d2">
-            <img
-              src="/crag.png"
-              alt="CRAG — Call Routing Application Gateway"
-            />
+          <div className="landing-hero-art landing-up landing-d2">
+            <div className="landing-hero-stage">
+              <CragCube
+                variant="hero"
+                className="landing-hero-cube"
+                alt="CRAG — Call Routing Application Gateway"
+              />
+              <SignalLine />
+            </div>
           </div>
         </div>
       </section>
 
       {/* ── STAT BAND — cobalt ───────────────────────────── */}
+      {/* Same 12-column grid as the hero above: each stat spans 3, so the
+          first and third stats sit on the hero's copy and art columns. */}
       <section className="landing-band landing-band-cobalt landing-stats">
-        <div className="landing-wrap landing-stats-grid">
+        <div className="landing-wrap landing-grid12 landing-stats-grid">
           {STATS.map((s) => (
             <div key={s.label} className="landing-stat">
               <div className="landing-stat-value">{s.value}</div>
