@@ -198,8 +198,10 @@ class PreviewLimiter:
     """Redis fixed window (shared by every API worker) when Redis answers;
     otherwise an in-process sliding window (then the bound is per worker)."""
 
-    def __init__(self, per_minute: int = limits.TTS_PREVIEW_PER_MINUTE):
+    def __init__(self, per_minute: int = limits.TTS_PREVIEW_PER_MINUTE,
+                 prefix: str = "ivr:ttsprev"):
         self.per_minute = per_minute
+        self.prefix = prefix
         self._local: dict[str, deque] = {}
 
     def reset(self) -> None:
@@ -210,7 +212,7 @@ class PreviewLimiter:
         now = time.time()
         minute = int(now // 60)
         try:
-            count = await redis_client.incr_with_ttl(f"ivr:ttsprev:{user_key}:{minute}", 70)
+            count = await redis_client.incr_with_ttl(f"{self.prefix}:{user_key}:{minute}", 70)
         except Exception as exc:  # noqa: BLE001 — Redis down: fall back
             logger.debug("ivr preview limiter: redis failed: %s", type(exc).__name__)
             count = 0

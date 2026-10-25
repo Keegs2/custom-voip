@@ -2,7 +2,9 @@
 
 The voicemail harness (tests/voicemail_api_harness.py: real init scripts,
 54 + 56, the api pool as the runtime ``api`` role, the REAL JWT middleware)
-plus the real 05 ``cdrs`` table + every cdrs column migration and 59 + 60.
+plus the real 05 ``cdrs`` table + every cdrs column migration and 59 + 60 + 61
+(``IvrHarness.IVR_MIGRATIONS``; 61 = the Flow assistant, tested in
+tests/test_ivr_assist_api.py).
 Routers mounted: ivr, number_inventory, cdrs, onboarding — with main.py's
 IvrApiError handler. The Piper sidecar is replaced by an in-process fake
 (``tts.list_voices`` / ``tts.synthesize``) that renders a 22.05 kHz WAV, so
@@ -69,6 +71,18 @@ def _cdrs_ddl() -> str:
 
 
 class IvrHarness(Harness):
+    #: The IVR migrations every IVR test DB loads, in order (59 + 60, and 61 =
+    #: the Flow assistant: customers.ivr_assist_enabled + ivr_assist_jobs).
+    #: A subclass drops 61 to exercise the API on a pre-61 schema.
+    IVR_MIGRATIONS = ("59_ivr.sql", "60_cdr_ivr.sql", "61_ivr_assist.sql")
+
+    @staticmethod
+    def reset_caches() -> None:
+        Harness.reset_caches()
+        from services.ivr.assist import jobs as assist_jobs
+        assist_jobs.reset_schema_cache()       # process-wide: one per test DB
+        assist_jobs.rate_limiter.reset()
+
     async def _setup(self) -> None:
         await super()._setup()
         from cdr_schema import apply_cdr_column_migrations
@@ -78,8 +92,8 @@ class IvrHarness(Harness):
             await apply_cdr_column_migrations(conn, times=1)
             await conn.execute("GRANT ALL ON cdrs TO api; GRANT USAGE, SELECT ON cdrs_id_seq TO api;")
             for _ in range(2):
-                await conn.execute((INIT / "59_ivr.sql").read_text())
-                await conn.execute((INIT / "60_cdr_ivr.sql").read_text())
+                for name in self.IVR_MIGRATIONS:
+                    await conn.execute((INIT / name).read_text())
             await conn.execute(
                 f"""
                 INSERT INTO customers (id, name, account_type, status) VALUES
@@ -793,11 +807,13 @@ def test_admin_api(h):
     # entitlement off -> every number off at FS, data kept
     r = api(h, "PUT", f"/v1/ivr/admin/customers/{CUST_A}/entitlement", "admin",
             json={"enabled": False})
-    assert r.json() == {"ivr_enabled": False}
+    # 61's assistant opt-in rides along (off: never opted in)
+    assert r.json() == {"ivr_enabled": False, "ivr_assist_enabled": False}
     assert run(h, h.fetchval("SELECT enabled FROM ivr_fs_number WHERE did = $1", A_IVR)) is False
     assert api(h, "GET", "/v1/ivr/flows").json()["detail"] == "ivr_not_enabled"
     assert api(h, "PUT", f"/v1/ivr/admin/customers/{CUST_A}/entitlement", "admin",
-               json={"enabled": True}).json() == {"ivr_enabled": True}
+               json={"enabled": True}).json() == {"ivr_enabled": True,
+                                                  "ivr_assist_enabled": False}
     assert api(h, "PUT", "/v1/ivr/admin/customers/999999/entitlement", "admin",
                json={"enabled": True}).status_code == 404
 
