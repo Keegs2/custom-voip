@@ -62,6 +62,9 @@ CDR_COLUMN_MIGRATIONS = (
     # role-guarded grant — the PRODUCTION function every scratch cdrs should
     # run. Refuses to apply without 50, so it must stay after 50.
     "55_cdr_refresh_call_quality_fix.sql",
+    # Visual IVR outcome columns (ivr_flow_id ... ivr_seconds): ADD COLUMN IF
+    # NOT EXISTS + COMMENTs + role-guarded grants only.
+    "60_cdr_ivr.sql",
 )
 
 
