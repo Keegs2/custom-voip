@@ -13,6 +13,7 @@ Every command is one line and needs sudo. Run them in order, one at a time; the 
 2. `feat/ivr-backend` (plan + contract, migrations 59/60, API, Piper `tts` sidecar)
 3. `feat/ivr-runtime` (FreeSWITCH call engine, gate `IVR_ENABLED`, off by default)
 4. `feat/ivr-portal` (the `/ivr` page + builder)
+5. `fix/rcf-no-redial-after-noanswer-busy` (#161: RCF stops re-dialing a phone that was busy or rang out). It merges cleanly in any position; it is already merged into #3.
 
 This order was test-merged clean on 2026-10-25. Nothing customer-visible changes until a customer is entitled (TED) and `IVR_ENABLED=true` is set (P5).
 
@@ -58,7 +59,8 @@ Step 3 recreates FreeSWITCH and drops that node's calls (window).
 7. `sudo docker exec voip-freeswitch sh -c '/usr/local/freeswitch/bin/fs_cli -p "$ESL_PASSWORD" -x "lua lib/vm_spool.lua selftest"'` → a line containing `OK`.
 8. `sudo docker inspect -f '{{.State.Health.Status}}' voip-vm-forwarder` → `healthy`
 9. `sudo docker logs --since 10m voip-freeswitch 2>&1 | grep -E "IVR DID lookup failed|vm_replica" | tail -3` → nothing.
-10. Test call: `+16174544217` rings `+17744045256` and connects. RCF is unchanged.
+10. Test call: `+16174544217` rings `+17744045256` and connects.
+11. RCF no-redial (#161), checked once after the first zone: call `+16174544217` and let `+17744045256` ring out. It rings for one ring cycle only, the caller gets the carrier's no-answer treatment, and `sudo docker logs --since 5m voip-freeswitch 2>&1 | grep 'RCF far end'` → `RCF far end NO_ANSWER on attempt 1/…`.
 
 After all six nodes, leave a voicemail on any test mailbox. It appears in the portal within seconds (the normal path). `sudo docker exec voip-vm-forwarder sh -c 'ls -A /var/lib/crag/vm-spool'` → only `audit` and `rejected`.
 
