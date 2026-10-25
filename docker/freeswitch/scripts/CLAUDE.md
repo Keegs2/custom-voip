@@ -126,6 +126,19 @@ list); plan: `docs/ENCRYPTED_VOICEMAIL_BUILD_PLAN.md` (D6/D8, §3.1). Tests:
   AFTER the script returns, so voicemail `billsec`/`duration` include the
   deposit time (normally < 1 s; ≤ ~50 s if the API is down) — verified on a
   real FS 1.11.3 loopback lab.
+- **East outage (D11, `docs/VOICEMAIL_OUTAGE_RESILIENCE.md`).** The API
+  answers ⇒ byte-identical to the above (harness-proven). The mailbox check
+  gives up after a 1 s connect and falls back to the zone replica view
+  `vm_fs_mailbox` (migration 58, `lib/vm_replica.lua`, same accepting rules as
+  the API); greeting = default (custom greetings need East to decrypt). When
+  the final deposit attempt fails, `lib/vm_spool.lua` seals the tmpfs WAV with
+  `openssl cms` (AuthEnvelopedData AES-256-GCM, RSA-OAEP to
+  `/run/revup/vm_spool_recipients.pem`) into the persistent `vm_spool` volume
+  (`/var/lib/crag/vm-spool/<msg_uuid>.cms` + meta) and unlinks the plaintext
+  (`vm_result=spooled`). The `vm-forwarder` container replays it to
+  `POST /v1/voicemail/fs/deposit-sealed` when East returns (original
+  `received_at` kept, idempotent on msg_uuid). No plaintext and no private key
+  ever on a media VM's disk. Self-test: `fs_cli -x 'lua lib/vm_spool.lua selftest'`.
 - **Shell safety (`lib/vm_deposit.lua`).** curl via `io.popen`; the only
   variable command-line parts are the validated API base URL + integer id, a
   `/dev/shm/vm/<uuidv4>.wav` path, and the `X-VM-Meta` base64url value (charset

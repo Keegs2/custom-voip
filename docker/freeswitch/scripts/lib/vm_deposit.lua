@@ -39,7 +39,12 @@ M.HEADER_FILE = "/run/revup/vm_ingest.header"
 M.VM_DIR      = "/dev/shm/vm"
 
 -- Timeouts / limits (seconds unless noted).
-M.MAILBOX_CONNECT_TIMEOUT  = 2
+-- The mailbox GET runs AFTER the answer, so its connect phase is dead air for
+-- the caller. When East is down (a black-holed VPC route: no SYN-ACK) the
+-- connect timeout is the whole wait before vm_box falls back to the zone
+-- replica (D11) — hence 1 s, not 2 (a healthy cross-zone connect takes tens
+-- of ms). The total stays 3 s, so an API that answers slowly is still used.
+M.MAILBOX_CONNECT_TIMEOUT  = 1
 M.MAILBOX_MAX_TIME         = 3      -- contract §6: GET /fs/mailbox timeout 3 s
 M.GREETING_CONNECT_TIMEOUT = 2
 M.GREETING_MAX_TIME        = 5
@@ -361,7 +366,9 @@ end
 --   { kind = "auth", code = "401"|"403" }      secret rejected (config error)
 --   { kind = "error", code = ..., detail = ... } anything else (transport,
 --                                                5xx, garbage) -> caller
---                                                proceeds with defaults
+--                                                asks the zone replica
+--                                                (lib/vm_replica.lua), then
+--                                                falls back to defaults
 function M.fetch_mailbox(base, mailbox_id, json)
     local cmd = M.mailbox_cmd(base, mailbox_id)
     if not cmd then
@@ -486,7 +493,9 @@ function M.deposit(base, rec_path, meta_b64, sleep_ms, file_exists, tag)
             tag, attempt, M.DEPOSIT_ATTEMPTS, code, tostring(exit_code),
             err and (", " .. err) or ""))
     end
-    log("ERR", string.format("%sdeposit failed after %d attempts (last http %s) — message lost",
+    -- vm_box now SEALS a message in this state to the spool (lib/vm_spool.lua)
+    -- and logs the final word ("SEALED to the spool" / "message lost").
+    log("ERR", string.format("%sdeposit failed after %d attempts (last http %s) — API unreachable",
         tag, M.DEPOSIT_ATTEMPTS, last_code))
     return { outcome = "lost", code = last_code, attempts = M.DEPOSIT_ATTEMPTS }
 end

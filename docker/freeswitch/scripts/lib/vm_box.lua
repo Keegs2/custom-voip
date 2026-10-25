@@ -17,13 +17,22 @@
 --     Any failure -> answer, play `unavailable` (tone fallback), hang up.
 --   set rtp_timer_name + jitterbuffer_msec (see RECORDING MEDIA PATH)
 --   answer
---   GET /v1/voicemail/fs/mailbox/{id} (3 s):
+--   GET /v1/voicemail/fs/mailbox/{id} (1 s connect, 3 s total):
 --     200 accepting=false -> `mailbox_full` (reason "full") / `unavailable`,
 --                            hang up, nothing recorded
 --     404 / 401 / 403     -> `unavailable`, hang up (a deposit could only be
 --                            dropped by the API)
---     anything else       -> proceed with DEFAULTS (300 s, default greeting);
---                            the deposit still runs with its retries
+--     anything else       -> ZONE-REPLICA FALLBACK (East outage, D11):
+--                            lib/vm_replica.lua reads view vm_fs_mailbox
+--                            (migration 58) on the local replica — the same
+--                            accepting/full/inactive rules and
+--                            max_message_seconds; a deleted mailbox =
+--                            `unavailable` (as a 404). No custom greeting
+--                            (only the East API can decrypt it): the default
+--                            greeting plays. Replica unusable too -> today's
+--                            DEFAULTS (300 s, default greeting). CDR var
+--                            vm_lookup_source = replica | defaults (unset
+--                            when the API answered).
 --   greeting: custom (GET .../greetings/{id}/audio -> /dev/shm/vm/g_<uuid>.wav,
 --     played, UNLINKED IMMEDIATELY after playback) else `default_greeting`
 --     (tone-only if the prompt file is missing). '#' skips the greeting.
@@ -31,6 +40,15 @@
 --     max_message_seconds, 10 s silence-stop at threshold 200, '#' ends)
 --   hang up the A-leg (if the caller has not already) -> deposit (§5, raw
 --     audio/wav, retry table) -> unlink -> opportunistic sweep.
+--   Every deposit attempt transient (API unreachable / 5xx): SEAL instead of
+--     losing it (lib/vm_spool.lua): CMS AuthEnvelopedData (AES-256-GCM,
+--     RSA-OAEP to the platform spool certificate) from tmpfs into the
+--     persistent /var/lib/crag/vm-spool/<msg_uuid>.cms + .json metadata
+--     sidecar, then the plaintext is unlinked; docker/vm-forwarder replays
+--     it to POST /v1/voicemail/fs/deposit-sealed when East is back, keeping
+--     the original time (received_at). vm_result=spooled. Only a seal that
+--     cannot be made (spool not mounted, no recipients, disk ceiling)
+--     still ends in vm_result=lost. Design: docs/VOICEMAIL_OUTAGE_RESILIENCE.md.
 --
 -- POST-HANGUP DEPOSIT (how it works under mod_lua)
 --   The `lua` dialplan application runs this script synchronously in the
@@ -51,7 +69,9 @@
 --     * the script ALWAYS returns: the deposit is bounded (3 attempts x
 --       15 s --max-time incl. connect + 1 s/2 s backoff ~= 48 s), so the channel/thread is never
 --       left hanging; the dialplan actions after `lua` are skipped because
---       the channel is no longer in CS_EXECUTE.
+--       the channel is no longer in CS_EXECUTE. A seal after a failed
+--       deposit adds one openssl run (~50 ms for 5 MB; `timeout` caps it
+--       at vm_spool.SEAL_TIMEOUT_S = 30 s).
 --     * CDR TIMING: FreeSWITCH stamps the hangup/end time when the state
 --       machine processes CS_HANGUP, i.e. AFTER this script returns — so the
 --       CDR end_stamp/billsec/duration INCLUDE the post-hangup deposit time
@@ -129,8 +149,11 @@
 --   retries exhausted, too-short, caller hangup mid-greeting/mid-record, and a
 --   Lua error anywhere in the flow (pcall). Files older than 15 min are swept
 --   opportunistically (rate-limited, at most once per 5 min per FS) and on FS
---   start (startup.lua). Nothing is ever written outside /dev/shm/vm: if that
---   tmpfs is not mounted the call plays `unavailable` instead of recording.
+--   start (startup.lua). No PLAINTEXT is ever written outside /dev/shm/vm: if
+--   that tmpfs is not mounted the call plays `unavailable` instead of
+--   recording. The only bytes that reach a persistent disk are a seal's
+--   ciphertext + metadata sidecar (lib/vm_spool.lua), and only after every
+--   deposit attempt failed.
 --
 -- Loaded per voicemail call with the loadfile() pattern (never at the top of
 -- inbound_router.lua, so RCF/trunk calls never pay for it).
@@ -192,6 +215,17 @@ local dep = load_lib("vm_deposit")
 local json = load_lib("json")
 M.dep = dep
 M.json = json
+
+-- Outage-only libraries (lib/vm_replica.lua, lib/vm_spool.lua): loaded on
+-- first use, so a call whose API lookup and deposit succeed never loads them.
+-- Cached for the rest of this call (vm_box itself is loaded per call).
+M.libs = {}
+function M.lib(name)
+    if M.libs[name] == nil then
+        M.libs[name] = load_lib(name) or false
+    end
+    return M.libs[name] or nil
+end
 
 -- ----------------------------------------------------------------------
 -- Helpers (all pcall-guarded: a session/FS call can never raise out)
@@ -370,6 +404,32 @@ local function cleanup(st, tag)
     end
 end
 
+-- Mailbox not accepting (API or zone replica): the matching prompt, hang up,
+-- nothing recorded.
+local function refuse_not_accepting(session, st, reason, tag)
+    st.result = "not_accepting_" .. reason
+    settle(session)
+    if reason == "full" then
+        play_prompt(session, "mailbox_full", M.TONE_REORDER, tag)
+    else
+        play_prompt(session, "unavailable", M.TONE_REORDER, tag)
+    end
+    hangup(session)
+end
+
+-- Zone-replica mailbox check (lib/vm_replica.lua) — never raises.
+local function replica_lookup(mailbox_id)
+    local rep = M.lib("vm_replica")
+    if not rep then
+        return { kind = "error", detail = "vm_replica.lua failed to load" }
+    end
+    local ok, res = pcall(rep.fetch_mailbox, mailbox_id)
+    if not ok or type(res) ~= "table" then
+        return { kind = "error", detail = "replica lookup raised: " .. tostring(res) }
+    end
+    return res
+end
+
 -- ----------------------------------------------------------------------
 -- Phase 1: answer -> lookup -> greeting -> beep -> record
 -- ----------------------------------------------------------------------
@@ -435,14 +495,7 @@ local function flow(session, a, st)
         if d.accepting == false then
             local reason = (d.reason == "full") and "full" or "inactive"
             log("INFO", tag .. "mailbox " .. tostring(mailbox_id) .. " not accepting (" .. reason .. ")")
-            st.result = "not_accepting_" .. reason
-            settle(session)
-            if reason == "full" then
-                play_prompt(session, "mailbox_full", M.TONE_REORDER, tag)
-            else
-                play_prompt(session, "unavailable", M.TONE_REORDER, tag)
-            end
-            hangup(session)
+            refuse_not_accepting(session, st, reason, tag)
             return
         elseif d.accepting ~= true then
             log("WARNING", tag .. "mailbox lookup returned no 'accepting' flag — using defaults")
@@ -472,10 +525,45 @@ local function flow(session, a, st)
         hangup(session)
         return
     else
-        log("WARNING", tag .. "mailbox lookup failed (" .. tostring(lk.detail) .. ", http "
-            .. tostring(lk.code) .. ") — proceeding with defaults ("
-            .. M.DEFAULT_MAX_SECONDS .. " s, default greeting)")
+        -- The East API did not answer (transport error / 5xx / garbage):
+        -- ask the zone replica (migration 58) instead of going in blind.
         st.lookup_failed = true
+        local why = tostring(lk.detail) .. ", http " .. tostring(lk.code)
+        local rp = replica_lookup(mailbox_id)
+        if rp.kind == "ok" then
+            local d = rp.data
+            setv(session, "vm_lookup_source", "replica")
+            if not d.accepting then
+                local reason = (d.reason == "full") and "full" or "inactive"
+                log("WARNING", tag .. "mailbox lookup failed (" .. why .. ") — zone replica: mailbox "
+                    .. tostring(mailbox_id) .. " not accepting (" .. reason .. ")")
+                refuse_not_accepting(session, st, reason, tag)
+                return
+            end
+            local n = d.max_message_seconds
+            if n and n == math.floor(n) and n >= M.MIN_MAX_SECONDS and n <= M.DEFAULT_MAX_SECONDS then
+                max_secs = n
+            else
+                log("WARNING", tag .. "invalid max_message_seconds from the zone replica — using "
+                    .. M.DEFAULT_MAX_SECONDS)
+            end
+            log("WARNING", tag .. "mailbox lookup failed (" .. why .. ") — using the zone replica ("
+                .. max_secs .. " s; default greeting: a custom greeting needs the East API)")
+        elseif rp.kind == "not_found" then
+            setv(session, "vm_lookup_source", "replica")
+            log("ERR", tag .. "mailbox lookup failed (" .. why .. ") — zone replica: mailbox "
+                .. tostring(mailbox_id) .. " unknown/deleted — playing unavailable")
+            st.result = "unavailable_404"
+            settle(session)
+            play_prompt(session, "unavailable", M.TONE_REORDER, tag)
+            hangup(session)
+            return
+        else
+            setv(session, "vm_lookup_source", "defaults")
+            log("WARNING", tag .. "mailbox lookup failed (" .. why .. ") and the zone replica is"
+                .. " unavailable (" .. tostring(rp.detail) .. ") — proceeding with defaults ("
+                .. M.DEFAULT_MAX_SECONDS .. " s, default greeting)")
+        end
     end
     setv(session, "vm_max_seconds", max_secs)
 
@@ -532,6 +620,9 @@ local function flow(session, a, st)
     -- DEPOSIT" above), or the file could not be opened/written (tmpfs full).
     session:execute("record", string.format("%s %d %d %d",
         rec_path, max_secs, M.SILENCE_THRESHOLD, M.SILENCE_HITS))
+    -- When the caller left the message (UTC). Only a sealed (spooled)
+    -- deposit carries it: the inbox then shows this time, not the replay's.
+    st.received_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
 
     if not file_exists(rec_path) then
         log("ERR", tag .. "record produced no file (tmpfs full or not writable?) — message not taken")
@@ -558,6 +649,63 @@ local function flow(session, a, st)
             .. " ms with the caller still connected (tmpfs full / immediate '#')")
         play_prompt(session, "unavailable", M.TONE_REORDER, tag)
     end
+end
+
+-- ----------------------------------------------------------------------
+-- Seal instead of lose (D11): every deposit attempt was transient, so the
+-- East API is unreachable. Encrypt the recording to the platform spool
+-- certificate (lib/vm_spool.lua) and unlink the plaintext; vm-forwarder
+-- replays it to POST /v1/voicemail/fs/deposit-sealed. Returns true when the
+-- message is durably sealed. Never raises (vm_spool.seal is pcall-wrapped).
+-- ----------------------------------------------------------------------
+local function seal_to_spool(a, st, dur, tag)
+    local spool = M.lib("vm_spool")
+    if not spool then
+        log("ERR", tag .. "vm_spool.lua failed to load — message lost")
+        return false
+    end
+    if not file_exists(st.rec_path) then
+        log("ERR", tag .. "the recording is gone — nothing to seal — message lost")
+        return false
+    end
+    -- The X-VM-Meta fields of contract §8.4 (and nothing else): what the
+    -- forwarder needs without a key. Sealed inside the blob as well.
+    local caller_name = dep.clean_text(a.caller_name, dep.MAX_CALLER_NAME)
+    local smeta = {
+        v = 1,
+        msg_uuid = st.msg_uuid,
+        mailbox_id = tonumber(a.mailbox_id),
+        did = dep.clean_text(a.did, dep.MAX_DID),
+        caller_number = dep.clean_text(a.caller_number, dep.MAX_CALLER_NUMBER),
+        caller_name = (caller_name ~= "") and caller_name or nil,
+        received_at = st.received_at or os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        duration_ms = dur,
+        zone = dep.clean_text(a.zone, dep.MAX_ZONE),
+    }
+    local meta_json, jerr = json.encode(smeta)
+    if not meta_json then
+        log("ERR", tag .. "spool metadata encode failed (" .. tostring(jerr) .. ") — message lost")
+        return false
+    end
+    local res = spool.seal({
+        msg_uuid = st.msg_uuid,
+        vm_dir = dep.VM_DIR,
+        wav_path = st.rec_path,
+        meta_json = meta_json,
+        register = function(p) register(st, p) end,
+        unlink = function(p) unlink(st, p) end,
+        tag = tag,
+    })
+    if res and res.ok then
+        unlink(st, st.rec_path)   -- the plaintext goes as soon as the ciphertext is durable
+        log("WARNING", string.format("%smessage SEALED to the spool (%s bytes, %s recipient(s)) —"
+            .. " vm-forwarder delivers it when the API is reachable", tag, tostring(res.bytes),
+            tostring(res.recipients)))
+        return true
+    end
+    log("ERR", tag .. "could not seal the message to the spool ("
+        .. tostring(res and res.detail) .. ") — message lost")
+    return false
 end
 
 -- ----------------------------------------------------------------------
@@ -618,7 +766,7 @@ local function deposit_phase(session, a, st, base)
     elseif res.outcome == "rejected" then
         st.result = "rejected_" .. tostring(res.code)
     else
-        st.result = "lost"
+        st.result = seal_to_spool(a, st, dur, tag) and "spooled" or "lost"
     end
     setv(session, "vm_deposit_http", res.code)
     setv(session, "vm_deposit_attempts", res.attempts)

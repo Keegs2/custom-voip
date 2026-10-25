@@ -26,6 +26,10 @@
 --                                           resolve to the stubs too
 --
 -- Run:  lua tests/lua/voicemail_harness.lua            (from the repo root)
+--       BASELINE_LIBDIR=<dir> lua tests/lua/voicemail_harness.lua
+--         [15]: <dir> = a copy of scripts/lib/ with the PRE-change vm_box.lua
+--         + vm_deposit.lua; every API-up scenario must produce the same
+--         commands, CDR variables, prompts, records, events and logs.
 
 local function script_dir()
     local src = debug.getinfo(1, "S").source
@@ -87,6 +91,15 @@ local MOUNTS_NO_VM = "overlay / overlay rw,relatime 0 0\nshm /dev/shm tmpfs rw 0
 
 local UUID4 = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-4%x%x%x%-[89ab]%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x"
 
+-- Outage resilience fixtures ([14]). The certificate bodies are only checked
+-- for PEM structure by lib/vm_spool.lua (openssl is faked here; the real CLI
+-- runs in the local docker E2E).
+local ONE_CERT = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ2VydGlmaWNhdGUtb25lAAAAAAAAAAAw\nCgYIKoZIzj0EAwIwEjEQMA4GA1UEAwwHdGVzdC0xMB4XDTI2\n-----END CERTIFICATE-----\n"
+local TWO_CERTS = ONE_CERT .. "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ2VydGlmaWNhdGUtdHdvAAAAAAAAAAAw\n-----END CERTIFICATE-----\n"
+local SPOOL_MOUNT_LINE = "/dev/sda1 /var/lib/crag/vm-spool ext4 rw,relatime 0 0\n"
+local USAGE_OK = "12\t/var/lib/crag/vm-spool\nFilesystem     1024-blocks    Used Available Capacity Mounted on\n"
+    .. "/dev/sda1         10255636 4102340   5612448      43% /var/lib/crag/vm-spool\n"
+
 -- ------------------------------------------------------------------
 -- Scenario runner
 -- ------------------------------------------------------------------
@@ -106,15 +119,32 @@ local UUID4 = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-4%x%x%x%-[89ab]%x%x%x%-%x%x%x%x%x%x%x
 --   raise_on_rec_open = N   (io.open of the message file raises on the Nth open)
 --   vm_box_missing = true
 --   sweep_last = epoch      (pre-seeded vm_sweep_last global)
+-- Outage resilience (D11, [14]):
+--   spool = true            /var/lib/crag/vm-spool is a mount (-> <scratch>/spool)
+--   recipients = string | false   vm_spool_recipients.pem content (default
+--                           ONE_CERT when spool=true; false = missing file)
+--   replica = { row = {...} } | { none = true } | { error = "..." }
+--             | { noconn = true }   fake db_client.get_connection() answer
+--             (absent = db_client without get_connection, i.e. "unusable")
+--   openssl = "fail" | "garbage"    fake seal outcome (default: success)
+--   usage = "<du/df output>"        answer to vm_spool.usage_cmd()
+--   libdir = "<dir>/"               load scripts/lib/* from here ([15] baseline)
 local function run_scenario(sc)
     scenario_no = scenario_no + 1
     local dir = SCRATCH .. "/s" .. scenario_no
-    assert(real_os.execute("mkdir -p '" .. dir .. "/vm' '" .. dir .. "/nosounds'"))
+    assert(real_os.execute("mkdir -p '" .. dir .. "/vm' '" .. dir .. "/nosounds' '"
+        .. dir .. "/spool'"))
     local header_path = dir .. "/header"
     if sc.header ~= false then
         write_file(header_path, sc.header or GOOD_SECRET_LINE)
     end
-    write_file(dir .. "/mounts", sc.mounts or MOUNTS_OK)
+    local recipients_path = dir .. "/recipients.pem"
+    local recipients = sc.recipients
+    if recipients == nil and sc.spool then recipients = ONE_CERT end
+    if recipients then write_file(recipients_path, recipients) end
+    local mounts = sc.mounts or MOUNTS_OK
+    if sc.spool then mounts = mounts .. SPOOL_MOUNT_LINE end
+    write_file(dir .. "/mounts", mounts)
 
     local cap = {
         setvars = {}, events = {}, popen = {}, execs = {}, hangups = {},
@@ -143,6 +173,10 @@ local function run_scenario(sc)
         local rest = p:match("^/dev/shm/vm/(.*)$")
         if rest then return dir .. "/vm/" .. rest end
         if p == "/dev/shm/vm" then return dir .. "/vm" end
+        rest = p:match("^/var/lib/crag/vm%-spool/(.*)$")
+        if rest then return dir .. "/spool/" .. rest end
+        if p == "/var/lib/crag/vm-spool" then return dir .. "/spool" end
+        if p == "/run/revup/vm_spool_recipients.pem" then return recipients_path end
         if p == "/run/revup/vm_ingest.header" then return header_path end
         if p == "/proc/self/mounts" then return dir .. "/mounts" end
         rest = p:match("^/usr/local/freeswitch/scripts/sounds/vm/(.*)$")
@@ -215,6 +249,45 @@ local function run_scenario(sc)
                 f:close()
             end
             return fake_handle((d.body or "") .. "\n" .. d.code, d.exit or 0)
+        elseif cmd:find("openssl cms -encrypt", 1, true) then
+            -- Fake openssl: the frame must exist in tmpfs at this moment; a
+            -- fake DER AuthEnvelopedData lands at -out, `install` copies the
+            -- tmpfs META to the spool .json.tmp. Real openssl runs in the
+            -- local docker E2E (docs/VOICEMAIL_OUTAGE_RESILIENCE.md §9).
+            ev("popen:seal")
+            cap.seal_cmds = (cap.seal_cmds or 0) + 1
+            local inp = cmd:match(" %-in '([^']+)'")
+            local outp = cmd:match(" %-out '([^']+)'")
+            local isrc, idst = cmd:match("install %-m 0600 '([^']+)' '([^']+)'")
+            local f = inp and real_io.open(map(inp), "rb")
+            if f then
+                cap.sealed_frame = f:read("*a")
+                f:close()
+            end
+            cap.recips_at_seal = 0
+            for _, n in ipairs(list_dir(dir .. "/vm")) do
+                if n:match("^r%d_.*%.pem$") then cap.recips_at_seal = cap.recips_at_seal + 1 end
+            end
+            if sc.openssl == "fail" then
+                return fake_handle("Error: unable to load certificate\n", 1)
+            end
+            if outp then
+                local body = (sc.openssl == "garbage") and "not a cms blob at all, sorry"
+                    or ("\48\130\1\0\6\11\42\134\72\134\247\13\1\9\16\1\23" .. string.rep("\170", 200))
+                write_file(map(outp), body)
+            end
+            if isrc and idst then
+                local s = real_io.open(map(isrc), "rb")
+                if s then
+                    write_file(map(idst), s:read("*a"))
+                    s:close()
+                end
+            end
+            return fake_handle("SEALED_OK\n", 0)
+        elseif cmd:find("du -sk ", 1, true) then
+            ev("popen:usage")
+            cap.usage_cmd = cmd
+            return fake_handle(sc.usage or USAGE_OK, 0)
         end
         ev("popen:other")
         return fake_handle("", 0)
@@ -242,6 +315,10 @@ local function run_scenario(sc)
         remove = function(p)
             ev("remove:" .. tostring(p))
             return real_os.remove(map(p))
+        end,
+        rename = function(a, b)
+            ev("rename:" .. tostring(a) .. ">" .. tostring(b))
+            return real_os.rename(map(a), map(b))
         end,
         execute = function(cmd)
             cap.execs[#cap.execs + 1] = cmd
@@ -345,6 +422,33 @@ local function run_scenario(sc)
         resolve_destination = function(did) call("resolve", did); return (sc.oracle or {})[did] end,
         get_trunk_endpoint_ips = function() return nil end,
     }
+    -- Zone replica (lib/vm_replica.lua -> db_client.get_connection()).
+    if sc.replica then
+        local rp = sc.replica
+        fake_db.get_connection = function()
+            ev("replica:connect")
+            if rp.noconn then return nil end
+            return {
+                execute = function(_, sql)
+                    cap.replica_sql = sql
+                    ev("replica:query")
+                    if rp.error then return nil, rp.error end
+                    local served = false
+                    return {
+                        fetch = function()
+                            if rp.none or served then return nil end
+                            served = true
+                            local r = {}
+                            for k, v in pairs(rp.row) do r[k] = v end
+                            return r
+                        end,
+                        close = function() end,
+                    }
+                end,
+            }
+        end
+        fake_db.close = function() cap.replica_closed = true; ev("replica:close") end
+    end
 
     -- ---- sandbox ----
     local env
@@ -361,7 +465,7 @@ local function run_scenario(sc)
             if name == "vm_box" and sc.vm_box_missing then
                 return nil, "cannot open " .. path
             end
-            return loadfile(LIBDIR .. name .. ".lua", "t", env)
+            return loadfile((sc.libdir or LIBDIR) .. name .. ".lua", "t", env)
         end
         return nil, "cannot open " .. path
     end
@@ -376,6 +480,7 @@ local function run_scenario(sc)
     cap.script_ok = ok
     cap.script_err = run_err
     cap.vm_dir_after = list_dir(dir .. "/vm")
+    cap.spool_after = list_dir(dir .. "/spool")
     cap.session_vars = session_vars
     cap.dir = dir
     return cap
@@ -443,7 +548,7 @@ end
 local API = "http://10.142.0.103:8000"
 local HDR = "-H @/run/revup/vm_ingest.header"
 local function expected_mailbox_cmd(id)
-    return "curl -q -s --noproxy '*' --connect-timeout 2 --max-time 3 " .. HDR
+    return "curl -q -s --noproxy '*' --connect-timeout 1 --max-time 3 " .. HDR
         .. " -H 'Accept: application/json' -w '\\n%{http_code}' '" .. API
         .. "/v1/voicemail/fs/mailbox/" .. id .. "' 2>/dev/null"
 end
@@ -1146,6 +1251,340 @@ do
         local ok = h:sub(1, 4) == "RIFF" and h:sub(9, 12) == "WAVE" and h:sub(13, 16) == "fmt "
             and h:byte(21) == 1 and h:byte(23) == 1 and (h:byte(25) + h:byte(26) * 256) == 8000 and h:byte(35) == 16
         check("[13] prompt " .. p .. ".wav is 8 kHz mono PCM16", ok, "bad header")
+    end
+end
+
+-- ==================================================================
+-- [14] East outage resilience (Visual IVR plan D11 / §7.5, contract §8.4):
+--      zone-replica mailbox check + seal-to-spool instead of "lost"
+-- ==================================================================
+do
+    print("[14] East outage: replica fallback, seal to spool, plaintext unlinked")
+    local OAEP = "-keyopt rsa_padding_mode:oaep -keyopt rsa_oaep_md:sha256 -keyopt rsa_mgf1_md:sha256"
+    local function expected_seal_cmd(u, n)
+        local r = {}
+        for k = 1, n do r[#r + 1] = "-recip '/dev/shm/vm/r" .. k .. "_" .. u .. ".pem' " .. OAEP end
+        local sp = "/var/lib/crag/vm-spool/" .. u
+        return "{ umask 077 && timeout 30 openssl cms -encrypt -binary -aes-256-gcm -keyid -outform DER"
+            .. " -in '/dev/shm/vm/s_" .. u .. ".bin' -out '" .. sp .. ".cms.tmp' " .. table.concat(r, " ")
+            .. " && install -m 0600 '/dev/shm/vm/j_" .. u .. ".json' '" .. sp .. ".json.tmp'"
+            .. " && sync '" .. sp .. ".cms.tmp' '" .. sp .. ".json.tmp' && echo SEALED_OK; } 2>&1"
+    end
+    local REPLICA_SQL = "SELECT mailbox_id, did, customer_id, status, accepting, max_message_seconds, reason"
+        .. " FROM vm_fs_mailbox WHERE mailbox_id = 42 LIMIT 1"
+    local REPLICA_OK = { row = { mailbox_id = "42", did = MAILBOX_DID, customer_id = "77", status = "active",
+        accepting = "t", max_message_seconds = "120", reason = nil } }
+    local API_DOWN = { code = "000", exit = 28 }          -- connect timeout (black-holed East)
+    local DEPOSITS_DOWN = { { code = "000", exit = 7 }, { code = "000", exit = 7 }, { code = "503" } }
+    local function spool_names(c)
+        local cms, json_, other = {}, {}, {}
+        for _, n in ipairs(c.spool_after) do
+            if n:match("^" .. UUID4 .. "%.cms$") then cms[#cms + 1] = n
+            elseif n:match("^" .. UUID4 .. "%.json$") then json_[#json_ + 1] = n
+            else other[#other + 1] = n end
+        end
+        return cms, json_, other
+    end
+    local function read_spool(c, name)
+        local f = real_io.open(c.dir .. "/spool/" .. name, "rb")
+        local s = f and f:read("*a")
+        if f then f:close() end
+        return s
+    end
+
+    -- [14a] API up: nothing new happens (replica, spool and certificates
+    --       all present but untouched; the call is the [1] call).
+    local c = run_scenario(direct({ spool = true, replica = REPLICA_OK,
+        caller_name = "Jane Caller",
+        mailbox = { code = "200", body = '{"mailbox_id":42,"customer_id":77,"did":"+15550009999","status":"active","accepting":true,"reason":null,"max_message_seconds":120,"greeting":null}' } }))
+    check("[14a] API up: exactly the 2 API commands (no openssl, no du/df)", #c.popen == 2
+        and c.popen[1] == expected_mailbox_cmd(42) and c.popen[2]:find("/v1/voicemail/fs/deposit'", 1, true)
+        and c.seal_cmds == nil and c.usage_cmd == nil, #c.popen)
+    check("[14a] API up: replica never connected", find_event(c, "replica:") == nil and c.replica_sql == nil,
+        tostring(c.replica_sql))
+    check("[14a] API up: vm_lookup_source unset, stored, spool empty",
+        c.setvars.vm_lookup_source == nil and c.setvars.vm_result == "stored" and #c.spool_after == 0,
+        tostring(c.setvars.vm_lookup_source) .. " " .. tostring(c.setvars.vm_result))
+    check("[14a] API up: same sweep exec as [1]", #c.execs == 1 and c.execs[1] == SWEEP_CMD, c.execs[1])
+    assert_clean("[14a]", c)
+
+    -- [14b] East down end to end: replica answers, message recorded with
+    --       the replica's limit + default greeting, deposit fails 3x,
+    --       sealed to the spool, plaintext unlinked.
+    c = run_scenario(direct({ spool = true, replica = REPLICA_OK, mailbox = API_DOWN,
+        deposits = DEPOSITS_DOWN, caller_id = "+15085550123", sip_from_user = "+15085550123",
+        caller_name = "Jane Caller", record = { secs = 7 } }))
+    local rp = rec_path_of(c)
+    local u = rp and rp:match("^/dev/shm/vm/(" .. UUID4 .. ")%.wav$")
+    check("[14b] replica queried with the exact SQL, connection closed",
+        c.replica_sql == REPLICA_SQL and c.replica_closed == true, c.replica_sql)
+    check("[14b] vm_lookup_source=replica", c.setvars.vm_lookup_source == "replica", c.setvars.vm_lookup_source)
+    check("[14b] record uses the replica's max_message_seconds (120)", rp and c.records[1] == rp .. " 120 200 10",
+        c.records[1])
+    check("[14b] default greeting (custom greetings need the East API)",
+        c.playbacks[1] == "/usr/local/freeswitch/scripts/sounds/vm/default_greeting.wav"
+        and c.setvars.vm_greeting == "default" and #popen_kind(c, "/fs/greetings/") == 0, c.playbacks[1])
+    check("[14b] replica consulted AFTER the API lookup failed, BEFORE the greeting",
+        (find_event(c, "popen:mailbox") or 99) < (find_event(c, "replica:connect") or 0)
+        and (find_event(c, "replica:close") or 99) < (find_event(c, "playback:") or 0), "order")
+    check("[14b] 3 deposit attempts, then the seal", #popen_kind(c, "/fs/deposit") == 3 and c.seal_cmds == 1
+        and (find_event(c, "popen:seal") or 0) > (find_event(c, "msleep:2000") or 99), tostring(c.seal_cmds))
+    check("[14b] spool usage measured with the constant command",
+        c.usage_cmd == "du -sk '/var/lib/crag/vm-spool' 2>/dev/null; df -Pk '/var/lib/crag/vm-spool' 2>/dev/null",
+        c.usage_cmd)
+    check("[14b] openssl command is exact (1 recipient, AES-256-GCM, OAEP-SHA256, -keyid, DER)",
+        u and popen_kind(c, "openssl cms")[1] == expected_seal_cmd(u, 1), popen_kind(c, "openssl cms")[1])
+    check("[14b] the recipient certificate was in tmpfs at seal time", c.recips_at_seal == 1, c.recips_at_seal)
+    local fr = c.sealed_frame or ""
+    local mlen, rest = fr:match("^CRAGVMS1\n(%d+)\n(.*)$")
+    local mjson = rest and rest:sub(1, tonumber(mlen))
+    local wav = rest and rest:sub(tonumber(mlen) + 1)
+    local m = mjson and json.decode(mjson)
+    check("[14b] sealed frame = CRAGVMS1 \\n len \\n META WAV", m ~= nil and wav == wav_bytes(7), #fr)
+    check("[14b] META fields are exactly contract §8.4 + v", m and m.v == 1 and m.msg_uuid == u
+        and m.mailbox_id == 42 and m.did == MAILBOX_DID and m.caller_number == "+15085550123"
+        and m.caller_name == "Jane Caller" and m.duration_ms == 7000 and m.zone == "east"
+        and type(m.received_at) == "string" and m.received_at:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$"),
+        mjson)
+    local nkeys = 0
+    for _ in pairs(m or {}) do nkeys = nkeys + 1 end
+    check("[14b] META carries no other key (no call_uuid / fs_node / caller_id_*)", nkeys == 9, nkeys)
+    local cms, jsn, other = spool_names(c)
+    check("[14b] spool = exactly <uuid>.cms + <uuid>.json (no .tmp left)",
+        #cms == 1 and #jsn == 1 and #other == 0 and cms[1] == u .. ".cms" and jsn[1] == u .. ".json",
+        table.concat(c.spool_after, ","))
+    check("[14b] sidecar == the sealed META bytes", read_spool(c, u .. ".json") == mjson, read_spool(c, u .. ".json"))
+    local blob = read_spool(c, u .. ".cms") or ""
+    check("[14b] no RIFF/WAVE bytes anywhere in the spool",
+        not blob:find("RIFF", 1, true) and not blob:find("WAVE", 1, true)
+        and not (read_spool(c, u .. ".json") or ""):find("RIFF", 1, true), "plaintext in spool")
+    check("[14b] renames: .json first, .cms last",
+        (find_event(c, "rename:/var/lib/crag/vm-spool/" .. tostring(u) .. ".json.tmp") or 99)
+        < (find_event(c, "rename:/var/lib/crag/vm-spool/" .. tostring(u) .. ".cms.tmp") or 0), "order")
+    check("[14b] recording unlinked right after the seal (before cleanup)",
+        (find_event(c, "remove:" .. tostring(rp)) or 0) > (find_event(c, "rename:/var/lib/crag/vm-spool/" .. tostring(u) .. ".cms.tmp") or 99),
+        "order")
+    check("[14b] vm_result=spooled, SEALED logged", c.setvars.vm_result == "spooled"
+        and has_log(c, "WARNING", "SEALED to the spool"), c.setvars.vm_result)
+    check("[14b] directory fsync after the renames", c.execs[1] == "sync '/var/lib/crag/vm-spool' >/dev/null 2>&1",
+        c.execs[1])
+    check("[14b] mailbox GET uses the 1 s connect timeout", popen_kind(c, "/fs/mailbox/")[1] == expected_mailbox_cmd(42),
+        popen_kind(c, "/fs/mailbox/")[1])
+    assert_clean("[14b]", c)
+
+    -- [14c] API lookup fine, East goes away before the deposit: sealed.
+    c = run_scenario(direct({ spool = true, deposits = DEPOSITS_DOWN }))
+    check("[14c] API answered the lookup (no replica), deposit failed -> spooled",
+        c.replica_sql == nil and c.setvars.vm_lookup_source == nil and c.setvars.vm_result == "spooled"
+        and #c.spool_after == 2, c.setvars.vm_result)
+    assert_clean("[14c]", c)
+
+    -- [14d] Replica outcomes.
+    c = run_scenario(direct({ spool = true, mailbox = API_DOWN, replica = { row = {
+        mailbox_id = "42", did = MAILBOX_DID, customer_id = "77", status = "active", accepting = "f",
+        max_message_seconds = "300", reason = "full" } } }))
+    check("[14d] replica full -> mailbox_full.wav, hang up, nothing recorded",
+        c.playbacks[1] == "/usr/local/freeswitch/scripts/sounds/vm/mailbox_full.wav" and #c.records == 0
+        and c.setvars.vm_result == "not_accepting_full" and #popen_kind(c, "/fs/deposit") == 0, c.playbacks[1])
+    assert_clean("[14d full]", c)
+    c = run_scenario(direct({ spool = true, mailbox = API_DOWN, replica = { row = {
+        mailbox_id = "42", did = MAILBOX_DID, customer_id = "77", status = "suspended", accepting = "f",
+        max_message_seconds = "300", reason = "inactive" } } }))
+    check("[14d] replica inactive -> unavailable.wav", c.playbacks[1] == "/usr/local/freeswitch/scripts/sounds/vm/unavailable.wav"
+        and c.setvars.vm_result == "not_accepting_inactive" and #c.records == 0, c.playbacks[1])
+    assert_clean("[14d inactive]", c)
+    c = run_scenario(direct({ spool = true, mailbox = API_DOWN, replica = { none = true } }))
+    check("[14d] replica: no row (deleted mailbox) -> unavailable, unavailable_404",
+        c.playbacks[1] == "/usr/local/freeswitch/scripts/sounds/vm/unavailable.wav"
+        and c.setvars.vm_result == "unavailable_404" and #c.records == 0
+        and c.setvars.vm_lookup_source == "replica", c.setvars.vm_result)
+    assert_clean("[14d none]", c)
+    local unusable = {
+        { tag = "view missing (58 not applied)", r = { error = 'ERROR: relation "vm_fs_mailbox" does not exist' } },
+        { tag = "no connection", r = { noconn = true } },
+        { tag = "accepting not a boolean", r = { row = { mailbox_id = "42", accepting = "maybe", max_message_seconds = "60" } } },
+        { tag = "row for another mailbox", r = { row = { mailbox_id = "43", accepting = "t", max_message_seconds = "60" } } },
+        { tag = "not accepting without reason", r = { row = { mailbox_id = "42", accepting = "f", max_message_seconds = "60" } } },
+    }
+    for _, k in ipairs(unusable) do
+        c = run_scenario(direct({ spool = true, mailbox = API_DOWN, replica = k.r }))
+        local rp2 = rec_path_of(c)
+        check("[14d] replica " .. k.tag .. " -> today's defaults (300 s, default greeting), vm_lookup_source=defaults",
+            rp2 and c.records[1] == rp2 .. " 300 200 10" and c.setvars.vm_lookup_source == "defaults"
+            and c.playbacks[1] == "/usr/local/freeswitch/scripts/sounds/vm/default_greeting.wav"
+            and c.setvars.vm_result == "stored", tostring(c.records[1]) .. " " .. tostring(c.setvars.vm_lookup_source))
+        assert_clean("[14d " .. k.tag .. "]", c)
+    end
+    c = run_scenario(direct({ mailbox = API_DOWN }))   -- db_client without get_connection
+    check("[14d] replica unusable (no get_connection) -> defaults, as before 58",
+        c.records[1] and c.records[1]:match(" 300 200 10$") and c.setvars.vm_lookup_source == "defaults", c.records[1])
+    assert_clean("[14d no get_connection]", c)
+    c = run_scenario(direct({ spool = true, mailbox = API_DOWN, replica = { row = {
+        mailbox_id = "42", accepting = "t", max_message_seconds = "99999" } } }))
+    check("[14d] replica max_message_seconds out of range -> 300", c.records[1] and c.records[1]:match(" 300 200 10$"),
+        c.records[1])
+    assert_clean("[14d bad max]", c)
+
+    -- [14e] Two recipients (rotation): two -recip groups, both certs in tmpfs.
+    c = run_scenario(direct({ spool = true, recipients = TWO_CERTS, deposits = DEPOSITS_DOWN }))
+    local u2 = (rec_path_of(c) or ""):match("(" .. UUID4 .. ")%.wav$")
+    check("[14e] 2 recipients -> exact 2-recipient openssl command",
+        u2 and popen_kind(c, "openssl cms")[1] == expected_seal_cmd(u2, 2) and c.recips_at_seal == 2,
+        popen_kind(c, "openssl cms")[1])
+    check("[14e] spooled", c.setvars.vm_result == "spooled", c.setvars.vm_result)
+    assert_clean("[14e]", c)
+
+    -- [14f] Hostile caller data never reaches the openssl command line.
+    local evil = "'; rm -rf / #$(id)`x`"
+    c = run_scenario(direct({ spool = true, deposits = DEPOSITS_DOWN, caller_name = evil,
+        caller_id = "+1508'$(id)", sip_from_user = "+1508'$(id)" }))
+    local scmd = popen_kind(c, "openssl cms")[1] or ""
+    check("[14f] hostile caller name/number absent from the seal command",
+        scmd ~= "" and not scmd:find("rm -rf", 1, true) and not scmd:find("$(id)", 1, true), scmd)
+    check("[14f] ...and present (escaped JSON) only inside the sealed META", (c.sealed_frame or ""):find("rm -rf", 1, true) ~= nil,
+        "missing")
+    assert_clean("[14f]", c)
+
+    -- [14g] Seal impossible -> "lost" exactly as before (logged), nothing
+    --       left in the spool, tmpfs clean.
+    local PRIVATE = ONE_CERT .. "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"
+    local FIVE = ONE_CERT .. ONE_CERT .. ONE_CERT .. ONE_CERT .. ONE_CERT
+    local cannot = {
+        { tag = "spool not mounted", sc = { deposits = DEPOSITS_DOWN }, log = "not mounted" },
+        { tag = "recipients file missing", sc = { spool = true, recipients = false, deposits = DEPOSITS_DOWN }, log = "missing or unreadable" },
+        { tag = "recipients file holds a private key", sc = { spool = true, recipients = PRIVATE, deposits = DEPOSITS_DOWN }, log = "PRIVATE KEY" },
+        { tag = "more than 4 certificates", sc = { spool = true, recipients = FIVE, deposits = DEPOSITS_DOWN }, log = "more than 4" },
+        { tag = "no certificate block", sc = { spool = true, recipients = "hello\n", deposits = DEPOSITS_DOWN }, log = "no certificate" },
+        { tag = "openssl fails", sc = { spool = true, openssl = "fail", deposits = DEPOSITS_DOWN }, log = "openssl seal failed" },
+        { tag = "openssl output is not CMS", sc = { spool = true, openssl = "garbage", deposits = DEPOSITS_DOWN }, log = "not a CMS AuthEnvelopedData" },
+        { tag = "spool over the safety ceiling", sc = { spool = true, deposits = DEPOSITS_DOWN,
+            usage = "5000000\t/var/lib/crag/vm-spool\nFilesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 10255636 4102340 5612448 43% /x\n" },
+            log = "safety ceiling" },
+        { tag = "disk almost full", sc = { spool = true, deposits = DEPOSITS_DOWN,
+            usage = "10\t/var/lib/crag/vm-spool\nFilesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 10255636 10000000 500 99% /x\n" },
+            log = "free on the spool filesystem" },
+    }
+    for _, k in ipairs(cannot) do
+        c = run_scenario(direct(k.sc))
+        check("[14g] " .. k.tag .. " -> lost + ERROR, spool empty",
+            c.setvars.vm_result == "lost" and has_log(c, "ERR", "message lost")
+            and #c.spool_after == 0, tostring(c.setvars.vm_result) .. " spool=" .. table.concat(c.spool_after, ","))
+        check("[14g] " .. k.tag .. " -> reason logged", has_log(c, "ERR", k.log), k.log)
+        assert_clean("[14g " .. k.tag .. "]", c)
+    end
+    c = run_scenario(direct({ spool = true, deposits = DEPOSITS_DOWN, usage = "garbage" }))
+    check("[14g] du/df unparsable -> sealed anyway (WARNING), spooled",
+        c.setvars.vm_result == "spooled" and has_log(c, "WARNING", "could not measure"), c.setvars.vm_result)
+    assert_clean("[14g du unparsable]", c)
+
+    -- [14h] Permanent rejection is NOT sealed (the API decided).
+    for _, code in ipairs({ "404", "409", "422" }) do
+        c = run_scenario(direct({ spool = true, deposits = { { code = code } } }))
+        check("[14h] deposit " .. code .. " -> rejected, never sealed",
+            c.setvars.vm_result == "rejected_" .. code and c.seal_cmds == nil and #c.spool_after == 0,
+            c.setvars.vm_result)
+        assert_clean("[14h " .. code .. "]", c)
+    end
+
+    -- [14i] Units.
+    local spool = plain_load("vm_spool")
+    local replica = plain_load("vm_replica")
+    check("[14i] vm_replica.query exact + integer-only",
+        replica.query(42) == REPLICA_SQL and replica.query("42; DROP") == nil and replica.query(0) == nil
+        and replica.query(2147483648) == nil and replica.query(4.5) == nil, replica.query(42))
+    check("[14i] vm_replica.fetch_mailbox(bad id) -> error, no db touched",
+        replica.fetch_mailbox("x", { db = {} }).kind == "error", "kind")
+    check("[14i] vm_spool.paths rejects a non-UUIDv4", spool.paths("/dev/shm/vm", "../../etc/passwd") == nil
+        and spool.paths("/dev/shm/vm", "00000000-0000-1000-8000-000000000000") == nil, "accepted")
+    check("[14i] vm_spool.seal_cmd refuses 0 / 5 / fractional recipients",
+        spool.seal_cmd(spool.paths("/dev/shm/vm", "3f2c8a8e-1b7d-4c3e-9a1f-2b3c4d5e6f70"), 0) == nil
+        and spool.seal_cmd(spool.paths("/dev/shm/vm", "3f2c8a8e-1b7d-4c3e-9a1f-2b3c4d5e6f70"), 5) == nil
+        and spool.seal_cmd(spool.paths("/dev/shm/vm", "3f2c8a8e-1b7d-4c3e-9a1f-2b3c4d5e6f70"), 1.5) == nil, "built")
+    local used, free = spool.parse_usage(USAGE_OK)
+    check("[14i] parse_usage(du+df)", used == 12 and free == 5612448, tostring(used) .. "/" .. tostring(free))
+    local u3, f3 = spool.parse_usage("")
+    check("[14i] parse_usage(empty) -> nil, nil", u3 == nil and f3 == nil, tostring(u3))
+    check("[14i] seal() never raises on garbage input",
+        spool.seal({ msg_uuid = "nope", vm_dir = "/dev/shm/vm" }).ok == false
+        and spool.seal({}).ok == false, "raised")
+end
+
+
+-- ==================================================================
+-- [15] API up => byte-identical to the pre-D11 libraries (optional:
+--      BASELINE_LIBDIR=<dir with the old vm_box.lua + vm_deposit.lua>)
+-- ==================================================================
+do
+    local BASE = real_os.getenv("BASELINE_LIBDIR")
+    if not BASE or BASE == "" then
+        print("[15] SKIP (set BASELINE_LIBDIR to compare against the pre-change libraries)")
+    else
+        if BASE:sub(-1) ~= "/" then BASE = BASE .. "/" end
+        print("[15] API up: byte-identical to " .. BASE)
+        local OK_MB = '{"mailbox_id":42,"customer_id":77,"did":"+15550009999","status":"active","accepting":true,"reason":null,"max_message_seconds":120,"greeting":null}'
+        local GREET = '{"mailbox_id":42,"accepting":true,"reason":null,"max_message_seconds":300,"greeting":{"greeting_id":5,"duration_ms":2000}}'
+        local factories = {
+            { "direct happy path", function() return direct({ caller_name = "Jane Caller", mailbox = { code = "200", body = OK_MB } }) end },
+            { "on-net RCF -> mailbox", function() return {
+                inbound_did = "+16170000001", caller_id = "+15085550777", sip_from_user = "+15085550777", caller_name = "Bob",
+                step1 = { product_type = "rcf", customer_id = 10, forward_to = MAILBOX_DID, pass_caller_id = true, rcf_name = "Origin" },
+                oracle = { [MAILBOX_DID] = VM_ORACLE_ROW } } end },
+            { "custom greeting", function() return direct({ mailbox = { code = "200", body = GREET }, greeting = { code = "200", content = wav_bytes(2) } }) end },
+            { "greeting fetch 503", function() return direct({ mailbox = { code = "200", body = GREET }, greeting = { code = "503" } }) end },
+            { "mailbox full", function() return direct({ mailbox = { code = "200", body = '{"mailbox_id":42,"accepting":false,"reason":"full"}' } }) end },
+            { "mailbox inactive", function() return direct({ mailbox = { code = "200", body = '{"mailbox_id":42,"accepting":false,"reason":"inactive"}' } }) end },
+            { "lookup 404", function() return direct({ mailbox = { code = "404", body = '{"detail":"x"}' } }) end },
+            { "lookup 401", function() return direct({ mailbox = { code = "401", body = '{"detail":"x"}' } }) end },
+            { "deposit 409", function() return direct({ deposits = { { code = "409" } } }) end },
+            { "deposit 422", function() return direct({ deposits = { { code = "422" } } }) end },
+            { "deposit 503 then stored", function() return direct({ deposits = { { code = "503" }, { code = "200", body = '{"status":"stored","message_id":5}' } } }) end },
+            { "hangup mid-record", function() return direct({ record = { secs = 20, hangup = true } }) end },
+            { "too short", function() return direct({ record = { secs = 0.6, hangup = true } }) end },
+            { "hangup in greeting", function() return direct({ hangup_during_greeting = true }) end },
+            { "prompts missing", function() return direct({ sounds = "missing" }) end },
+            { "preflight: header missing", function() return direct({ header = false }) end },
+            { "with spool + replica present", function() return direct({ spool = true, replica = { row = { mailbox_id = "42", accepting = "t", max_message_seconds = "60" } } }) end },
+        }
+        local function norm(s)
+            -- X-VM-Meta embeds the random msg_uuid: compare its decoded JSON
+            s = tostring(s):gsub("X%-VM%-Meta: ([A-Za-z0-9_%-]+)", function(b)
+                return "X-VM-Meta: " .. (dep.b64url_decode(b) or b)
+            end)
+            s = s:gsub(UUID4, "<uuid>")
+            -- the one intended difference: the mailbox GET connect timeout 2 -> 1
+            s = s:gsub("%-%-connect%-timeout 2 %-%-max%-time 3 ", "--connect-timeout 1 --max-time 3 ")
+            return s
+        end
+        local function flat(c)
+            local out = {}
+            local function add(k, v) out[#out + 1] = k .. "=" .. norm(v) end
+            for _, x in ipairs(c.popen) do add("popen", x) end
+            for _, x in ipairs(c.execs) do add("exec", x) end
+            for _, x in ipairs(c.playbacks) do add("play", x) end
+            for _, x in ipairs(c.records) do add("record", x) end
+            for _, x in ipairs(c.hangups) do add("hangup", x) end
+            for _, x in ipairs(c.events) do add("event", x) end
+            for _, x in ipairs(c.msleeps) do add("msleep", x) end
+            for _, l in ipairs(c.logs) do add("log", l.level .. " " .. l.msg) end
+            local keys = {}
+            for k in pairs(c.setvars) do keys[#keys + 1] = k end
+            table.sort(keys)
+            for _, k in ipairs(keys) do add("var " .. k, c.setvars[k]) end
+            add("vm_dir_after", #c.vm_dir_after)
+            add("deposit_bytes", c.deposit_bytes and #c.deposit_bytes or 0)
+            return out
+        end
+        for _, f in ipairs(factories) do
+            local old_sc = f[2]()
+            old_sc.libdir = BASE
+            local a, b = flat(run_scenario(old_sc)), flat(run_scenario(f[2]()))
+            local same, where = (#a == #b), nil
+            for i = 1, math.max(#a, #b) do
+                if a[i] ~= b[i] then same = false; where = i; break end
+            end
+            check("[15] " .. f[1] .. ": identical (" .. #b .. " observations)", same,
+                where and ("first diff #" .. where .. "\n      old: " .. tostring(a[where]) .. "\n      new: " .. tostring(b[where])) or "length")
+        end
     end
 end
 

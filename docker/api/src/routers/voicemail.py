@@ -959,3 +959,12 @@ async def fs_greeting_audio(greeting_id: int, request: Request):
 @router.post("/fs/deposit", dependencies=[Depends(require_ingest_secret)])
 async def fs_deposit(request: Request):
     return await vm_deposit.handle_deposit(request)
+
+
+# Visual IVR plan D11 / contract docs/IVR_INTERFACES.md §8.4: a message FS
+# sealed to its spool during an East outage, replayed by docker/vm-forwarder.
+# 201 stored / 200 duplicate / 410 dropped (audited) / 422 bad / 503 retry.
+@router.post("/fs/deposit-sealed", dependencies=[Depends(require_ingest_secret)])
+async def fs_deposit_sealed(request: Request):
+    from services.voicemail import sealed as vm_sealed  # local: keeps this edit in the /fs/ section
+    return await vm_sealed.handle_deposit_sealed(request)

@@ -73,6 +73,7 @@ services:
       # /fs/ endpoints (same value as /opt/revup/secrets/fs-voicemail/vm_ingest.header on
       # every FS node). >= 32 chars. Unset/short => every FS call 503.
       - INGEST_SHARED_SECRET=${INGEST_SHARED_SECRET:-}
+      - VOICEMAIL_SPOOL_PRIVATE_KEY_B64=${VOICEMAIL_SPOOL_PRIVATE_KEY_B64:-}
       # Optional ADC key file (path INSIDE the container). Only if the VM SA /
       # impersonation cannot be used — the key file must then also be mounted
       # read-only via a compose override. Empty = unset (VM metadata ADC).
