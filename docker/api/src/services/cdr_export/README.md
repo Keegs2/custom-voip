@@ -212,7 +212,7 @@ Deployed with `docs/CALL_QUALITY_ACCURACY_PLAN.md`. For Equinox:
   `loss_bursts`, `packets_reordered`, `ssrc_changes`, `burst_ratio`,
   `inbound_media_ratio`, `call_quality_status`, `call_quality_grade`, `call_mos`,
   `call_quality_leg`. The header row names them; existing positions do not move.
-- **Visual IVR (migration 60) — 6 more trailing columns** after `call_quality_leg`:
+- **Visual IVR (migration 60) — 6 more trailing columns, OPT-IN** (`CDR_EXPORT_IVR_COLUMNS=true`; off by default, and the file is then byte-identical to the pre-IVR layout ending at `call_quality_leg`; turn it on only after Equinox confirms) after `call_quality_leg`:
   `ivr_flow_id`, `ivr_flow_version`, `ivr_exit`
   (`transfer|voicemail|hangup|caller_hangup|timeout|error|limit`), `ivr_path`,
   `ivr_transfer_to`, `ivr_seconds`. Filled on the A-leg of a call an IVR answered

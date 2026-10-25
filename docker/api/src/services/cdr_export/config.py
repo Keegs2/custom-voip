@@ -81,6 +81,10 @@ class ExportConfig:
     delimiter: str = ","
     quote_all: bool = False
 
+    # ---- Visual IVR columns (migration 60): OFF until Equinox is ready for
+    #      the 6 extra trailing columns (formatter.IVR_FIELDS).
+    include_ivr_columns: bool = False
+
     @classmethod
     def from_env(cls) -> "ExportConfig":
         """Build an ExportConfig from CDR_EXPORT_* environment variables."""
@@ -104,6 +108,7 @@ class ExportConfig:
             filename_ts_format=os.getenv("CDR_EXPORT_FILENAME_TS_FORMAT", "%Y%m%d%H%M%S"),
             delimiter=os.getenv("CDR_EXPORT_DELIMITER", ","),
             quote_all=_env_bool("CDR_EXPORT_QUOTE_ALL", False),
+            include_ivr_columns=_env_bool("CDR_EXPORT_IVR_COLUMNS", False),
         )
 
     def redacted(self) -> dict:
