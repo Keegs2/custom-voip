@@ -44,6 +44,14 @@ function defaultName(text: string): string {
   return `Message ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 }
 
+/** "Kristin (US English, female)" as served — add the gender only when the
+ *  sidecar's label doesn't already say it. */
+function voiceLabel(v: { label: string; gender: string }): string {
+  return v.gender && !v.label.toLowerCase().includes(v.gender.toLowerCase())
+    ? `${v.label} (${v.gender})`
+    : v.label;
+}
+
 export function PromptDialog({ onClose, onCreated, forWhat }: PromptDialogProps) {
   // ── ALL hooks unconditionally at the top (React #310) ──
   const ws = useIvrWorkspace();
@@ -216,7 +224,7 @@ export function PromptDialog({ onClose, onCreated, forWhat }: PromptDialogProps)
                 {voices.isLoading && <option value="">Loading voices…</option>}
                 {voiceList.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.label} ({v.gender})
+                    {voiceLabel(v)}
                   </option>
                 ))}
               </select>
