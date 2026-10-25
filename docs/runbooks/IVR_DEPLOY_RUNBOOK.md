@@ -1,6 +1,6 @@
 # Visual IVR + voicemail outage resilience: deploy runbook (2026-10-25)
 
-This runbook deploys all four CRAG PRs, then TED, then turns IVR on for the live test (P5, run by the owner). It ends with the test checklist.
+This runbook deploys the five CRAG PRs (#157–#161) in one maintenance, turning the IVR call path on (`IVR_ENABLED=true`) in the same FreeSWITCH recreate. TED can ship any time after. The live test (P5, run by the owner) needs no maintenance window, and it can start right after the maintenance, with or without TED (§4). It ends with the test checklist.
 
 - **Plan:** `docs/IVR_PRODUCT_PLAN.md`. **Contract:** `docs/IVR_INTERFACES.md`.
 - **Voicemail detail** (key rotation, outage behaviour, rollback): `docs/runbooks/VOICEMAIL_OUTAGE_RESILIENCE_DEPLOY.md`. Its steps are folded in below.
@@ -15,7 +15,9 @@ Every command is one line and needs sudo. Run them in order, one at a time; the 
 4. `feat/ivr-portal` (the `/ivr` page + builder)
 5. `fix/rcf-no-redial-after-noanswer-busy` (#161: RCF stops re-dialing a phone that was busy or rang out). It merges cleanly in any position; it is already merged into #3.
 
-This order was test-merged clean on 2026-10-25. Nothing customer-visible changes until a customer is entitled (TED) and `IVR_ENABLED=true` is set (P5).
+This order was test-merged clean on 2026-10-25.
+
+`IVR_ENABLED=true` is set during this maintenance (§2 step 3), so FreeSWITCH is recreated only once. It is safe early: no IVR number exists yet, and a number answers only after it is assigned as IVR (TED or §4) **and** a flow is published to it. Nothing customer-visible changes until then.
 
 ## 1. Services VM (`services`, East)
 
@@ -52,10 +54,10 @@ Step 3 recreates FreeSWITCH and drops that node's calls (window).
 
 1. `echo '<the one-line certificate from §1.19>' | base64 -d | sudo tee /opt/revup/secrets/fs-voicemail/vm_spool_recipients.pem >/dev/null && sudo chmod 0644 /opt/revup/secrets/fs-voicemail/vm_spool_recipients.pem && echo OK` → `OK`
 2. `sudo sha256sum /opt/revup/secrets/fs-voicemail/vm_spool_recipients.pem` → the same checksum as §1.19.
-3. `cd /opt/revup && sudo git pull && sudo docker compose -f docker-compose.media.yml up -d freeswitch` → a fast-forward, then `Recreated`. If ports stay held: `sudo killall -9 freeswitch`, then repeat this step.
+3. `cd /opt/revup && sudo git pull && sudo sh -c 'grep -q "^IVR_ENABLED=" .env && sed -i "s/^IVR_ENABLED=.*/IVR_ENABLED=true/" .env || echo "IVR_ENABLED=true" >> .env' && grep '^IVR_ENABLED' .env && sudo docker compose -f docker-compose.media.yml up -d freeswitch` → a fast-forward, `IVR_ENABLED=true`, then `Recreated`. If ports stay held: `sudo killall -9 freeswitch`, then run `cd /opt/revup && sudo docker compose -f docker-compose.media.yml up -d freeswitch` again.
 4. `cd /opt/revup && sudo docker compose -f docker-compose.media.yml up -d --no-deps --build vm-forwarder` → `Started`.
 5. `sudo docker kill -s HUP voip-vmagent` → `voip-vmagent`
-6. After about 45 s: `sudo docker exec voip-freeswitch sh -c 'grep -cE " /var/lib/crag/(vm-spool|ivr-prompts) " /proc/self/mounts; echo "IVR_ENABLED=$IVR_ENABLED"; ls /usr/local/freeswitch/scripts/sounds/ivr/'` → `2`, then `IVR_ENABLED=false`, then `goodbye.wav  technical_difficulty.wav`.
+6. After about 45 s: `sudo docker exec voip-freeswitch sh -c 'grep -cE " /var/lib/crag/(vm-spool|ivr-prompts) " /proc/self/mounts; echo "IVR_ENABLED=$IVR_ENABLED"; ls /usr/local/freeswitch/scripts/sounds/ivr/'` → `2`, then `IVR_ENABLED=true`, then `goodbye.wav  technical_difficulty.wav`.
 7. `sudo docker exec voip-freeswitch sh -c '/usr/local/freeswitch/bin/fs_cli -p "$ESL_PASSWORD" -x "lua lib/vm_spool.lua selftest"'` → a line containing `OK`.
 8. `sudo docker inspect -f '{{.State.Health.Status}}' voip-vm-forwarder` → `healthy`
 9. `sudo docker logs --since 10m voip-freeswitch 2>&1 | grep -E "IVR DID lookup failed|vm_replica" | tail -3` → nothing.
@@ -71,7 +73,18 @@ Merge the TED PR (`feat/crag-ivr-admin`) after §1. Ship it the usual TED way: `
 ## 4. P5 — the live test (owner)
 
 ### Set up
-1. **In TED**, Customer 360 of the test customer → Visual IVR → **Turn on**. Then **Assign Number** with a spare DID routed to CRAG, as product IVR, named "IVR test".
+No maintenance window is needed: the call path was turned on in §2. Pick **one** of 1a / 1b.
+
+1a. **With TED (after §3):** Customer 360 of the test customer → Visual IVR → **Turn on**. Then **Assign Number** with a spare DID routed to CRAG, as product IVR, named "IVR test".
+
+1b. **Without TED (right after the maintenance)**, on **services**. These use the CRAG admin API directly; assigning a number as IVR also turns IVR on for that customer.
+   1. Log in once. It prompts for the admin email and password, and keeps the token in a private file:
+      `read -rp 'CRAG admin email: ' E && read -rsp 'password: ' P && echo && curl -s -X POST http://127.0.0.1:8088/v1/auth/login -H 'content-type: application/json' -d "{\"email\":\"$E\",\"password\":\"$P\"}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])' > ~/crag_admin.tok; unset P; chmod 600 ~/crag_admin.tok; wc -c < ~/crag_admin.tok` → a number over 100. An error instead means the login failed.
+   2. List spare DIDs:
+      `curl -s "http://127.0.0.1:8088/v1/numbers/inventory?status=available&limit=50" -H "authorization: Bearer $(cat ~/crag_admin.tok)" | python3 -c 'import sys,json;d=json.load(sys.stdin);[print(i["did"], i.get("carrier") or "", i.get("state") or "") for i in (d.get("items", []) if isinstance(d, dict) else d)]'` → one DID per line. Pick one the carrier routes to CRAG.
+   3. Assign it as IVR to the test customer. Granite Telephony is customer **11**; replace `+1NNNNNNNNNN` with the DID:
+      `curl -s -X POST "http://127.0.0.1:8088/v1/numbers/+1NNNNNNNNNN/assign" -H "authorization: Bearer $(cat ~/crag_admin.tok)" -H 'content-type: application/json' -d '{"customer_id":11,"product_type":"ivr","name":"IVR test"}'` → `{"status":"assigned", … "product_type":"ivr", …}`
+   4. When you're done with the API: `rm -f ~/crag_admin.tok`
 2. **In the portal**, as that customer or View as Customer, open IVR → **New message**, three times:
    - "Welcome": "Thanks for calling."
    - "Menu": "For sales press 1. To leave a message press 2. To hear this again press 9."
@@ -85,11 +98,8 @@ Merge the TED PR (`feat/crag-ivr-admin`) after §1. Ship it the usual TED way: `
 4. **Test call** in the builder: keys `9 1` → Welcome, Menu twice, then the transfer. Then **Publish**.
 5. **IVR page** → the test number → **Choose a flow** → "IVR test". The number now reads "Live · version 1".
 
-### Turn the call path on
-Only IVR numbers are affected, and only the test number exists. Carriers spread inbound calls across all three zones, so turn it on in every zone.
-
-6. On each of the 6 FS nodes, standby first: `sudo sh -c 'grep -q "^IVR_ENABLED=" /opt/revup/.env && sed -i "s/^IVR_ENABLED=.*/IVR_ENABLED=true/" /opt/revup/.env || echo "IVR_ENABLED=true" >> /opt/revup/.env' && cd /opt/revup && sudo docker compose -f docker-compose.media.yml up -d freeswitch` → `Recreated`.
-7. `sudo docker exec voip-freeswitch sh -c 'echo $IVR_ENABLED'` → `true`
+### The call path
+It is already on in every zone (§2 step 3). The test number answers as soon as step 5 is done; the published version reaches every zone's replica within seconds.
 
 ### Calls to make (to the IVR test number)
 
@@ -112,5 +122,6 @@ Only IVR numbers are affected, and only the test number exists. Carriers spread 
 - Troubleshooting ladder for a transfer call: the forward leg went out like any RCF forward (same failover and STIR handling).
 
 ### Rollback (any time)
-- **Calls:** set `IVR_ENABLED=false` (or delete the line) on each FS node, then `up -d freeswitch`. IVR numbers get 603 and nothing else changes.
+- **One number:** in TED, Switch Off. Or unassign it with `curl -s -X POST "http://127.0.0.1:8088/v1/numbers/+1NNNNNNNNNN/unassign" -H "authorization: Bearer $(cat ~/crag_admin.tok)"`; the customer's flows are kept.
 - **One customer:** in TED, Turn Off (data kept).
+- **All IVR calls:** set `IVR_ENABLED=false` on each FS node, then `up -d freeswitch` (needs a window). IVR numbers get 603 and nothing else changes.
