@@ -4,11 +4,51 @@
 
    The `dlx5-` prefix marks these as page-scoped, NOT part of the shared
    DAYLIGHT CONSOLE system in index.css. If another page reaches for one of
-   these, promote it into the shared `dl-*` block. Every value references the
-   shared `--rcf-*` custom properties declared on `.dl-scope` — no re-stated
-   magic numbers for color or rhythm. Hand-written @media only (never
-   Tailwind md:* — see the container-build gotcha in CLAUDE.md).
+   these, promote it into the shared `dl-*` block. Colour is THEME TOKENS
+   only (`--t-*`, docker/ui/CLAUDE.md §18) plus the page tokens below.
+   Hand-written @media only (never Tailwind md:* — see the container-build
+   gotcha in CLAUDE.md).
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Page tokens (§18.3 rule 2) — Troubleshooting ──────────────────────────
+   Colours with no exact --t-* twin. LIGHT keeps today's value (light parity:
+   the hex lines are this file's only colour literals; light shadows are
+   ink = --t-text at the old alphas); DARK aliases the granite set. On
+   :root so the CallTraceModal portal (and the ladder inside it) resolves
+   them too. */
+:root,
+[data-force-theme='light'] {
+  --ts-ghost: #b6c2d4;              /* separators, arrows, empty "—", disabled pager */
+  --ts-ctl-border: #d5deeb;         /* pager buttons */
+  --ts-ctl-border-hover: #b7c7dd;
+  --ts-ghost-hover-bg: #f2f6fc;     /* ghost link / icon-button hover */
+  --ts-ghost-hover-border: #b5c4da;
+  --ts-seg-shadow: 0 1px 2px color-mix(in srgb, var(--t-text) 8%, transparent);
+  --ts-scrim: color-mix(in srgb, var(--t-text) 46%, transparent);
+  --ts-accent-wash: color-mix(in srgb, var(--t-cobalt) 6%, transparent);
+  /* The call panel's lift: azure-bright ring, cobalt bloom, deep ink drop */
+  --ts-modal-shadow:
+    0 0 0 5px color-mix(in srgb, var(--brand-azure-bright) 22%, transparent),
+    0 12px 28px -12px color-mix(in srgb, var(--t-cobalt) 40%, transparent),
+    0 36px 90px -28px color-mix(in srgb, var(--t-text) 60%, transparent);
+}
+
+:root[data-theme='dark'],
+[data-force-theme='dark'] {
+  --ts-ghost: var(--t-text-faint);
+  --ts-ctl-border: var(--t-line-strong);
+  --ts-ctl-border-hover: var(--t-field-border-hover);
+  --ts-ghost-hover-bg: var(--t-hover);
+  --ts-ghost-hover-border: var(--t-field-border-hover);
+  --ts-seg-shadow: var(--t-shadow-xs);
+  --ts-scrim: var(--t-scrim);
+  --ts-accent-wash: color-mix(in srgb, var(--t-cobalt) 14%, transparent);
+  /* Same azure ring, then the landing's deep modal drop + azure glow */
+  --ts-modal-shadow:
+    0 0 0 5px color-mix(in srgb, var(--brand-azure-bright) 18%, transparent),
+    var(--t-shadow-modal),
+    0 0 48px -12px color-mix(in srgb, var(--brand-azure-bright) 35%, transparent);
+}
 
 /* ─── Page-owned canvas — this page renders OUTSIDE AppLayout ───
    `.dl-scope` cancels the AppLayout wrapper's horizontal padding with
@@ -123,7 +163,7 @@
 /* Time-range row sits on a hairline that separates "what" from "when". */
 .dlx5-timerow {
   padding-top: 18px;
-  border-top: 1px solid var(--rcf-line-soft);
+  border-top: 1px solid var(--t-line-soft);
 }
 
 /* ─── Omnibox — the primary search control ───
@@ -147,7 +187,7 @@
   top: 50%;
   transform: translateY(-50%);
   display: inline-flex;
-  color: #8b99b0;
+  color: var(--t-text-faint);
   pointer-events: none;
 }
 
@@ -195,23 +235,23 @@
   margin: 0;
   font-size: 0.74rem;
   line-height: 1.5;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .dlx5-hint-needle {
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.73rem;
   font-weight: 600;
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
   overflow-wrap: anywhere; /* long Call-IDs wrap instead of overflowing */
 }
 
 .dlx5-hint-sep {
-  color: #b6c2d4;
+  color: var(--ts-ghost);
 }
 
 .dlx5-hint-warn {
-  color: #b45309;
+  color: var(--t-warn-fg);
   font-weight: 600;
 }
 
@@ -226,9 +266,9 @@
   padding: 3px;
   gap: 2px;
   box-sizing: border-box;
-  border: 1px solid #c9d5e6;
+  border: 1px solid var(--t-field-border);
   border-radius: 8px;
-  background: var(--rcf-tint);
+  background: var(--t-tint);
 }
 
 .dlx5-seg-btn {
@@ -245,27 +285,27 @@
   border-radius: 6px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   cursor: pointer;
   transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease), box-shadow var(--rcf-ease);
 }
 
 .dlx5-seg-btn:hover:not(.dlx5-seg-btn-active) {
-  background: #ffffff;
-  color: var(--rcf-ink-soft);
+  background: var(--t-surface-raised);
+  color: var(--t-text-soft);
 }
 
 .dlx5-seg-btn:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
 .dlx5-seg-btn-active {
-  background: #ffffff;
-  border-color: rgba(47, 125, 246, 0.45);
-  color: var(--rcf-azure-deep);
+  background: var(--t-surface-raised);
+  border-color: color-mix(in srgb, var(--t-accent-line) 45%, transparent);
+  color: var(--t-accent-text);
   font-weight: 700;
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.08);
+  box-shadow: var(--ts-seg-shadow);
 }
 
 /* ─── Advanced disclosure — quiet uppercase toggle + rotating caret ─── */
@@ -279,7 +319,7 @@
 
 .dlx5-advbar-note {
   font-size: 0.7rem;
-  color: var(--rcf-ink-faint, #8b99b0);
+  color: var(--t-text-faint);
 }
 
 .dlx5-adv-toggle {
@@ -296,17 +336,17 @@
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   cursor: pointer;
   transition: color var(--rcf-ease);
 }
 
 .dlx5-adv-toggle:hover {
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
 }
 
 .dlx5-adv-toggle:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -328,9 +368,9 @@
   letter-spacing: 0.04em;
   padding: 1px 8px;
   border-radius: 20px;
-  color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.1);
-  border: 1px solid rgba(47, 125, 246, 0.3);
+  color: var(--t-accent-text);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 30%, transparent);
 }
 
 /* The open Advanced grid sits directly under its toggle (the column gap
@@ -347,7 +387,7 @@
   margin: -6px 0 0;
   font-size: 0.78rem;
   font-weight: 600;
-  color: var(--rcf-red);
+  color: var(--t-danger-fg);
 }
 
 /* ─── Results head — title + count on one line, summary beneath ─── */
@@ -384,33 +424,33 @@
 }
 
 .dlx5-status-ok {
-  color: var(--rcf-green);
-  background: rgba(22, 163, 74, 0.1);
-  border-color: rgba(22, 163, 74, 0.26);
+  color: var(--t-ok-fg);
+  background: var(--t-ok-bg);
+  border-color: var(--t-ok-border);
 }
 
 .dlx5-status-info {
-  color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.09);
-  border-color: rgba(47, 125, 246, 0.26);
+  color: var(--t-info-fg);
+  background: var(--t-info-bg);
+  border-color: color-mix(in srgb, var(--t-info-solid) 26%, transparent);
 }
 
 .dlx5-status-warn {
-  color: #b45309;
-  background: rgba(180, 83, 9, 0.09);
-  border-color: rgba(180, 83, 9, 0.26);
+  color: var(--t-warn-fg);
+  background: var(--t-warn-bg);
+  border-color: var(--t-warn-border);
 }
 
 .dlx5-status-err {
-  color: var(--rcf-red);
-  background: rgba(220, 38, 38, 0.07);
-  border-color: rgba(220, 38, 38, 0.26);
+  color: var(--t-danger-fg);
+  background: var(--t-danger-bg);
+  border-color: var(--t-danger-border);
 }
 
 .dlx5-status-none {
-  color: var(--rcf-ink-dim);
-  background: rgba(93, 111, 140, 0.08);
-  border-color: rgba(93, 111, 140, 0.2);
+  color: var(--t-text-dim);
+  background: var(--t-neutral-bg);
+  border-color: var(--t-neutral-border);
 }
 
 /* ─── Attestation pill — same chrome as the status pill, mono glyphs ─── */
@@ -439,16 +479,16 @@
   font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  color: var(--rcf-ink-dim);
-  background: rgba(93, 111, 140, 0.08);
-  border: 1px solid rgba(93, 111, 140, 0.2);
+  color: var(--t-text-dim);
+  background: var(--t-neutral-bg);
+  border: 1px solid var(--t-neutral-border);
 }
 
 .dlx5-zone-raw {
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.64rem;
   font-weight: 600;
-  color: var(--rcf-ink-faint, #8b99b0);
+  color: var(--t-text-faint);
 }
 
 /* ─── Network Path line — one clean mono line above the call panel's ladder
@@ -459,7 +499,7 @@
   margin-bottom: 12px;
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.74rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -471,13 +511,13 @@
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--rcf-ink-faint, #8b99b0);
+  color: var(--t-text-faint);
   margin-right: 10px;
   flex-shrink: 0;
 }
 
 .dlx5-pathline-arrow {
-  color: #b6c2d4;
+  color: var(--ts-ghost);
   margin: 0 8px;
 }
 
@@ -492,7 +532,7 @@
   gap: 12px;
   flex-wrap: wrap;
   padding: 12px 20px 14px;
-  border-top: 1px solid var(--rcf-line-soft);
+  border-top: 1px solid var(--t-line-soft);
 }
 
 .dlx5-pager-status {
@@ -519,35 +559,35 @@
   font-size: 0.74rem;
   font-weight: 600;
   font-family: inherit;
-  border: 1px solid #d5deeb;
-  background: #ffffff;
-  color: var(--rcf-ink-dim);
+  border: 1px solid var(--ts-ctl-border);
+  background: var(--t-surface);
+  color: var(--t-text-dim);
   cursor: pointer;
   user-select: none;
   transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
 }
 
 .dlx5-pgbtn:hover:not(:disabled) {
-  background: var(--rcf-tint-hover);
-  border-color: #b7c7dd;
-  color: var(--rcf-ink-soft);
+  background: var(--t-tint-hover);
+  border-color: var(--ts-ctl-border-hover);
+  color: var(--t-text-soft);
 }
 
 .dlx5-pgbtn:disabled {
-  color: #b6c2d4;
+  color: var(--ts-ghost);
   opacity: 0.55;
   cursor: not-allowed;
 }
 
 .dlx5-pgbtn:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
 .dlx5-pg-cur {
   font-size: 0.76rem;
   font-weight: 600;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -555,7 +595,7 @@
 /* Quiet "there's more" annotation beside the page readout */
 .dlx5-pager-note {
   font-size: 0.72rem;
-  color: var(--rcf-ink-faint, #8b99b0);
+  color: var(--t-text-faint);
   white-space: nowrap;
 }
 
@@ -572,7 +612,7 @@
 }
 
 .dl-row.dlx5-row:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: -2px;
 }
 
@@ -592,13 +632,13 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
-  color: #9aa9c0;
+  color: var(--t-field-placeholder); /* the hint grey — same value as a field placeholder */
   transition: color var(--rcf-ease);
 }
 
 .dl-row:hover .dlx5-openhint,
 .dl-row:focus-visible .dlx5-openhint {
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
 }
 
 .dlx5-chevron {
@@ -617,12 +657,17 @@
    VISIBLE on the paper canvas, so a clipped last column reads as
    "scroll", not "broken". (The container-query sticky slab that pinned the
    old inline expanded row is gone with the row itself — call detail now
-   opens in CallTraceModal.) */
+   opens in CallTraceModal.)
+   `position: relative` makes the scroller the containing block of the
+   visually-hidden column header (position: absolute) at the table's far
+   right; without it, at 390px it sat ~700px past the viewport and widened
+   the page behind the open call panel. */
 .dlx5-tablewrap {
+  position: relative;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;                        /* Firefox */
-  scrollbar-color: #b7c7dd var(--rcf-tint);     /* Firefox: thumb / track */
+  scrollbar-color: var(--t-scrollbar) var(--t-tint); /* Firefox: thumb / track */
 }
 
 .dlx5-tablewrap::-webkit-scrollbar {
@@ -630,16 +675,16 @@
 }
 
 .dlx5-tablewrap::-webkit-scrollbar-track {
-  background: var(--rcf-tint);
+  background: var(--t-tint);
 }
 
 .dlx5-tablewrap::-webkit-scrollbar-thumb {
-  background: #b7c7dd;
+  background: var(--t-scrollbar);
   border-radius: 999px;
 }
 
 .dlx5-tablewrap::-webkit-scrollbar-thumb:hover {
-  background: #94a9c9;
+  background: var(--t-scrollbar-hover);
 }
 
 /* Compact ghost link (the call panel's Grafana deep link). Light-ghost
@@ -650,9 +695,9 @@
   gap: 6px;
   padding: 5px 12px;
   border-radius: 7px;
-  border: 1px solid #cdd8e8;
-  background: var(--rcf-card);
-  color: var(--rcf-ink-soft);
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-surface-raised);
+  color: var(--t-text-soft);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -662,13 +707,13 @@
 }
 
 .dlx5-frame-link:hover {
-  background: #f2f6fc;
-  border-color: #b5c4da;
-  color: var(--rcf-azure-deep);
+  background: var(--ts-ghost-hover-bg);
+  border-color: var(--ts-ghost-hover-border);
+  color: var(--t-accent-text);
 }
 
 .dlx5-frame-link:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
@@ -681,11 +726,11 @@
   margin-left: 6px;
   padding: 1px 7px;
   border-radius: 20px;
-  border: 1px dashed rgba(93, 111, 140, 0.32);
+  border: 1px dashed color-mix(in srgb, var(--t-neutral-fg) 32%, transparent);
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.62rem;
   font-weight: 600;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
   cursor: help;
   vertical-align: middle;
@@ -714,14 +759,17 @@
    page's lighter azure accents and neutral hairline cards — so it
    unmistakably reads as a separate panel. Head and PCAP strip are fixed; the
    body scrolls (both axes: a wide ladder pans inside the body, never the
-   page). The portal root carries `.dl-scope` for the --rcf-* tokens; the
-   rules below cancel that class's page-canvas geometry.
+   page). The portal root carries `.dl-scope` for the daylight primitives'
+   class rules; the rules below cancel that class's page-canvas geometry.
+   Theme: cobalt is `--t-cobalt` (brand cobalt on light, a lifted cobalt on
+   dark so the outline still reads on granite); the panel is raised, its
+   body a sunken well under the ladder's cards.
    ═══════════════════════════════════════════════════════════════════════════ */
 .dl-scope.dlx5-canvas,
 .dl-scope.dlx5-modal-root {
-  --dlx5-accent: var(--brand-cobalt);
-  --dlx5-accent-deep: var(--brand-cobalt);
-  --dlx5-accent-wash: rgba(17, 51, 152, 0.06);
+  --dlx5-accent: var(--t-cobalt);
+  --dlx5-accent-deep: var(--t-cobalt);
+  --dlx5-accent-wash: var(--ts-accent-wash);
 }
 
 .dl-scope.dlx5-modal-root {
@@ -735,7 +783,7 @@
   justify-content: center;
   padding: 4vh 2vw;
   box-sizing: border-box;
-  background: rgba(14, 23, 38, 0.46);
+  background: var(--ts-scrim);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   animation: dlx5-modal-fade 160ms ease-out;
@@ -748,14 +796,11 @@
   max-height: 92vh;
   min-height: 0;
   box-sizing: border-box;
-  background: var(--rcf-card);
+  background: var(--t-surface-raised);
   border: 2px solid var(--dlx5-accent);
   border-radius: 14px;
   overflow: hidden;
-  box-shadow:
-    0 0 0 5px rgba(79, 146, 255, 0.22),
-    0 12px 28px -12px rgba(17, 51, 152, 0.4),
-    0 36px 90px -28px rgba(14, 23, 38, 0.6);
+  box-shadow: var(--ts-modal-shadow);
   animation: dlx5-modal-rise 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -767,8 +812,8 @@
 .dlx5-modal-head {
   flex: none;
   padding: 16px 18px 14px;
-  background: var(--rcf-card);
-  border-bottom: 1px solid var(--rcf-line);
+  background: var(--t-surface-raised);
+  border-bottom: 1px solid var(--t-line);
 }
 
 .dlx5-modal-toprow {
@@ -792,7 +837,7 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
 }
 
@@ -807,7 +852,7 @@
 }
 
 .dlx5-modal-eyebrow-sep {
-  color: #b6c2d4;
+  color: var(--ts-ghost);
   font-weight: 400;
 }
 
@@ -822,7 +867,7 @@
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.3;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .dlx5-modal-party {
@@ -830,11 +875,11 @@
 }
 
 .dlx5-modal-party-to {
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
 }
 
 .dlx5-modal-arrow {
-  color: #b6c2d4;
+  color: var(--ts-ghost);
   font-weight: 400;
 }
 
@@ -864,16 +909,16 @@
   height: 34px;
   padding: 0;
   border-radius: 8px;
-  border: 1px solid #cdd8e8;
-  background: var(--rcf-card);
-  color: var(--rcf-ink-soft);
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-surface-raised);
+  color: var(--t-text-soft);
   cursor: pointer;
   transition: background var(--rcf-ease), border-color var(--rcf-ease), color var(--rcf-ease);
 }
 
 .dlx5-modal-iconbtn:hover:not(:disabled) {
-  background: #f2f6fc;
-  border-color: #b5c4da;
+  background: var(--ts-ghost-hover-bg);
+  border-color: var(--ts-ghost-hover-border);
   color: var(--dlx5-accent-deep);
 }
 
@@ -903,7 +948,7 @@
 .dlx5-fact {
   min-width: 0;
   padding: 0 18px;
-  border-left: 1px solid var(--rcf-line);
+  border-left: 1px solid var(--t-line);
 }
 
 .dlx5-fact:first-child {
@@ -917,7 +962,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
 }
 
@@ -927,7 +972,7 @@
   min-height: 22px;
   margin: 0;
   font-size: 0.78rem;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   white-space: nowrap;
 }
 
@@ -952,9 +997,9 @@
   overflow: auto;
   overscroll-behavior: contain;
   padding: 16px 18px 20px;
-  background: var(--rcf-tint);
+  background: var(--t-surface-sunken); /* light: the same paper tint as before */
   scrollbar-width: thin;
-  scrollbar-color: #b7c7dd var(--rcf-tint);
+  scrollbar-color: var(--t-scrollbar) var(--t-surface-sunken);
 }
 
 .dlx5-modal-body::-webkit-scrollbar {
@@ -963,7 +1008,7 @@
 }
 
 .dlx5-modal-body::-webkit-scrollbar-thumb {
-  background: #b7c7dd;
+  background: var(--t-scrollbar);
   border-radius: 999px;
 }
 

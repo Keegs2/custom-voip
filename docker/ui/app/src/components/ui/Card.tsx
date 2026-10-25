@@ -11,8 +11,8 @@ interface CardTitleProps {
 }
 
 export function Card({ children, className, compact = false }: CardProps) {
-  // Borderless liquid-glass surface with the blue light-up on hover.
-  // Behaviour lives in the .glass-surface / .glass-hover CSS classes.
+  // Raised panel (theme tokens) with the azure lift on hover — behaviour
+  // lives in the .glass-surface / .glass-hover classes in index.css.
   return (
     <div
       className={['glass-surface', 'glass-hover', className].filter(Boolean).join(' ')}
@@ -30,7 +30,7 @@ export function CardTitle({ children, className }: CardTitleProps) {
       style={{
         fontSize: '0.95rem',
         fontWeight: 700,
-        color: '#e2e8f0',
+        color: 'var(--t-text-strong)',
         marginBottom: 16,
         letterSpacing: '-0.01em',
       }}

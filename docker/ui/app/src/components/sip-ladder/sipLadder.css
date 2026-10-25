@@ -2,16 +2,40 @@
    sipLadder.css — the SIP ladder's ONE component stylesheet.
 
    Everything else in the ladder stack styles inline off the LADDER_COLORS
-   theme object (sipLadderUtils.ts). This file exists only for what inline
-   styles cannot express: scrollbar pseudo-elements and the sticky-header
-   paint rules. Scrollbar values mirror the daylight scrollbar treatment of
-   the CDR page's `.dlx4-tablewrap` (styles/dl-platform-b.css) so every
+   theme object (sipLadderUtils.ts), whose values are `var(--t-*)` theme
+   tokens plus the `--ladder-*` page tokens below. This file exists for what
+   inline styles cannot express: those page tokens, scrollbar
+   pseudo-elements and the sticky-header paint rules. Scrollbars mirror the
+   CDR page's `.dlx4-tablewrap` (styles/dl-platform-b.css) so every
    horizontally-panning surface on the troubleshooting/CDR pages reads
-   identically.
+   identically. Theme contract: docker/ui/CLAUDE.md §18.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ─── Page tokens (§18.3 rule 2) — the ladder colours with no exact --t-*
+   twin. LIGHT = the daylight ladder exactly (the two hex lines are this
+   file's only colour literals; the light shadows are ink = --t-text at the
+   old alphas); DARK aliases the granite set. On :root so the ladder reads
+   them inside the CallTraceModal portal. ─── */
+:root,
+[data-force-theme='light'] {
+  --ladder-bye: #64748b;            /* slate-500 — BYE arrows (4.8:1 on white) */
+  --ladder-loopback: #475569;       /* slate-600 — the same-box loopback connector */
+  --ladder-shadow-card: var(--t-shadow-xs);
+  --ladder-shadow-panel:
+    0 1px 2px color-mix(in srgb, var(--t-text) 6%, transparent),
+    0 10px 24px -16px color-mix(in srgb, var(--t-text) 20%, transparent);
+}
+
+:root[data-theme='dark'],
+[data-force-theme='dark'] {
+  --ladder-bye: var(--t-neutral-fg);
+  --ladder-loopback: var(--t-text-dim);
+  --ladder-shadow-card: var(--t-shadow-card);
+  --ladder-shadow-panel: var(--t-shadow-pop);
+}
+
 /* Sticky participant header (both the Time gutter and every node column).
-   The background MUST be fully opaque — the previous rgba(255,255,255,0.97)
+   The background MUST be fully opaque — the previous 97 %-white fill
    let scrolled message rows ("100 Trying", retrans labels) ghost through
    behind the header text. z-index 10 clears every row layer (arrow lines
    z-1, dots/heads z-2, labels z-3). The bottom hairline is an inset shadow,
@@ -21,17 +45,17 @@
   position: sticky;
   top: 0;
   z-index: 10;
-  background: #ffffff; /* LADDER_COLORS.bg — opaque, never see-through */
-  box-shadow: inset 0 -1px 0 #e2e8f2; /* LADDER_COLORS.border hairline */
+  background: var(--t-surface); /* LADDER_COLORS.bg — opaque in both themes */
+  box-shadow: inset 0 -1px 0 var(--t-line); /* LADDER_COLORS.border hairline */
 }
 
-/* The ladder's internal horizontal pan region. The scrollbar stays VISIBLE
-   on the white canvas — an explicit affordance, so a clipped last column
-   reads as "scroll", not "broken". */
+/* The ladder's internal pan region (both axes). The scrollbar stays VISIBLE
+   on the card — an explicit affordance, so a clipped last column reads as
+   "scroll", not "broken". */
 .sipladder-scroll {
   -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;             /* Firefox */
-  scrollbar-color: #b7c7dd #f7f9fc;  /* Firefox: thumb / track */
+  scrollbar-width: thin;                               /* Firefox */
+  scrollbar-color: var(--t-scrollbar) var(--t-tint);   /* Firefox: thumb / track */
 }
 
 .sipladder-scroll::-webkit-scrollbar {
@@ -40,14 +64,14 @@
 }
 
 .sipladder-scroll::-webkit-scrollbar-track {
-  background: #f7f9fc;
+  background: var(--t-tint);
 }
 
 .sipladder-scroll::-webkit-scrollbar-thumb {
-  background: #b7c7dd;
+  background: var(--t-scrollbar);
   border-radius: 999px;
 }
 
 .sipladder-scroll::-webkit-scrollbar-thumb:hover {
-  background: #94a9c9;
+  background: var(--t-scrollbar-hover);
 }

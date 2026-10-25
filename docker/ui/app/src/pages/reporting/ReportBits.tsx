@@ -7,6 +7,7 @@ import { Check, ChevronDown, HelpCircle, X } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import type { CallOutcome, QualityGrade } from '../../types/reports';
 import { GRADE_TONE, GRADE_WORD } from './reportFormat';
+import { T } from '../../styles/theme';
 
 /** "What does this mean?" — a native <details>, so Enter/Space toggle it for free. */
 export function Explainer({ children, label = 'What does this mean?' }: { children: ReactNode; label?: string }) {
@@ -97,7 +98,7 @@ export function ReportCard({
   return (
     <section className={`dl-panel rpt-card${className ? ` ${className}` : ''}`} aria-labelledby={headingId}>
       <div className="dl-panel-head">
-        {icon && <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--rcf-azure-deep)' }}>{icon}</span>}
+        {icon && <span aria-hidden="true" style={{ display: 'inline-flex', color: T.accentText }}>{icon}</span>}
         <h2 id={headingId} className="dl-panel-title" style={{ margin: 0 }}>{title}</h2>
         {headExtra}
       </div>

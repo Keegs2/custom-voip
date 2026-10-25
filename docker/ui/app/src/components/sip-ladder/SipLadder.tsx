@@ -3,7 +3,7 @@ import type { HomerSearchResult } from '../../api/homer';
 import type { LadderLayout, LadderNode } from './sipLadderTypes';
 import { computeLayout } from './sipLadderLayout';
 import { matchesCarrierVocab } from './ladderOrder';
-import { LADDER_COLORS } from './sipLadderUtils';
+import { LADDER_COLORS, ladderMix } from './sipLadderUtils';
 import { SipMessageRow, TIMESTAMP_COL_WIDTH } from './SipMessageRow';
 import { PacketDetailPanel } from './PacketDetailPanel';
 import './sipLadder.css';
@@ -22,12 +22,13 @@ if (import.meta.env.DEV) {
 // ALL colors come from the LADDER_COLORS theme object (sipLadderUtils.ts) —
 // never hard-code a hue here. These two constants are structural only.
 
-/** Daylight card — white slab with a hairline border, mirroring `.dl-panel`. */
+/** Ladder card — a surface slab with a hairline border, mirroring `.dl-panel`
+ *  (white on light; the granite card + inner highlight on dark). */
 const CARD: React.CSSProperties = {
   background: LADDER_COLORS.bg,
   border: `1px solid ${LADDER_COLORS.border}`,
   borderRadius: 12,
-  boxShadow: '0 1px 2px rgba(14,23,38,0.05)',
+  boxShadow: LADDER_COLORS.shadowCard,
 };
 
 const MONO: React.CSSProperties = {
@@ -295,8 +296,8 @@ function LegChip({ leg, callIds }: LegChipProps) {
   if (callIds.length === 0) return null;
 
   const accent = leg === 'a' ? LADDER_COLORS.aLeg : LADDER_COLORS.bLeg;
-  const wash = leg === 'a' ? 'rgba(29,99,221,0.08)' : 'rgba(180,83,9,0.08)';
-  const edge = leg === 'a' ? 'rgba(29,99,221,0.22)' : 'rgba(180,83,9,0.24)';
+  const wash = ladderMix(accent, 8);
+  const edge = ladderMix(accent, leg === 'a' ? 22 : 24);
   const idsText = callIds.join(', ');
 
   return (
@@ -367,16 +368,16 @@ function EmptyLadder() {
         height={40}
         viewBox="0 0 24 24"
         fill="none"
-        stroke={LADDER_COLORS.textFaint}
+        stroke="currentColor"
         strokeWidth={1.5}
         strokeLinecap="round"
         strokeLinejoin="round"
-        style={{ opacity: 0.5 }}
+        style={{ opacity: 0.5, color: LADDER_COLORS.textFaint }}
       >
         <path d="M5 12.55a11 11 0 0 1 14.08 0" />
         <path d="M1.42 9a16 16 0 0 1 21.16 0" />
         <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
-        <circle cx={12} cy={20} r={1} fill={LADDER_COLORS.textFaint} stroke="none" />
+        <circle cx={12} cy={20} r={1} fill="currentColor" stroke="none" />
       </svg>
       <p style={{ color: LADDER_COLORS.textFaint, fontSize: '0.85rem', textAlign: 'center' }}>
         No SIP messages to display

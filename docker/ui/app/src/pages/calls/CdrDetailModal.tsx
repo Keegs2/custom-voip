@@ -59,6 +59,7 @@ import type { ReasonAudience } from './quality';
 import { GradePill } from './CallsTable';
 import { fmtMinutes, hasExactDuration } from '../../utils/callDuration';
 import type { Cdr, LegQuality } from '../../types/cdr';
+import { T } from '../../styles/theme';
 
 // Dev-only grade-definition self-test (dead-code-eliminated in production).
 if (import.meta.env.DEV) {
@@ -185,7 +186,7 @@ function DirectionPanel({ title, subtitle, leg, missingNote, isStaff }: Directio
       </div>
 
       {!leg && (
-        <p style={{ margin: '10px 0 0', fontSize: '0.78rem', color: 'var(--rcf-ink-dim)' }}>{missingNote}</p>
+        <p style={{ margin: '10px 0 0', fontSize: '0.78rem', color: T.textDim }}>{missingNote}</p>
       )}
 
       {leg && reason && (
@@ -195,7 +196,7 @@ function DirectionPanel({ title, subtitle, leg, missingNote, isStaff }: Directio
             margin: '10px 0 0',
             fontSize: '0.78rem',
             fontWeight: leg.quality_status === 'no_rtp' ? 700 : 500,
-            color: leg.quality_status === 'no_rtp' ? gradeColor('poor') : 'var(--rcf-ink-dim)',
+            color: leg.quality_status === 'no_rtp' ? gradeColor('poor') : T.textDim,
           }}
         >
           {reason}
@@ -232,7 +233,7 @@ function DirectionPanel({ title, subtitle, leg, missingNote, isStaff }: Directio
       {leg && isStaff && (
         <div
           className="dlx-info-grid"
-          style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--rcf-line)', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}
+          style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}`, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}
         >
           <InfoItem label="Status" value={leg.quality_status ?? 'NULL (pre-backfill)'} mono />
           <InfoItem label="Source" value={leg.quality_source ?? null} mono />
@@ -379,8 +380,8 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
               <span className="dlx4-modal-title" style={{ fontFamily: MONO, fontWeight: 600 }}>
                 {fmt(d.caller_id) || d.caller_id || '—'}
               </span>
-              <span aria-hidden="true" style={{ color: 'var(--rcf-ink-dim)', fontSize: '0.85rem' }}>→</span>
-              <span className="dlx4-modal-title" style={{ fontFamily: MONO, fontWeight: 700, color: 'var(--rcf-azure-deep)' }}>
+              <span aria-hidden="true" style={{ color: T.textDim, fontSize: '0.85rem' }}>→</span>
+              <span className="dlx4-modal-title" style={{ fontFamily: MONO, fontWeight: 700, color: T.accentText }}>
                 {fmt(d.destination) || d.destination}
               </span>
             </div>
@@ -395,7 +396,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, minWidth: 0 }}>
               <span
                 className="dlx4-mono"
-                style={{ fontSize: '0.68rem', color: 'var(--rcf-ink-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                style={{ fontSize: '0.68rem', color: T.textDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                 title={d.uuid}
               >
                 {d.uuid}
@@ -433,7 +434,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
                       : 'Not graded'}
                   </span>
                   {d.call_quality_grade && (
-                    <span style={{ color: 'var(--rcf-ink-dim)', fontWeight: 500 }}> (worse direction)</span>
+                    <span style={{ color: T.textDim, fontWeight: 500 }}> (worse direction)</span>
                   )}
                 </span>
                 {d.call_mos != null && (
@@ -442,7 +443,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
                   </span>
                 )}
                 {!d.call_quality_grade && callGradeReason && (
-                  <span style={{ fontSize: '0.78rem', color: 'var(--rcf-ink-dim)' }}>{callGradeReason}</span>
+                  <span style={{ fontSize: '0.78rem', color: T.textDim }}>{callGradeReason}</span>
                 )}
                 {isStaff && d.call_quality_leg && (
                   <span className="dl-tag dl-tag-slate" title="Which direction set the call grade">
@@ -512,7 +513,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
                   : d.sip_code != null ? `SIP ${d.sip_code}` : null
               }
               mono
-              accent={d.hangup_cause === 'NORMAL_CLEARING' ? 'var(--rcf-green)' : d.hangup_cause ? 'var(--rcf-red)' : undefined}
+              accent={d.hangup_cause === 'NORMAL_CLEARING' ? T.okFg : d.hangup_cause ? T.dangerFg : undefined}
             />
             {isStaff && d.traffic_grade && <InfoItem label="Traffic Grade" value={d.traffic_grade} />}
             {d.trunk_id && <InfoItem label="Trunk" value={d.trunk_id} mono />}
@@ -610,7 +611,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
                   style={{
                     marginLeft: 'auto',
                     fontSize: '0.68rem',
-                    color: 'var(--rcf-ink-dim)',
+                    color: T.textDim,
                     transition: 'transform 0.2s ease',
                     transform: rtpOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
                   }}
@@ -679,7 +680,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
                   label="Total Cost"
                   value={d.total_cost != null ? `$${d.total_cost.toFixed(4)}` : null}
                   mono
-                  accent={d.total_cost != null && d.total_cost > 0 ? 'var(--rcf-azure-deep)' : undefined}
+                  accent={d.total_cost != null && d.total_cost > 0 ? T.accentText : undefined}
                 />
                 <InfoItem
                   label="Carrier Cost"
@@ -693,7 +694,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
                   accent={
                     d.margin == null || d.margin === 0
                       ? undefined
-                      : d.margin > 0 ? 'var(--rcf-green)' : 'var(--rcf-red)'
+                      : d.margin > 0 ? T.okFg : T.dangerFg
                   }
                 />
                 <InfoItem

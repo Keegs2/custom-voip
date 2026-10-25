@@ -4,6 +4,11 @@
  * they can request from. Extracted verbatim from RcfPage so both the admin
  * console's "DID Management" tab and the customer dashboard's "Manage
  * numbers" overlay render the same component.
+ *
+ * Colours are theme tokens (docker/ui/CLAUDE.md §18): `T` / `tMix` and the
+ * rcf `theme.ts` palette for inline styles, `.rcf-dialog*` (index.css) for
+ * the two confirmation dialogs. Light resolves to exactly the daylight
+ * values; dark to the granite set.
  */
 import { Fragment, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -22,9 +27,15 @@ import {
 } from '../../api/didInventory';
 import type { DidInventoryItem } from '../../types/didInventory';
 import { extractNpa, extractNxx } from './didFormat';
+import { T, TONE, tMix } from '../../styles/theme';
 import {
-  AZURE, AZURE_DEEP, GREEN, INK, INK_DIM, INK_FAINT, INK_SOFT, MONO, RED,
+  AZURE_DEEP, DL, GREEN, INK, INK_DIM, INK_FAINT, INK_SOFT, MONO, RED,
 } from './theme';
+
+/** A translucent wash of a `var()` colour that isn't a theme token (the DL palette). */
+function mixVar(color: string, percent: number): string {
+  return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
+}
 
 // ─── DIDManagementTab ─────────────────────────────────────────────────────────
 
@@ -81,7 +92,7 @@ function DidFilterBar({
       <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
         <span
           aria-hidden="true"
-          style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#9aa9c0', display: 'flex', alignItems: 'center', pointerEvents: 'none' }}
+          style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: T.fieldPlaceholder, display: 'flex', alignItems: 'center', pointerEvents: 'none' }}
         >
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
             <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
@@ -119,7 +130,7 @@ function DidFilterBar({
             textAlign: 'center',
             letterSpacing: '0.08em',
             color: filters.npa.length === 3 ? AZURE_DEEP : undefined,
-            borderColor: filters.npa.length === 3 ? 'rgba(47,125,246,0.55)' : undefined,
+            borderColor: filters.npa.length === 3 ? tMix('accent-line', 55) : undefined,
           }}
         />
       </div>
@@ -145,7 +156,7 @@ function DidFilterBar({
             textAlign: 'center',
             letterSpacing: '0.08em',
             color: filters.nxx.length === 3 ? AZURE_DEEP : undefined,
-            borderColor: filters.nxx.length === 3 ? 'rgba(47,125,246,0.55)' : undefined,
+            borderColor: filters.nxx.length === 3 ? tMix('accent-line', 55) : undefined,
           }}
         />
       </div>
@@ -174,8 +185,8 @@ function DidFilterBar({
             fontSize: '0.72rem',
             fontWeight: 600,
             color: hasActive ? AZURE_DEEP : INK_DIM,
-            background: hasActive ? 'rgba(47,125,246,0.08)' : '#ffffff',
-            border: `1px solid ${hasActive ? 'rgba(47,125,246,0.22)' : '#d5deeb'}`,
+            background: hasActive ? tMix('accent-line', 8) : T.surface,
+            border: `1px solid ${hasActive ? tMix('accent-line', 22) : DL.ctlBorder}`,
             borderRadius: 20,
             padding: '5px 13px',
             whiteSpace: 'nowrap',
@@ -245,14 +256,14 @@ function didStatusBadge(status: DidInventoryItem['status']): React.ReactNode {
     DidInventoryItem['status'],
     { bg: string; color: string; border: string; label: string }
   > = {
-    available:   { bg: 'rgba(47,125,246,0.09)',  color: AZURE_DEEP, border: 'rgba(47,125,246,0.28)',  label: 'Available' },
-    assigned:    { bg: 'rgba(22,163,74,0.1)',    color: GREEN,      border: 'rgba(22,163,74,0.28)',   label: 'Assigned' },
-    reserved:    { bg: 'rgba(93,111,140,0.12)',  color: INK_SOFT,   border: 'rgba(93,111,140,0.3)',   label: 'Pending Approval' },
-    porting_in:  { bg: 'rgba(29,99,221,0.07)',   color: AZURE_DEEP, border: 'rgba(29,99,221,0.24)',   label: 'Porting In' },
-    porting_out: { bg: 'rgba(29,99,221,0.07)',   color: AZURE_DEEP, border: 'rgba(29,99,221,0.24)',   label: 'Porting Out' },
-    suspended:   { bg: 'rgba(220,38,38,0.07)',   color: RED,        border: 'rgba(220,38,38,0.26)',   label: 'Suspended' },
+    available:   { bg: T.accentTint,                 color: AZURE_DEEP, border: tMix('accent-line', 28),  label: 'Available' },
+    assigned:    { bg: TONE.ok.bg,                   color: GREEN,      border: tMix('ok-solid', 28),     label: 'Assigned' },
+    reserved:    { bg: tMix('neutral-fg', 12),       color: INK_SOFT,   border: tMix('neutral-fg', 30),   label: 'Pending Approval' },
+    porting_in:  { bg: tMix('accent-text', 7),       color: AZURE_DEEP, border: tMix('accent-text', 24),  label: 'Porting In' },
+    porting_out: { bg: tMix('accent-text', 7),       color: AZURE_DEEP, border: tMix('accent-text', 24),  label: 'Porting Out' },
+    suspended:   { bg: TONE.danger.bg,               color: RED,        border: TONE.danger.border,       label: 'Suspended' },
     // Sky pending state — the release is in flight, awaiting engineering review
-    release_requested: { bg: 'rgba(2,132,199,0.08)', color: '#0369a1', border: 'rgba(2,132,199,0.28)', label: 'Release Requested' },
+    release_requested: { bg: mixVar(DL.skySolid, 8), color: DL.sky,    border: mixVar(DL.skySolid, 28),  label: 'Release Requested' },
   };
   const s = styles[status] ?? styles.available;
   return (
@@ -358,6 +369,7 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
   if (!did) return null;
   return (
     <div
+      className="rcf-dialog-scrim"
       style={{
         position: 'fixed',
         inset: 0,
@@ -366,7 +378,6 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
         alignItems: 'center',
         justifyContent: 'center',
         padding: 24,
-        background: 'rgba(10,16,28,0.45)',
         backdropFilter: 'blur(4px)',
         WebkitBackdropFilter: 'blur(4px)',
         animation: 'fx-fade 0.15s ease',
@@ -374,19 +385,15 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
       onClick={(e) => { if (e.target === e.currentTarget && !isPending) onCancel(); }}
     >
       <div
+        className="rcf-dialog"
         style={{
-          background: '#ffffff',
-          border: '1px solid #dfe6f0',
-          borderTop: `4px solid ${AZURE}`,
           borderRadius: 14,
           padding: '30px 32px 26px',
           maxWidth: 420,
           width: '100%',
           position: 'relative',
-          boxShadow: '0 24px 64px -12px rgba(14,23,38,0.4)',
           animation: 'fx-rise 0.2s ease',
           fontFamily: '"Public Sans", "IBM Plex Sans", -apple-system, sans-serif',
-          color: INK,
         }}
       >
         {/* Icon */}
@@ -395,14 +402,14 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
             width: 48,
             height: 48,
             borderRadius: 12,
-            background: '#e4eeff',
+            background: DL.iconWash,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             marginBottom: 18,
           }}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke={AZURE_DEEP} strokeWidth={1.6} style={{ width: 24, height: 24 }}>
+          <svg viewBox="0 0 24 24" fill="none" strokeWidth={1.6} style={{ width: 24, height: 24, stroke: AZURE_DEEP }}>
             <path d="M3 5a2 2 0 0 1 2-2h3.28a1 1 0 0 1 .948.684l1.498 4.493a1 1 0 0 1-.502 1.21l-2.257 1.13a11.042 11.042 0 0 0 5.516 5.516l1.13-2.257a1 1 0 0 1 1.21-.502l4.493 1.498a1 1 0 0 1 .684.949V19a2 2 0 0 1-2 2h-1C9.716 21 3 14.284 3 6V5z" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
@@ -427,8 +434,8 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
           style={{
             padding: '12px 16px',
             borderRadius: 10,
-            background: '#eef4ff',
-            border: '1px solid rgba(47,125,246,0.2)',
+            background: DL.noteWash,
+            border: `1px solid ${tMix('accent-line', 20)}`,
             marginBottom: 22,
             fontSize: '0.78rem',
             lineHeight: 1.5,
@@ -457,8 +464,8 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
           >
             {isPending && (
               <svg viewBox="0 0 16 16" style={{ width: 13, height: 13, animation: 'fx-spin 0.7s linear infinite' }}>
-                <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth={2} />
-                <path d="M8 2a6 6 0 0 1 6 6" stroke="#fff" strokeWidth={2} fill="none" strokeLinecap="round" />
+                <circle cx="8" cy="8" r="6" fill="none" style={{ stroke: tMix('text-on-accent', 35) }} strokeWidth={2} />
+                <path d="M8 2a6 6 0 0 1 6 6" style={{ stroke: T.textOnAccent }} strokeWidth={2} fill="none" strokeLinecap="round" />
               </svg>
             )}
             {isPending ? 'Requesting…' : 'Confirm Request'}
@@ -484,6 +491,7 @@ function RequestReleaseModal({ did, onConfirm, onCancel, isPending }: RequestRel
   if (!did) return null;
   return (
     <div
+      className="rcf-dialog-scrim rcf-dialog-scrim-strong"
       style={{
         position: 'fixed',
         inset: 0,
@@ -492,7 +500,6 @@ function RequestReleaseModal({ did, onConfirm, onCancel, isPending }: RequestRel
         alignItems: 'center',
         justifyContent: 'center',
         padding: 24,
-        background: 'rgba(10,16,28,0.5)',
         backdropFilter: 'blur(5px)',
         WebkitBackdropFilter: 'blur(5px)',
         animation: 'fx-fade 0.15s ease',
@@ -500,19 +507,15 @@ function RequestReleaseModal({ did, onConfirm, onCancel, isPending }: RequestRel
       onClick={(e) => { if (e.target === e.currentTarget && !isPending) onCancel(); }}
     >
       <div
+        className="rcf-dialog rcf-dialog-strong"
         style={{
-          background: '#ffffff',
-          border: '1px solid #dfe6f0',
-          borderTop: `4px solid ${AZURE}`,
           borderRadius: 14,
           padding: '30px 32px 26px',
           maxWidth: 440,
           width: '100%',
           position: 'relative',
-          boxShadow: '0 24px 64px -12px rgba(14,23,38,0.45)',
           animation: 'fx-rise 0.2s ease',
           fontFamily: '"Public Sans", "IBM Plex Sans", -apple-system, sans-serif',
-          color: INK,
         }}
       >
         {/* Outbound-arrow icon — a request leaving for review */}
@@ -521,14 +524,14 @@ function RequestReleaseModal({ did, onConfirm, onCancel, isPending }: RequestRel
             width: 48,
             height: 48,
             borderRadius: 12,
-            background: '#e4eeff',
+            background: DL.iconWash,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             marginBottom: 18,
           }}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke={AZURE_DEEP} strokeWidth={1.7} style={{ width: 24, height: 24 }}>
+          <svg viewBox="0 0 24 24" fill="none" strokeWidth={1.7} style={{ width: 24, height: 24, stroke: AZURE_DEEP }}>
             <path d="M7 17L17 7M17 7H9M17 7v8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
@@ -560,8 +563,8 @@ function RequestReleaseModal({ did, onConfirm, onCancel, isPending }: RequestRel
           style={{
             padding: '13px 16px',
             borderRadius: 10,
-            background: 'rgba(47,125,246,0.05)',
-            border: '1px solid rgba(47,125,246,0.18)',
+            background: tMix('accent-line', 5),
+            border: `1px solid ${tMix('accent-line', 18)}`,
             marginBottom: 24,
             fontSize: '0.81rem',
             lineHeight: 1.6,
@@ -591,8 +594,8 @@ function RequestReleaseModal({ did, onConfirm, onCancel, isPending }: RequestRel
           >
             {isPending && (
               <svg viewBox="0 0 16 16" style={{ width: 13, height: 13, animation: 'fx-spin 0.7s linear infinite' }}>
-                <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth={2} />
-                <path d="M8 2a6 6 0 0 1 6 6" stroke="#fff" strokeWidth={2} fill="none" strokeLinecap="round" />
+                <circle cx="8" cy="8" r="6" fill="none" style={{ stroke: tMix('text-on-accent', 35) }} strokeWidth={2} />
+                <path d="M8 2a6 6 0 0 1 6 6" style={{ stroke: T.textOnAccent }} strokeWidth={2} fill="none" strokeLinecap="round" />
               </svg>
             )}
             {isPending ? 'Submitting…' : 'Request Release'}
@@ -648,7 +651,7 @@ function MyNumbersSection({
     return (
       <DidCard>
         <DidSectionHeader title="My Numbers" />
-        <div style={{ padding: '16px 20px', margin: 16, borderRadius: 10, background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: RED, fontSize: '0.85rem' }}>
+        <div style={{ padding: '16px 20px', margin: 16, borderRadius: 10, background: tMix('danger-solid', 6), border: `1px solid ${tMix('danger-solid', 20)}`, color: RED, fontSize: '0.85rem' }}>
           Unable to load your numbers. Please try refreshing.
         </div>
       </DidCard>
@@ -680,13 +683,13 @@ function MyNumbersSection({
               width: 56,
               height: 56,
               borderRadius: 14,
-              background: '#e4eeff',
+              background: DL.iconWash,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke={AZURE_DEEP} strokeWidth={1.5} style={{ width: 28, height: 28 }}>
+            <svg viewBox="0 0 24 24" fill="none" strokeWidth={1.5} style={{ width: 28, height: 28, stroke: AZURE_DEEP }}>
               <path d="M3 5a2 2 0 0 1 2-2h3.28a1 1 0 0 1 .948.684l1.498 4.493a1 1 0 0 1-.502 1.21l-2.257 1.13a11.042 11.042 0 0 0 5.516 5.516l1.13-2.257a1 1 0 0 1 1.21-.502l4.493 1.498a1 1 0 0 1 .684.949V19a2 2 0 0 1-2 2h-1C9.716 21 3 14.284 3 6V5z" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
@@ -722,7 +725,7 @@ function MyNumbersSection({
                 textAlign: 'center',
               }}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="#b6c2d4" strokeWidth={1.5} style={{ width: 28, height: 28 }}>
+              <svg viewBox="0 0 24 24" fill="none" strokeWidth={1.5} style={{ width: 28, height: 28, stroke: DL.slateSoft }}>
                 <path d="m21 21-5.197-5.197M15.803 15.803A7.5 7.5 0 1 0 4.197 4.197a7.5 7.5 0 0 0 11.606 11.606Z" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               <p style={{ color: INK_SOFT, fontSize: '0.85rem', fontWeight: 500, margin: 0 }}>
@@ -773,12 +776,11 @@ function MyNumbersSection({
                             <svg
                               viewBox="0 0 16 16"
                               fill="none"
-                              stroke={isExpanded ? AZURE_DEEP : INK_FAINT}
                               strokeWidth={1.75}
                               strokeLinecap="round"
                               strokeLinejoin="round"
                               className={`rcf-chev${isExpanded ? ' rcf-chev-open' : ''}`}
-                              style={{ width: 13, height: 13 }}
+                              style={{ width: 13, height: 13, stroke: isExpanded ? AZURE_DEEP : INK_FAINT }}
                             >
                               <path d="M6 3l5 5-5 5" />
                             </svg>
@@ -793,7 +795,7 @@ function MyNumbersSection({
 
                           {/* Location — city/state merged, quiet em-dash when unknown */}
                           <td style={{ padding: '15px 16px' }}>
-                            <span style={{ fontSize: '0.85rem', color: location ? INK_SOFT : '#a7b3c8', whiteSpace: 'nowrap' }}>
+                            <span style={{ fontSize: '0.85rem', color: location ? INK_SOFT : DL.slateMute, whiteSpace: 'nowrap' }}>
                               {location || '—'}
                             </span>
                           </td>
@@ -816,15 +818,15 @@ function MyNumbersSection({
                               <button
                                 type="button"
                                 className="rcf-btn rcf-btn-ghost"
-                                style={{ padding: '7px 14px', fontSize: '0.74rem', gap: 6, whiteSpace: 'nowrap', color: AZURE_DEEP, borderColor: 'rgba(47,125,246,0.35)' }}
+                                style={{ padding: '7px 14px', fontSize: '0.74rem', gap: 6, whiteSpace: 'nowrap', color: AZURE_DEEP, borderColor: tMix('accent-line', 35) }}
                                 onClick={() => onCancelRelease(item)}
                                 disabled={cancelingDid === item.did}
                                 title="Withdraw the pending release request — the number stays assigned"
                               >
                                 {cancelingDid === item.did ? (
                                   <svg viewBox="0 0 16 16" style={{ width: 11, height: 11, animation: 'fx-spin 0.7s linear infinite' }}>
-                                    <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(47,125,246,0.3)" strokeWidth={2} />
-                                    <path d="M8 2a6 6 0 0 1 6 6" stroke={AZURE_DEEP} strokeWidth={2} fill="none" strokeLinecap="round" />
+                                    <circle cx="8" cy="8" r="6" fill="none" style={{ stroke: tMix('accent-line', 30) }} strokeWidth={2} />
+                                    <path d="M8 2a6 6 0 0 1 6 6" style={{ stroke: AZURE_DEEP }} strokeWidth={2} fill="none" strokeLinecap="round" />
                                   </svg>
                                 ) : (
                                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75} style={{ width: 11, height: 11 }}>
@@ -857,14 +859,14 @@ function MyNumbersSection({
                               colSpan={7}
                               style={{
                                 padding: '0 20px 20px 20px',
-                                background: '#f7fafd',
+                                background: DL.well,
                               }}
                             >
                               {/* Detail panel */}
                               <div
                                 style={{
-                                  background: '#ffffff',
-                                  border: '1px solid #dfe6f0',
+                                  background: T.surface,
+                                  border: `1px solid ${DL.rule}`,
                                   borderRadius: 12,
                                   padding: '20px 22px',
                                   display: 'grid',
@@ -872,7 +874,7 @@ function MyNumbersSection({
                                   gap: 16,
                                   position: 'relative',
                                   overflow: 'hidden',
-                                  boxShadow: '0 8px 22px -14px rgba(14,23,38,0.25)',
+                                  boxShadow: DL.detailShadow,
                                 }}
                               >
                                 {/* Top accent line */}
@@ -883,7 +885,7 @@ function MyNumbersSection({
                                     left: 32,
                                     right: 32,
                                     height: 2,
-                                    background: 'linear-gradient(90deg, transparent, rgba(47,125,246,0.5), transparent)',
+                                    background: `linear-gradient(90deg, transparent, ${DL.detailLine}, transparent)`,
                                   }}
                                 />
 
@@ -1008,7 +1010,7 @@ function PendingRequestsSection({ items }: { items: DidInventoryItem[] }) {
                     </span>
                   </td>
                   <td style={{ padding: '15px 16px' }}>
-                    <span style={{ fontSize: '0.85rem', color: location ? INK_SOFT : '#a7b3c8', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: '0.85rem', color: location ? INK_SOFT : DL.slateMute, whiteSpace: 'nowrap' }}>
                       {location || '—'}
                     </span>
                   </td>
@@ -1088,7 +1090,7 @@ function AvailableNumbersSection({
     return (
       <DidCard delay={160}>
         <DidSectionHeader title="Available Numbers" />
-        <div style={{ padding: '16px 20px', margin: 16, borderRadius: 10, background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: RED, fontSize: '0.85rem' }}>
+        <div style={{ padding: '16px 20px', margin: 16, borderRadius: 10, background: tMix('danger-solid', 6), border: `1px solid ${tMix('danger-solid', 20)}`, color: RED, fontSize: '0.85rem' }}>
           Unable to load available numbers. Please try refreshing.
         </div>
       </DidCard>
@@ -1103,7 +1105,8 @@ function AvailableNumbersSection({
         countLabel={filtered.length === 1 ? 'number available' : 'numbers available'}
       />
       {!canRequest && (
-        <p style={{ margin: '0 0 14px', fontSize: '0.8rem', color: INK_DIM }}>
+        // Inset like the rest of the panel (it used to touch the left edge).
+        <p style={{ margin: 0, padding: '12px 20px', fontSize: '0.8rem', color: INK_DIM }}>
           {isStaff
             ? 'View only — staff assign numbers to customers from the number inventory tool.'
             : 'View only — your account has read-only access. Ask your account administrator to request numbers.'}
@@ -1127,13 +1130,13 @@ function AvailableNumbersSection({
               width: 56,
               height: 56,
               borderRadius: 14,
-              background: '#e4eeff',
+              background: DL.iconWash,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke={AZURE_DEEP} strokeWidth={1.5} style={{ width: 26, height: 26 }}>
+            <svg viewBox="0 0 24 24" fill="none" strokeWidth={1.5} style={{ width: 26, height: 26, stroke: AZURE_DEEP }}>
               <rect x="3" y="3" width="18" height="18" rx="3" />
               <path d="M9 12h6M12 9v6" strokeLinecap="round" />
             </svg>
@@ -1170,7 +1173,7 @@ function AvailableNumbersSection({
                 textAlign: 'center',
               }}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="#b6c2d4" strokeWidth={1.5} style={{ width: 32, height: 32 }}>
+              <svg viewBox="0 0 24 24" fill="none" strokeWidth={1.5} style={{ width: 32, height: 32, stroke: DL.slateSoft }}>
                 <path d="m21 21-5.197-5.197M15.803 15.803A7.5 7.5 0 1 0 4.197 4.197a7.5 7.5 0 0 0 11.606 11.606Z" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               <p style={{ color: INK_SOFT, fontSize: '0.88rem', fontWeight: 500, margin: 0 }}>
@@ -1209,7 +1212,7 @@ function AvailableNumbersSection({
 
                         {/* Location — city/state merged (list is pre-sorted by state) */}
                         <td style={{ padding: '15px 16px' }}>
-                          <span style={{ fontSize: '0.85rem', color: location ? INK_SOFT : '#a7b3c8', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: '0.85rem', color: location ? INK_SOFT : DL.slateMute, whiteSpace: 'nowrap' }}>
                             {location || '—'}
                           </span>
                         </td>
@@ -1230,8 +1233,8 @@ function AvailableNumbersSection({
                           >
                             {isRequesting ? (
                               <svg viewBox="0 0 16 16" style={{ width: 11, height: 11, animation: 'fx-spin 0.7s linear infinite' }}>
-                                <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth={2} />
-                                <path d="M8 2a6 6 0 0 1 6 6" stroke="#fff" strokeWidth={2} fill="none" strokeLinecap="round" />
+                                <circle cx="8" cy="8" r="6" fill="none" style={{ stroke: tMix('text-on-accent', 35) }} strokeWidth={2} />
+                                <path d="M8 2a6 6 0 0 1 6 6" style={{ stroke: T.textOnAccent }} strokeWidth={2} fill="none" strokeLinecap="round" />
                               </svg>
                             ) : (
                               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 11, height: 11 }}>

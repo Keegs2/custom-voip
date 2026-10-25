@@ -26,6 +26,7 @@ import { downloadPcap } from '../../api/homer';
 import { ApiError } from '../../api/client';
 import { saveBlob } from '../../utils/download';
 import { Spinner } from '../ui/Spinner';
+import { T } from '../../styles/theme';
 
 const HELPER_OFF =
   'Edge-only capture (SBC ↔ carrier/customer) — safe to share externally.';
@@ -93,8 +94,8 @@ export function PcapExportControl({ callId }: PcapExportControlProps) {
         gap: 12,
         flexWrap: 'wrap',
         padding: '9px 18px',
-        background: 'var(--rcf-card)',
-        borderBottom: '1px solid var(--rcf-line)',
+        background: T.surface,
+        borderBottom: `1px solid ${T.line}`,
       }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -119,7 +120,7 @@ export function PcapExportControl({ callId }: PcapExportControlProps) {
           cursor: busy ? 'default' : 'pointer',
           fontSize: '0.76rem',
           fontWeight: 600,
-          color: 'var(--rcf-ink-soft)',
+          color: T.textSoft,
           whiteSpace: 'nowrap',
           userSelect: 'none',
           flexShrink: 0,
@@ -131,7 +132,7 @@ export function PcapExportControl({ callId }: PcapExportControlProps) {
           checked={internal}
           disabled={busy}
           onChange={(e) => setInternal(e.target.checked)}
-          style={{ width: 14, height: 14, accentColor: 'var(--rcf-azure)', cursor: 'inherit' }}
+          style={{ width: 14, height: 14, accentColor: T.accent, cursor: 'inherit' }}
         />
         Show internal
       </label>
@@ -142,7 +143,7 @@ export function PcapExportControl({ callId }: PcapExportControlProps) {
         style={{
           fontSize: '0.7rem',
           lineHeight: 1.4,
-          color: internal ? '#b45309' : 'var(--rcf-ink-dim)',
+          color: internal ? T.warnFg : T.textDim,
           fontWeight: internal ? 600 : 400,
           minWidth: 0,
         }}

@@ -12,6 +12,7 @@ import type { ReportNumbers } from '../../types/reports';
 import { CardError, GradeBadge, ReportCard, Skeleton } from './ReportBits';
 import { nameWithProduct } from '../../config/products';
 import { fmtCount, fmtMinutes, fmtPct, fmtPhone } from './reportFormat';
+import { T } from '../../styles/theme';
 
 const INITIAL_ROWS = 10;
 
@@ -83,7 +84,7 @@ export function NumbersTable({ numbers }: NumbersTableProps) {
                   return (
                   <tr key={r.number} className="dl-row">
                     <td>
-                      <span className="rpt-mono" style={{ color: 'var(--rcf-azure-deep)', fontWeight: 600 }}>{fmtPhone(r.number)}</span>
+                      <span className="rpt-mono" style={{ color: T.accentText, fontWeight: 600 }}>{fmtPhone(r.number)}</span>
                       {subline && <span className="rpt-subline">{subline}</span>}
                     </td>
                     {showForward && (

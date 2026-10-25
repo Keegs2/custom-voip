@@ -4,7 +4,8 @@
  * The builder ships in Phase 2, so the page is a quiet daylight header plus a
  * composed coming-soon state — same copy and semantics as the original
  * placeholder, restyled into the shared DAYLIGHT CONSOLE system (`dl-*`
- * classes in index.css; page-scoped `dlx-*` in dl-portal-pages.css).
+ * classes in index.css; page-scoped `dlx-*` in dl-portal-pages.css), on the
+ * theme tokens so it follows light / dark.
  *
  * React #310: every hook is called unconditionally at the top, before any
  * early return.
@@ -12,11 +13,12 @@
 
 import { useAuth } from '../contexts/AuthContext';
 import { IconIVR } from '../components/icons/ProductIcons';
+import { T } from '../styles/theme';
 import '../styles/dl-portal-pages.css';
 
-/* ─── Design tokens (mirror the .dl-scope CSS vars) ─── */
-const INK = '#0e1726';
-const INK_DIM = '#5d6f8c';
+/* ─── Colour roles — theme tokens (light / dark, docker/ui/CLAUDE.md §18) ─── */
+const INK = T.text;
+const INK_DIM = T.textDim;
 
 export function IvrBuilderPage() {
   // ── ALL hooks unconditionally at the top — React #310 guard ──

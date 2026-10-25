@@ -6,14 +6,21 @@
  * identical everywhere.
  *
  * Palette follows the app convention (green=good, amber=partial, red=bad,
- * gray=none) with the brand blue (src/styles/brand.ts) reserved for `div`
- * (diversion) — azure-deep text (5.4:1 on white) on an azure wash:
+ * gray=none) with the brand blue reserved for `div` (diversion):
  *   - Attestation:  A = green,   B = amber,  C = gray,  div = blue
  *   - Verstat:      Passed = green,  Failed = red,  No-TN / none = gray
+ *
+ * THEMED (docker/ui/CLAUDE.md §18): every value is a theme-token `var()`
+ * string — the status tones (`TONE.*`) plus two alpha steps — so a pill reads
+ * on paper and on granite alike (light: green-700 / amber-700 / red-700 /
+ * slate text, ≥ 4.4:1 on its wash; dark: the lifted granite tones). This
+ * replaced the old dark-UI palette (#22c55e / #f59e0b / #ef4444 / #94a3b8
+ * text), which measured 2.1–3.8:1 on the white call-detail modal. The
+ * Troubleshooting badges (CallBadges) render from the same table.
  */
 
 import type { AttestationLevel, StirBadgeFields, StirBadgeSource, VerstatSource } from '../../types/stir';
-import { BRAND_AZURE_DEEP, brandAzureAlpha } from '../../styles/brand';
+import { T, TONE, tMix } from '../../styles/theme';
 
 export interface ColorToken {
   /** Foreground / text colour. */
@@ -24,12 +31,32 @@ export interface ColorToken {
   border: string;
 }
 
-// ── Raw palette ──────────────────────────────────────────────────────────────
-const GREEN: ColorToken = { text: '#22c55e', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.25)' };
-const AMBER: ColorToken = { text: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.28)' };
-const RED: ColorToken   = { text: '#ef4444', bg: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.28)'  };
-const BLUE: ColorToken  = { text: BRAND_AZURE_DEEP, bg: brandAzureAlpha(0.12), border: brandAzureAlpha(0.3) };
-const GRAY: ColorToken  = { text: '#94a3b8', bg: 'rgba(74,85,104,0.15)',  border: 'rgba(74,85,104,0.30)'  };
+// ── Palette (theme tokens) ───────────────────────────────────────────────────
+const GREEN: ColorToken = { text: T.okFg, bg: TONE.ok.bg, border: TONE.ok.border };
+const AMBER: ColorToken = { text: T.warnFg, bg: TONE.warn.bg, border: TONE.warn.border };
+const RED: ColorToken   = { text: T.dangerFg, bg: tMix('danger-solid', 8), border: TONE.danger.border };
+const BLUE: ColorToken  = { text: T.infoFg, bg: TONE.info.bg, border: tMix('info-solid', 26) };
+const GRAY: ColorToken  = { text: T.neutralFg, bg: TONE.neutral.bg, border: TONE.neutral.border };
+/** Nothing on record / a label this build doesn't know — the gray chrome
+ *  with dim (not faint) text, so the word itself still reads at AA. */
+const NONE: ColorToken  = { text: T.textDim, bg: TONE.neutral.bg, border: TONE.neutral.border };
+
+export type AttestToneKey = 'A' | 'B' | 'C' | 'div' | 'base-only' | 'unsigned' | 'none';
+
+/**
+ * Every attestation label → its pill tone. Wire-outcome labels (Kamailio
+ * `eff=`): a base PASSporT went out but no div could be chained (amber), or
+ * nothing was signed at all (red — the compliance-risk case).
+ */
+export const ATTEST_TONES: Readonly<Record<AttestToneKey, ColorToken>> = Object.freeze({
+  A: GREEN,
+  B: AMBER,
+  C: GRAY,
+  div: BLUE,
+  'base-only': AMBER,
+  unsigned: RED,
+  none: NONE,
+});
 
 /** Colour for an attestation level. `null`/unknown → gray ("none"). */
 export function attestColor(level: AttestationLevel | string | null | undefined): ColorToken {

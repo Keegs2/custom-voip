@@ -7,7 +7,10 @@
  *   Granite Crag   ● Active · Customer since March 2026     [Viewing ▾] [ Call forwarding | SIP Trunking Soon ]  [+ Manage numbers]
  *
  * Granite gradient, inner top highlight, a soft cobalt radial glow and a 2px
- * azure light-line along the bottom edge (account-dashboard.css). The
+ * azure light-line along the bottom edge (account-dashboard.css). The band
+ * is dark in BOTH themes: the frame reads the page theme's --t-band-* set,
+ * and the two content columns are pinned with data-force-theme="dark" so
+ * every token inside (and the native <select> popup) is the dark set. The
  * switcher is a segmented pill driven by products.ts: available products are
  * pressable, the rest are dimmed with a "Soon" tag (aria-disabled, still
  * focusable so the roadmap is discoverable by keyboard). A product with its
@@ -99,7 +102,7 @@ export function DashboardHeader({
     <header className="ad-header ad-rise" style={{ '--i': 0 } as CSSProperties}>
       <div className="ad-header-glow" aria-hidden="true" />
 
-      <div className="ad-header-id">
+      <div className="ad-header-id" data-force-theme="dark">
         <p className="ad-header-kicker">
           {kickerText}
           {tag && <span className="ad-preview-tag">{tag}</span>}
@@ -120,7 +123,7 @@ export function DashboardHeader({
         {children}
       </div>
 
-      <div className="ad-header-tools">
+      <div className="ad-header-tools" data-force-theme="dark">
         {scope}
 
         {products && (

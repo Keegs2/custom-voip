@@ -12,6 +12,7 @@ import { ChevronDown } from 'lucide-react';
 import { productTag } from '../../config/products';
 import type { MyNumber } from '../../types/reports';
 import { fmtPhone } from './reportFormat';
+import { T } from '../../styles/theme';
 
 interface NumberPickerProps {
   options: MyNumber[];
@@ -103,7 +104,7 @@ export function NumberPicker({ options, selected, onChange, loading, failed }: N
         onClick={() => (open ? close(false) : setOpen(true))}
       >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
-        <ChevronDown size={14} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--rcf-ink-dim)' }} />
+        <ChevronDown size={14} aria-hidden="true" style={{ flexShrink: 0, color: T.textDim }} />
       </button>
       {failed && (
         <span id={`${labelId}-err`} className="dl-help" style={{ display: 'block' }}>

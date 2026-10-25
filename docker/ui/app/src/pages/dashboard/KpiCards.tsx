@@ -20,6 +20,11 @@
  *
  * Quality tone + words come only from quality.ts (goodShareColor) and the
  * colour always travels with a word. No money, no raw media values.
+ *
+ * Tones are theme tokens (docker/ui/CLAUDE.md §18): on light exactly the
+ * old brand hex (azure, azure-deep, cobalt, green); on dark the granite set
+ * (azure-bright lines, lifted cobalt, emerald) so edges, icons and
+ * sparklines keep their contrast.
  */
 import type { CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -27,8 +32,7 @@ import { Building2, CircleCheck, Hash, PhoneForwarded, PhoneIncoming, Users, Vol
 import type { CdrActivityPoint, CdrActivityResponse } from '../../types/cdrActivity';
 import { goodShareColor } from '../calls/quality';
 import { fmtPct1, fmtShareFloor } from '../rcf/activityFormat';
-import { GREEN } from '../rcf/theme';
-import { BRAND_AZURE as AZURE, BRAND_AZURE_DEEP as AZURE_DEEP, BRAND_COBALT as COBALT } from '../../styles/brand';
+import { T } from '../../styles/theme';
 import { mixSentence, type ProductCount } from '../../config/products';
 import { shareWord, type Feed } from './accountData';
 
@@ -59,6 +63,12 @@ export interface TeamCounts {
   total: number;
   active: number;
 }
+
+// KPI tones — light = the brand hex these cards always used.
+const TONE_NUMBERS = T.accentLine; // azure · azure-bright
+const TONE_ANSWERED = T.accentText; // azure-deep · azure-bright
+const TONE_PEOPLE = T.cobalt; // cobalt · lifted cobalt
+const TONE_FORWARDING = T.okFg; // green · emerald
 
 // ─── Sparkline ───────────────────────────────────────────────────────────────
 
@@ -104,9 +114,9 @@ function Sparkline({ values, color, floorZero }: { values: readonly (number | nu
 
   return (
     <svg className="ad-spark" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} aria-hidden="true">
-      <path d={area} fill={color} opacity={0.1} />
-      <path d={line} fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-      {last && <circle cx={last.x} cy={last.y} r={2.6} fill={color} />}
+      <path d={area} style={{ fill: color }} opacity={0.1} />
+      <path d={line} fill="none" style={{ stroke: color }} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      {last && <circle cx={last.x} cy={last.y} r={2.6} style={{ fill: color }} />}
     </svg>
   );
 }
@@ -227,7 +237,7 @@ export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref,
           order={order}
           label="Customers"
           icon={<Building2 size={16} strokeWidth={2} />}
-          tone={COBALT}
+          tone={TONE_PEOPLE}
           value={people.feed.state === 'ready' ? people.feed.value.total.toLocaleString() : <Placeholder state={people.feed.state} />}
           context={
             people.feed.state === 'ready'
@@ -243,7 +253,7 @@ export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref,
           order={slot(5)}
           label="Team"
           icon={<Users size={16} strokeWidth={2} />}
-          tone={COBALT}
+          tone={TONE_PEOPLE}
           value={people.feed.state === 'ready' ? people.feed.value.total.toLocaleString() : <Placeholder state={people.feed.state} />}
           context={
             people.feed.state === 'ready'
@@ -266,7 +276,7 @@ export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref,
           order={slot(0)}
           label="Numbers"
           icon={<Hash size={16} strokeWidth={2} />}
-          tone={AZURE}
+          tone={TONE_NUMBERS}
           value={numbers.state === 'ready' ? `${numbers.value.total.toLocaleString()}${numbers.value.partial ? '+' : ''}` : <Placeholder state={numbers.state} />}
           context={
             n?.partial ? (platform ? 'First 1,000 listed' : 'First 100 listed') : mix ? <span className="ad-ellipsis">{mix}</span> : numbersWhere
@@ -281,7 +291,7 @@ export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref,
           order={slot(1)}
           label="Forwarding"
           icon={<PhoneForwarded size={16} strokeWidth={2} />}
-          tone={GREEN}
+          tone={TONE_FORWARDING}
           value={numbers.state === 'ready' ? numbers.value.forwarding.toLocaleString() : <Placeholder state={numbers.state} />}
           context={
             numbers.state !== 'ready' ? 'Routing right now' : noForwarding ? 'No call forwarding numbers' : numbers.value.paused === 0 ? (
@@ -305,10 +315,10 @@ export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref,
           order={slot(2)}
           label="Calls, 7 days"
           icon={<PhoneIncoming size={16} strokeWidth={2} />}
-          tone={AZURE}
+          tone={TONE_NUMBERS}
           value={k ? k.calls.toLocaleString() : activityPlaceholder}
           context={k ? `${k.answered.toLocaleString()} answered` : callsWhere}
-          spark={k && k.calls > 0 ? <Sparkline values={series(points, (p) => p.calls)} color={AZURE} floorZero /> : null}
+          spark={k && k.calls > 0 ? <Sparkline values={series(points, (p) => p.calls)} color={TONE_NUMBERS} floorZero /> : null}
           target={openActivity}
         />
       </div>
@@ -318,10 +328,10 @@ export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref,
           order={slot(3)}
           label="Answered"
           icon={<CircleCheck size={16} strokeWidth={2} />}
-          tone={AZURE_DEEP}
+          tone={TONE_ANSWERED}
           value={k ? fmtPct1(k.asr_pct) : activityPlaceholder}
           context={k ? (k.calls === 0 ? 'No calls yet' : `${(k.calls - k.answered).toLocaleString()} missed`) : 'Share of calls answered'}
-          spark={k && k.calls > 0 ? <Sparkline values={series(points, (p) => p.asr_pct)} color={AZURE_DEEP} floorZero={false} /> : null}
+          spark={k && k.calls > 0 ? <Sparkline values={series(points, (p) => p.asr_pct)} color={TONE_ANSWERED} floorZero={false} /> : null}
           target={openActivity}
         />
       </div>

@@ -4,8 +4,10 @@
    The `dlx-` prefix marks these as page-scoped, NOT part of the shared
    DAYLIGHT CONSOLE system in index.css. If another page reaches for one of
    these, promote it into the shared `dl-*` block (flag for consolidation).
-   Every value references the shared `--rcf-*` custom properties declared on
-   `.dl-scope` — no re-stated magic numbers for color or rhythm.
+   Colour is THEME TOKENS only (`--t-*`, docker/ui/CLAUDE.md §18) plus the
+   Calls page tokens (`--cq-*`, declared for both themes at the top of
+   dl-platform-b.css — CallsPage imports both files). Unused legacy rules
+   (sheet, stat line, filter grid) map to the nearest theme token.
    Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -21,11 +23,11 @@
 .dlx-stat {
   min-width: 108px;
   padding-left: 14px;
-  border-left: 3px solid var(--rcf-azure);
+  border-left: 3px solid var(--t-accent-line);
 }
 
 .dlx-stat-dim {
-  border-left-color: #c6d2e4;
+  border-left-color: var(--t-line-strong);
 }
 
 .dlx-stat-value {
@@ -34,7 +36,7 @@
   font-size: 1.3rem;
   line-height: 1.05;
   letter-spacing: -0.01em;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -45,7 +47,7 @@
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
 }
 
@@ -70,28 +72,28 @@
   font-weight: 600;
   padding: 5px 14px;
   border-radius: 20px;
-  border: 1px solid #cdd8e8;
-  background: #ffffff;
-  color: var(--rcf-ink-dim);
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-surface-raised);
+  color: var(--t-text-dim);
   cursor: pointer;
   transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
 }
 
 .dlx-seg-btn:hover:not(.dlx-seg-btn-active) {
-  background: #f2f6fc;
-  border-color: #a3b6d3;
-  color: var(--rcf-ink-soft);
+  background: var(--cq-ghost-hover-bg);
+  border-color: var(--t-field-border-hover);
+  color: var(--t-text-soft);
 }
 
 .dlx-seg-btn:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
 .dlx-seg-btn-active {
-  border-color: rgba(47, 125, 246, 0.5);
-  background: rgba(47, 125, 246, 0.1);
-  color: var(--rcf-azure-deep);
+  border-color: color-mix(in srgb, var(--t-accent-line) 50%, transparent);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
+  color: var(--t-accent-text);
   font-weight: 700;
 }
 
@@ -102,18 +104,18 @@
 }
 
 .dlx-th-sort:hover {
-  color: var(--rcf-ink-soft);
-  background: #eef3fa;
+  color: var(--t-text-soft);
+  background: var(--t-tint-hover);
 }
 
 .dlx-th-active,
-.dlx-th-active:hover { color: var(--rcf-azure-deep); }
+.dlx-th-active:hover { color: var(--t-accent-text); }
 
 /* Selected CDR row — open-state tint + azure keyline (rcf-nrow-open family) */
 .dlx-row-active,
 .dlx-row-active:hover {
-  background: #eef4fe;
-  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+  background: var(--t-accent-wash);
+  box-shadow: inset 2px 0 0 0 var(--t-accent-line);
 }
 
 /* ─── Pagination buttons (mirrors the console pagination family) ─── */
@@ -128,22 +130,22 @@
   font-size: 0.76rem;
   font-weight: 600;
   font-family: inherit;
-  border: 1px solid #d5deeb;
-  background: #ffffff;
-  color: var(--rcf-ink-dim);
+  border: 1px solid var(--cq-ctl-border);
+  background: var(--t-surface);
+  color: var(--t-text-dim);
   cursor: pointer;
   user-select: none;
   transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
 }
 
 .dlx-pgbtn:hover:not(:disabled) {
-  background: var(--rcf-tint-hover);
-  border-color: #b7c7dd;
-  color: var(--rcf-ink-soft);
+  background: var(--t-tint-hover);
+  border-color: var(--cq-ctl-border-hover);
+  color: var(--t-text-soft);
 }
 
 .dlx-pgbtn:disabled {
-  color: #b6c2d4;
+  color: var(--cq-ghost);
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -152,7 +154,7 @@
 .dlx-sheet-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(14, 23, 38, 0.34);
+  background: var(--t-scrim);
   z-index: 1000;
   display: flex;
   justify-content: flex-end;
@@ -163,9 +165,9 @@
   width: 480px;
   max-width: 95vw;
   height: 100%;
-  background: var(--rcf-card);
-  border-left: 1px solid var(--rcf-line);
-  box-shadow: -28px 0 64px rgba(14, 23, 38, 0.22);
+  background: var(--t-surface-raised);
+  border-left: 1px solid var(--t-line);
+  box-shadow: var(--t-shadow-modal);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -196,8 +198,8 @@
   justify-content: space-between;
   gap: 12px;
   padding: 18px 22px 14px;
-  background: var(--rcf-card);
-  border-bottom: 1px solid var(--rcf-line);
+  background: var(--t-surface-raised);
+  border-bottom: 1px solid var(--t-line);
 }
 
 .dlx-sheet-eyebrow {
@@ -208,14 +210,14 @@
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .dlx-sheet-eyebrow::before {
   content: '';
   width: 6px;
   height: 6px;
-  background: var(--rcf-azure);
+  background: var(--t-accent-line);
   border-radius: 1px;
   flex-shrink: 0;
 }
@@ -229,21 +231,21 @@
   height: 30px;
   padding: 0;
   border-radius: 7px;
-  border: 1px solid #cdd8e8;
-  background: #ffffff;
-  color: var(--rcf-ink-dim);
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-surface-raised);
+  color: var(--t-text-dim);
   cursor: pointer;
   transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
 }
 
 .dlx-sheet-close:hover {
-  background: #f2f6fc;
-  border-color: #b5c4da;
-  color: var(--rcf-ink);
+  background: var(--cq-ghost-hover-bg);
+  border-color: var(--cq-ghost-hover-border);
+  color: var(--t-text);
 }
 
 .dlx-sheet-close:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
@@ -260,17 +262,17 @@
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   margin-bottom: 10px;
   padding-bottom: 7px;
-  border-bottom: 1px solid var(--rcf-line);
+  border-bottom: 1px solid var(--t-line);
 }
 
 .dlx-sheet-section-title::before {
   content: '';
   width: 7px;
   height: 7px;
-  background: var(--rcf-azure);
+  background: var(--t-accent-line);
   border-radius: 1px;
   flex-shrink: 0;
 }
@@ -281,7 +283,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   margin-bottom: 4px;
 }
 
@@ -291,7 +293,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 6px 0;
-  border-bottom: 1px solid var(--rcf-line-soft);
+  border-bottom: 1px solid var(--t-line-soft);
 }
 
 .dlx-drow-label {
@@ -302,7 +304,7 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
 }
 
@@ -310,6 +312,6 @@
   min-width: 0;
   font-size: 0.78rem;
   font-weight: 500;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   word-break: break-all;
 }

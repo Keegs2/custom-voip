@@ -18,7 +18,8 @@ export function Spinner({ size = 'md', className }: SpinnerProps) {
       role="status"
       aria-label="Loading"
       className={cn(
-        'inline-block rounded-full border-[color:var(--brand-azure)]/30 border-t-[color:var(--brand-azure)] animate-spin flex-shrink-0',
+        // Track = accent @ 30%, arc = accent (azure in both themes).
+        'inline-block rounded-full border-[color:color-mix(in_srgb,var(--t-accent)_30%,transparent)] border-t-[color:var(--t-accent)] animate-spin flex-shrink-0',
         sizeClasses[size],
         className,
       )}
@@ -29,7 +30,7 @@ export function Spinner({ size = 'md', className }: SpinnerProps) {
 /** Centered full-page spinner for loading states */
 export function CenteredSpinner({ label = 'Loading…' }: { label?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-16 text-[#718096]">
+    <div className="flex flex-col items-center justify-center gap-3 py-16 text-[color:var(--t-text-dim)]">
       <Spinner size="lg" />
       <span className="text-sm">{label}</span>
     </div>

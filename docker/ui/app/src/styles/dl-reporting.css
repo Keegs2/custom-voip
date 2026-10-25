@@ -6,10 +6,28 @@
    is the shared DAYLIGHT CONSOLE (`dl-*` in index.css), the segmented control
    (`dlx-seg` in dl-admin.css), the stat strip + pager (`dlx4-*` in
    dl-platform-b.css) and the chart card/tooltip (`dl-qtc-*` in
-   dl-trend-chart.css) — reused, never duplicated. Every color references the
-   shared `--rcf-*` custom properties declared on `.dl-scope`.
+   dl-trend-chart.css) — reused, never duplicated. Colour is THEME TOKENS
+   only (`--t-*`, docker/ui/CLAUDE.md §18) plus the `--cq-*` page tokens of
+   dl-platform-b.css (ReportingPage imports it) and the two below.
    Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Page tokens (§18.3 rule 2). LIGHT = today's values (the skeleton's
+   highlight is this file's only colour literal; the popover shadow is ink =
+   --t-text at the old alphas); DARK aliases the granite set. ─── */
+:root,
+[data-force-theme='light'] {
+  --rpt-skel-hi: #f6f8fb;
+  --rpt-shadow-pop:
+    0 2px 6px color-mix(in srgb, var(--t-text) 8%, transparent),
+    0 18px 38px -16px color-mix(in srgb, var(--t-text) 30%, transparent);
+}
+
+:root[data-theme='dark'],
+[data-force-theme='dark'] {
+  --rpt-skel-hi: var(--t-line);
+  --rpt-shadow-pop: var(--t-shadow-pop);
+}
 
 /* ─── Screen-reader-only text (chart data tables, icon-only context) ─── */
 .rpt-sr {
@@ -38,8 +56,8 @@
   gap: 10px 14px;
   padding: 12px 16px;
   border-radius: 10px;
-  background: rgba(47, 125, 246, 0.05);
-  border: 1px solid rgba(47, 125, 246, 0.18);
+  background: color-mix(in srgb, var(--t-accent-line) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 18%, transparent);
 }
 
 .rpt-staffbar-label {
@@ -47,14 +65,14 @@
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .rpt-staffbar select { min-width: 240px; max-width: 100%; }
 
 .rpt-staffbar-note {
   font-size: 0.72rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 /* ─── Controls slab ─── */
@@ -87,7 +105,7 @@
   gap: 12px 14px;
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid var(--rcf-line-soft);
+  border-top: 1px solid var(--t-line-soft);
 }
 
 .rpt-custom-dates .dl-input { min-width: 160px; }
@@ -95,7 +113,7 @@
 .rpt-tzline {
   margin-top: 12px;
   font-size: 0.7rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 /* ─── Number picker (button + popover checklist) ─── */
@@ -118,12 +136,10 @@
   top: calc(100% + 6px);
   left: 0;
   width: min(340px, calc(100vw - 48px));
-  background: var(--rcf-card);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-surface-raised);
+  border: 1px solid var(--t-line);
   border-radius: 10px;
-  box-shadow:
-    0 2px 6px rgba(14, 23, 38, 0.08),
-    0 18px 38px -16px rgba(14, 23, 38, 0.3);
+  box-shadow: var(--rpt-shadow-pop);
   overflow: hidden;
 }
 
@@ -133,9 +149,9 @@
   justify-content: space-between;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--rcf-line-soft);
+  border-bottom: 1px solid var(--t-line-soft);
   font-size: 0.72rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .rpt-numpick-list {
@@ -152,15 +168,15 @@
   border-radius: 7px;
   cursor: pointer;
   font-size: 0.8rem;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
-.rpt-numpick-opt:hover { background: var(--rcf-tint-hover); }
+.rpt-numpick-opt:hover { background: var(--t-tint-hover); }
 
 .rpt-numpick-opt input {
   width: 15px;
   height: 15px;
-  accent-color: var(--rcf-azure);
+  accent-color: var(--t-accent);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -174,7 +190,7 @@
 .rpt-numpick-name {
   display: block;
   font-size: 0.68rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 /* The settings panel hosts the number picker's popover, which must hang
@@ -191,9 +207,9 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   line-height: 1.5;
-  color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.09);
-  border: 1px solid rgba(47, 125, 246, 0.24);
+  color: var(--t-accent-text);
+  background: var(--t-accent-tint);
+  border: 1px solid var(--t-accent-border);
   border-radius: 999px;
   padding: 0 7px;
   white-space: nowrap;
@@ -207,16 +223,16 @@
   font: inherit;
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
   cursor: pointer;
 }
 
 .rpt-linkbtn:hover { text-decoration: underline; }
-.rpt-linkbtn:disabled { color: var(--rcf-ink-dim); cursor: default; text-decoration: none; }
+.rpt-linkbtn:disabled { color: var(--t-text-dim); cursor: default; text-decoration: none; }
 
 .rpt-linkbtn:focus-visible,
 .rpt-numpick-btn:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 2px;
 }
 
@@ -228,13 +244,13 @@
   font-weight: 500;
   line-height: 1.5;
   letter-spacing: -0.012em;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   max-width: 70ch;
 }
 
 .rpt-sentence strong {
   font-weight: 700;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .rpt-hero-stats { margin-top: 18px; }
@@ -276,14 +292,14 @@
   font-size: 1.35rem;
   line-height: 1.15;
   letter-spacing: -0.015em;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .rpt-caption {
   margin: 4px 0 0;
   font-size: 0.8rem;
   line-height: 1.5;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .rpt-eyebrow {
@@ -291,13 +307,13 @@
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   margin-bottom: 5px;
 }
 
 .rpt-divider {
   height: 1px;
-  background: var(--rcf-line-soft);
+  background: var(--t-line-soft);
   border: 0;
   margin: 0;
 }
@@ -315,7 +331,7 @@
   cursor: pointer;
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
   border-radius: 6px;
   padding: 2px 0;
   user-select: none;
@@ -325,7 +341,7 @@
 .rpt-explain > summary:hover { text-decoration: underline; }
 
 .rpt-explain > summary:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 2px;
 }
 
@@ -336,11 +352,11 @@
   margin-top: 8px;
   padding: 10px 13px;
   border-radius: 8px;
-  background: rgba(47, 125, 246, 0.05);
-  border: 1px solid rgba(47, 125, 246, 0.16);
+  background: color-mix(in srgb, var(--t-accent-line) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 16%, transparent);
   font-size: 0.76rem;
   line-height: 1.6;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .rpt-explain-body p { margin: 0; }
@@ -362,7 +378,7 @@
   justify-content: space-between;
   gap: 12px;
   font-size: 0.78rem;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   margin-bottom: 5px;
 }
 
@@ -374,20 +390,20 @@
 
 .rpt-bar-count span {
   font-weight: 500;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .rpt-bar-track {
   height: 8px;
   border-radius: 8px;
-  background: var(--rcf-line-soft);
+  background: var(--t-line-soft);
   overflow: hidden;
 }
 
 .rpt-bar-fill {
   height: 100%;
   border-radius: 8px;
-  background: #d97706;
+  background: var(--t-warn-solid);
 }
 
 /* ─── Chart legend (color + text, never color alone) ─── */
@@ -396,7 +412,7 @@
   flex-wrap: wrap;
   gap: 6px 18px;
   font-size: 0.72rem;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .rpt-legend-item {
@@ -415,14 +431,14 @@
 .rpt-chart-svg:focus { outline: none; }
 
 .rpt-chart-svg:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 2px;
   border-radius: 6px;
 }
 
 .rpt-chart-hint {
   font-size: 0.68rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 /* ─── Outcome + grade badges (icon + word + color) ─── */
@@ -440,15 +456,15 @@
 }
 
 .rpt-badge-ok {
-  color: #15803d;
-  background: rgba(22, 163, 74, 0.08);
-  border-color: rgba(22, 163, 74, 0.24);
+  color: var(--t-ok-fg);
+  background: color-mix(in srgb, var(--t-ok-solid) 8%, transparent);
+  border-color: color-mix(in srgb, var(--t-ok-solid) 24%, transparent);
 }
 
 .rpt-badge-miss {
-  color: #92400e;
-  background: rgba(217, 119, 6, 0.08);
-  border-color: rgba(217, 119, 6, 0.26);
+  color: var(--cq-amber-ink);
+  background: color-mix(in srgb, var(--t-warn-solid) 8%, transparent);
+  border-color: color-mix(in srgb, var(--t-warn-solid) 26%, transparent);
 }
 
 .rpt-grade {
@@ -476,7 +492,7 @@
 .rpt-table td {
   padding: 11px 16px;
   font-size: 0.8rem;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   vertical-align: middle;
 }
 
@@ -490,12 +506,12 @@
   white-space: nowrap;
 }
 
-.rpt-dim { color: var(--rcf-ink-dim); }
+.rpt-dim { color: var(--t-text-dim); }
 
 .rpt-subline {
   display: block;
   font-size: 0.68rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   margin-top: 1px;
 }
 
@@ -503,7 +519,7 @@
   display: flex;
   justify-content: center;
   padding: 12px 16px;
-  border-top: 1px solid var(--rcf-line-soft);
+  border-top: 1px solid var(--t-line-soft);
 }
 
 /* ─── Call list filter row ─── */
@@ -513,8 +529,8 @@
   gap: 12px 18px;
   align-items: center;
   padding: 12px 20px;
-  border-bottom: 1px solid var(--rcf-line);
-  background: var(--rcf-tint);
+  border-bottom: 1px solid var(--t-line);
+  background: var(--t-tint);
 }
 
 .rpt-listfilters-group {
@@ -540,21 +556,21 @@
   font-family: "Archivo", "IBM Plex Sans", sans-serif;
   font-weight: 700;
   font-size: 0.82rem;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .rpt-glossary dd {
   margin: 3px 0 0;
   font-size: 0.78rem;
   line-height: 1.55;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 /* ─── Loading skeletons ─── */
 .rpt-skel {
   display: block;
   border-radius: 6px;
-  background: linear-gradient(90deg, #edf1f7 0%, #f6f8fb 45%, #edf1f7 90%);
+  background: linear-gradient(90deg, var(--t-line-soft) 0%, var(--rpt-skel-hi) 45%, var(--t-line-soft) 90%);
   background-size: 220% 100%;
   animation: rpt-shimmer 1.3s ease-in-out infinite;
 }

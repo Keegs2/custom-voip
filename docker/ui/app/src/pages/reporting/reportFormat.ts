@@ -13,6 +13,7 @@
  */
 import type { IsoDate, QualityGrade } from '../../types/reports';
 import { CHART_SERIES } from '../../styles/brand';
+import { CHART, T } from '../../styles/theme';
 
 /* ─── Timezone ──────────────────────────────────────────────────────────── */
 
@@ -281,8 +282,24 @@ export const GRADE_WORD: Record<QualityGrade, string> = {
   none: 'Not measured yet',
 };
 
-/** Text color per grade — always paired with the word, never color alone. */
+/**
+ * Text color per grade — always paired with the word, never color alone.
+ * SCREEN: theme-token `var()` strings (light = green-700 / azure-deep /
+ * amber-700 / red-700 / slate; dark = the granite tones).
+ */
 export const GRADE_TONE: Record<QualityGrade, string> = {
+  great: T.okFg,
+  good: T.accentText,
+  fair: T.warnFg,
+  poor: T.dangerFg,
+  none: T.textDim,
+};
+
+/**
+ * The same grade colours as fixed HEX — the Reporting PDF only (@react-pdf
+ * is print: it can't resolve `var()` and always renders light; §18.3 rule 8).
+ */
+export const GRADE_TONE_PRINT: Record<QualityGrade, string> = {
   great: '#15803d',
   good: '#1d63dd',
   fair: '#b45309',
@@ -300,6 +317,16 @@ export const GRADE_BLURB: Record<QualityGrade, string> = {
 
 /* ─── Chart series colors (legend + bars + PDF share them) ──────────────── */
 
-// Brand chart roles (src/styles/brand.ts): answered = azure, missed = the
-// neutral slate — the same pair as the account dashboard's Call volume card.
+// Brand chart roles: answered = azure, missed = the neutral slate — the same
+// pair as the account dashboard's Call volume card.
+//
+// SCREEN: `TREND_SERIES` — theme-token `var()` strings (CHART roles; light =
+// exactly the hex pair below). Paint SVG with them through `style`, never the
+// fill= attribute (§18.3 rule 5).
+export const TREND_SERIES = { answered: CHART.primary, missed: CHART.neutral } as const;
+
+// HEX (print / theme-less): the light values of the same roles from
+// src/styles/brand.ts. Kept for anything that cannot resolve `var()` — and
+// for pages/rcf/ActivityChart.tsx, which still imports it (its owner moves
+// it to `CHART` / `TREND_SERIES`).
 export const TREND_COLORS = { answered: CHART_SERIES.primary, missed: CHART_SERIES.neutral } as const;

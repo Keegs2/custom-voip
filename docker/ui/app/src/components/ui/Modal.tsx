@@ -42,30 +42,35 @@ export function Modal({ open, onClose, title, children, footer, maxWidth = 'max-
     >
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-[color:var(--t-scrim)] backdrop-blur-sm"
         onClick={onClose}
         aria-hidden="true"
       />
 
-      {/* Panel */}
+      {/* Panel — elevation 2: raised surface, hairline, modal shadow; the
+          landing's azure keyline along the top edge on dark. */}
       <div
         className={cn(
-          'relative w-full rounded-xl',
-          'bg-[#1a1d27] border border-[#2a2f45]',
-          'shadow-[0_12px_40px_rgba(0,0,0,.6)]',
+          'relative w-full rounded-xl overflow-hidden',
+          'bg-[color:var(--t-surface-raised)] text-[color:var(--t-text)] border border-[color:var(--t-line)]',
+          'shadow-[var(--t-shadow-modal)]',
           'flex flex-col max-h-[90vh]',
           maxWidth,
         )}
       >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute top-0 left-[12%] right-[12%] h-px bg-[image:var(--t-keyline)]"
+        />
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a2f45]">
-          <h2 className="text-[1rem] font-bold text-[#e2e8f0] tracking-[-0.2px]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[color:var(--t-line)]">
+          <h2 className="text-[1rem] font-bold text-[color:var(--t-text-strong)] tracking-[-0.2px]">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="text-[#718096] hover:text-[#e2e8f0] transition-colors text-xl leading-none p-1 -mr-1 rounded"
+            className="text-[color:var(--t-text-dim)] hover:text-[color:var(--t-text)] hover:bg-[color:var(--t-hover)] transition-colors text-xl leading-none p-1 -mr-1 rounded"
             aria-label="Close modal"
           >
             ✕
@@ -79,7 +84,7 @@ export function Modal({ open, onClose, title, children, footer, maxWidth = 'max-
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[#2a2f45]">
+          <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[color:var(--t-line)]">
             {footer}
           </div>
         )}

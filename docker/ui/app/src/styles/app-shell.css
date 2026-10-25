@@ -1,0 +1,1058 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   APP SHELL — canvas, sidebar, collapse tab, theme toggle (imported once,
+   main.tsx; used by AppLayout, Sidebar, SidebarCollapse, ThemeToggle and
+   the full-screen TroubleshootingPage, which renders its own Sidebar).
+
+   Every colour is a theme token (src/styles/theme.css): the sidebar is the
+   original dark shell on dark and a white daylight panel on light. Product
+   accents arrive per row as `--sb-accent` (Sidebar.tsx sets it inline to a
+   --t-sb-accent-* token); every tint of it is a color-mix(), so one rule
+   serves every product in both themes.
+
+   Responsive layout is hand-written @media (NOT Tailwind md:*). 768px is
+   the mobile-drawer breakpoint.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Canvas (AppLayout root) ─── */
+.app-canvas {
+  min-height: 100vh;
+  background: var(--t-canvas-bg);
+  color: var(--t-text);
+}
+
+/* Main content — margin animates in sync with the sidebar slide */
+.app-main {
+  transition: margin-left 200ms ease;
+}
+
+.app-main--sidebar {
+  margin-left: var(--sidebar-w);
+}
+
+/* Desktop collapse: slide the fixed sidebar off-canvas. Uses `transform`
+   (Tailwind v4's translate utilities use the separate `translate` property,
+   so the mobile-drawer classes and this compose without fighting). */
+@media (min-width: 768px) {
+  .app-sidebar--collapsed {
+    transform: translateX(-100%);
+  }
+}
+
+/* Collapse/expand tab — slim cobalt pill seated on the sidebar↔content
+   boundary. Cobalt in both themes: it reads as intentional on granite and
+   on paper alike. */
+.sidebar-collapse-tab {
+  position: fixed;
+  left: var(--sidebar-w);
+  top: 34%;
+  z-index: 120;               /* above the sidebar (z-100) */
+  width: 22px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--brand-azure-bright) 40%, transparent);
+  border-left: none;
+  border-radius: 0 10px 10px 0;
+  background: linear-gradient(150deg, var(--brand-cobalt) 0%, var(--brand-cobalt-deep) 100%);
+  color: var(--t-text-on-accent);
+  cursor: pointer;
+  box-shadow:
+    2px 0 12px -2px color-mix(in srgb, var(--brand-cobalt-deep) 55%, transparent),
+    0 0 16px -4px color-mix(in srgb, var(--brand-azure) 50%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--t-text-on-accent) 16%, transparent);
+  transition: left 200ms ease, width 150ms ease, filter 150ms ease;
+}
+
+.sidebar-collapse-tab:hover {
+  filter: brightness(1.3);
+  width: 27px;
+}
+
+.sidebar-collapse-tab:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+
+/* When collapsed, the tab parks flush at the viewport's left edge */
+.sidebar-collapse-tab--collapsed {
+  left: 0;
+}
+
+/* Collapsed-sidebar theme toggle — a shorter sibling tab under the collapse
+   tab (the footer toggle is off-canvas while collapsed). Same edge family,
+   quieter fill so the collapse tab stays the primary control. */
+.theme-edge-tab {
+  position: fixed;
+  left: 0;
+  top: calc(34% + 72px);
+  z-index: 120;
+  width: 22px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--t-line-strong);
+  border-left: none;
+  border-radius: 0 9px 9px 0;
+  background: var(--t-surface-raised);
+  color: var(--t-accent-text);
+  cursor: pointer;
+  box-shadow: var(--t-shadow-pop);
+  transition: width 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.theme-edge-tab:hover {
+  width: 27px;
+  color: var(--t-accent-text-hover);
+  border-color: var(--t-accent-border);
+}
+
+.theme-edge-tab:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+
+/* Mobile (<768px): the sidebar is a drawer driven by the topbar menu
+   button — the desktop edge tabs defer to it entirely. */
+@media (max-width: 767px) {
+  .app-main--sidebar { margin-left: 0; }
+  .sidebar-collapse-tab,
+  .theme-edge-tab { display: none; }
+}
+
+/* ─── Sidebar panel ─── */
+.sb {
+  width: var(--sidebar-w);
+  background: var(--t-sb-bg);
+  border-right: 1px solid var(--t-sb-border);
+  color: var(--t-sb-text);
+  /* `translate` covers the Tailwind mobile-drawer utilities (v4 uses the
+     translate property); `transform` covers the desktop collapse. */
+  transition: transform 200ms ease, translate 250ms ease-in-out, border-color 0.2s ease;
+}
+
+.sb--customer-view {
+  border-right-color: var(--t-sb-banner-border);
+}
+
+/* ─── Mobile topbar + drawer scrim ─── */
+.sb-topbar {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px 0 14px;
+  height: 56px;
+  background: var(--t-sb-bg-solid);
+  border-bottom: 1px solid var(--t-sb-border);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+@media (max-width: 767px) {
+  .sb-topbar { display: flex; }
+}
+
+.sb-topbar .sb-brand {
+  flex: 1;
+  justify-content: flex-start;
+  padding: 0;
+}
+
+.sb-topbar .sb-brand::before { display: none; }
+
+.sb-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--t-scrim);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+@media (min-width: 768px) {
+  .sb-scrim { display: none; }
+}
+
+/* ─── Brand lockup — the landing nav's: cube mark + wide wordmark ─── */
+.sb-brand {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 22px 16px 16px;
+  border: none;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  text-align: left;
+}
+
+/* Subtle azure ambient glow behind the lockup */
+.sb-brand::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 80px;
+  background: radial-gradient(ellipse 140% 100% at 50% 0%, var(--t-sb-glow) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.sb-brand:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: -4px;
+  border-radius: 10px;
+}
+
+.sb-brand-mark {
+  position: relative;
+  display: block;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  filter: var(--t-sb-mark-glow);
+  transition: filter 0.3s ease;
+}
+
+.sb-brand:hover .sb-brand-mark {
+  filter: var(--t-sb-mark-glow) drop-shadow(0 0 10px var(--brand-glow));
+}
+
+.sb-wordmark {
+  position: relative;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 800;
+  font-stretch: 125%;
+  font-size: 0.74rem;
+  letter-spacing: 0.18em;
+  line-height: 1;
+  color: var(--t-sb-wordmark);
+  white-space: nowrap;
+}
+
+.sb-wordmark-dim {
+  font-weight: 600;
+  color: var(--t-sb-wordmark-dim);
+}
+
+/* Gradient hairline between zones */
+.sb-divider {
+  margin: 0 16px;
+  height: 1px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, transparent, var(--t-sb-divider) 20%, var(--t-sb-divider) 80%, transparent);
+}
+
+.sb-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--t-sb-scrollbar) transparent;
+}
+
+.sb-nav {
+  padding: 12px 16px;
+}
+
+/* ─── Nav rows ───
+   One shared treatment for every live nav row: resting label + icon swatch,
+   an accent-leaning hover tint, and the ACTIVE state (accent gradient wash +
+   accent border + soft accent glow + dot). `--sb-accent` is the row's
+   product accent; the alpha steps (13/6/25/19/9/8 %) reproduce the original
+   `${hex}22 / 10 / 40 / 30 / 18 / 14` suffixes exactly. */
+.sb-nav-row {
+  --sb-accent: var(--t-sb-accent-azure);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 0.825rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--t-sb-text);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  text-decoration: none;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.sb-nav-row--small {
+  gap: 8px;
+  padding: 5px 10px 5px 14px;
+  font-size: 0.76rem;
+}
+
+.sb-nav-row:hover,
+.sb-nav-row:focus-visible {
+  background: color-mix(in srgb, var(--sb-accent) 8%, transparent);
+  color: var(--t-sb-text-hover);
+}
+
+.sb-nav-row:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: -2px;
+}
+
+.sb-nav-row.sb-nav-row--active {
+  font-weight: 600;
+  color: var(--t-sb-text-active);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--sb-accent) 13.3%, transparent) 0%,
+    color-mix(in srgb, var(--sb-accent) 6.3%, transparent) 100%
+  );
+  border-color: color-mix(in srgb, var(--sb-accent) 25%, transparent);
+  box-shadow: 0 2px 12px -4px color-mix(in srgb, var(--sb-accent) 25%, transparent);
+}
+
+.sb-nav-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--t-sb-icon-bg);
+  border: 1px solid var(--t-sb-icon-border);
+  color: var(--t-sb-icon);
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.sb-nav-row--small .sb-nav-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.sb-nav-row:hover .sb-nav-icon,
+.sb-nav-row:focus-visible .sb-nav-icon {
+  background: var(--t-sb-icon-bg-hover);
+  border-color: var(--t-sb-icon-border-hover);
+  color: var(--t-sb-icon-hover);
+}
+
+.sb-nav-row.sb-nav-row--active .sb-nav-icon {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--sb-accent) 18.8%, transparent) 0%,
+    color-mix(in srgb, var(--sb-accent) 9.4%, transparent) 100%
+  );
+  border-color: color-mix(in srgb, var(--sb-accent) 25%, transparent);
+  color: var(--sb-accent);
+}
+
+.sb-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Unread count pill (Visual Voicemail) */
+.sb-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--t-accent);
+  color: var(--t-text-on-accent);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* Active dot */
+.sb-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--sb-accent);
+  box-shadow: 0 0 6px var(--sb-accent);
+}
+
+/* ─── Collapsible group headers (Products / Insights / Administration…) ─── */
+.sb-group {
+  margin-bottom: 4px;
+}
+
+.sb-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: none;
+  cursor: pointer;
+  user-select: none;
+  font: inherit;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--t-sb-head);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.sb-group-head:hover,
+.sb-group-head:focus-visible {
+  background: var(--t-sb-hover);
+  color: var(--t-sb-head-hover);
+}
+
+.sb-group-head:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: -2px;
+}
+
+.sb-group-head-icon {
+  display: flex;
+  align-items: center;
+  color: inherit;
+}
+
+.sb-group-head-label {
+  flex: 1;
+  text-align: left;
+}
+
+/* Small "go to" arrow when the group is navigable and expanded */
+.sb-group-go {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  color: var(--t-sb-accent-azure);
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.sb-group-chevron {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.sb-group-chevron--closed {
+  transform: rotate(-90deg);
+}
+
+.sb-group-panel {
+  overflow: hidden;
+  max-height: 600px;
+  opacity: 1;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+}
+
+.sb-group-panel--closed {
+  max-height: 0;
+  opacity: 0;
+}
+
+.sb-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 2px;
+}
+
+/* Static sub-group divider label ("Support" inside Administration) */
+.sb-subhead {
+  padding: 6px 10px 2px;
+  margin-top: 8px;
+  font-size: 0.52rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--t-sb-subhead);
+  user-select: none;
+}
+
+/* ─── Coming Soon (pre-launch) group — always the LAST nav group ─────────
+   Muted at rest so previews never read as live product nav: dim label +
+   icon swatch, a quiet "Soon" pill, a quieter group header, and a hairline
+   divider separating it from the live groups. Linked rows get only a faint
+   NEUTRAL hover lift — no product accent — and their active state is a
+   neutral wash, never the live gradient + glow. Labels hold ≥ 3:1 (the
+   owner's "darkened" rule) instead of the 4.5:1 of live rows. */
+.sb-soon-divider {
+  height: 1px;
+  margin: 12px 10px 8px;
+  background: linear-gradient(90deg, transparent, var(--t-sb-divider) 15%, var(--t-sb-divider) 85%, transparent);
+}
+
+.sb-group-head.sb-group-head--muted { color: var(--t-sb-muted); }
+
+.sb-group-head.sb-group-head--muted:hover,
+.sb-group-head.sb-group-head--muted:focus-visible {
+  background: var(--t-sb-muted-hover-bg);
+  color: var(--t-sb-muted-hover);
+}
+
+.sb-soon-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 14px;
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 0.76rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  user-select: none;
+  text-decoration: none;
+  color: var(--t-sb-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: default;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.sb-soon-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--t-sb-muted-icon-bg);
+  border: 1px solid var(--t-sb-muted-icon-border);
+  color: var(--t-sb-muted-icon);
+  opacity: 0.85;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
+}
+
+.sb-soon-pill {
+  flex-shrink: 0;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  line-height: 1.6;
+  text-transform: uppercase;
+  color: var(--t-sb-pill-text);
+  background: var(--t-sb-pill-bg);
+  border: 1px solid var(--t-sb-pill-border);
+  border-radius: 999px;
+  padding: 1px 7px;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.sb-soon-row--link { cursor: pointer; }
+
+.sb-soon-row--link:hover,
+.sb-soon-row--link:focus-visible {
+  background: var(--t-sb-muted-hover-bg);
+  color: var(--t-sb-muted-hover);
+}
+
+.sb-soon-row--link:hover .sb-soon-icon,
+.sb-soon-row--link:focus-visible .sb-soon-icon {
+  color: var(--t-sb-muted-hover);
+  opacity: 1;
+}
+
+.sb-soon-row--link:hover .sb-soon-pill,
+.sb-soon-row--link:focus-visible .sb-soon-pill {
+  color: var(--t-sb-muted-hover);
+}
+
+.sb-soon-row--link:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: -2px;
+}
+
+/* On the preview page itself: a neutral "you are here" wash. */
+.sb-soon-row.sb-soon-row--active {
+  color: var(--t-sb-muted-active-text);
+  background: var(--t-sb-muted-active-bg);
+  border-color: var(--t-sb-muted-active-border);
+}
+
+.sb-soon-row--active .sb-soon-icon {
+  color: var(--t-sb-muted-active-text);
+  opacity: 1;
+}
+
+/* ─── Customer-view (amber) banner ─── */
+.sb-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 7px 14px 10px;
+  background: var(--t-sb-banner-bg);
+  border-bottom: 1px solid var(--t-sb-banner-border);
+  flex-shrink: 0;
+}
+
+.sb-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--t-sb-banner-icon);
+}
+
+.sb-banner-title {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--t-sb-banner-text);
+}
+
+/* ─── View-as-Customer control ─── */
+.sb-viewas-wrap {
+  padding: 8px 16px 2px;
+  flex-shrink: 0;
+}
+
+.sb-viewas {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  background: transparent;
+  border: 1px solid var(--t-sb-btn-border);
+  color: var(--t-sb-text);
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.sb-viewas:hover,
+.sb-viewas:focus-visible {
+  background: var(--t-sb-hover);
+  color: var(--t-sb-text-hover);
+}
+
+.sb-viewas:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+
+.sb-viewas-glyph {
+  flex-shrink: 0;
+}
+
+.sb-viewas-label {
+  flex: 1;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.sb-viewas.sb-viewas--on {
+  background: var(--t-sb-banner-bg);
+  border-color: var(--t-sb-banner-border);
+  color: var(--t-sb-banner-text);
+}
+
+.sb-viewas-pill {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-sb-banner-text);
+  background: var(--t-sb-banner-pill-bg);
+  border: 1px solid var(--t-sb-banner-pill-border);
+  border-radius: 999px;
+  padding: 2px 6px;
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+
+/* Customer-preview picker (components/preview/CustomerPreviewPicker.tsx).
+   `cvp--dark` = the sidebar banner tone, `cvp--light` = on a page. Both
+   follow the theme; the names are the component's shipped prop values. */
+.cvp {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cvp-label {
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.cvp-select {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 28px 0 9px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  appearance: none;
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 10px 10px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.cvp-select:disabled { cursor: progress; opacity: 0.7; }
+
+.cvp--dark .cvp-label { color: var(--t-sb-banner-label); }
+
+.cvp--dark .cvp-select {
+  color: var(--t-sb-banner-field-text);
+  background-color: var(--t-sb-banner-field-bg);
+  background-image: var(--t-sb-banner-chevron);
+  border: 1px solid var(--t-sb-banner-field-border);
+}
+
+.cvp--dark .cvp-select:hover { border-color: var(--t-sb-banner-field-border-hover); }
+
+.cvp--dark .cvp-select:focus-visible {
+  outline: none;
+  border-color: var(--t-sb-banner-field-focus);
+  box-shadow: 0 0 0 3px var(--t-sb-banner-field-halo);
+}
+
+.cvp-select option { color: var(--t-text); background: var(--t-surface-raised); }
+
+.cvp--light .cvp-label { color: var(--t-text-soft); font-size: 0.78rem; }
+
+.cvp--light .cvp-select {
+  height: 38px;
+  font-size: 0.85rem;
+  color: var(--t-text);
+  background-color: var(--t-field-bg);
+  background-image: var(--t-chevron);
+  border: 1px solid var(--t-line);
+  box-shadow: var(--t-shadow-xs);
+}
+
+.cvp--light .cvp-select:hover { border-color: var(--t-accent-border); }
+
+.cvp--light .cvp-select:focus-visible {
+  outline: none;
+  border-color: var(--t-focus);
+  box-shadow: var(--t-focus-halo);
+}
+
+/* ─── User footer ───
+   Two rows in one card: who you are (→ /my-account), then the account
+   actions — the theme switch and Sign out, both labelled. */
+.sb-footer {
+  padding: 12px 16px 18px;
+  flex-shrink: 0;
+}
+
+.sb-user {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--t-sb-card-bg);
+  border: 1px solid var(--t-sb-card-border);
+}
+
+/* Avatar + name → /my-account. Active blue wash beats the hover tint. */
+.sb-account-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  text-decoration: none;
+  border-radius: 7px;
+  padding: 3px 4px;
+  cursor: pointer;
+  background: transparent;
+  transition: background 150ms ease;
+}
+
+.sb-account-link:hover,
+.sb-account-link:focus-visible {
+  background: var(--t-sb-hover);
+}
+
+.sb-account-link:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 1px;
+}
+
+.sb-account-link.sb-account-link--active {
+  background: var(--t-accent-tint);
+}
+
+.sb-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--t-sb-avatar-bg);
+  border: 1px solid var(--t-sb-avatar-border);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--t-sb-avatar-text);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.sb-user-text {
+  min-width: 0;
+}
+
+.sb-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--t-sb-name);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-meta {
+  margin-top: 1px;
+  font-size: 0.65rem;
+  color: var(--t-sb-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-user-actions {
+  display: flex;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--t-sb-card-border);
+}
+
+/* Labelled footer actions (theme switch, Sign out) */
+.sb-action {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  color: var(--t-sb-btn-icon);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.sb-action svg { flex-shrink: 0; }
+
+.sb-action:hover,
+.sb-action:focus-visible {
+  color: var(--t-sb-text-hover);
+  background: var(--t-sb-hover);
+}
+
+.sb-action:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 1px;
+}
+
+/* Icon-only buttons (mobile topbar menu + theme switch) */
+.sb-iconbtn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--t-sb-btn-icon);
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.sb-iconbtn:hover,
+.sb-iconbtn:focus-visible {
+  color: var(--t-sb-text-hover);
+  background: var(--t-sb-hover);
+  border-color: var(--t-sb-btn-border);
+}
+
+.sb-iconbtn:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+
+/* The theme switch leans azure on hover (sun / moon) */
+.sb-theme-toggle:hover,
+.sb-theme-toggle:focus-visible {
+  color: var(--t-accent-text);
+  border-color: var(--t-accent-border);
+}
+
+/* Sign out keeps its red hover */
+.sb-signout:hover,
+.sb-signout:focus-visible {
+  color: var(--t-danger-fg);
+  background: var(--t-danger-bg);
+  border-color: var(--t-danger-border);
+}
+
+/* ─── Sidebar sign-in form (shown only when signed out) ─── */
+.sb-login {
+  padding: 14px 16px 16px;
+  flex-shrink: 0;
+}
+
+.sb-login-title {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--t-sb-head);
+  margin-bottom: 10px;
+  user-select: none;
+}
+
+.sb-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sb-login-field {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--t-sb-field-bg);
+  border: 1px solid var(--t-sb-field-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--t-sb-field-text);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.sb-login-field::placeholder { color: var(--t-field-placeholder); }
+
+.sb-login-field:focus {
+  border-color: var(--t-focus);
+  box-shadow: var(--t-focus-halo);
+}
+
+.sb-login-error {
+  font-size: 0.7rem;
+  line-height: 1.45;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--t-danger-fg);
+  background: var(--t-danger-bg);
+  border: 1px solid var(--t-danger-border);
+}
+
+.sb-login-submit {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--t-text-on-accent);
+  background: var(--brand-btn-bg);
+  box-shadow: var(--brand-btn-shadow);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.sb-login-submit:hover:not(:disabled) {
+  background: var(--brand-btn-bg-hover);
+  box-shadow: var(--brand-btn-shadow-hover);
+}
+
+.sb-login-submit:disabled {
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--t-accent) 45%, transparent);
+  box-shadow: none;
+}
+
+.sb-login-submit:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+
+.sb-spin {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  animation: fx-spin 0.75s linear infinite;
+}
+
+/* Reduced motion: hover states snap instead of easing. !important beats
+   the sidebar's slide transition too. */
+@media (prefers-reduced-motion: reduce) {
+  .app-main,
+  .app-sidebar,
+  .sidebar-collapse-tab,
+  .theme-edge-tab,
+  .sb,
+  .sb-nav-row,
+  .sb-nav-icon,
+  .sb-group-head,
+  .sb-group-chevron,
+  .sb-group-panel,
+  .sb-soon-row,
+  .sb-soon-icon,
+  .sb-soon-pill,
+  .sb-viewas,
+  .sb-account-link,
+  .sb-action,
+  .sb-iconbtn,
+  .sb-brand-mark,
+  .cvp-select {
+    transition: none !important;
+  }
+
+  .sb-spin { animation-duration: 1.5s; }
+}

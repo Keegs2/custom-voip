@@ -40,9 +40,10 @@ import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { fmtMoneySmart } from '../../utils/format';
 import {
-  GOOD, WARN, BAD, AZURE_DEEP,
+  GOOD, WARN, BAD,
   goodShareColor, mosColor, summarizeCallQuality, fmtDurationShort,
 } from './quality';
+import { T } from '../../styles/theme';
 import { fmtAvgCallDuration } from '../../utils/callDuration';
 import { ROWS_MODE_NOTE } from './callsFilters';
 import type { Cdr, CdrRowsMode } from '../../types/cdr';
@@ -185,7 +186,7 @@ export function CallsKpiStrip({ cdrs, total, isStaff, rowsMode = 'calls' }: Call
           <KpiTile
             label="Cost"
             value={hasRated ? fmtMoneySmart(stats.totalCost) : '—'}
-            tone={hasRated && stats.totalCost > 0 ? AZURE_DEEP : undefined}
+            tone={hasRated && stats.totalCost > 0 ? T.accentText : undefined}
             sub={
               hasRated && stats.avgCost != null
                 ? `avg ${fmtMoneySmart(stats.avgCost)}/${perUnit} · ${stats.ratedCount.toLocaleString()} rated`

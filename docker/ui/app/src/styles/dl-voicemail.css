@@ -1,21 +1,114 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   dl-voicemail.css — page-scoped daylight styles for Visual Voicemail
+   dl-voicemail.css — page-scoped styles for Visual Voicemail
    (pages/VisualVoicemailPage.tsx + pages/voicemail/*).
 
    The `vm-` prefix marks these as page-scoped, NOT part of the shared
-   DAYLIGHT CONSOLE system in index.css. Colour and rhythm come from the
-   shared `--rcf-*` custom properties declared on `.dl-scope` and the brand
-   blue family (`--brand-*` in :root) — never a Tailwind blue. Responsive
-   rules are container queries on `.vm-body` (the content column), so the
-   layout follows the space beside the sidebar, not the window. Hand-written
+   DAYLIGHT CONSOLE system in index.css. Colour comes from the theme layer
+   (`--t-*`, src/styles/theme.css — contract: docker/ui/CLAUDE.md §18), so
+   the page follows light / dark: LIGHT is the daylight console exactly as it
+   was; DARK is the landing's granite — raised panels, cloud text,
+   azure-bright lines and a glow on the play control. Responsive rules are
+   container queries on `.vm-body` (the content column), so the layout
+   follows the space beside the sidebar, not the window. Hand-written
    @media/@container only (never Tailwind md:* — see CLAUDE.md).
+
+   Theme pattern used here:
+     · a colour that has a theme token uses it (flips for free);
+     · an alpha of a token is color-mix(in srgb, var(--t-…) N%, transparent);
+     · page roles that need a different recipe per theme are `--vm-*`
+       tokens, set on .vm-scope (both the page root and the VmDialog portal
+       root carry it) and re-set in the DARK block right below it;
+     · the few dark-only refinements that change more than a colour sit in
+       the "Dark theme" section at the end of the file.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .vm-scope {
-  --vm-select-tint: #eef4fe;
   --vm-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --vm-display: "Archivo", "IBM Plex Sans", sans-serif;
-  --vm-amber: #b45309;
+
+  /* Colour roles */
+  --vm-select-tint: var(--t-accent-wash);     /* selected row / card */
+  --vm-amber: var(--t-warn-fg);               /* staff tag text, expiry, notes */
+  --vm-label: var(--t-text-faint);            /* tiny uppercase fact labels */
+  --vm-thumb: var(--t-surface);               /* range thumb */
+  --vm-dialog-bg: var(--t-surface-raised);
+  --vm-player-line: color-mix(in srgb, var(--t-accent-line) 18%, transparent);
+  --vm-danger-fill: linear-gradient(180deg, var(--t-danger-solid) 0%, var(--t-danger-fg) 100%);
+  --vm-danger-fill-hover: linear-gradient(180deg, var(--t-danger-fg) 0%, var(--vm-danger-deep) 100%);
+  --vm-danger-glow: 0 6px 16px -8px color-mix(in srgb, var(--t-danger-fg) 70%, transparent);
+
+  /* Elevation. Light keeps the page's own ink-tinted shadows (the ink is
+     the light --t-text) and the granite dialog backdrop; dark swaps in the
+     theme's elevation tokens (DARK block below). */
+  --vm-shadow-pop:
+    0 1px 2px color-mix(in srgb, var(--t-text) 6%, transparent),
+    0 18px 40px -16px color-mix(in srgb, var(--t-text) 28%, transparent);
+  --vm-shadow-modal:
+    0 0 0 1px color-mix(in srgb, var(--vm-granite) 10%, transparent),
+    0 32px 80px -24px color-mix(in srgb, var(--vm-granite) 60%, transparent);
+  --vm-shadow-seg: 0 1px 2px color-mix(in srgb, var(--t-text) 12%, transparent);
+  --vm-scrim: color-mix(in srgb, var(--vm-granite) 50%, transparent);
+
+  /* Light-only shades that no theme token carries — the exact daylight
+     values (CLAUDE.md §18.3 rule 2: a page token defined for BOTH themes;
+     the DARK block below re-points every one of them at a token). */
+  --vm-granite: #070c16;        /* the landing granite: dialog backdrop + shadow ink */
+  --vm-staff: #f59e0b;          /* staff marker amber (warn-solid on dark is the same hue) */
+  --vm-note-bg: #fbfcfe;        /* folder note strip */
+  --vm-player-bg: linear-gradient(180deg, #f7faff 0%, #f1f6fe 100%); /* azure-washed card */
+  --vm-track-rest: #d6e0ee;     /* player track, unplayed part */
+  --vm-mode-hover-line: #c4d3e8;
+  --vm-iconbtn-hover-line: #cdd7e6;
+  --vm-seg-bg: #eef2f8;         /* segmented switch well */
+  --vm-level-rest: #e5e9f0;     /* recording level track */
+  --vm-drop-line: #c3d0e4;      /* upload drop zone, dashed */
+  --vm-danger-deep: #991b1b;    /* danger button, pressed end of the gradient */
+  --vm-danger-ring: #f87171;    /* danger button focus ring */
+  /* The range thumb's drop shadow, as a legacy rgba: the native thumb is
+     painted on its own path, where a color-mix() shadow lands ±4 levels off
+     at the ring's anti-aliased edge. */
+  --vm-shadow-thumb: 0 1px 3px rgba(14, 23, 38, 0.3);
+}
+
+/* ─── DARK: the same roles, re-pointed at the granite set ─────────────── */
+:root[data-theme='dark'] .vm-scope {
+  --vm-label: var(--t-text-dim);              /* faint fails AA on dark tint */
+  --vm-thumb: var(--t-text);
+  --vm-player-bg:
+    radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--t-accent-line) 12%, transparent), transparent 62%),
+    var(--t-surface-sunken);
+  --vm-player-line: var(--t-accent-border);
+  /* A solid red that keeps white text ≥ 4.5:1 on granite (the dark
+     danger tokens are text-bright, too light for a white label). */
+  --vm-danger-fill: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--t-danger-solid) 86%, var(--t-canvas)) 0%,
+    color-mix(in srgb, var(--t-danger-solid) 70%, var(--t-canvas)) 100%
+  );
+  --vm-danger-fill-hover: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--t-danger-solid) 78%, var(--t-canvas)) 0%,
+    color-mix(in srgb, var(--t-danger-solid) 62%, var(--t-canvas)) 100%
+  );
+  --vm-danger-glow: 0 0 22px -6px color-mix(in srgb, var(--t-danger-solid) 55%, transparent);
+
+  --vm-shadow-pop: var(--t-shadow-pop);
+  --vm-shadow-modal: 0 0 0 1px var(--t-line), var(--t-shadow-modal);
+  --vm-shadow-seg: var(--t-shadow-xs), var(--t-highlight);
+  --vm-shadow-thumb: 0 0 0 3px color-mix(in srgb, var(--t-accent-line) 22%, transparent), var(--t-shadow-xs);
+  --vm-scrim: var(--t-scrim);
+
+  --vm-granite: var(--t-canvas);
+  --vm-staff: var(--t-warn-solid);
+  --vm-note-bg: var(--t-tint);
+  --vm-track-rest: color-mix(in srgb, var(--t-text-dim) 55%, transparent); /* ≥ 3:1 on the well */
+  --vm-mode-hover-line: var(--t-line-strong);
+  --vm-iconbtn-hover-line: var(--t-line-strong);
+  --vm-seg-bg: var(--t-surface-sunken);
+  --vm-level-rest: var(--t-line);
+  --vm-drop-line: var(--t-line-strong);
+  --vm-danger-deep: var(--t-danger-solid);
+  --vm-danger-ring: var(--t-danger-fg);
 }
 
 .vm-body {
@@ -77,8 +170,8 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--vm-amber);
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.38);
+  background: color-mix(in srgb, var(--vm-staff) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vm-staff) 38%, transparent);
   border-radius: 999px;
   padding: 2px 8px;
   white-space: nowrap;
@@ -107,17 +200,21 @@
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  color: var(--brand-azure-deep);
-  background: rgba(47, 125, 246, 0.08);
-  border: 1px solid rgba(47, 125, 246, 0.26);
+  color: var(--t-accent-text);
+  background: color-mix(in srgb, var(--t-accent-line) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 26%, transparent);
   border-radius: 999px;
   padding: 4px 11px 4px 9px;
   cursor: pointer;
   transition: background var(--rcf-ease), border-color var(--rcf-ease);
 }
 
-.vm-enc-pill:hover { background: rgba(47, 125, 246, 0.13); border-color: rgba(47, 125, 246, 0.4); }
-.vm-enc-pill:focus-visible { outline: 2px solid var(--brand-focus-ring); outline-offset: 2px; }
+.vm-enc-pill:hover {
+  background: color-mix(in srgb, var(--t-accent-line) 13%, transparent);
+  border-color: color-mix(in srgb, var(--t-accent-line) 40%, transparent);
+}
+
+.vm-enc-pill:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 
 .vm-enc-panel {
   position: absolute;
@@ -130,19 +227,19 @@
   gap: 8px;
   padding: 14px 16px;
   border-radius: 12px;
-  background: var(--rcf-card);
-  border: 1px solid var(--rcf-line);
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.06), 0 18px 40px -16px rgba(14, 23, 38, 0.28);
+  background: var(--t-surface-raised);
+  border: 1px solid var(--t-line);
+  box-shadow: var(--vm-shadow-pop);
   font-size: 0.75rem;
   line-height: 1.55;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   animation: fx-fade 0.14s ease-out;
 }
 
 .vm-enc-panel strong {
   font-family: var(--vm-display);
   font-size: 0.8rem;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 /* ─── Mailbox bar ────────────────────────────────────────────────────────── */
@@ -177,7 +274,7 @@
   font-weight: 700;
   font-size: 1rem;
   letter-spacing: -0.01em;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   padding: 4px 0;
 }
 
@@ -191,7 +288,7 @@
 .vm-mbar-customer {
   font-size: 0.78rem;
   font-weight: 600;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .vm-tabs {
@@ -230,8 +327,8 @@
   display: flex;
   gap: 4px;
   padding: 10px 10px 0;
-  border-bottom: 1px solid var(--rcf-line);
-  background: var(--rcf-tint);
+  border-bottom: 1px solid var(--t-line);
+  background: var(--t-tint);
 }
 
 .vm-folder {
@@ -244,7 +341,7 @@
   font-family: var(--vm-display);
   font-weight: 700;
   font-size: 0.8rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   padding: 8px 10px 10px;
   border-bottom: 2px solid transparent;
   border-radius: 7px 7px 0 0;
@@ -253,22 +350,26 @@
   transition: color var(--rcf-ease), border-color var(--rcf-ease), background var(--rcf-ease);
 }
 
-.vm-folder:hover { color: var(--rcf-azure-deep); background: rgba(47, 125, 246, 0.05); }
-.vm-folder:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: -2px; }
+.vm-folder:hover {
+  color: var(--t-accent-text);
+  background: color-mix(in srgb, var(--t-accent-line) 5%, transparent);
+}
+
+.vm-folder:focus-visible { outline: 2px solid var(--t-focus); outline-offset: -2px; }
 
 .vm-folder-on,
 .vm-folder-on:hover {
-  color: var(--rcf-ink);
-  border-bottom-color: var(--rcf-azure);
-  background: var(--rcf-card);
+  color: var(--t-text);
+  border-bottom-color: var(--t-accent-line);
+  background: var(--t-surface);
 }
 
 .vm-folder-count {
   font-family: inherit;
   font-size: 0.66rem;
   font-weight: 700;
-  color: var(--rcf-ink-dim);
-  background: rgba(93, 111, 140, 0.1);
+  color: var(--t-text-dim);
+  background: color-mix(in srgb, var(--t-neutral-fg) 10%, transparent);
   border-radius: 999px;
   padding: 1px 7px;
   font-variant-numeric: tabular-nums;
@@ -279,8 +380,8 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #ffffff;
-  background: var(--brand-azure);
+  color: var(--t-text-on-accent);
+  background: var(--t-accent);
   border-radius: 999px;
   padding: 2px 7px;
 }
@@ -289,9 +390,9 @@
   margin: 0;
   padding: 8px 16px;
   font-size: 0.7rem;
-  color: var(--rcf-ink-dim);
-  background: #fbfcfe;
-  border-bottom: 1px solid var(--rcf-line-soft);
+  color: var(--t-text-dim);
+  background: var(--vm-note-bg);
+  border-bottom: 1px solid var(--t-line-soft);
 }
 
 .vm-list {
@@ -300,7 +401,7 @@
   padding: 0;
 }
 
-.vm-list li + li .vm-row { border-top: 1px solid var(--rcf-line-soft); }
+.vm-list li + li .vm-row { border-top: 1px solid var(--t-line-soft); }
 
 .vm-row {
   appearance: none;
@@ -313,27 +414,29 @@
   background: transparent;
   font-family: inherit;
   text-align: left;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   cursor: pointer;
   transition: background var(--rcf-ease), box-shadow var(--rcf-ease);
 }
 
 .vm-row:hover {
-  background: var(--rcf-tint-hover);
-  box-shadow: inset 2px 0 0 0 rgba(47, 125, 246, 0.45);
+  background: var(--t-tint-hover);
+  box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--t-accent-line) 45%, transparent);
 }
 
 .vm-row:focus { outline: none; }
 
 .vm-row:focus-visible {
-  background: var(--rcf-tint-hover);
-  box-shadow: inset 2px 0 0 0 var(--rcf-azure), inset 0 0 0 1px rgba(47, 125, 246, 0.35);
+  background: var(--t-tint-hover);
+  box-shadow:
+    inset 2px 0 0 0 var(--t-accent-line),
+    inset 0 0 0 1px color-mix(in srgb, var(--t-accent-line) 35%, transparent);
 }
 
 .vm-row-on,
 .vm-row-on:hover {
   background: var(--vm-select-tint);
-  box-shadow: inset 3px 0 0 0 var(--rcf-azure);
+  box-shadow: inset 3px 0 0 0 var(--t-accent-line);
 }
 
 .vm-row-dot {
@@ -346,8 +449,8 @@
 }
 
 .vm-row-unread .vm-row-dot {
-  background: var(--brand-azure);
-  box-shadow: 0 0 0 3px rgba(47, 125, 246, 0.16);
+  background: var(--t-accent-line);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-accent-line) 16%, transparent);
 }
 
 .vm-row-main {
@@ -379,16 +482,16 @@
 
 .vm-row-when {
   font-size: 0.7rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
-.vm-row-unread .vm-row-when { color: var(--rcf-azure-deep); font-weight: 700; }
+.vm-row-unread .vm-row-when { color: var(--t-accent-text); font-weight: 700; }
 
 .vm-row-sub {
   font-size: 0.72rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -404,7 +507,7 @@
 .vm-row-dur {
   font-family: var(--vm-mono);
   font-size: 0.7rem;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   font-variant-numeric: tabular-nums;
 }
 
@@ -425,7 +528,7 @@
   min-width: 0;
   font-size: 0.72rem;
   line-height: 1.45;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .vm-row-snippet-text {
@@ -435,7 +538,7 @@
   white-space: nowrap;
 }
 
-.vm-row-snippet-quiet { color: var(--rcf-ink-dim); font-style: italic; }
+.vm-row-snippet-quiet { color: var(--t-text-dim); font-style: italic; }
 
 .vm-row-snippet .vm-spin {
   width: 10px;
@@ -449,7 +552,7 @@
   display: flex;
   justify-content: center;
   padding: 12px;
-  border-top: 1px solid var(--rcf-line-soft);
+  border-top: 1px solid var(--t-line-soft);
 }
 
 .vm-state-line {
@@ -459,10 +562,10 @@
   gap: 10px;
   padding: 18px 16px;
   font-size: 0.78rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
-.vm-state-err { color: var(--rcf-red); }
+.vm-state-err { color: var(--t-danger-fg); }
 
 .vm-linkbtn {
   appearance: none;
@@ -471,7 +574,7 @@
   padding: 0;
   font: inherit;
   font-weight: 700;
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -480,7 +583,7 @@
   gap: 6px;
 }
 
-.vm-linkbtn:hover { color: var(--brand-cobalt); }
+.vm-linkbtn:hover { color: var(--t-accent-text-hover); }
 .vm-linkbtn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ─── Reading pane ───────────────────────────────────────────────────────── */
@@ -507,7 +610,7 @@
   font-size: 1.22rem;
   letter-spacing: -0.02em;
   line-height: 1.2;
-  color: var(--rcf-ink);
+  color: var(--t-text-strong);
   overflow-wrap: anywhere;
 }
 
@@ -515,7 +618,7 @@
   margin: 4px 0 0;
   font-family: var(--vm-mono);
   font-size: 0.82rem;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .vm-state {
@@ -530,14 +633,14 @@
 }
 
 .vm-state-new {
-  color: #ffffff;
-  background: var(--brand-azure);
+  color: var(--t-text-on-accent);
+  background: var(--t-accent);
 }
 
 .vm-state-read {
-  color: var(--rcf-ink-soft);
-  background: rgba(93, 111, 140, 0.1);
-  border: 1px solid rgba(93, 111, 140, 0.22);
+  color: var(--t-text-soft);
+  background: color-mix(in srgb, var(--t-neutral-fg) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-neutral-fg) 22%, transparent);
 }
 
 .vm-facts {
@@ -547,8 +650,8 @@
   margin: 0;
   padding: 12px 16px;
   border-radius: 10px;
-  background: var(--rcf-tint);
-  border: 1px solid var(--rcf-line-soft);
+  background: var(--t-tint);
+  border: 1px solid var(--t-line-soft);
 }
 
 .vm-facts > div { min-width: 0; }
@@ -560,7 +663,7 @@
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #8b99b0;
+  color: var(--vm-label);
   margin-bottom: 3px;
 }
 
@@ -568,7 +671,7 @@
   margin: 0;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   font-variant-numeric: tabular-nums;
 }
 
@@ -588,13 +691,15 @@
 }
 
 .vm-btn-danger-solid {
-  background: linear-gradient(180deg, #dc2626 0%, #b91c1c 100%);
-  color: #ffffff;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 6px 16px -8px rgba(185, 28, 28, 0.7);
+  background: var(--vm-danger-fill);
+  color: var(--t-text-on-accent);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--t-text-on-accent) 18%, transparent) inset,
+    var(--vm-danger-glow);
 }
 
-.vm-btn-danger-solid:hover:not(:disabled) { background: linear-gradient(180deg, #b91c1c 0%, #991b1b 100%); }
-.vm-btn-danger-solid:focus-visible { outline: 2px solid #f87171; outline-offset: 2px; }
+.vm-btn-danger-solid:hover:not(:disabled) { background: var(--vm-danger-fill-hover); }
+.vm-btn-danger-solid:focus-visible { outline: 2px solid var(--vm-danger-ring); outline-offset: 2px; }
 .vm-btn-danger-solid:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 
 .vm-retention {
@@ -603,13 +708,13 @@
   gap: 8px;
   margin: 0;
   padding-top: 14px;
-  border-top: 1px solid var(--rcf-line-soft);
+  border-top: 1px solid var(--t-line-soft);
   font-size: 0.72rem;
   line-height: 1.5;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
-.vm-retention svg { flex-shrink: 0; margin-top: 2px; color: var(--rcf-azure-deep); }
+.vm-retention svg { flex-shrink: 0; margin-top: 2px; color: var(--t-accent-text); }
 
 .vm-pane-empty {
   display: flex;
@@ -620,11 +725,13 @@
   padding: 64px 24px;
   text-align: center;
   font-size: 0.8rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .vm-pane-empty p { margin: 0; max-width: 36ch; line-height: 1.5; }
 
+/* Icon chip: a 15 % azure-bright wash over the surface (#e4eeff on paper;
+   a deep azure chip on granite). */
 .vm-pane-empty-icon {
   display: flex;
   align-items: center;
@@ -632,8 +739,8 @@
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  background: #e4eeff;
-  color: var(--rcf-azure-deep);
+  background: color-mix(in srgb, var(--brand-azure-bright) 15.4%, var(--t-surface));
+  color: var(--t-accent-text);
 }
 
 /* ─── Transcript (v1.1) ──────────────────────────────────────────────────── */
@@ -645,8 +752,8 @@
   gap: 10px;
   padding: 14px 16px;
   border-radius: 12px;
-  background: var(--rcf-card);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-surface);
+  border: 1px solid var(--t-line);
 }
 
 .vm-tx-head {
@@ -662,13 +769,13 @@
   margin: 0;
   font-size: 0.8rem;
   font-weight: 700;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .vm-tx-sub {
   margin: 2px 0 0;
   font-size: 0.68rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .vm-tx-tools {
@@ -686,18 +793,18 @@
   overflow-y: auto;
   padding: 10px 12px;
   border-radius: 8px;
-  background: var(--rcf-tint);
-  border: 1px solid var(--rcf-line-soft);
+  background: var(--t-tint);
+  border: 1px solid var(--t-line-soft);
   font-size: 0.86rem;
   line-height: 1.6;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
   cursor: text;
 }
 
-.vm-tx-text:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+.vm-tx-text:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 
 .vm-tx-note {
   display: flex;
@@ -720,10 +827,10 @@
   margin: 0;
   font-size: 0.8rem;
   line-height: 1.5;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
-.vm-tx-state-err { color: var(--rcf-red); }
+.vm-tx-state-err { color: var(--t-danger-fg); }
 
 .vm-tx-foot {
   display: flex;
@@ -741,7 +848,7 @@
   justify-content: space-between;
   gap: 16px;
   padding-top: 14px;
-  border-top: 1px solid var(--rcf-line-soft);
+  border-top: 1px solid var(--t-line-soft);
 }
 
 @container vm (max-width: 560px) {
@@ -749,14 +856,16 @@
 }
 
 /* ─── Player ─────────────────────────────────────────────────────────────── */
+/* Light: a 4–7 % azure wash card. Dark: a sunken well with an azure pool in
+   its corner, an azure-bright hairline and a glowing play control. */
 .vm-player {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 14px 16px;
   border-radius: 12px;
-  background: linear-gradient(180deg, #f7faff 0%, #f1f6fe 100%);
-  border: 1px solid rgba(47, 125, 246, 0.18);
+  background: var(--vm-player-bg);
+  border: 1px solid var(--vm-player-line);
 }
 
 .vm-player-compact {
@@ -784,7 +893,7 @@
   flex-shrink: 0;
   border: none;
   border-radius: 50%;
-  color: #ffffff;
+  color: var(--t-text-on-accent);
   background: var(--brand-btn-bg);
   box-shadow: var(--brand-btn-shadow);
   cursor: pointer;
@@ -795,7 +904,7 @@
 .vm-play-on svg { margin-left: 0; }
 .vm-play:hover { background: var(--brand-btn-bg-hover); box-shadow: var(--brand-btn-shadow-hover); }
 .vm-play:active { transform: scale(0.94); }
-.vm-play:focus-visible { outline: 2px solid var(--brand-focus-ring); outline-offset: 3px; }
+.vm-play:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 3px; }
 
 .vm-player-compact .vm-play {
   width: 32px;
@@ -818,10 +927,10 @@
   border-radius: 6px;
   background: linear-gradient(
     to right,
-    var(--brand-azure) 0,
-    var(--brand-azure) var(--vm-pct, 0%),
-    #d6e0ee var(--vm-pct, 0%),
-    #d6e0ee 100%
+    var(--t-accent-line) 0,
+    var(--t-accent-line) var(--vm-pct, 0%),
+    var(--vm-track-rest) var(--vm-pct, 0%),
+    var(--vm-track-rest) 100%
   );
   cursor: pointer;
 }
@@ -832,9 +941,9 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #ffffff;
-  border: 2px solid var(--brand-azure);
-  box-shadow: 0 1px 3px rgba(14, 23, 38, 0.3);
+  background: var(--vm-thumb);
+  border: 2px solid var(--t-accent-line);
+  box-shadow: var(--vm-shadow-thumb);
   transition: transform 0.1s ease;
 }
 
@@ -842,20 +951,20 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #ffffff;
-  border: 2px solid var(--brand-azure);
-  box-shadow: 0 1px 3px rgba(14, 23, 38, 0.3);
+  background: var(--vm-thumb);
+  border: 2px solid var(--t-accent-line);
+  box-shadow: var(--vm-shadow-thumb);
 }
 
 .vm-track:hover::-webkit-slider-thumb { transform: scale(1.12); }
 .vm-track:focus { outline: none; }
-.vm-track:focus-visible { outline: 2px solid var(--brand-focus-ring); outline-offset: 5px; }
+.vm-track:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 5px; }
 .vm-track:disabled { cursor: default; opacity: 0.55; }
 
 .vm-time {
   font-family: var(--vm-mono);
   font-size: 0.72rem;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   min-width: 78px;
@@ -883,7 +992,7 @@
   font-family: inherit;
   font-size: 0.66rem;
   font-weight: 700;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -892,20 +1001,24 @@
   font-variant-numeric: tabular-nums;
 }
 
-.vm-speed-opt:hover { color: var(--rcf-azure-deep); background: rgba(47, 125, 246, 0.07); }
-.vm-speed-opt:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 1px; }
+.vm-speed-opt:hover {
+  color: var(--t-accent-text);
+  background: color-mix(in srgb, var(--t-accent-line) 7%, transparent);
+}
+
+.vm-speed-opt:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 1px; }
 
 .vm-speed-on,
 .vm-speed-on:hover {
-  color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.1);
-  border-color: rgba(47, 125, 246, 0.3);
+  color: var(--t-accent-text);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
+  border-color: color-mix(in srgb, var(--t-accent-line) 30%, transparent);
 }
 
 .vm-player-err {
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--rcf-red);
+  color: var(--t-danger-fg);
 }
 
 .vm-spin {
@@ -913,16 +1026,16 @@
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  border: 2px solid rgba(47, 125, 246, 0.25);
-  border-top-color: var(--brand-azure);
+  border: 2px solid color-mix(in srgb, var(--t-accent-line) 25%, transparent);
+  border-top-color: var(--t-accent-line);
   animation: fx-spin 0.75s linear infinite;
   flex-shrink: 0;
 }
 
 .vm-play .vm-spin,
 .vm-spin-light {
-  border-color: rgba(255, 255, 255, 0.35);
-  border-top-color: #ffffff;
+  border-color: color-mix(in srgb, var(--t-text-on-accent) 35%, transparent);
+  border-top-color: var(--t-text-on-accent);
 }
 
 /* ─── Settings ───────────────────────────────────────────────────────────── */
@@ -953,32 +1066,32 @@
   gap: 10px;
   padding: 12px 14px;
   border-radius: 10px;
-  border: 1px solid var(--rcf-line);
-  background: var(--rcf-card);
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
   cursor: pointer;
   transition: border-color var(--rcf-ease), background var(--rcf-ease), box-shadow var(--rcf-ease);
 }
 
-.vm-mode:hover { border-color: #c4d3e8; background: var(--rcf-tint); }
+.vm-mode:hover { border-color: var(--vm-mode-hover-line); background: var(--t-tint); }
 
 .vm-mode input {
   margin-top: 3px;
-  accent-color: var(--brand-azure);
+  accent-color: var(--t-accent);
 }
 
 .vm-mode strong {
   display: block;
   font-size: 0.82rem;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .vm-mode .dl-help { margin-top: 3px; }
 
 .vm-mode-on,
 .vm-mode-on:hover {
-  border-color: rgba(47, 125, 246, 0.5);
+  border-color: color-mix(in srgb, var(--t-accent-line) 50%, transparent);
   background: var(--vm-select-tint);
-  box-shadow: 0 0 0 3px rgba(47, 125, 246, 0.1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-accent-line) 10%, transparent);
 }
 
 .vm-mode-off { cursor: not-allowed; opacity: 0.62; }
@@ -999,13 +1112,13 @@
   gap: 10px 18px;
   padding: 10px 14px;
   border-radius: 10px;
-  border: 1px solid var(--rcf-line-soft);
-  background: var(--rcf-tint);
+  border: 1px solid var(--t-line-soft);
+  background: var(--t-tint);
 }
 
 .vm-greeting-on {
-  border-color: rgba(22, 163, 74, 0.32);
-  background: rgba(22, 163, 74, 0.04);
+  border-color: color-mix(in srgb, var(--t-ok-solid) 32%, transparent);
+  background: color-mix(in srgb, var(--t-ok-solid) 4%, transparent);
 }
 
 .vm-greeting-id {
@@ -1018,7 +1131,7 @@
 .vm-greeting-name {
   font-size: 0.82rem;
   font-weight: 700;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1026,7 +1139,7 @@
 
 .vm-greeting-meta {
   font-size: 0.68rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .vm-greeting-actions {
@@ -1049,18 +1162,29 @@
   height: 32px;
   padding: 0;
   border-radius: 8px;
-  border: 1px solid var(--rcf-line);
-  background: var(--rcf-card);
-  color: var(--rcf-ink-dim);
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  color: var(--t-text-dim);
   cursor: pointer;
   transition: color var(--rcf-ease), border-color var(--rcf-ease), background var(--rcf-ease);
 }
 
 .vm-iconbtn svg { width: 14px; height: 14px; }
-.vm-iconbtn:hover:not(:disabled) { color: var(--rcf-ink); border-color: #cdd7e6; background: var(--rcf-tint); }
-.vm-iconbtn:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+
+.vm-iconbtn:hover:not(:disabled) {
+  color: var(--t-text);
+  border-color: var(--vm-iconbtn-hover-line);
+  background: var(--t-tint);
+}
+
+.vm-iconbtn:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 .vm-iconbtn:disabled { opacity: 0.45; cursor: not-allowed; }
-.vm-iconbtn-danger:hover:not(:disabled) { color: var(--rcf-red); border-color: rgba(220, 38, 38, 0.35); background: rgba(220, 38, 38, 0.05); }
+
+.vm-iconbtn-danger:hover:not(:disabled) {
+  color: var(--t-danger-fg);
+  border-color: color-mix(in srgb, var(--t-danger-solid) 35%, transparent);
+  background: color-mix(in srgb, var(--t-danger-solid) 5%, transparent);
+}
 
 .vm-form {
   display: flex;
@@ -1088,7 +1212,7 @@
   gap: 10px;
 }
 
-.vm-help-err { color: var(--rcf-red); }
+.vm-help-err { color: var(--t-danger-fg); }
 
 .vm-storage {
   display: flex;
@@ -1107,19 +1231,19 @@
   justify-content: space-between;
   gap: 12px;
   font-size: 0.74rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .vm-storage-top strong {
-  color: var(--rcf-ink);
+  color: var(--t-text);
   font-variant-numeric: tabular-nums;
 }
 
-.vm-meter-fill { background: var(--brand-azure); }
-.vm-meter-warn { background: #d97706; }
-.vm-meter-bad { background: #dc2626; }
+.vm-meter-fill { background: var(--t-accent-line); }
+.vm-meter-warn { background: var(--t-warn-solid); }
+.vm-meter-bad { background: var(--t-danger-solid); }
 
-.vm-admin-panel { border-color: rgba(245, 158, 11, 0.32); }
+.vm-admin-panel { border-color: color-mix(in srgb, var(--vm-staff) 32%, transparent); }
 
 .vm-admin {
   display: flex;
@@ -1133,7 +1257,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--rcf-line-soft);
+  border-bottom: 1px solid var(--t-line-soft);
 }
 
 .vm-admin-row:first-child { padding-top: 0; }
@@ -1141,7 +1265,7 @@
 
 .vm-admin-row strong {
   font-size: 0.82rem;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .vm-admin-row .dl-help { margin-top: 3px; max-width: 46ch; }
@@ -1151,7 +1275,7 @@
   font-family: var(--vm-display);
   font-size: 1.05rem;
   letter-spacing: -0.015em;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .vm-center-copy {
@@ -1159,7 +1283,7 @@
   max-width: 52ch;
   font-size: 0.82rem;
   line-height: 1.6;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .vm-intro { padding: 28px clamp(20px, 3vw, 36px) 26px; }
@@ -1179,14 +1303,14 @@
   font-weight: 700;
   font-size: clamp(1.05rem, 1.6vw, 1.25rem);
   letter-spacing: -0.02em;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .vm-intro-copy {
   margin: 0;
   font-size: 0.84rem;
   line-height: 1.55;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .vm-intro-points {
@@ -1208,14 +1332,14 @@
   align-items: flex-start;
   padding: 14px 16px;
   border-radius: 10px;
-  background: var(--rcf-tint);
-  border: 1px solid var(--rcf-line-soft);
+  background: var(--t-tint);
+  border: 1px solid var(--t-line-soft);
 }
 
 .vm-intro-point strong {
   display: block;
   font-size: 0.82rem;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   margin-bottom: 3px;
 }
 
@@ -1223,7 +1347,7 @@
   display: block;
   font-size: 0.74rem;
   line-height: 1.5;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .vm-intro-chip {
@@ -1234,21 +1358,24 @@
   height: 32px;
   border-radius: 8px;
   flex-shrink: 0;
-  color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.1);
-  border: 1px solid rgba(47, 125, 246, 0.2);
+  color: var(--t-accent-text);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 20%, transparent);
 }
 
 .vm-intro-close {
   margin: 22px 0 0;
   padding-top: 16px;
-  border-top: 1px solid var(--rcf-line-soft);
+  border-top: 1px solid var(--t-line-soft);
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 /* ─── Dialogs ────────────────────────────────────────────────────────────── */
+/* Portal root: `.dl-scope` (for the dl-* primitives' class rules) +
+   `.vm-scope` (for the --vm-* roles). Colour needs no scope — the theme
+   tokens live on <html> (CLAUDE.md §18.3 rule 6). */
 .dl-scope.vm-dialog-root {
   position: fixed;
   inset: 0;
@@ -1259,7 +1386,7 @@
   align-items: center;
   justify-content: center;
   padding: 4vh 16px;
-  background: rgba(7, 12, 22, 0.5);
+  background: var(--vm-scrim);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   animation: fx-fade 0.16s ease-out;
@@ -1269,16 +1396,16 @@
   display: flex;
   flex-direction: column;
   max-height: 92vh;
-  background: var(--rcf-card);
+  background: var(--vm-dialog-bg);
   border-radius: 14px;
-  border-top: 3px solid var(--brand-azure);
+  border-top: 3px solid var(--t-accent-line);
   overflow: hidden;
   outline: none;
-  box-shadow: 0 0 0 1px rgba(7, 12, 22, 0.1), 0 32px 80px -24px rgba(7, 12, 22, 0.6);
+  box-shadow: var(--vm-shadow-modal);
   animation: vm-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.vm-dialog-danger { border-top-color: #dc2626; }
+.vm-dialog-danger { border-top-color: var(--t-danger-solid); }
 
 @keyframes vm-pop {
   from { opacity: 0; transform: translateY(8px) scale(0.99); }
@@ -1297,7 +1424,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 18px 22px 14px;
-  border-bottom: 1px solid var(--rcf-line);
+  border-bottom: 1px solid var(--t-line);
 }
 
 .vm-dialog-id { min-width: 0; }
@@ -1308,14 +1435,14 @@
   font-weight: 700;
   font-size: 1.05rem;
   letter-spacing: -0.02em;
-  color: var(--rcf-ink);
+  color: var(--t-text-strong);
 }
 
 .vm-dialog-sub {
   margin-top: 4px;
   font-size: 0.78rem;
   line-height: 1.5;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .vm-dialog-body {
@@ -1323,7 +1450,7 @@
   overflow-y: auto;
   padding: 18px 22px;
   font-size: 0.82rem;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .vm-dialog-foot {
@@ -1331,12 +1458,12 @@
   justify-content: flex-end;
   gap: 10px;
   padding: 14px 22px;
-  border-top: 1px solid var(--rcf-line);
-  background: var(--rcf-tint);
+  border-top: 1px solid var(--t-line);
+  background: var(--t-tint);
 }
 
 .vm-confirm-body p { margin: 0 0 10px; line-height: 1.6; }
-.vm-confirm-body strong { color: var(--rcf-ink); }
+.vm-confirm-body strong { color: var(--t-text); }
 
 .vm-confirm-list {
   margin: 0 0 14px;
@@ -1353,8 +1480,8 @@
   padding: 3px;
   gap: 3px;
   border-radius: 10px;
-  background: #eef2f8;
-  border: 1px solid var(--rcf-line);
+  background: var(--vm-seg-bg);
+  border: 1px solid var(--t-line);
   margin-bottom: 16px;
 }
 
@@ -1369,20 +1496,20 @@
   font-family: inherit;
   font-size: 0.78rem;
   font-weight: 700;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   background: transparent;
   cursor: pointer;
 }
 
-.vm-seg-opt:hover:not(:disabled) { color: var(--rcf-ink); }
-.vm-seg-opt:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 1px; }
+.vm-seg-opt:hover:not(:disabled) { color: var(--t-text); }
+.vm-seg-opt:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 1px; }
 .vm-seg-opt:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .vm-seg-on,
 .vm-seg-on:hover:not(:disabled) {
-  color: var(--rcf-azure-deep);
-  background: var(--rcf-card);
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.12);
+  color: var(--t-accent-text);
+  background: var(--t-surface-raised);
+  box-shadow: var(--vm-shadow-seg);
 }
 
 .vm-capture-start {
@@ -1398,22 +1525,22 @@
   gap: 16px;
   padding: 14px 16px;
   border-radius: 12px;
-  border: 1px solid rgba(220, 38, 38, 0.26);
-  background: rgba(220, 38, 38, 0.04);
+  border: 1px solid color-mix(in srgb, var(--t-danger-solid) 26%, transparent);
+  background: color-mix(in srgb, var(--t-danger-solid) 4%, transparent);
 }
 
 .vm-rec-dot {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #dc2626;
+  background: var(--t-danger-solid);
   flex-shrink: 0;
   animation: vm-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes vm-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45); }
-  50% { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--t-danger-solid) 45%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--t-danger-solid) 0%, transparent); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1432,16 +1559,16 @@
   font-family: var(--vm-mono);
   font-size: 1.15rem;
   font-weight: 600;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   font-variant-numeric: tabular-nums;
 }
 
-.vm-rec-time span { font-size: 0.78rem; color: var(--rcf-ink-dim); }
+.vm-rec-time span { font-size: 0.78rem; color: var(--t-text-dim); }
 
 .vm-level {
   height: 6px;
   border-radius: 6px;
-  background: #e5e9f0;
+  background: var(--vm-level-rest);
   overflow: hidden;
 }
 
@@ -1449,7 +1576,7 @@
   display: block;
   height: 100%;
   border-radius: 6px;
-  background: linear-gradient(90deg, var(--brand-azure) 0%, #16a34a 70%, #d97706 100%);
+  background: linear-gradient(90deg, var(--t-accent-line) 0%, var(--t-ok-solid) 70%, var(--t-warn-solid) 100%);
   transition: width 0.08s linear;
 }
 
@@ -1461,17 +1588,17 @@
   padding: 26px 20px;
   text-align: center;
   border-radius: 12px;
-  border: 1.5px dashed #c3d0e4;
-  background: var(--rcf-tint);
-  color: var(--rcf-ink-dim);
+  border: 1.5px dashed var(--vm-drop-line);
+  background: var(--t-tint);
+  color: var(--t-text-dim);
   transition: border-color var(--rcf-ease), background var(--rcf-ease);
 }
 
 .vm-drop p { margin: 4px 0 0; }
-.vm-drop svg { color: var(--rcf-azure-deep); }
+.vm-drop svg { color: var(--t-accent-text); }
 
 .vm-drop-on {
-  border-color: var(--brand-azure);
+  border-color: var(--t-accent-line);
   background: var(--vm-select-tint);
 }
 
@@ -1494,7 +1621,7 @@
 
 .vm-preview-meta {
   font-size: 0.7rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   overflow-wrap: anywhere;
 }
 
@@ -1506,11 +1633,11 @@
   gap: 8px;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   cursor: pointer;
 }
 
-.vm-check input { accent-color: var(--brand-azure); width: 15px; height: 15px; }
+.vm-check input { accent-color: var(--t-accent); width: 15px; height: 15px; }
 
 /* New mailbox: number search + pick list */
 .vm-search {
@@ -1522,7 +1649,7 @@
 .vm-search svg {
   position: absolute;
   left: 11px;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   pointer-events: none;
 }
 
@@ -1532,9 +1659,9 @@
   margin-top: 8px;
   max-height: 220px;
   overflow-y: auto;
-  border: 1px solid var(--rcf-line);
+  border: 1px solid var(--t-line);
   border-radius: 10px;
-  background: var(--rcf-card);
+  background: var(--t-surface);
 }
 
 .vm-number {
@@ -1544,23 +1671,153 @@
   gap: 10px;
   padding: 9px 12px;
   font-size: 0.82rem;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   cursor: pointer;
-  border-top: 1px solid var(--rcf-line-soft);
+  border-top: 1px solid var(--t-line-soft);
 }
 
 .vm-number:first-child { border-top: none; }
-.vm-number:hover { background: var(--rcf-tint-hover); }
-.vm-number input { accent-color: var(--brand-azure); }
+.vm-number:hover { background: var(--t-tint-hover); }
+.vm-number input { accent-color: var(--t-accent); }
 
 .vm-number-on,
 .vm-number-on:hover {
   background: var(--vm-select-tint);
-  box-shadow: inset 3px 0 0 0 var(--rcf-azure);
+  box-shadow: inset 3px 0 0 0 var(--t-accent-line);
 }
 
 .vm-number-where {
   font-size: 0.72rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   text-align: right;
+}
+
+/* ═══ Dark theme — refinements beyond the token flips ═══════════════════════
+   The landing's language on granite: chips and pills read as azure-bright
+   tints with a hairline; the selected message and the play control carry a
+   soft azure glow; a dialog is a raised panel with an azure keyline.
+   Selectors are (0,3,0)+, so each one repeats the states it must cover. */
+
+:root[data-theme='dark'] .vm-play {
+  box-shadow: var(--brand-btn-shadow), var(--t-glow);
+}
+
+:root[data-theme='dark'] .vm-play:hover {
+  box-shadow: var(--brand-btn-shadow-hover), var(--t-glow);
+}
+
+:root[data-theme='dark'] .vm-enc-pill {
+  background: var(--t-accent-tint);
+  border-color: var(--t-accent-border);
+}
+
+:root[data-theme='dark'] .vm-enc-pill:hover {
+  background: color-mix(in srgb, var(--t-accent-line) 20%, transparent);
+  border-color: color-mix(in srgb, var(--t-accent-line) 52%, transparent);
+}
+
+:root[data-theme='dark'] .vm-folder-on,
+:root[data-theme='dark'] .vm-folder-on:hover {
+  color: var(--t-text-strong);
+  background: var(--t-surface);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--t-text-strong) 5%, transparent);
+}
+
+/* Selected message: azure-bright leading edge + a faint inner bloom. */
+:root[data-theme='dark'] .vm-row-on,
+:root[data-theme='dark'] .vm-row-on:hover {
+  box-shadow:
+    inset 3px 0 0 0 var(--t-accent-line),
+    inset 24px 0 32px -24px color-mix(in srgb, var(--t-accent-line) 30%, transparent);
+}
+
+:root[data-theme='dark'] .vm-row-unread .vm-row-dot {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--t-accent-line) 18%, transparent),
+    0 0 10px color-mix(in srgb, var(--t-accent-line) 55%, transparent);
+}
+
+:root[data-theme='dark'] .vm-facts,
+:root[data-theme='dark'] .vm-tx-text {
+  background: var(--t-surface-sunken);
+  border-color: var(--t-line);
+}
+
+:root[data-theme='dark'] .vm-tx {
+  background: var(--t-panel-bg);
+  box-shadow: var(--t-highlight);
+}
+
+:root[data-theme='dark'] .vm-state-new,
+:root[data-theme='dark'] .vm-folder-new {
+  background: var(--t-accent-hover);   /* small white label: azure-deep keeps it ≥ 4.5:1 */
+  box-shadow: var(--t-glow);
+}
+
+:root[data-theme='dark'] .vm-state-read {
+  background: var(--t-neutral-bg);
+  border-color: var(--t-neutral-border);
+}
+
+:root[data-theme='dark'] .vm-speed-on,
+:root[data-theme='dark'] .vm-speed-on:hover {
+  background: var(--t-accent-tint);
+  border-color: var(--t-accent-border);
+}
+
+:root[data-theme='dark'] .vm-mode-on,
+:root[data-theme='dark'] .vm-mode-on:hover {
+  border-color: var(--t-accent-border);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-accent-line) 12%, transparent), var(--t-glow);
+}
+
+:root[data-theme='dark'] .vm-greeting-on {
+  border-color: var(--t-ok-border);
+  background: color-mix(in srgb, var(--t-ok-solid) 6%, transparent);
+}
+
+:root[data-theme='dark'] .vm-intro-chip {
+  background: var(--t-accent-tint);
+  border-color: var(--t-accent-border);
+}
+
+:root[data-theme='dark'] .vm-greeting,
+:root[data-theme='dark'] .vm-intro-point {
+  border-color: var(--t-line);
+}
+
+:root[data-theme='dark'] .vm-iconbtn {
+  background: transparent;
+  border-color: var(--t-line-strong);
+}
+
+:root[data-theme='dark'] .vm-iconbtn:hover:not(:disabled) {
+  background: var(--t-hover);
+  border-color: var(--t-field-border-hover);
+}
+
+:root[data-theme='dark'] .vm-iconbtn-danger:hover:not(:disabled) {
+  background: var(--t-danger-bg);
+  border-color: var(--t-danger-border);
+}
+
+:root[data-theme='dark'] .vm-numbers {
+  background: var(--t-surface-sunken);
+}
+
+/* Dialog: raised panel, hairline ring, an azure keyline glow under the edge. */
+:root[data-theme='dark'] .vm-dialog {
+  box-shadow:
+    var(--vm-shadow-modal),
+    0 -10px 40px -18px color-mix(in srgb, var(--t-accent-line) 60%, transparent);
+}
+
+:root[data-theme='dark'] .vm-dialog-danger {
+  box-shadow:
+    var(--vm-shadow-modal),
+    0 -10px 40px -18px color-mix(in srgb, var(--t-danger-solid) 55%, transparent);
+}
+
+:root[data-theme='dark'] .vm-dialog-foot {
+  background: color-mix(in srgb, var(--t-surface-sunken) 55%, var(--t-surface-raised));
 }

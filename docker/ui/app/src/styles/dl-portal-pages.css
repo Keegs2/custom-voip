@@ -1,12 +1,13 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    dl-portal-pages.css — page-scoped daylight styles for the portal pages
-   converted in this pass (AccountPage, ApiDidsPage, IvrBuilderPage).
+   converted in this pass (AccountPage, ApiDidsPage, IvrBuilderPage) and the
+   SIP Trunking page's few bespoke colour roles (TrunksPage, `.dlx-trunks`).
 
    The `dlx-` prefix marks these as page-scoped, NOT part of the shared
    DAYLIGHT CONSOLE system in index.css. If a third page reaches for one of
    these, promote it into the shared `dl-*` block (flagged for
-   consolidation). Every value references the shared `--rcf-*` custom
-   properties declared on `.dl-scope` — no re-stated magic numbers.
+   consolidation). Colour comes from the theme layer (`--t-*`, light / dark —
+   docker/ui/CLAUDE.md §18) — no re-stated magic numbers.
    Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -36,3 +37,20 @@
 @media (min-width: 640px) {
   .dlx-ro-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
+
+/* ─── SIP Trunking page (TrunksPage — root `.dl-scope.dlx-trunks`) ─── */
+/* Two light shades no theme token carries — the exact daylight values
+   (CLAUDE.md §18.3 rule 2); dark re-points both at tokens. */
+.dlx-trunks {
+  --dlx-warn-ink: #92400e;      /* amber-800: "no authorized IPs yet" note */
+  --dlx-dot-off: #b6c2d4;       /* disabled-DID status dot */
+}
+
+:root[data-theme='dark'] .dlx-trunks {
+  --dlx-warn-ink: var(--t-warn-fg);
+  --dlx-dot-off: var(--t-neutral-solid);
+}
+
+/* Authorized-IP remove (×): dim at rest, danger on hover. */
+.dlx-ip-remove { color: var(--t-text-dim); }
+.dlx-ip-remove:hover:not(:disabled) { color: var(--t-danger-fg); }

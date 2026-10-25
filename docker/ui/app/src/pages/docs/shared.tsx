@@ -5,9 +5,9 @@
  * Keep this file free of page-specific content — it is pure shared infrastructure.
  *
  * Styling: the shared DAYLIGHT CONSOLE system (`dl-*` classes in index.css)
- * plus the docs-only `dlx-*` primitives in src/styles/dl-docs.css — paper
- * canvas, quiet breadcrumb header, white panels, ink text, azure accents,
- * ink-on-dark code blocks.
+ * plus the docs-only `dlx-*` primitives in src/styles/dl-docs.css, all on the
+ * theme tokens (light / dark — docker/ui/CLAUDE.md §18). Code blocks are a
+ * dark code surface in both themes. The page root carries `dl-scope dlx-docs`.
  *
  * React #310: every hook in every component below is called unconditionally
  * at the top of its function, before any early return.
@@ -46,22 +46,19 @@ export function UL({ items }: { items: React.ReactNode[] }) {
 
 /* ─── Callout box ────────────────────────────────────────── */
 
+/** The callout's hue: `info` = azure (the default), `warn` = amber. */
+export type CalloutTone = 'info' | 'warn';
+
 export function Callout({
-  accent,
+  tone = 'info',
   children,
 }: {
-  accent: string;
+  tone?: CalloutTone;
   children: React.ReactNode;
 }) {
   return (
-    <div
-      className="dlx-callout"
-      style={{
-        background: `${accent}0d`,
-        border: `1px solid ${accent}30`,
-      }}
-    >
-      <div style={{ color: accent, flexShrink: 0, marginTop: 2 }}>
+    <div className={tone === 'warn' ? 'dlx-callout dlx-callout-warn' : 'dlx-callout'}>
+      <div className="dlx-callout-icon">
         <Info size={14} />
       </div>
       <div>{children}</div>
@@ -118,22 +115,25 @@ export function AccordionSection({
 
 /* ─── Code block ─────────────────────────────────────────── */
 
+/** Syntax token kinds → `.dlx-tok-*` classes (colours: the code theme in dl-docs.css). */
+type TokenKind = 'text' | 'key' | 'string' | 'literal' | 'number';
+
 /**
  * Renders a single code line with simple token colouring tuned for the
- * ink-on-dark navy code surface. Covers the patterns that appear in
- * curl/JSON examples without a full parser.
+ * dark code surface (dark in both themes). Covers the patterns that appear
+ * in curl/JSON examples without a full parser.
  */
 function CodeLine({ raw }: { raw: string }) {
   // Comment lines
   if (/^\s*#/.test(raw)) {
     return (
       <div>
-        <span style={{ color: '#5b6d8f' }}>{raw}</span>
+        <span className="dlx-tok-comment">{raw}</span>
       </div>
     );
   }
 
-  const tokens: Array<{ text: string; color: string }> = [];
+  const tokens: Array<{ text: string; kind: TokenKind }> = [];
   const remaining = raw;
 
   const TOKEN_RE = /("[\w\s:+@./\\-]*"\s*:)|("(?:[^"\\]|\\.)*")|(\b(?:true|false|null)\b)|(\b\d+(?:\.\d+)?\b)/g;
@@ -144,34 +144,34 @@ function CodeLine({ raw }: { raw: string }) {
   TOKEN_RE.lastIndex = 0;
   while ((match = TOKEN_RE.exec(remaining)) !== null) {
     if (match.index > lastIndex) {
-      tokens.push({ text: remaining.slice(lastIndex, match.index), color: '#c9d5ea' });
+      tokens.push({ text: remaining.slice(lastIndex, match.index), kind: 'text' });
     }
 
     if (match[1]) {
-      tokens.push({ text: match[1], color: '#6fb0ff' });
+      tokens.push({ text: match[1], kind: 'key' });
     } else if (match[2]) {
-      tokens.push({ text: match[2], color: '#a3c9ff' });
+      tokens.push({ text: match[2], kind: 'string' });
     } else if (match[3]) {
-      tokens.push({ text: match[3], color: '#5fd39a' });
+      tokens.push({ text: match[3], kind: 'literal' });
     } else if (match[4]) {
-      tokens.push({ text: match[4], color: '#4cc9f0' });
+      tokens.push({ text: match[4], kind: 'number' });
     }
 
     lastIndex = match.index + match[0].length;
   }
 
   if (lastIndex < remaining.length) {
-    tokens.push({ text: remaining.slice(lastIndex), color: '#c9d5ea' });
+    tokens.push({ text: remaining.slice(lastIndex), kind: 'text' });
   }
 
   if (tokens.length === 0) {
-    return <div><span style={{ color: '#c9d5ea' }}>{raw || ' '}</span></div>;
+    return <div><span className="dlx-tok-text">{raw || ' '}</span></div>;
   }
 
   return (
     <div>
       {tokens.map((t, i) => (
-        <span key={i} style={{ color: t.color }}>{t.text}</span>
+        <span key={i} className={`dlx-tok-${t.kind}`}>{t.text}</span>
       ))}
     </div>
   );

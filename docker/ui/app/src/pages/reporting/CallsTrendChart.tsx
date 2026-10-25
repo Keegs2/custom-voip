@@ -6,7 +6,11 @@
  *   - TRUE-PIXEL TEXT: the SVG is drawn at the container's measured width
  *     (ResizeObserver), never scaled through a viewBox, so 11px ticks are 11px.
  *   - Quiet chrome: hairline grid, 3–4 nice integer y ticks, 4–6 date labels,
- *     a white tooltip card (reuses the shared `dl-qtc-*` styles).
+ *     a raised tooltip card (reuses the shared `dl-qtc-*` styles).
+ *   - THEMED (docker/ui/CLAUDE.md §18): series, ticks, grid and hover band are
+ *     theme tokens (CHART roles + the `--rpt-chart-*` page tokens in
+ *     dl-trend-chart.css), painted through `style` — never the fill=/stroke=
+ *     attributes, which don't reliably resolve `var()`.
  *
  * Accessibility: the plot is one focusable element — Left/Right (and
  * Home/End) walk the buckets and the tooltip text is mirrored into a polite
@@ -16,15 +20,17 @@
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import type { ReportTrendPoint, TrendBucket } from '../../types/reports';
-import { dayKeyToUtc, fmtMinutes, plural, TREND_COLORS } from './reportFormat';
-import { brandAzureAlpha } from '../../styles/brand';
+import { dayKeyToUtc, fmtMinutes, plural, TREND_SERIES } from './reportFormat';
+import { CHART } from '../../styles/theme';
 import '../../styles/dl-trend-chart.css';
 
-const ANSWERED = TREND_COLORS.answered;
-const MISSED = TREND_COLORS.missed;
-const INK_TICK = '#46566f';
-const GRID_LINE = 'rgba(14, 23, 38, 0.055)';
-const HOVER_BAND = brandAzureAlpha(0.07);
+const ANSWERED = TREND_SERIES.answered;
+const MISSED = TREND_SERIES.missed;
+/** Tick labels: ink-soft on paper (as before), the chart label tone on granite. */
+const INK_TICK = 'var(--rpt-chart-tick)';
+/** Gridlines: ink 5.5 % on paper (as before), the chart grid on granite. */
+const GRID_LINE = 'var(--rpt-chart-grid)';
+const HOVER_BAND = CHART.hoverBand;
 
 const PAD_L = 40;
 const PAD_R = 10;
@@ -188,8 +194,8 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
               const y = crisp(geom.yFor(t));
               return (
                 <g key={t}>
-                  <line x1={PAD_L} y1={y} x2={width - PAD_R} y2={y} stroke={GRID_LINE} strokeWidth={1} />
-                  <text x={PAD_L - 8} y={y + 3.5} textAnchor="end" fontSize={11} fill={INK_TICK} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  <line x1={PAD_L} y1={y} x2={width - PAD_R} y2={y} strokeWidth={1} style={{ stroke: GRID_LINE }} />
+                  <text x={PAD_L - 8} y={y + 3.5} textAnchor="end" fontSize={11} style={{ fill: INK_TICK, fontVariantNumeric: 'tabular-nums' }}>
                     {t.toLocaleString()}
                   </text>
                 </g>
@@ -202,7 +208,7 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
                 y={PAD_T}
                 width={geom.slot}
                 height={PLOT_H}
-                fill={HOVER_BAND}
+                style={{ fill: HOVER_BAND }}
                 rx={4}
               />
             )}
@@ -217,10 +223,10 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
               return (
                 <g key={p.date} aria-hidden="true">
                   {p.answered > 0 && (
-                    <rect x={x} y={answeredTop} width={geom.barW} height={Math.max(base - answeredTop, 1)} fill={ANSWERED} rx={p.missed > 0 ? 0 : radius} />
+                    <rect x={x} y={answeredTop} width={geom.barW} height={Math.max(base - answeredTop, 1)} style={{ fill: ANSWERED }} rx={p.missed > 0 ? 0 : radius} />
                   )}
                   {p.missed > 0 && (
-                    <rect x={x} y={totalTop} width={geom.barW} height={Math.max(answeredTop - totalTop, 1.5)} fill={MISSED} rx={radius} />
+                    <rect x={x} y={totalTop} width={geom.barW} height={Math.max(answeredTop - totalTop, 1.5)} style={{ fill: MISSED }} rx={radius} />
                   )}
                 </g>
               );
@@ -237,7 +243,7 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
                   y={SVG_H - 8}
                   textAnchor={nearRight ? 'end' : nearLeft ? 'start' : 'middle'}
                   fontSize={11}
-                  fill={INK_TICK}
+                  style={{ fill: INK_TICK }}
                 >
                   {labels.tick(points[i].date)}
                 </text>

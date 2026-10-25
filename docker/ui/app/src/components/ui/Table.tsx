@@ -21,7 +21,7 @@ interface TrProps {
   className?: string;
 }
 
-/** Scrollable table wrapper — borderless liquid-glass panel */
+/** Scrollable table wrapper — a raised panel (theme tokens, .glass-surface) */
 export function TableWrap({ children, className }: TableProps) {
   return (
     <div
@@ -34,9 +34,8 @@ export function TableWrap({ children, className }: TableProps) {
 }
 
 /**
- * Table row with a cheap, smooth per-row hover glow (blue background tint +
- * inset accent leading-edge + soft shadow). No backdrop-filter — safe for long
- * lists. Behaviour lives in the .glass-row-hover CSS class.
+ * Table row with a cheap per-row hover (tint + azure leading edge). Safe for
+ * long lists. Behaviour lives in the .glass-row-hover CSS class.
  */
 export function Tr({ children, className }: TrProps) {
   return <tr className={cn('glass-row-hover', className)}>{children}</tr>;
@@ -53,14 +52,13 @@ export function Table({ children, className }: TableProps) {
 }
 
 export function Thead({ children, className }: TableProps) {
-  // Quiet, refined header band — a whisper of tint + a hairline accent underline
-  // instead of a hard border.
+  // Quiet header band — the panel tint + a hairline underline.
   return (
     <thead
       className={cn(className)}
       style={{
-        background: 'rgba(47,125,246,0.035)',
-        boxShadow: 'inset 0 -1px 0 0 rgba(47,125,246,0.12)',
+        background: 'var(--t-tint)',
+        boxShadow: 'inset 0 -1px 0 0 var(--t-line)',
       }}
     >
       {children}
@@ -81,7 +79,7 @@ export function Th({ children, className }: ThProps) {
         fontWeight: 600,
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
-        color: '#64748b',
+        color: 'var(--t-text-dim)',
       }}
     >
       {children}
@@ -90,8 +88,7 @@ export function Th({ children, className }: ThProps) {
 }
 
 export function Td({ children, className, colSpan }: TdProps) {
-  // Borderless — row separation comes from the hover tint + generous padding,
-  // not a hard rule. A near-invisible inset hairline keeps rows legible at rest.
+  // Row separation is a soft inset hairline + the hover tint.
   return (
     <td
       colSpan={colSpan}
@@ -101,7 +98,7 @@ export function Td({ children, className, colSpan }: TdProps) {
       )}
       style={{
         padding: '14px 20px',
-        boxShadow: 'inset 0 -1px 0 0 rgba(255,255,255,0.025)',
+        boxShadow: 'inset 0 -1px 0 0 var(--t-line-soft)',
       }}
     >
       {children}
