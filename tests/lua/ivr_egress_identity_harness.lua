@@ -4,8 +4,9 @@
 --
 -- WHAT IS COMPARED. Every scenario runs twice under tests/lua/ivr_sandbox.lua:
 --   BASELINE  the pre-extraction router: BASELINE_REF=<commit> (git show
---             <commit>:docker/freeswitch/scripts/inbound_router.lua — cd69af1
---             is the RCF-V1 commit the IVR extraction was cut from) or
+--             <commit>:docker/freeswitch/scripts/inbound_router.lua — c6aa829
+--             = RCF-V1 + the no-redial fix, the router this extraction must
+--             leave RCF identical to; cd69af1 before that fix) or
 --             BASELINE_ROUTER=<file>. OPT-IN: with neither set the harness
 --             prints SKIPPED and exits 0. It is a one-off proof for a refactor
 --             of the router, not a standing regression test — once the router
@@ -43,7 +44,7 @@ local BASELINE_REF = os.getenv("BASELINE_REF")
 local tmp_baseline
 if (not BASELINE or BASELINE == "") and (not BASELINE_REF or BASELINE_REF == "") then
     print("SKIPPED: the RCF egress byte-identity proof is opt-in. Run it against the router")
-    print("from before a refactor: BASELINE_REF=cd69af1 lua tests/lua/ivr_egress_identity_harness.lua")
+    print("from before a refactor: BASELINE_REF=c6aa829 lua tests/lua/ivr_egress_identity_harness.lua")
     print("ALL IVR EGRESS IDENTITY ASSERTIONS SKIPPED (no baseline requested)")
     SB.cleanup()
     os.exit(0)
@@ -327,7 +328,10 @@ do
     c = SB.run(S.rcf_passthrough_on, SB.ROUTER)
     check("From pass-through export", any_event(c, "exec:export:origination_caller_id_number=5085550180"), "")
     c = SB.run(S.rcf_noanswer_redial, SB.ROUTER)
-    check("RCF (not IVR) keeps re-dialling after NO_ANSWER / USER_BUSY (today's behavior)", #c.bridges == 4, #c.bridges)
+    -- fix/rcf-no-redial-after-noanswer-busy: a far-end NO_ANSWER (ring 30 s >
+    -- the 10 s PDD bound) ends the sweep for RCF too, and the cause goes back.
+    check("RCF stops after a far-end NO_ANSWER (no re-dial) and returns it, not 503",
+        #c.bridges == 1 and c.hangups[1] == "NO_ANSWER", #c.bridges .. " " .. tostring(c.hangups[1]))
 end
 
 do
