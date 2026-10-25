@@ -8,7 +8,9 @@ plays the API. Proves:
   * the response table: 201/200 stored|duplicate -> deleted; 410 -> deleted
     + journaled; 422 -> rejected/ + journaled; 503 / 5xx / 401 / 404 /
     network error / a 2xx without a status -> kept, global backoff, the pass
-    stops at the first failure; oldest received_at first;
+    stops at the first failure; oldest received_at first; after a NETWORK
+    failure the GET / probe retries as soon as East answers, after an HTTP
+    failure the full backoff holds;
   * caps: older than 7 days -> dropped (pending AND rejected) + journaled;
     over the byte cap -> oldest rejected first, then oldest pending,
     journaled; leftovers after an hour (.tmp, lone .json deleted, lone .cms
@@ -217,7 +219,38 @@ def test_network_error_keeps(env, api, monkeypatch):
     f = env.forwarder()
     f.run_once()
     assert env.names() == {f"{u}.cms", f"{u}.json"} and f.api_reachable == 0
-    assert f.send_failures == 1
+    assert f.send_failures == 1 and f.last_failure_network
+
+
+def test_probe_cuts_the_backoff_short_after_a_network_failure(env, api, monkeypatch):
+    """East unreachable -> long backoff; the cheap GET / probe retries the
+    queue as soon as East answers again (not up to 6 min later)."""
+    u = env.put()
+    f = env.forwarder(VM_FORWARDER_BACKOFF_MIN_S=200)
+    good_port = f.cfg.api_port
+    f.cfg.api_port = "1"                       # nothing listens: connection refused
+    f.run_once()
+    assert f.send_failures == 1 and f.last_failure_network and f.next_attempt - env.now > 100
+    env.now += 5
+    f.run_once()                               # probe < scan interval since the failure? no: first probe
+    assert len(api.requests) == 0              # probe failed (still the dead port)
+    f.cfg.api_port = good_port                 # East is back
+    env.now += 10
+    f.run_once()
+    assert [r["uuid"] for r in api.requests] == [u], "retried right after the probe answered"
+    assert env.names() == set() and f.backoff_s == 0
+
+
+def test_no_probe_shortcut_after_an_http_failure(env, api):
+    u = env.put()
+    api.script = {u: [(503, {"detail": "Spool key is not configured; retry later."})]}
+    f = env.forwarder(VM_FORWARDER_BACKOFF_MIN_S=200)
+    f.run_once()
+    assert not f.last_failure_network
+    for _ in range(5):
+        env.now += 10
+        f.run_once()
+    assert len(api.requests) == 1, "the API answered 503: keep the full backoff"
 
 
 @pytest.mark.parametrize("header", [None, "Authorization: x\n", "X-Ingest-Secret: short\n"])

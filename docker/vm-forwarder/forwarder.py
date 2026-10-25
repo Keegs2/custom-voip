@@ -34,6 +34,13 @@ Loop (every SCAN_INTERVAL_S):
      error, a 2xx without the status) -> keep; exponential backoff
      (5 s .. 5 min, +/- 20 % jitter) for the WHOLE queue — an outage is
      global, so one failure pauses the pass instead of hammering East.
+     After a NETWORK failure (no HTTP answer at all = East unreachable) the
+     backoff is cut short by a cheap probe, ``GET /`` (JWT-exempt, no DB),
+     once per scan: the moment East answers, the queue is retried, so mail
+     arrives within ~SCAN_INTERVAL_S of East's return instead of up to 6 min
+     later. An HTTP-level failure (503 key unset, 401, ...) keeps the full
+     backoff — the API is up but refusing, so retrying sooner would only
+     resend the blob.
 
 Metrics (Prometheus text, http://127.0.0.1:9105/metrics, scraped by the
 co-located vmagent — docker/vmagent/scrape-media.yml job vm_forwarder) for a
@@ -152,6 +159,8 @@ class Forwarder:
         self.backoff_s = 0.0
         self.next_attempt = 0.0
         self.last_scan = 0.0
+        self.last_probe = 0.0
+        self.last_failure_network = False
         self.api_reachable = 0
         self.forwarded = {"stored": 0, "duplicate": 0, "dropped": 0, "rejected": 0}
         self.dropped = {"age": 0, "size": 0, "orphan": 0, "bad_sidecar": 0}
@@ -388,10 +397,12 @@ class Forwarder:
             raw = resp.read(RESPONSE_MAX)
         except (OSError, http.client.HTTPException) as exc:
             self.api_reachable = 0
+            self.last_failure_network = True
             return "retry", 0, f"{exc.__class__.__name__}: {exc}"[:200]
         finally:
             conn.close()
         self.api_reachable = 1
+        self.last_failure_network = False
         try:
             payload = json.loads(raw.decode("utf-8")) if raw else {}
         except (UnicodeDecodeError, ValueError):
@@ -407,6 +418,20 @@ class Forwarder:
             return "rejected", status, detail
         return "retry", status, detail or f"http {status}"
 
+    def probe(self) -> bool:
+        """True when the API answers HTTP at all (``GET /``: JWT-exempt, no DB)."""
+        if not self.cfg.api_ok()[0]:
+            return False
+        conn = http.client.HTTPConnection(self.cfg.api_host, int(self.cfg.api_port), timeout=3)
+        try:
+            conn.request("GET", "/", headers={"User-Agent": "crag-vm-forwarder/1"})
+            conn.getresponse().read(1024)
+            return True
+        except (OSError, http.client.HTTPException):
+            return False
+        finally:
+            conn.close()
+
     # ------------------------------------------------------------------
     # loop
     # ------------------------------------------------------------------
@@ -420,8 +445,19 @@ class Forwarder:
         pending, rejected, orphans = self.scan()
         pending = self.enforce(pending, rejected, orphans, now)
         self.last_scan = now
-        if not pending or now < self.next_attempt:
+        if not pending:
             return
+        if now < self.next_attempt:
+            # East was unreachable: probe cheaply once per scan, retry at once
+            # when it answers (see the module docstring).
+            if not self.last_failure_network or now - self.last_probe < self.cfg.scan_interval_s:
+                return
+            self.last_probe = now
+            if not self.probe():
+                return
+            LOG.info("API reachable again — retrying the spool now")
+            self.api_reachable = 1
+            self.backoff_s = 0.0
         for m in pending:
             if m.error:
                 self._reject_pair(m)
