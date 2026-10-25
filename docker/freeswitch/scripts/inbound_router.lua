@@ -2743,7 +2743,16 @@ local function terminate_ivr(dest, ctx)
     local function finalize()
         if nested or not state then return end
         local engine_mod = state.engine
-        local vars = engine_mod and engine_mod.cdr_vars(state, os.time()) or { ivr_exit = state.exit or "error" }
+        local vars
+        if engine_mod then
+            vars = engine_mod.cdr_vars(state, os.time())
+        else
+            -- ivr_engine itself failed to load: exit + seconds only.
+            vars = { ivr_exit = state.exit or "error" }
+            if state.answered_at then
+                vars.ivr_seconds = string.format("%d", math.max(0, os.time() - state.answered_at))
+            end
+        end
         for k, v in pairs(vars) do
             if v ~= nil and v ~= "" then set_var(k, v) end
         end
@@ -2753,7 +2762,7 @@ local function terminate_ivr(dest, ctx)
     end
 
     -- The error path (contract §4/§5): system prompt, hang up, ivr_exit=error.
-    local media, prompts
+    local media, prompts, engine
     local function fail(reason, cause)
         log("ERR", reason)
         local up = false
@@ -2763,7 +2772,8 @@ local function terminate_ivr(dest, ctx)
             pcall(function() session:answer() end)
         end
         if not state then
-            state = { path = "", answered_at = os.time(), exit = nil }
+            state = engine and engine.new_state(os.time()) or { path = "", answered_at = os.time() }
+            state.engine = engine
             ctx.ivr_state = state
         end
         state.exit = state.exit or "error"
@@ -2804,7 +2814,7 @@ local function terminate_ivr(dest, ctx)
     -- never a 404/503 or a carrier hairpin).
     media = load_module("media_leg")
     prompts = load_module("ivr_prompts")
-    local engine = load_module("ivr_engine")
+    engine = load_module("ivr_engine")
     local schedule = load_module("schedule")
     local rules = load_module("rules")
     if not (media and prompts and engine and schedule and rules) then

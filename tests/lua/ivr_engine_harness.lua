@@ -710,6 +710,8 @@ do
             #c2.pagd == 0 and not table.concat(c2.cache_files, ","):find("tmp", 1, true), table.concat(c2.cache_files, ","))
         check(label .. ": media prepared before that answer",
             c2.answer_vars and c2.answer_vars.rtp_timer_name == "soft", "")
+        check(label .. ": ivr_seconds recorded for the answered error call",
+            c2.setvars.ivr_seconds ~= nil and c2.setvars.ivr_flow_id == "12", tostring(c2.setvars.ivr_seconds))
     end
     local bad = {}
     for k, v in pairs(audio) do bad[k] = v end
