@@ -230,3 +230,58 @@ export async function apiRequestBlob(path: string): Promise<ApiBinaryResult> {
     headers: response.headers,
   };
 }
+
+/** Shared tail of the non-JSON helpers below: 401 bounce + ApiError on failure. */
+async function failIfNotOk(response: Response): Promise<void> {
+  if (response.status === 401) {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.location.replace('/');
+    throw new ApiError(401, 'Session expired. Please sign in again.');
+  }
+  if (!response.ok) {
+    let errorBody: unknown;
+    try {
+      errorBody = await response.json();
+    } catch {
+      errorBody = await response.text().catch(() => 'Unknown error');
+    }
+    throw new ApiError(response.status, extractErrorMessage(errorBody), errorBody);
+  }
+}
+
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
+/**
+ * Multipart sibling of apiRequest (the IVR prompt upload: `name` + a WAV
+ * `file`). The browser sets the multipart Content-Type with its boundary,
+ * so none is set here. Same auth / 401 / ApiError handling.
+ */
+export async function apiRequestForm<T>(method: 'POST' | 'PUT', path: string, form: FormData): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: authHeaders({ Accept: 'application/json' }),
+    body: form,
+  });
+  await failIfNotOk(response);
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
+/**
+ * POST a JSON body, receive a binary body (the IVR text-to-speech preview
+ * answers `audio/wav`). Error bodies are still JSON `{ detail }`.
+ */
+export async function apiPostForBlob(path: string, body: unknown): Promise<Blob> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body),
+  });
+  await failIfNotOk(response);
+  return response.blob();
+}

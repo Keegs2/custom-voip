@@ -1,0 +1,718 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   VISUAL IVR — the /ivr page (numbers, flows, messages), the shared field
+   and dialog pieces, and the block palette. The builder canvas and panels
+   are in ivr-builder.css (loaded with the lazy builder chunk).
+
+   Theming (docker/ui/CLAUDE.md §18): every colour is a theme token or a
+   color-mix() of tokens — no literals. The --ivr-* hues are ALIASES of
+   --t-* tokens, declared on :root and re-declared under [data-force-theme]
+   so they resolve in both themes, in portals and under a pin. Dark values
+   are the bright twins of each token (≥ 3:1 on the dark surface; text
+   inks ≥ 4.5:1 in both themes).
+
+   Prefix: ivr-. Layout is hand-written @media / container queries.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root,
+[data-force-theme] {
+  /* One hue per block type: marks, rails, handles, minimap. */
+  --ivr-entry: var(--t-accent-line);
+  --ivr-play: var(--t-violet);
+  --ivr-menu: var(--t-cobalt);
+  --ivr-schedule: var(--t-warn-solid);
+  --ivr-condition: var(--t-teal);
+  --ivr-dial: var(--t-ok-solid);
+  --ivr-voicemail: color-mix(in srgb, var(--t-violet) 50%, var(--t-danger-solid));
+  --ivr-goto: var(--t-text-dim);
+  --ivr-hangup: var(--t-danger-solid);
+  /* The same hues as TEXT (darker on light where the mark colour is < 4.5:1). */
+  --ivr-entry-ink: var(--t-accent-text);
+  --ivr-play-ink: var(--t-violet);
+  --ivr-menu-ink: var(--t-cobalt);
+  --ivr-schedule-ink: var(--t-warn-fg);
+  --ivr-condition-ink: var(--t-teal);
+  --ivr-dial-ink: var(--t-ok-fg);
+  --ivr-voicemail-ink: color-mix(in srgb, var(--t-violet) 50%, var(--t-danger-fg));
+  --ivr-goto-ink: var(--t-text-soft);
+  --ivr-hangup-ink: var(--t-danger-fg);
+  /* Canvas */
+  --ivr-canvas-bg: var(--t-canvas);
+  --ivr-canvas-dot: color-mix(in srgb, var(--t-text-faint) 42%, transparent);
+  --ivr-edge-color: var(--t-line-strong);
+  --ivr-edge-active: var(--t-accent-line);
+  /* The keycap */
+  --ivr-key-face: linear-gradient(180deg, var(--t-surface) 0%, var(--t-tint) 100%);
+  --ivr-key-edge: var(--t-line-strong);
+}
+
+/* A pressed (chosen) key carries white text: cobalt on light (11:1); on dark
+   the lifted cobalt is too pale for white, so azure-deep (5.2:1). */
+:root,
+[data-force-theme='light'] { --ivr-key-on: var(--t-cobalt); }
+:root[data-theme='dark'],
+[data-force-theme='dark'] { --ivr-key-on: var(--t-accent-hover); }
+
+/* ─── Full-bleed canvas (outside AppLayout, like Troubleshooting) ─── */
+.dl-scope.ivr-canvas {
+  margin: 0 0 0 var(--sidebar-w);
+  min-height: 100vh;
+  box-sizing: border-box;
+  transition: margin-left 200ms ease;
+}
+
+@media (min-width: 768px) {
+  .dl-scope.ivr-canvas--collapsed { margin-left: 0; }
+}
+
+@media (max-width: 767px) {
+  .dl-scope.ivr-canvas { margin-left: 0; min-height: calc(100vh - 56px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dl-scope.ivr-canvas { transition: none !important; }
+}
+
+/* PreviewPrompt is written for AppLayout's padded column. */
+.ivr-prompt-wrap { padding: clamp(28px, 3vw, 44px) clamp(16px, 3.4vw, 52px); }
+.ivr-prompt-wrap .rcf-scope { margin: 0; background: none; }
+
+.ivr-route-fallback {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  color: var(--t-text-dim);
+  font-size: 0.85rem;
+}
+
+/* ─── Shared bits ─── */
+.ivr-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ivr-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--t-text);
+  margin-bottom: 6px;
+}
+
+.ivr-label strong { font-weight: 700; }
+
+.ivr-muted { color: var(--t-text-dim); }
+
+.ivr-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 4px;
+  font-size: 0.84rem;
+  color: var(--t-text-dim);
+}
+
+.ivr-gap { margin-top: 4px; }
+
+.ivr-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--t-info-fg);
+  background: var(--t-info-bg);
+  border: 1px solid var(--t-info-border);
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+.ivr-tag-warn { color: var(--t-warn-fg); background: var(--t-warn-bg); border-color: var(--t-warn-border); }
+.ivr-tag-ok { color: var(--t-ok-fg); background: var(--t-ok-bg); border-color: var(--t-ok-border); }
+
+.ivr-linkbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+}
+
+.ivr-btn-sm { padding: 6px 12px; font-size: 0.74rem; }
+
+/* The keypad key — a small raised cap with its digit set in Archivo. */
+.ivr-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 800;
+  font-size: 0.72rem;
+  line-height: 1;
+  color: var(--ivr-menu-ink);
+  background: var(--ivr-key-face);
+  border: 1px solid var(--ivr-key-edge);
+  box-shadow: 0 1.5px 0 var(--ivr-key-edge), var(--t-highlight);
+}
+
+/* ─── Fields (dialogs and inspector) ─── */
+.ivr-field { margin-bottom: 18px; min-width: 0; }
+.ivr-field:last-child { margin-bottom: 0; }
+.ivr-field .dl-help { margin-top: 6px; }
+
+.ivr-fieldset { border: 0; padding: 0; margin-inline: 0; min-width: 0; }
+.ivr-fieldset > legend { padding: 0; }
+
+.ivr-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+}
+
+.ivr-field-row .ivr-field { margin-bottom: 0; }
+
+.ivr-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.ivr-label-row .ivr-label { margin-bottom: 0; }
+
+.ivr-field-empty {
+  margin: 0 0 8px;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--t-text-dim);
+}
+
+.ivr-help-tight { margin: 8px 0 16px; }
+
+.ivr-grow { flex: 1 1 auto; min-width: 0; }
+
+.ivr-input-unit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--t-text-dim);
+}
+
+.ivr-input-unit .dl-input { width: 76px; }
+
+.ivr-inline-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.ivr-inline-add .dl-input { min-width: 0; }
+
+.ivr-radios { display: flex; flex-direction: column; gap: 6px; }
+
+.ivr-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--t-line);
+  border-radius: 9px;
+  background: var(--t-surface);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--t-text);
+  cursor: pointer;
+  transition: border-color var(--rcf-ease), background var(--rcf-ease);
+}
+
+.ivr-radio:hover { border-color: var(--t-accent-border); }
+.ivr-radio-on { border-color: var(--t-accent-line); background: var(--t-accent-wash); }
+.ivr-radio input { margin: 2px 0 0; accent-color: var(--t-accent); flex-shrink: 0; }
+.ivr-radio:has(input:disabled) { cursor: default; }
+.ivr-radio:has(input:focus-visible) { outline: 2px solid var(--t-focus); outline-offset: 2px; }
+
+.ivr-radio-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--t-text-dim);
+  line-height: 1.45;
+}
+
+.ivr-chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
+
+.ivr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-tint);
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--t-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.ivr-chip-bad { border-color: var(--t-danger-border); background: var(--t-danger-bg); color: var(--t-danger-fg); }
+
+.ivr-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--t-text-dim);
+  cursor: pointer;
+}
+
+.ivr-chip-x:hover { background: var(--t-hover); color: var(--t-text); }
+
+.ivr-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  color: var(--t-text-soft);
+  cursor: pointer;
+  transition: background var(--rcf-ease), border-color var(--rcf-ease), color var(--rcf-ease);
+}
+
+.ivr-mini-btn:hover:not(:disabled) { background: var(--t-tint-hover); border-color: var(--t-accent-border); color: var(--t-text); }
+.ivr-mini-btn:disabled { opacity: 0.4; cursor: default; }
+.ivr-mini-btn-danger:hover:not(:disabled) { color: var(--t-danger-fg); border-color: var(--t-danger-border); background: var(--t-danger-bg); }
+
+/* ─── /ivr header ─── */
+.ivr-header { align-items: flex-end; }
+
+.ivr-header-side {
+  display: flex;
+  align-items: flex-end;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+
+.ivr-scope-pick { display: flex; flex-direction: column; min-width: 240px; }
+.ivr-scope-select { min-width: 240px; }
+
+.ivr-pick { max-width: 560px; margin: 8vh auto 0; }
+.ivr-pick-body { padding: 32px; display: flex; flex-direction: column; gap: 16px; }
+
+.ivr-pick-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--t-text-strong);
+}
+
+/* ─── Panels + list rows ─── */
+.ivr-sections { display: flex; flex-direction: column; gap: var(--rcf-stack); }
+
+.ivr-panel { padding: 0; overflow: hidden; }
+
+.ivr-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 16px;
+}
+
+.ivr-panel-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 1.02rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin: 0 0 4px;
+  color: var(--t-text-strong);
+}
+
+.ivr-panel-sub { margin: 0; font-size: 0.78rem; line-height: 1.5; color: var(--t-text-dim); max-width: 64ch; }
+
+.ivr-empty {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin: 0 22px 22px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  border: 1px dashed var(--t-line-strong);
+  background: var(--t-tint);
+}
+
+.ivr-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: var(--t-accent-text);
+  background: var(--t-accent-tint);
+}
+
+.ivr-empty-title { margin: 2px 0 3px; font-size: 0.86rem; font-weight: 700; color: var(--t-text); }
+.ivr-empty-copy { margin: 0; font-size: 0.78rem; line-height: 1.55; color: var(--t-text-soft); max-width: 70ch; }
+
+.ivr-rows { list-style: none; margin: 0; padding: 0; }
+
+.ivr-row {
+  display: grid;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 22px;
+  border-top: 1px solid var(--t-line-soft);
+  font-size: 0.82rem;
+  color: var(--t-text);
+}
+
+.ivr-rows-numbers .ivr-row { grid-template-columns: minmax(170px, 1.1fr) minmax(140px, 1fr) minmax(170px, 1.1fr) minmax(120px, 0.8fr) auto; }
+.ivr-rows-flows .ivr-row { grid-template-columns: minmax(170px, 1.2fr) minmax(170px, 1.1fr) minmax(140px, 1fr) minmax(120px, 0.8fr) auto; }
+
+.ivr-row:not(.ivr-row-head):hover { background: var(--t-tint-hover); }
+
+.ivr-row-head {
+  padding-top: 9px;
+  padding-bottom: 9px;
+  background: var(--t-tint);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--t-text-dim);
+}
+
+.ivr-cell { min-width: 0; }
+.ivr-cell-id { display: flex; flex-direction: column; gap: 2px; }
+
+.ivr-number {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+}
+
+.ivr-cell-sub { font-size: 0.72rem; color: var(--t-text-dim); }
+.ivr-cell-when { color: var(--t-text-soft); font-variant-numeric: tabular-nums; }
+
+.ivr-cell-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.ivr-link,
+.ivr-flow-name {
+  color: var(--t-accent-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.ivr-flow-name { font-weight: 700; color: var(--t-text); }
+.ivr-link:hover,
+.ivr-flow-name:hover { color: var(--t-accent-text-hover); text-decoration: underline; text-underline-offset: 3px; }
+.ivr-numlist { font-variant-numeric: tabular-nums; color: var(--t-text-soft); }
+
+.ivr-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+.ivr-status-dot { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+.ivr-status-ok { color: var(--t-ok-fg); }
+.ivr-status-ok .ivr-status-dot { background: var(--t-ok-solid); box-shadow: 0 0 0 3px var(--t-ok-bg); }
+.ivr-status-warn { color: var(--t-warn-fg); }
+.ivr-status-warn .ivr-status-dot { background: var(--t-warn-solid); }
+.ivr-status-danger { color: var(--t-danger-fg); }
+.ivr-status-danger .ivr-status-dot { background: var(--t-danger-solid); }
+.ivr-status-neutral { color: var(--t-text-soft); }
+.ivr-status-neutral .ivr-status-dot { background: transparent; border: 1.5px solid var(--t-text-faint); }
+.ivr-status-stack { display: flex; flex-direction: column; gap: 3px; }
+
+/* Rows restack on narrow content widths. */
+@media (max-width: 900px) {
+  .ivr-row-head { display: none; }
+  .ivr-rows-numbers .ivr-row,
+  .ivr-rows-flows .ivr-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    padding: 14px 16px;
+  }
+  .ivr-row .ivr-cell-id { grid-column: 1 / 2; }
+  .ivr-row .ivr-cell-actions { grid-column: 2; grid-row: 1; }
+  .ivr-row .ivr-cell[data-label] { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline; }
+  .ivr-row .ivr-cell[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 104px;
+    font-size: 0.7rem;
+    color: var(--t-text-dim);
+  }
+  .ivr-panel-head { padding: 16px; flex-wrap: wrap; }
+  .ivr-empty { margin: 0 16px 16px; }
+}
+
+@media (max-width: 560px) {
+  .ivr-cell-actions .dl-btn { padding: 6px 10px; }
+  .ivr-header-side { width: 100%; }
+  .ivr-scope-pick,
+  .ivr-scope-select { min-width: 0; width: 100%; }
+}
+
+/* ─── Choice list (Bind a flow) ─── */
+.ivr-choice-list { display: flex; flex-direction: column; gap: 8px; }
+
+.ivr-choice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  cursor: pointer;
+  transition: border-color var(--rcf-ease), background var(--rcf-ease);
+}
+
+.ivr-choice:hover { border-color: var(--t-accent-border); }
+.ivr-choice-on { border-color: var(--t-accent-line); background: var(--t-accent-wash); }
+.ivr-choice input { margin-top: 3px; accent-color: var(--t-accent); }
+.ivr-choice:has(input:focus-visible) { outline: 2px solid var(--t-focus); outline-offset: 2px; }
+.ivr-choice-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ivr-choice-name { font-size: 0.84rem; font-weight: 700; color: var(--t-text); }
+.ivr-choice-detail { font-size: 0.74rem; color: var(--t-text-dim); }
+
+/* ─── Not entitled: the explainer ─── */
+.ivr-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 0;
+  overflow: hidden;
+}
+
+.ivr-intro-art {
+  position: relative;
+  padding: 32px 30px;
+  background:
+    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--t-accent-line) 10%, transparent), transparent 55%),
+    var(--t-surface-sunken);
+  border-right: 1px solid var(--t-line);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.ivr-mini {
+  position: relative;
+  max-width: 330px;
+  padding: 10px 14px 10px 16px;
+  border-radius: 10px;
+  background: var(--t-surface);
+  border: 1px solid var(--t-line);
+  box-shadow: inset 3px 0 0 var(--ivr-hue, var(--t-line-strong)), var(--t-shadow-card);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--t-text);
+}
+
+.ivr-mini-entry { --ivr-hue: var(--ivr-entry); display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.ivr-mini-play { --ivr-hue: var(--ivr-play); }
+.ivr-mini-menu { --ivr-hue: var(--ivr-menu); }
+.ivr-mini-dial { --ivr-hue: var(--ivr-dial); display: flex; gap: 7px; align-items: center; color: var(--ivr-dial-ink); font-weight: 600; }
+.ivr-mini-voicemail { --ivr-hue: var(--ivr-voicemail); display: flex; gap: 7px; align-items: center; color: var(--ivr-voicemail-ink); font-weight: 600; }
+
+.ivr-mini-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--ivr-entry); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ivr-entry) 18%, transparent); }
+
+.ivr-mini-kind {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--ivr-hue);
+}
+
+.ivr-mini-play .ivr-mini-kind { color: var(--ivr-play-ink); }
+.ivr-mini-menu .ivr-mini-kind { color: var(--ivr-menu-ink); }
+
+.ivr-mini-keys { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.ivr-mini-keyrow { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+
+.ivr-mini-link {
+  width: 2px;
+  height: 18px;
+  margin-left: 26px;
+  background: var(--ivr-edge-color);
+}
+
+.ivr-mini-branches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+  padding-left: 18px;
+  border-left: 2px solid var(--ivr-edge-color);
+  margin-left: 25px;
+}
+
+.ivr-intro-copy { padding: 34px 36px; }
+
+.ivr-intro-title {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.25rem, 2vw, 1.55rem);
+  letter-spacing: -0.024em;
+  line-height: 1.15;
+  margin: 0 0 10px;
+  color: var(--t-text-strong);
+}
+
+.ivr-intro-lead { margin: 0 0 20px; font-size: 0.88rem; line-height: 1.6; color: var(--t-text-soft); max-width: 56ch; }
+
+.ivr-intro-points {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ivr-intro-points li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--t-text);
+  max-width: 58ch;
+}
+
+.ivr-intro-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  color: var(--t-accent-text);
+  background: var(--t-accent-tint);
+}
+
+.ivr-intro-status {
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: var(--t-info-bg);
+  border: 1px solid var(--t-info-border);
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--t-text);
+}
+
+@media (max-width: 900px) {
+  .ivr-intro { grid-template-columns: minmax(0, 1fr); }
+  .ivr-intro-art { border-right: 0; border-bottom: 1px solid var(--t-line); padding: 24px 18px; }
+  .ivr-intro-copy { padding: 24px 18px; }
+}
+
+/* ─── Messages (prompt manager) ─── */
+.ivr-prompts { list-style: none; margin: 0; padding: 0; }
+
+.ivr-prompt {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 12px 22px;
+  border-top: 1px solid var(--t-line-soft);
+}
+
+.ivr-prompt:hover { background: var(--t-tint-hover); }
+.ivr-prompt .vm-player { margin: 0; }
+.ivr-prompt-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ivr-prompt-name { font-size: 0.84rem; font-weight: 700; color: var(--t-text); }
+
+.ivr-prompt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.72rem;
+  color: var(--t-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.ivr-kind { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--t-text-soft); }
+.ivr-kind-tts { color: var(--ivr-play-ink); }
+
+.ivr-prompt-text {
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--t-text-soft);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ivr-prompt-actions { display: flex; gap: 6px; }
+
+@media (max-width: 900px) {
+  .ivr-prompt { grid-template-columns: minmax(0, 1fr) auto; padding: 12px 16px; gap: 8px 12px; }
+  .ivr-prompt .vm-player { grid-column: 1 / -1; grid-row: 2; }
+  .ivr-prompt-id { grid-column: 1; grid-row: 1; }
+  .ivr-prompt-actions { grid-column: 2; grid-row: 1; }
+}
+
+/* ─── New message dialog ─── */
+.vm-seg.ivr-seg3,
+.vm-seg.ivr-seg2 { display: grid; width: 100%; }
+.vm-seg.ivr-seg3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.vm-seg.ivr-seg2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.vm-seg.ivr-seg3 .vm-seg-opt,
+.vm-seg.ivr-seg2 .vm-seg-opt { justify-content: center; }
+
+.ivr-tts { margin-top: 16px; }
+.ivr-tts .vm-field { margin-bottom: 14px; }
+.ivr-textarea { resize: vertical; min-height: 96px; line-height: 1.5; }
+.ivr-counter { font-variant-numeric: tabular-nums; }
+
+.ivr-tts-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 14px; }
+.ivr-tts-row .vm-field { margin: 0; }
+.ivr-tts-preview { flex-shrink: 0; height: 38px; }
+.ivr-tts-player { margin: 0 0 16px; transition: opacity var(--rcf-ease); }
+.ivr-tts-player.ivr-stale { opacity: 0.6; }
+
+@media (max-width: 560px) {
+  .ivr-tts-row { flex-direction: column; align-items: stretch; }
+  .vm-seg.ivr-seg3 .vm-seg-opt { font-size: 0.72rem; padding-inline: 6px; }
+}

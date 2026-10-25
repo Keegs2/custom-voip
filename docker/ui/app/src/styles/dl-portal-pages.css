@@ -1,6 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    dl-portal-pages.css — page-scoped daylight styles for the portal pages
-   converted in this pass (AccountPage, ApiDidsPage, IvrBuilderPage) and the
+   converted in this pass (AccountPage, ApiDidsPage; the old IvrBuilderPage
+   placeholder is gone — /ivr is styles/ivr.css) and the
    SIP Trunking page's few bespoke colour roles (TrunksPage, `.dlx-trunks`).
 
    The `dlx-` prefix marks these as page-scoped, NOT part of the shared

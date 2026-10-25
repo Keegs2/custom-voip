@@ -1,6 +1,6 @@
 /**
  * products.ts — the ONE catalog of the products a customer's number can
- * belong to, and how each reads in the UI.
+ * belong to, and how each reads in the UI (rcf · api · trunk · voicemail · ivr).
  *
  * The API's product-agnostic list of "a customer's numbers" (the
  * `number_routing` view, read through `/reports/my-numbers`,
@@ -18,7 +18,7 @@
 import { API_CALLING_ENABLED } from './features';
 
 /** Product ids the catalog knows. The API may send others (future products). */
-export type KnownProductId = 'rcf' | 'api' | 'trunk' | 'voicemail';
+export type KnownProductId = 'rcf' | 'api' | 'trunk' | 'voicemail' | 'ivr';
 
 /** A product id as the API sends it — known ids autocomplete, any string is accepted. */
 export type ProductId = KnownProductId | (string & {});
@@ -87,6 +87,19 @@ const CATALOG: Readonly<Record<KnownProductId, ProductInfo>> = {
     mixWord: 'voicemail',
     destination: { main: 'Voicemail', sub: 'Callers leave a message' },
     order: 4,
+    hidden: false,
+  },
+  // Visual IVR (docs/IVR_INTERFACES.md): a number answered by a menu the
+  // customer builds in /ivr. `number_routing` lists it like any product.
+  ivr: {
+    id: 'ivr',
+    label: 'IVR',
+    tag: 'IVR',
+    onWord: 'Answering',
+    offWord: 'Off',
+    mixWord: 'IVR',
+    destination: { main: 'Your IVR menu', sub: 'IVR' },
+    order: 5,
     hidden: false,
   },
 };

@@ -78,18 +78,27 @@ export async function resampleClip(clip: PcmClip, toRate: number): Promise<Float
   return resampleFallback(clip.samples, clip.sampleRate, toRate);
 }
 
+export interface ClipOptions {
+  /** Output rate. Default: the voicemail greeting rate (16 kHz). IVR prompts
+      use 8000 — the canonical prompt format (docs/IVR_INTERFACES.md §4). */
+  sampleRate?: number;
+  /** What the clip is called in limit messages ("greeting" / "message"). */
+  noun?: string;
+}
+
 /** Encodes a mono clip as the API's greeting WAV, enforcing the limits. */
-export async function buildGreetingWav(clip: PcmClip): Promise<GreetingAudio> {
-  const samples = await resampleClip(clip, GREETING_SAMPLE_RATE);
-  const durationSec = samples.length / GREETING_SAMPLE_RATE;
-  const buffer = encodeWavPcm16(samples, GREETING_SAMPLE_RATE);
-  const problem = greetingProblem({ durationSec, bytes: buffer.byteLength });
+export async function buildGreetingWav(clip: PcmClip, options: ClipOptions = {}): Promise<GreetingAudio> {
+  const sampleRate = options.sampleRate ?? GREETING_SAMPLE_RATE;
+  const samples = await resampleClip(clip, sampleRate);
+  const durationSec = samples.length / sampleRate;
+  const buffer = encodeWavPcm16(samples, sampleRate);
+  const problem = greetingProblem({ durationSec, bytes: buffer.byteLength }, options.noun);
   if (problem) throw new GreetingAudioError(problem);
   return {
     wav: new Blob([buffer], { type: 'audio/wav' }),
     durationSec,
     bytes: buffer.byteLength,
-    sampleRate: GREETING_SAMPLE_RATE,
+    sampleRate,
   };
 }
 
@@ -99,10 +108,10 @@ export async function buildGreetingWav(clip: PcmClip): Promise<GreetingAudio> {
  * conforming engines resample during decode; buildGreetingWav resamples
  * again only if the engine returned another rate.
  */
-export async function decodeAudioFile(file: Blob): Promise<PcmClip> {
+export async function decodeAudioFile(file: Blob, noun = 'greeting'): Promise<PcmClip> {
   if (file.size === 0) throw new GreetingAudioError('That file is empty.');
   if (file.size > MAX_SOURCE_FILE_BYTES) {
-    throw new GreetingAudioError('That file is over 50 MB. Pick a shorter clip (greetings can be up to 2:00).');
+    throw new GreetingAudioError(`That file is over 50 MB. Pick a shorter clip (${noun}s can be up to 2:00).`);
   }
   const Ctor = offlineAudioContextCtor();
   if (!Ctor) throw new GreetingAudioError('This browser can’t convert audio. Try a current version of Chrome, Edge, Firefox or Safari.');
@@ -117,7 +126,7 @@ export async function decodeAudioFile(file: Blob): Promise<PcmClip> {
   }
   // Reject absurd lengths before doing any more work.
   if (decoded.duration > GREETING_MAX_SECONDS + 0.05) {
-    const problem = greetingProblem({ durationSec: decoded.duration, bytes: 0 });
+    const problem = greetingProblem({ durationSec: decoded.duration, bytes: 0 }, noun);
     throw new GreetingAudioError(problem ?? 'That clip is too long.');
   }
   const channels: Float32Array[] = [];
