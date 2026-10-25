@@ -1,0 +1,3742 @@
+{
+  "version": 1,
+  "about": "Flow assistant eval cases (docs/IVR_ASSIST_INTERFACES.md §9). Run inside the API container: python -m services.ivr.assist.eval --cases - < this file. Each case has a synthetic customer ('context'), the customer's message, the expected result kind, whether the proposal compiles clean, and simulated calls (caller, time, keys) with the exit they must reach. 'reference' is a known-good TED answer in alias form: the tests replay it through CRAG's pipeline (fake TED) to prove every expectation is reachable; the eval runner ignores it.",
+  "contexts": {
+    "acme_power": {
+      "about": "Electric + gas utility, Eastern time, Massachusetts numbers.",
+      "destinations": [
+        {
+          "did": "+16175550101",
+          "product": "rcf",
+          "name": "Billing line"
+        },
+        {
+          "did": "+16175550102",
+          "product": "rcf",
+          "name": "Outage desk"
+        },
+        {
+          "did": "+16175550103",
+          "product": "rcf",
+          "name": "Front desk"
+        },
+        {
+          "did": "+16175550107",
+          "product": "rcf",
+          "name": "Emergency gas line"
+        },
+        {
+          "did": "+16175550104",
+          "product": "voicemail",
+          "name": "Front desk mailbox"
+        },
+        {
+          "did": "+16175550105",
+          "product": "voicemail",
+          "name": "After-hours mailbox"
+        },
+        {
+          "did": "+16175550106",
+          "product": "ivr",
+          "name": "Main line",
+          "this_flow": true
+        }
+      ],
+      "prompts": [
+        {
+          "id": 1,
+          "name": "Main greeting",
+          "text": "Thanks for calling Acme Power."
+        },
+        {
+          "id": 2,
+          "name": "Holiday notice",
+          "text": null
+        },
+        {
+          "id": 3,
+          "name": "After-hours message",
+          "text": "Our offices are closed right now. Please leave a message."
+        }
+      ]
+    },
+    "riverside_water": {
+      "about": "Water utility, Central time, Illinois numbers.",
+      "destinations": [
+        {
+          "did": "+13125550201",
+          "product": "rcf",
+          "name": "Customer service"
+        },
+        {
+          "did": "+13125550202",
+          "product": "rcf",
+          "name": "Water main breaks"
+        },
+        {
+          "did": "+13125550203",
+          "product": "voicemail",
+          "name": "Customer service mailbox"
+        },
+        {
+          "did": "+13125550204",
+          "product": "ivr",
+          "name": "Riverside main",
+          "this_flow": true
+        }
+      ],
+      "prompts": [
+        {
+          "id": 11,
+          "name": "Welcome",
+          "text": "Welcome to Riverside Water."
+        }
+      ]
+    },
+    "desert_gas": {
+      "about": "Gas utility, Arizona (no daylight saving time).",
+      "destinations": [
+        {
+          "did": "+16025550301",
+          "product": "rcf",
+          "name": "Dispatch"
+        },
+        {
+          "did": "+16025550302",
+          "product": "rcf",
+          "name": "Billing office"
+        },
+        {
+          "did": "+16025550303",
+          "product": "voicemail",
+          "name": "Dispatch mailbox"
+        }
+      ],
+      "prompts": []
+    },
+    "coastal_electric": {
+      "about": "Electric co-op, Pacific time, with a SIP trunk PBX.",
+      "destinations": [
+        {
+          "did": "+14155550401",
+          "product": "rcf",
+          "name": "Call center"
+        },
+        {
+          "did": "+14155550402",
+          "product": "trunk",
+          "name": "Reception PBX"
+        },
+        {
+          "did": "+14155550404",
+          "product": "voicemail",
+          "name": "Call center mailbox"
+        }
+      ],
+      "prompts": []
+    },
+    "island_power": {
+      "about": "Island utility with Honolulu and San Juan offices.",
+      "destinations": [
+        {
+          "did": "+17875550502",
+          "product": "rcf",
+          "name": "San Juan office"
+        },
+        {
+          "did": "+18085550501",
+          "product": "rcf",
+          "name": "Honolulu office"
+        },
+        {
+          "did": "+17875550504",
+          "product": "voicemail",
+          "name": "San Juan mailbox"
+        },
+        {
+          "did": "+18085550503",
+          "product": "voicemail",
+          "name": "Honolulu mailbox"
+        }
+      ],
+      "prompts": []
+    },
+    "two_billing": {
+      "about": "Two billing teams and two mailboxes (ambiguity cases).",
+      "destinations": [
+        {
+          "did": "+15085550601",
+          "product": "rcf",
+          "name": "Residential billing"
+        },
+        {
+          "did": "+15085550602",
+          "product": "rcf",
+          "name": "Commercial billing"
+        },
+        {
+          "did": "+15085550603",
+          "product": "voicemail",
+          "name": "Billing mailbox"
+        },
+        {
+          "did": "+15085550604",
+          "product": "voicemail",
+          "name": "Front office mailbox"
+        }
+      ],
+      "prompts": []
+    },
+    "districts": {
+      "about": "Four district offices, Eastern time, North Carolina numbers.",
+      "destinations": [
+        {
+          "did": "+17045550701",
+          "product": "rcf",
+          "name": "North district"
+        },
+        {
+          "did": "+17045550702",
+          "product": "rcf",
+          "name": "South district"
+        },
+        {
+          "did": "+17045550703",
+          "product": "rcf",
+          "name": "East district"
+        },
+        {
+          "did": "+17045550704",
+          "product": "rcf",
+          "name": "West district"
+        },
+        {
+          "did": "+17045550705",
+          "product": "voicemail",
+          "name": "District mailbox"
+        }
+      ],
+      "prompts": []
+    }
+  },
+  "cases": [
+    {
+      "id": "acme-main-menu",
+      "context": "acme_power",
+      "message": "Greet callers with our main greeting, then: press 1 for billing, press 2 to report an outage, press 0 for the front desk. If nobody presses anything, repeat the menu once, then send them to the front desk mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "compiles_clean": true,
+        "calls": [
+          {
+            "name": "press 1 -> billing",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "1"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550101",
+            "says": [
+              "Main greeting"
+            ]
+          },
+          {
+            "name": "press 2 -> outage desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "2"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550102"
+          },
+          {
+            "name": "press 0 -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "0"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          },
+          {
+            "name": "no key twice -> front desk mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+16175550104"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_greet",
+              "type": "play",
+              "label": "Greeting",
+              "config": {
+                "prompts": [
+                  "P1"
+                ]
+              }
+            },
+            {
+              "id": "n_menu",
+              "type": "menu",
+              "label": "Main menu",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ],
+                "digits": [
+                  "1",
+                  "2",
+                  "0"
+                ],
+                "retries": 1
+              }
+            },
+            {
+              "id": "n_bill",
+              "type": "dial",
+              "label": "Billing",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_outage",
+              "type": "dial",
+              "label": "Outages",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                }
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "label": "Front desk",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "label": "Front desk mailbox",
+              "config": {
+                "mailbox": "D5"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_greet"
+            },
+            {
+              "source": "n_greet",
+              "sourceHandle": "next",
+              "target": "n_menu"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:1",
+              "target": "n_bill"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:2",
+              "target": "n_outage"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:0",
+              "target": "n_front"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "noInput",
+              "target": "n_vm"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "noMatch",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Main menu",
+            "text": "For billing, press 1. To report an outage, press 2. For the front desk, press 0."
+          }
+        ],
+        "summary": "Callers hear [P1], then the main menu: 1 rings [D1], 2 rings [D2] and 0 rings [D3]. If nobody presses a key, the menu repeats once and then goes to [D5].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-weekday-hours",
+      "context": "acme_power",
+      "message": "Weekdays 8am to 5pm Eastern, ring the front desk for 25 seconds and go to the front desk mailbox if nobody answers. After hours and on weekends, play our after-hours message and send them to the after-hours mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "Wednesday 9:00 ET -> front desk, 25 s",
+            "caller": "+15085551212",
+            "at": "2026-11-04T14:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550103",
+            "ring_timeout": 25
+          },
+          {
+            "name": "Wednesday 18:30 ET -> after-hours mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-04T23:30:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+16175550105",
+            "says": [
+              "After-hours message"
+            ]
+          },
+          {
+            "name": "Saturday 10:00 ET -> after-hours mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-07T15:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+16175550105"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_hours",
+              "type": "schedule",
+              "label": "Business hours",
+              "config": {
+                "tz": "America/New_York",
+                "weekly": {
+                  "mon": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "tue": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "wed": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "thu": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "fri": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "sat": [],
+                  "sun": []
+                }
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "label": "Front desk",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                },
+                "ringTimeoutSec": 25
+              }
+            },
+            {
+              "id": "n_front_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D5"
+              }
+            },
+            {
+              "id": "n_closed",
+              "type": "play",
+              "label": "After hours",
+              "config": {
+                "prompts": [
+                  "P3"
+                ]
+              }
+            },
+            {
+              "id": "n_ah_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D6"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_hours"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "open",
+              "target": "n_front"
+            },
+            {
+              "source": "n_front",
+              "sourceHandle": "noAnswer",
+              "target": "n_front_vm"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "closed",
+              "target": "n_closed"
+            },
+            {
+              "source": "n_closed",
+              "sourceHandle": "next",
+              "target": "n_ah_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Weekdays 8:00-17:00 Eastern, calls ring [D3] for 25 seconds, then go to [D5]. Otherwise callers hear [P3] and go to [D6].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-anonymous-block",
+      "context": "acme_power",
+      "message": "If the caller is blocked or private, say we don't accept anonymous calls and hang up. Otherwise ring the front desk.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "anonymous -> hang up",
+            "caller": "anonymous",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "hangup",
+            "says": [
+              "Anonymous calls notice"
+            ]
+          },
+          {
+            "name": "a normal caller -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_check",
+              "type": "condition",
+              "label": "Blocked caller?",
+              "config": {
+                "mode": "anonymous"
+              }
+            },
+            {
+              "id": "n_bye",
+              "type": "hangup",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ]
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "label": "Front desk",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_check"
+            },
+            {
+              "source": "n_check",
+              "sourceHandle": "match",
+              "target": "n_bye"
+            },
+            {
+              "source": "n_check",
+              "sourceHandle": "noMatch",
+              "target": "n_front"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Anonymous calls notice",
+            "text": "Sorry, we don't accept calls from blocked or private numbers. Goodbye."
+          }
+        ],
+        "summary": "Blocked or private callers hear a short notice and the call ends; everyone else rings [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-outage-contractor",
+      "context": "acme_power",
+      "message": "Press 1 to report an outage, which should go to our outage contractor at (508) 555-2199. Press 2 for billing.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "press 1 -> contractor",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "1"
+            ],
+            "outcome": "transfer",
+            "target": "+15085552199"
+          },
+          {
+            "name": "press 2 -> billing",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "2"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550101"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_menu",
+              "type": "menu",
+              "label": "Menu",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ],
+                "digits": [
+                  "1",
+                  "2"
+                ]
+              }
+            },
+            {
+              "id": "n_contractor",
+              "type": "dial",
+              "label": "Outage contractor",
+              "config": {
+                "target": {
+                  "kind": "external",
+                  "ref": "N1"
+                }
+              }
+            },
+            {
+              "id": "n_bill",
+              "type": "dial",
+              "label": "Billing",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_menu"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:1",
+              "target": "n_contractor"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:2",
+              "target": "n_bill"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Main menu",
+            "text": "To report an outage, press 1. For billing, press 2."
+          }
+        ],
+        "summary": "A menu: 1 transfers to the outage contractor at [N1], 2 rings [D1].",
+        "assumptions": [
+          "Callers who press nothing hear the menu again and then the call ends."
+        ]
+      }
+    },
+    {
+      "id": "acme-area-code",
+      "context": "acme_power",
+      "message": "If the caller's area code is 617 or 857, ring the outage desk; otherwise ring the front desk.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "617 caller -> outage desk",
+            "caller": "+16175552345",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550102"
+          },
+          {
+            "name": "857 caller -> outage desk",
+            "caller": "+18575552345",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550102"
+          },
+          {
+            "name": "508 caller -> front desk",
+            "caller": "+15085552345",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_check",
+              "type": "condition",
+              "label": "Boston area?",
+              "config": {
+                "mode": "prefix",
+                "values": [
+                  "+1617",
+                  "+1857"
+                ]
+              }
+            },
+            {
+              "id": "n_outage",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                }
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_check"
+            },
+            {
+              "source": "n_check",
+              "sourceHandle": "match",
+              "target": "n_outage"
+            },
+            {
+              "source": "n_check",
+              "sourceHandle": "noMatch",
+              "target": "n_front"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Callers from area codes 617 and 857 ring [D2]; everyone else rings [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "riverside-holidays",
+      "context": "riverside_water",
+      "message": "Business hours are Monday to Friday 9 to 5 Central. We're closed on Thanksgiving, 2026-11-26, and on Christmas Day, 2026-12-25. When we're open ring customer service; when we're closed play the welcome message and send callers to the customer service mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "Tuesday 10:00 CT -> customer service",
+            "caller": "+15085551212",
+            "at": "2026-11-24T16:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+13125550201"
+          },
+          {
+            "name": "Thanksgiving -> mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-26T16:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+13125550203",
+            "says": [
+              "Welcome"
+            ]
+          },
+          {
+            "name": "Christmas -> mailbox",
+            "caller": "+15085551212",
+            "at": "2026-12-25T18:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+13125550203"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_hours",
+              "type": "schedule",
+              "label": "Office hours",
+              "config": {
+                "tz": "America/Chicago",
+                "weekly": {
+                  "mon": [
+                    {
+                      "start": "09:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "tue": [
+                    {
+                      "start": "09:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "wed": [
+                    {
+                      "start": "09:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "thu": [
+                    {
+                      "start": "09:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "fri": [
+                    {
+                      "start": "09:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "sat": [],
+                  "sun": []
+                },
+                "closedDates": [
+                  "2026-11-26",
+                  "2026-12-25"
+                ]
+              }
+            },
+            {
+              "id": "n_cs",
+              "type": "dial",
+              "label": "Customer service",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_welcome",
+              "type": "play",
+              "config": {
+                "prompts": [
+                  "P1"
+                ]
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D3"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_hours"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "open",
+              "target": "n_cs"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "closed",
+              "target": "n_welcome"
+            },
+            {
+              "source": "n_welcome",
+              "sourceHandle": "next",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Weekdays 9:00-17:00 Central (closed 2026-11-26 and 2026-12-25) calls ring [D1]; otherwise callers hear [P1] and go to [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-answering-service-callerid",
+      "context": "acme_power",
+      "message": "Send every call to our answering service at 774-404-5256 and show our number instead of the caller's.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "any caller -> answering service, our number shown",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+17744045256",
+            "pass_caller_id": false
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_service",
+              "type": "dial",
+              "label": "Answering service",
+              "config": {
+                "target": {
+                  "kind": "external",
+                  "ref": "N1"
+                },
+                "passCallerId": false
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_service"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Every call transfers to the answering service at [N1], showing your number.",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-ring-chain",
+      "context": "acme_power",
+      "message": "Ring the billing line for 20 seconds; if nobody answers, try the front desk for 30 seconds, then send them to the front desk mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "first try: billing for 20 s",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550101",
+            "ring_timeout": 20
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_bill",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                },
+                "ringTimeoutSec": 20
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                },
+                "ringTimeoutSec": 30
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D5"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_bill"
+            },
+            {
+              "source": "n_bill",
+              "sourceHandle": "noAnswer",
+              "target": "n_front"
+            },
+            {
+              "source": "n_front",
+              "sourceHandle": "noAnswer",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Calls ring [D1] for 20 seconds, then [D3] for 30 seconds, then go to [D5].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-repeat-option",
+      "context": "acme_power",
+      "message": "Main menu: press 1 for billing, 2 for outages, and 9 to hear the options again.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "9 then 1 -> billing",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "9",
+              "1"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550101"
+          },
+          {
+            "name": "press 2 -> outage desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "2"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550102"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_menu",
+              "type": "menu",
+              "label": "Main menu",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ],
+                "digits": [
+                  "1",
+                  "2",
+                  "9"
+                ]
+              }
+            },
+            {
+              "id": "n_bill",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_outage",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                }
+              }
+            },
+            {
+              "id": "n_again",
+              "type": "goto",
+              "label": "Repeat",
+              "config": {
+                "targetNodeId": "n_menu"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_menu"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:1",
+              "target": "n_bill"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:2",
+              "target": "n_outage"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:9",
+              "target": "n_again"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Main menu",
+            "text": "For billing, press 1. For outages, press 2. To hear these options again, press 9."
+          }
+        ],
+        "summary": "A main menu: 1 rings [D1], 2 rings [D2], 9 repeats the menu.",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-menu-timeouts",
+      "context": "acme_power",
+      "message": "In the menu (1 billing, 2 outages) wait 8 seconds for a key and repeat it twice. If they press a wrong key, say 'Sorry, that's not an option.' If they still don't choose, transfer them to the front desk.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "wrong key three times -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "7",
+              "7",
+              "7"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550103",
+            "says": [
+              "Not an option"
+            ]
+          },
+          {
+            "name": "no key -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          },
+          {
+            "name": "press 1 -> billing",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "1"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550101"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_menu",
+              "type": "menu",
+              "label": "Menu",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ],
+                "digits": [
+                  "1",
+                  "2"
+                ],
+                "timeoutSec": 8,
+                "retries": 2,
+                "invalidPrompts": [
+                  "NP2"
+                ]
+              }
+            },
+            {
+              "id": "n_bill",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_outage",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                }
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_menu"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:1",
+              "target": "n_bill"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:2",
+              "target": "n_outage"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "noInput",
+              "target": "n_front"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "noMatch",
+              "target": "n_front"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Main menu",
+            "text": "For billing, press 1. For outages, press 2."
+          },
+          {
+            "key": "NP2",
+            "name": "Not an option",
+            "text": "Sorry, that's not an option."
+          }
+        ],
+        "summary": "The menu waits 8 seconds and repeats twice; 1 rings [D1], 2 rings [D2], anything else ends at [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "refuse-sms",
+      "context": "acme_power",
+      "message": "Text every caller a link to our outage map.",
+      "expect": {
+        "kind": "cannot_build"
+      },
+      "reference": {
+        "kind": "cannot_build",
+        "message": "I can only build call menus, business hours, caller checks, transfers, voicemail and messages. I can't send text messages."
+      }
+    },
+    {
+      "id": "refuse-recording-email",
+      "context": "acme_power",
+      "message": "Record every call and email the recordings to billing@acmepower.example.",
+      "expect": {
+        "kind": "cannot_build"
+      },
+      "reference": {
+        "kind": "cannot_build",
+        "message": "I can't record calls or send email. I can build menus, business hours, caller checks, transfers, voicemail and messages."
+      }
+    },
+    {
+      "id": "twobilling-ambiguous",
+      "context": "two_billing",
+      "message": "Press 1 for billing.",
+      "expect": {
+        "kind": "clarify"
+      },
+      "reference": {
+        "kind": "clarify",
+        "question": "Which number should billing ring: [D1] or [D2]?"
+      }
+    },
+    {
+      "id": "twobilling-which-mailbox",
+      "context": "two_billing",
+      "message": "Send all callers straight to voicemail.",
+      "expect": {
+        "kind": "clarify"
+      },
+      "reference": {
+        "kind": "clarify",
+        "question": "Which mailbox should callers go to: [D3] or [D4]?"
+      }
+    },
+    {
+      "id": "acme-unknown-team",
+      "context": "acme_power",
+      "message": "Press 3 for the meter reading team.",
+      "expect": {
+        "kind": "clarify"
+      },
+      "reference": {
+        "kind": "clarify",
+        "question": "I don't see a meter reading team among your numbers. Which number should 3 ring?"
+      }
+    },
+    {
+      "id": "acme-spanish",
+      "context": "acme_power",
+      "message": "Press 1 for English and 2 para español. English callers go to the front desk; Spanish callers go to our Spanish-speaking team at +1 (617) 555-2177.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "press 2 -> Spanish team",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "2"
+            ],
+            "outcome": "transfer",
+            "target": "+16175552177"
+          },
+          {
+            "name": "press 1 -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "1"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_lang",
+              "type": "menu",
+              "label": "Language",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ],
+                "digits": [
+                  "1",
+                  "2"
+                ]
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            },
+            {
+              "id": "n_es",
+              "type": "dial",
+              "label": "Spanish team",
+              "config": {
+                "target": {
+                  "kind": "external",
+                  "ref": "N1"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_lang"
+            },
+            {
+              "source": "n_lang",
+              "sourceHandle": "d:1",
+              "target": "n_front"
+            },
+            {
+              "source": "n_lang",
+              "sourceHandle": "d:2",
+              "target": "n_es"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Language menu",
+            "text": "For English, press 1. Para español, oprima 2."
+          }
+        ],
+        "summary": "A language menu: 1 rings [D3], 2 transfers to the Spanish-speaking team at [N1].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "coastal-pacific-hours",
+      "context": "coastal_electric",
+      "message": "Our call center is open Monday through Saturday, 7 AM to 7 PM Pacific. Outside those hours, send callers to the call center mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "Saturday 10:00 PT -> call center",
+            "caller": "+15085551212",
+            "at": "2026-11-07T18:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+14155550401"
+          },
+          {
+            "name": "Sunday 10:00 PT -> mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-08T18:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+14155550404"
+          },
+          {
+            "name": "Sunday 20:00 PT -> mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-09T04:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+14155550404"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_hours",
+              "type": "schedule",
+              "config": {
+                "tz": "America/Los_Angeles",
+                "weekly": {
+                  "mon": [
+                    {
+                      "start": "07:00",
+                      "end": "19:00"
+                    }
+                  ],
+                  "tue": [
+                    {
+                      "start": "07:00",
+                      "end": "19:00"
+                    }
+                  ],
+                  "wed": [
+                    {
+                      "start": "07:00",
+                      "end": "19:00"
+                    }
+                  ],
+                  "thu": [
+                    {
+                      "start": "07:00",
+                      "end": "19:00"
+                    }
+                  ],
+                  "fri": [
+                    {
+                      "start": "07:00",
+                      "end": "19:00"
+                    }
+                  ],
+                  "sat": [
+                    {
+                      "start": "07:00",
+                      "end": "19:00"
+                    }
+                  ],
+                  "sun": []
+                }
+              }
+            },
+            {
+              "id": "n_cc",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D3"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_hours"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "open",
+              "target": "n_cc"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "closed",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Monday-Saturday 7:00-19:00 Pacific calls ring [D1]; otherwise they go to [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "desert-arizona-time",
+      "context": "desert_gas",
+      "message": "We're open weekdays 8 to 5 Arizona time. Ring dispatch when we're open; otherwise send callers to the dispatch mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "Wednesday 08:30 MST (summer) -> dispatch",
+            "caller": "+15085551212",
+            "at": "2026-07-15T15:30:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16025550301"
+          },
+          {
+            "name": "Wednesday 07:30 MST (summer, Denver would be open) -> mailbox",
+            "caller": "+15085551212",
+            "at": "2026-07-15T14:30:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+16025550303"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_hours",
+              "type": "schedule",
+              "config": {
+                "tz": "America/Phoenix",
+                "weekly": {
+                  "mon": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "tue": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "wed": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "thu": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "fri": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "sat": [],
+                  "sun": []
+                }
+              }
+            },
+            {
+              "id": "n_dispatch",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D3"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_hours"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "open",
+              "target": "n_dispatch"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "closed",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Weekdays 8:00-17:00 Arizona time calls ring [D1]; otherwise they go to [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-lunch-break",
+      "context": "acme_power",
+      "message": "Weekdays we're open 8 to 12 and 1 to 5 Eastern, closed for lunch from 12 to 1. During lunch and after hours, play the after-hours message and send them to the after-hours mailbox. When we're open, ring the front desk.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "12:30 ET -> after-hours mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-04T17:30:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+16175550105"
+          },
+          {
+            "name": "13:30 ET -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T18:30:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_hours",
+              "type": "schedule",
+              "config": {
+                "tz": "America/New_York",
+                "weekly": {
+                  "mon": [
+                    {
+                      "start": "08:00",
+                      "end": "12:00"
+                    },
+                    {
+                      "start": "13:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "tue": [
+                    {
+                      "start": "08:00",
+                      "end": "12:00"
+                    },
+                    {
+                      "start": "13:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "wed": [
+                    {
+                      "start": "08:00",
+                      "end": "12:00"
+                    },
+                    {
+                      "start": "13:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "thu": [
+                    {
+                      "start": "08:00",
+                      "end": "12:00"
+                    },
+                    {
+                      "start": "13:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "fri": [
+                    {
+                      "start": "08:00",
+                      "end": "12:00"
+                    },
+                    {
+                      "start": "13:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "sat": [],
+                  "sun": []
+                }
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            },
+            {
+              "id": "n_closed",
+              "type": "play",
+              "config": {
+                "prompts": [
+                  "P3"
+                ]
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D6"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_hours"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "open",
+              "target": "n_front"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "closed",
+              "target": "n_closed"
+            },
+            {
+              "source": "n_closed",
+              "sourceHandle": "next",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Weekdays 8:00-12:00 and 13:00-17:00 Eastern calls ring [D3]; otherwise callers hear [P3] and go to [D6].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-gas-emergency",
+      "context": "acme_power",
+      "message": "If you smell gas, press 1 to reach our emergency gas line right away. Press 2 for everything else, which goes to the front desk.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "press 1 -> emergency gas line",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "1"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550107"
+          },
+          {
+            "name": "press 2 -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "2"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_menu",
+              "type": "menu",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ],
+                "digits": [
+                  "1",
+                  "2"
+                ]
+              }
+            },
+            {
+              "id": "n_gas",
+              "type": "dial",
+              "label": "Gas emergency",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D4"
+                }
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_menu"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:1",
+              "target": "n_gas"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:2",
+              "target": "n_front"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Emergency menu",
+            "text": "If you smell gas, press 1 now. For anything else, press 2."
+          }
+        ],
+        "summary": "1 rings [D4] for gas emergencies; 2 rings [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-after-hours-oncall",
+      "context": "acme_power",
+      "message": "After 6 PM Eastern, only take emergencies: say 'Our office is closed. If this is an emergency, press 1.' Pressing 1 rings our on-call engineer at 617.555.2188; otherwise hang up. Before 6 PM ring the front desk.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "18:30 ET, presses 1 -> on-call engineer",
+            "caller": "+15085551212",
+            "at": "2026-11-04T23:30:00Z",
+            "digits": [
+              "1"
+            ],
+            "outcome": "transfer",
+            "target": "+16175552188"
+          },
+          {
+            "name": "18:30 ET, no key -> hang up",
+            "caller": "+15085551212",
+            "at": "2026-11-04T23:30:00Z",
+            "digits": [],
+            "outcome": "hangup"
+          },
+          {
+            "name": "10:00 ET -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_hours",
+              "type": "schedule",
+              "label": "Before 6 PM",
+              "config": {
+                "tz": "America/New_York",
+                "weekly": {
+                  "mon": [
+                    {
+                      "start": "00:00",
+                      "end": "18:00"
+                    }
+                  ],
+                  "tue": [
+                    {
+                      "start": "00:00",
+                      "end": "18:00"
+                    }
+                  ],
+                  "wed": [
+                    {
+                      "start": "00:00",
+                      "end": "18:00"
+                    }
+                  ],
+                  "thu": [
+                    {
+                      "start": "00:00",
+                      "end": "18:00"
+                    }
+                  ],
+                  "fri": [
+                    {
+                      "start": "00:00",
+                      "end": "18:00"
+                    }
+                  ],
+                  "sat": [
+                    {
+                      "start": "00:00",
+                      "end": "18:00"
+                    }
+                  ],
+                  "sun": [
+                    {
+                      "start": "00:00",
+                      "end": "18:00"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            },
+            {
+              "id": "n_emerg",
+              "type": "menu",
+              "label": "Emergencies only",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ],
+                "digits": [
+                  "1"
+                ],
+                "retries": 0
+              }
+            },
+            {
+              "id": "n_oncall",
+              "type": "dial",
+              "label": "On-call engineer",
+              "config": {
+                "target": {
+                  "kind": "external",
+                  "ref": "N1"
+                }
+              }
+            },
+            {
+              "id": "n_bye",
+              "type": "hangup",
+              "config": {}
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_hours"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "open",
+              "target": "n_front"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "closed",
+              "target": "n_emerg"
+            },
+            {
+              "source": "n_emerg",
+              "sourceHandle": "d:1",
+              "target": "n_oncall"
+            },
+            {
+              "source": "n_emerg",
+              "sourceHandle": "noInput",
+              "target": "n_bye"
+            },
+            {
+              "source": "n_emerg",
+              "sourceHandle": "noMatch",
+              "target": "n_bye"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Closed notice",
+            "text": "Our office is closed. If this is an emergency, press 1."
+          }
+        ],
+        "summary": "Before 18:00 Eastern calls ring [D3]. After that callers hear the closed notice; pressing 1 transfers to the on-call engineer at [N1], anything else hangs up.",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-loop-main-line",
+      "context": "acme_power",
+      "message": "Transfer all callers to our main line.",
+      "expect": {
+        "kind": [
+          "clarify",
+          "cannot_build"
+        ]
+      },
+      "reference": {
+        "kind": "clarify",
+        "question": "[D7] is the number this flow answers, so sending callers there would loop. Which number should they go to?"
+      }
+    },
+    {
+      "id": "acme-field-crew",
+      "context": "acme_power",
+      "message": "If the caller is our field crew phone, 508-555-2145, connect them straight to the outage desk. Everyone else hears the main greeting and goes to the front desk.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "field crew -> outage desk",
+            "caller": "+15085552145",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550102"
+          },
+          {
+            "name": "anyone else -> greeting, front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550103",
+            "says": [
+              "Main greeting"
+            ]
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_crew",
+              "type": "condition",
+              "label": "Field crew?",
+              "config": {
+                "mode": "equals",
+                "values": [
+                  "N1"
+                ]
+              }
+            },
+            {
+              "id": "n_outage",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                }
+              }
+            },
+            {
+              "id": "n_greet",
+              "type": "play",
+              "config": {
+                "prompts": [
+                  "P1"
+                ]
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_crew"
+            },
+            {
+              "source": "n_crew",
+              "sourceHandle": "match",
+              "target": "n_outage"
+            },
+            {
+              "source": "n_crew",
+              "sourceHandle": "noMatch",
+              "target": "n_greet"
+            },
+            {
+              "source": "n_greet",
+              "sourceHandle": "next",
+              "target": "n_front"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Calls from [N1] ring [D2]; everyone else hears [P1] and rings [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "island-puerto-rico",
+      "context": "island_power",
+      "message": "Our San Juan office is open weekdays 8:00 to 4:30 Puerto Rico time. Ring the San Juan office; after hours send callers to the San Juan mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "09:00 AST -> San Juan office",
+            "caller": "+15085551212",
+            "at": "2026-11-04T13:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+17875550502"
+          },
+          {
+            "name": "17:00 AST -> San Juan mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-04T21:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+17875550504"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_hours",
+              "type": "schedule",
+              "config": {
+                "tz": "America/Puerto_Rico",
+                "weekly": {
+                  "mon": [
+                    {
+                      "start": "08:00",
+                      "end": "16:30"
+                    }
+                  ],
+                  "tue": [
+                    {
+                      "start": "08:00",
+                      "end": "16:30"
+                    }
+                  ],
+                  "wed": [
+                    {
+                      "start": "08:00",
+                      "end": "16:30"
+                    }
+                  ],
+                  "thu": [
+                    {
+                      "start": "08:00",
+                      "end": "16:30"
+                    }
+                  ],
+                  "fri": [
+                    {
+                      "start": "08:00",
+                      "end": "16:30"
+                    }
+                  ],
+                  "sat": [],
+                  "sun": []
+                }
+              }
+            },
+            {
+              "id": "n_sj",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D3"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_hours"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "open",
+              "target": "n_sj"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "closed",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Weekdays 8:00-16:30 Puerto Rico time calls ring [D1]; otherwise they go to [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "island-hawaii",
+      "context": "island_power",
+      "message": "Honolulu callers: we're open weekdays 7:30 to 4 Hawaii time. Ring the Honolulu office; otherwise the Honolulu mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "08:00 HST -> Honolulu office",
+            "caller": "+15085551212",
+            "at": "2026-11-04T18:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+18085550501"
+          },
+          {
+            "name": "17:00 HST -> Honolulu mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-05T03:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+18085550503"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_hours",
+              "type": "schedule",
+              "config": {
+                "tz": "Pacific/Honolulu",
+                "weekly": {
+                  "mon": [
+                    {
+                      "start": "07:30",
+                      "end": "16:00"
+                    }
+                  ],
+                  "tue": [
+                    {
+                      "start": "07:30",
+                      "end": "16:00"
+                    }
+                  ],
+                  "wed": [
+                    {
+                      "start": "07:30",
+                      "end": "16:00"
+                    }
+                  ],
+                  "thu": [
+                    {
+                      "start": "07:30",
+                      "end": "16:00"
+                    }
+                  ],
+                  "fri": [
+                    {
+                      "start": "07:30",
+                      "end": "16:00"
+                    }
+                  ],
+                  "sat": [],
+                  "sun": []
+                }
+              }
+            },
+            {
+              "id": "n_hnl",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                }
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D4"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_hours"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "open",
+              "target": "n_hnl"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "closed",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Weekdays 7:30-16:00 Hawaii time calls ring [D2]; otherwise they go to [D4].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "districts-menu",
+      "context": "districts",
+      "message": "Press 1 for the North district, 2 for South, 3 for East and 4 for West. If they don't choose, send them to the district mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "press 3 -> East",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "3"
+            ],
+            "outcome": "transfer",
+            "target": "+17045550703"
+          },
+          {
+            "name": "press 4 -> West",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "4"
+            ],
+            "outcome": "transfer",
+            "target": "+17045550704"
+          },
+          {
+            "name": "no key -> district mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+17045550705"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_menu",
+              "type": "menu",
+              "label": "Districts",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ],
+                "digits": [
+                  "1",
+                  "2",
+                  "3",
+                  "4"
+                ]
+              }
+            },
+            {
+              "id": "n_n",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_s",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                }
+              }
+            },
+            {
+              "id": "n_e",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            },
+            {
+              "id": "n_w",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D4"
+                }
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D5"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_menu"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:1",
+              "target": "n_n"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:2",
+              "target": "n_s"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:3",
+              "target": "n_e"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:4",
+              "target": "n_w"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "noInput",
+              "target": "n_vm"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "noMatch",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "District menu",
+            "text": "For the North district, press 1. For South, press 2. For East, press 3. For West, press 4."
+          }
+        ],
+        "summary": "A district menu: 1 [D1], 2 [D2], 3 [D3], 4 [D4]; no choice goes to [D5].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-add-holiday",
+      "context": "acme_power",
+      "message": "Also close on New Year's Day 2027.",
+      "base": {
+        "schemaVersion": 1,
+        "nodes": [
+          {
+            "id": "n_start",
+            "type": "entry",
+            "position": {
+              "x": 0,
+              "y": 0
+            },
+            "data": {
+              "label": "Start",
+              "config": {}
+            }
+          },
+          {
+            "id": "n_hours",
+            "type": "schedule",
+            "position": {
+              "x": 0,
+              "y": 120
+            },
+            "data": {
+              "label": "Office hours",
+              "config": {
+                "tz": "America/New_York",
+                "weekly": {
+                  "mon": [
+                    [
+                      "08:00",
+                      "17:00"
+                    ]
+                  ],
+                  "tue": [
+                    [
+                      "08:00",
+                      "17:00"
+                    ]
+                  ],
+                  "wed": [
+                    [
+                      "08:00",
+                      "17:00"
+                    ]
+                  ],
+                  "thu": [
+                    [
+                      "08:00",
+                      "17:00"
+                    ]
+                  ],
+                  "fri": [
+                    [
+                      "08:00",
+                      "17:00"
+                    ]
+                  ],
+                  "sat": [],
+                  "sun": []
+                },
+                "closedDates": [
+                  "2026-12-25"
+                ]
+              }
+            }
+          },
+          {
+            "id": "n_front",
+            "type": "dial",
+            "position": {
+              "x": -150,
+              "y": 240
+            },
+            "data": {
+              "label": "Front desk",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "did": "+16175550103"
+                },
+                "ringTimeoutSec": 30
+              }
+            }
+          },
+          {
+            "id": "n_vm",
+            "type": "voicemail",
+            "position": {
+              "x": 150,
+              "y": 240
+            },
+            "data": {
+              "label": "After-hours mailbox",
+              "config": {
+                "did": "+16175550105"
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_1",
+            "source": "n_start",
+            "sourceHandle": "next",
+            "target": "n_hours"
+          },
+          {
+            "id": "e_2",
+            "source": "n_hours",
+            "sourceHandle": "open",
+            "target": "n_front"
+          },
+          {
+            "id": "e_3",
+            "source": "n_hours",
+            "sourceHandle": "closed",
+            "target": "n_vm"
+          }
+        ],
+        "viewport": {
+          "x": 0,
+          "y": 0,
+          "zoom": 1
+        }
+      },
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "New Year's Day -> after-hours mailbox",
+            "caller": "+15085551212",
+            "at": "2027-01-01T15:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+16175550105"
+          },
+          {
+            "name": "New Year's Eve -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-12-31T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_hours",
+              "type": "schedule",
+              "label": "Office hours",
+              "config": {
+                "tz": "America/New_York",
+                "weekly": {
+                  "mon": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "tue": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "wed": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "thu": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "fri": [
+                    {
+                      "start": "08:00",
+                      "end": "17:00"
+                    }
+                  ],
+                  "sat": [],
+                  "sun": []
+                },
+                "closedDates": [
+                  "2026-12-25",
+                  "2027-01-01"
+                ]
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "label": "Front desk",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                },
+                "ringTimeoutSec": 30
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "label": "After-hours mailbox",
+              "config": {
+                "mailbox": "D6"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_hours"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "open",
+              "target": "n_front"
+            },
+            {
+              "source": "n_hours",
+              "sourceHandle": "closed",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Same as before, and closed on 2027-01-01: calls that day go to [D6].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-star-operator",
+      "context": "acme_power",
+      "message": "Main menu: press 1 for billing, 2 for outages, or press star at any time to reach an operator at the front desk.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "press * -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "*"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          },
+          {
+            "name": "press 1 -> billing",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "1"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550101"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_menu",
+              "type": "menu",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ],
+                "digits": [
+                  "1",
+                  "2",
+                  "*"
+                ]
+              }
+            },
+            {
+              "id": "n_bill",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_outage",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                }
+              }
+            },
+            {
+              "id": "n_op",
+              "type": "dial",
+              "label": "Operator",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_menu"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:1",
+              "target": "n_bill"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:2",
+              "target": "n_outage"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:*",
+              "target": "n_op"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Main menu",
+            "text": "For billing, press 1. For outages, press 2. For an operator, press star."
+          }
+        ],
+        "summary": "1 rings [D1], 2 rings [D2], * reaches the operator at [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-greeting-goodbye",
+      "context": "acme_power",
+      "message": "Play the main greeting, then say 'Thank you for calling. Goodbye.' and hang up.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "everyone -> greeting, goodbye",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "hangup",
+            "says": [
+              "Main greeting",
+              "Goodbye"
+            ]
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_greet",
+              "type": "play",
+              "config": {
+                "prompts": [
+                  "P1"
+                ]
+              }
+            },
+            {
+              "id": "n_bye",
+              "type": "hangup",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ]
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_greet"
+            },
+            {
+              "source": "n_greet",
+              "sourceHandle": "next",
+              "target": "n_bye"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Goodbye",
+            "text": "Thank you for calling. Goodbye."
+          }
+        ],
+        "summary": "Callers hear [P1], then a goodbye, and the call ends.",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "coastal-pbx-reception",
+      "context": "coastal_electric",
+      "message": "Send all calls to our reception PBX number, and show the caller's number.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "everyone -> reception PBX, caller's number",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+14155550402",
+            "pass_caller_id": true
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_pbx",
+              "type": "dial",
+              "label": "Reception",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                },
+                "passCallerId": true
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_pbx"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Every call rings [D2], showing the caller's number.",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-straight-to-mailbox",
+      "context": "acme_power",
+      "message": "Send everyone straight to the front desk mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "everyone -> front desk mailbox",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "voicemail",
+            "target": "+16175550104"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D5"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Every call goes to [D5].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "refuse-payments",
+      "context": "acme_power",
+      "message": "Take credit card payments over the phone.",
+      "expect": {
+        "kind": "cannot_build"
+      },
+      "reference": {
+        "kind": "cannot_build",
+        "message": "I can't take payments. I can build menus, business hours, caller checks, transfers, voicemail and messages."
+      }
+    },
+    {
+      "id": "acme-normal-hours-unknown",
+      "context": "acme_power",
+      "message": "Use our normal business hours and send after-hours calls to voicemail.",
+      "expect": {
+        "kind": "clarify"
+      },
+      "reference": {
+        "kind": "clarify",
+        "question": "What are your business hours (days, times and time zone), and which mailbox should after-hours calls go to: [D5] or [D6]?"
+      }
+    },
+    {
+      "id": "desert-dispatch-noanswer",
+      "context": "desert_gas",
+      "message": "Ring our dispatcher at 1-602-555-2166 for 45 seconds and show the caller's number; if nobody answers, send them to the dispatch mailbox.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "everyone -> dispatcher, 45 s, caller's number",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [],
+            "outcome": "transfer",
+            "target": "+16025552166",
+            "ring_timeout": 45,
+            "pass_caller_id": true
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_disp",
+              "type": "dial",
+              "label": "Dispatcher",
+              "config": {
+                "target": {
+                  "kind": "external",
+                  "ref": "N1"
+                },
+                "ringTimeoutSec": 45,
+                "passCallerId": true
+              }
+            },
+            {
+              "id": "n_vm",
+              "type": "voicemail",
+              "config": {
+                "mailbox": "D3"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_disp"
+            },
+            {
+              "source": "n_disp",
+              "sourceHandle": "noAnswer",
+              "target": "n_vm"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "Calls ring the dispatcher at [N1] for 45 seconds, showing the caller's number, then go to [D3].",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "riverside-main-break",
+      "context": "riverside_water",
+      "message": "Press 1 to report a water main break, which rings the water main breaks line for 60 seconds. Press 2 for customer service. Press 0 to repeat these options.",
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "0 then 1 -> main breaks, 60 s",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "0",
+              "1"
+            ],
+            "outcome": "transfer",
+            "target": "+13125550202",
+            "ring_timeout": 60
+          },
+          {
+            "name": "press 2 -> customer service",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "2"
+            ],
+            "outcome": "transfer",
+            "target": "+13125550201"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_menu",
+              "type": "menu",
+              "config": {
+                "prompts": [
+                  "NP1"
+                ],
+                "digits": [
+                  "1",
+                  "2",
+                  "0"
+                ]
+              }
+            },
+            {
+              "id": "n_break",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                },
+                "ringTimeoutSec": 60
+              }
+            },
+            {
+              "id": "n_cs",
+              "type": "dial",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_again",
+              "type": "goto",
+              "config": {
+                "targetNodeId": "n_menu"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_menu"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:1",
+              "target": "n_break"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:2",
+              "target": "n_cs"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:0",
+              "target": "n_again"
+            }
+          ]
+        },
+        "new_prompts": [
+          {
+            "key": "NP1",
+            "name": "Main menu",
+            "text": "To report a water main break, press 1. For customer service, press 2. To hear these options again, press 0."
+          }
+        ],
+        "summary": "1 rings [D2] for 60 seconds, 2 rings [D1], 0 repeats the menu.",
+        "assumptions": []
+      }
+    },
+    {
+      "id": "acme-refine-with-history",
+      "context": "acme_power",
+      "message": "Also add 0 for the front desk.",
+      "base": {
+        "schemaVersion": 1,
+        "nodes": [
+          {
+            "id": "n_start",
+            "type": "entry",
+            "position": {
+              "x": 0,
+              "y": 0
+            },
+            "data": {
+              "label": "Start",
+              "config": {}
+            }
+          },
+          {
+            "id": "n_menu",
+            "type": "menu",
+            "position": {
+              "x": 0,
+              "y": 120
+            },
+            "data": {
+              "label": "Main menu",
+              "config": {
+                "prompts": [
+                  1
+                ],
+                "digits": [
+                  "1",
+                  "2"
+                ]
+              }
+            }
+          },
+          {
+            "id": "n_bill",
+            "type": "dial",
+            "position": {
+              "x": -150,
+              "y": 240
+            },
+            "data": {
+              "label": "Billing",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "did": "+16175550101"
+                }
+              }
+            }
+          },
+          {
+            "id": "n_outage",
+            "type": "dial",
+            "position": {
+              "x": 150,
+              "y": 240
+            },
+            "data": {
+              "label": "Outages",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "did": "+16175550102"
+                }
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_1",
+            "source": "n_start",
+            "sourceHandle": "next",
+            "target": "n_menu"
+          },
+          {
+            "id": "e_2",
+            "source": "n_menu",
+            "sourceHandle": "d:1",
+            "target": "n_bill"
+          },
+          {
+            "id": "e_3",
+            "source": "n_menu",
+            "sourceHandle": "d:2",
+            "target": "n_outage"
+          }
+        ]
+      },
+      "history": [
+        [
+          "customer",
+          "Press 1 for billing (617) 555-0101 and 2 for outages."
+        ],
+        [
+          "assistant",
+          "Callers hear a menu: 1 goes to Billing line (617-555-0101), 2 goes to Outage desk (617-555-0102)."
+        ]
+      ],
+      "expect": {
+        "kind": "proposal",
+        "calls": [
+          {
+            "name": "press 0 -> front desk",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "0"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550103"
+          },
+          {
+            "name": "press 1 -> billing still",
+            "caller": "+15085551212",
+            "at": "2026-11-04T15:00:00Z",
+            "digits": [
+              "1"
+            ],
+            "outcome": "transfer",
+            "target": "+16175550101"
+          }
+        ]
+      },
+      "reference": {
+        "kind": "proposal",
+        "graph": {
+          "nodes": [
+            {
+              "id": "n_start",
+              "type": "entry",
+              "label": "Start",
+              "config": {}
+            },
+            {
+              "id": "n_menu",
+              "type": "menu",
+              "label": "Main menu",
+              "config": {
+                "prompts": [
+                  "P1"
+                ],
+                "digits": [
+                  "1",
+                  "2",
+                  "0"
+                ]
+              }
+            },
+            {
+              "id": "n_bill",
+              "type": "dial",
+              "label": "Billing",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D1"
+                }
+              }
+            },
+            {
+              "id": "n_outage",
+              "type": "dial",
+              "label": "Outages",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D2"
+                }
+              }
+            },
+            {
+              "id": "n_front",
+              "type": "dial",
+              "label": "Front desk",
+              "config": {
+                "target": {
+                  "kind": "own",
+                  "ref": "D3"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "source": "n_start",
+              "sourceHandle": "next",
+              "target": "n_menu"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:1",
+              "target": "n_bill"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:2",
+              "target": "n_outage"
+            },
+            {
+              "source": "n_menu",
+              "sourceHandle": "d:0",
+              "target": "n_front"
+            }
+          ]
+        },
+        "new_prompts": [],
+        "summary": "The menu now also sends 0 to [D3].",
+        "assumptions": []
+      }
+    }
+  ]
+}
