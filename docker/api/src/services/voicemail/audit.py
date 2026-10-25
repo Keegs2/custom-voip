@@ -19,6 +19,12 @@ returned) | transcript_request (ui/admin — retry ``{"kind":"retry","force":…
 or backfill ``{"kind":"backfill","count":n}``) | transcript_requeue (admin —
 ``{"error_code":…,"count":n}``). Mailbox transcription settings stay
 ``mailbox_update``.
+Voicemail outage resilience (plan D11, ``sealed.py``): a sealed replay that
+is stored writes the usual ``deposit`` row with ``"via":"spool"`` +
+``received_at`` in its detail; one the API drops writes spool_drop
+(freeswitch — ``{"msg_uuid", "reason": mailbox_deleted | not_accepting_full |
+not_accepting_inactive | too_long | key_destroyed, "received_at",
+"duration_ms", "zone"}``, never caller data) BEFORE answering 410.
 Sources: ui | freeswitch | system | admin.
 """
 from __future__ import annotations
