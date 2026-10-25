@@ -296,13 +296,25 @@ inbound_router.lua (product_type == "rcf"):
        CDR-split block (`cdr_leg_attempt` = launched count, 1..N) — see
        "CDR A/B leg split" below. The local-extension bridge never does.
      - Loop breaks on `originate_disposition == "SUCCESS"` (the real FS bridge-result variable; `bridge_result` is NOT a channel variable and must never be used). `carrier_used` is set per attempt, so breaking on success records the winning carrier.
+     - Loop ALSO breaks on a **far-end final** result (`far_end_final()`,
+       2026-10-25): `USER_BUSY` (486) always, and `NO_ANSWER` when the ring
+       time (`call_timeout`) is longer than `BRIDGE_PROGRESS_TIMEOUT` — the
+       forwarded phone was reached, so another SBC/carrier attempt would only
+       ring it again (it used to re-dial up to 8 times). The caller then gets
+       that cause back (`USER_BUSY` → 486, `NO_ANSWER` → 480), not the 503,
+       which also invited the originating carrier to retry the call on
+       another route. With a ring time ≤ the PDD bound a NO_ANSWER can be a
+       silent route, so it still fails over. Every other cause (5xx,
+       PROGRESS_TIMEOUT, CALL_REJECTED, SBC down …) fails over as before.
+       Harness: `tests/lua/onnet_router_harness.lua` [7b-7g].
      - RFC 4028: NO export (the old no-op exports were removed 2026-09-24).
        The A-leg answer interval is `sofia_session_timeout=1800`, `set` at top
        level before any answer/bridge (the only per-call knob; read after the
        internal profile's NAT override 90/120). B-leg timers: Kamailio.
      - Uses EXTERNAL profile so Via/Contact/SDP get public IP.
   6. If every launched attempt fails (up to 8 on the db path, 4 on fallback)
-     -> NORMAL_TEMPORARY_FAILURE (SIP 503)
+     -> NORMAL_TEMPORARY_FAILURE (SIP 503) — unless the last result was
+     far-end final (busy / rang out, above): that cause goes back instead
      - lua_routed=true prevents dialplan from masking with 404
   |
   Special case: forward_to is a local extension (is_local_extension, ^10xx)

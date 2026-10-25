@@ -120,6 +120,28 @@ end
 bridge_progress_timeout = math.floor(bridge_progress_timeout)
 
 -- ================================================================
+-- Far-end final results: never re-dial a phone that was reached
+-- ================================================================
+-- A bridge attempt that ends USER_BUSY (the far end answered 486 busy) or
+-- NO_ANSWER (it rang for the whole call_timeout) reached the forwarded
+-- PHONE, not a broken route. The next SBC / carrier attempt would only ring
+-- that same phone again — up to 8 times — so the failover sweep stops there
+-- and the caller gets that answer back (USER_BUSY -> 486, NO_ANSWER -> 480)
+-- instead of a 503, which also invites the originating carrier to retry
+-- the whole call on another of our routes. Every other cause (SBC / carrier
+-- trouble, PROGRESS_TIMEOUT, 5xx, CALL_REJECTED …) keeps the failover order.
+-- NO_ANSWER counts only when the ring time is longer than the PDD bound:
+-- with call_timeout <= progress_timeout a route that never answered at all
+-- also ends NO_ANSWER, and that one must still fail over.
+local function far_end_final(disposition, call_timeout)
+    if disposition == "USER_BUSY" then
+        return true
+    end
+    return disposition == "NO_ANSWER"
+        and (tonumber(call_timeout) or 0) > bridge_progress_timeout
+end
+
+-- ================================================================
 -- RCF From-header pass-through gate (RCF_FROM_PASSTHROUGH=on|off)
 -- ================================================================
 -- DEFAULT OFF. Only the exact values on|true|1 (case-insensitive, trimmed)
@@ -1666,6 +1688,13 @@ local function terminate_rcf(dest, ctx)
                     uuid, i, total_attempts, attempt.label,
                     get_var("last_bridge_hangup_cause", disposition)
                 ))
+                if far_end_final(disposition, ring_timeout) then
+                    freeswitch.consoleLog("INFO", string.format(
+                        "[%s] RCF far end %s on attempt %d/%d: not re-dialing %s on another route\n",
+                        uuid, disposition, i, total_attempts, forward_to
+                    ))
+                    break
+                end
             end
 
             -- If continue_on_fail tore the A-leg down (e.g. caller hung up
@@ -1766,6 +1795,13 @@ local function terminate_rcf(dest, ctx)
                     uuid, i, attempt.label,
                     get_var("last_bridge_hangup_cause", disposition)
                 ))
+                if far_end_final(disposition, ring_timeout) then
+                    freeswitch.consoleLog("INFO", string.format(
+                        "[%s] RCF far end %s on attempt %d/4: not re-dialing %s on another route\n",
+                        uuid, disposition, i, forward_to
+                    ))
+                    break
+                end
             end
 
             -- If continue_on_fail tore the A-leg down (e.g. caller hung up
@@ -1782,6 +1818,16 @@ local function terminate_rcf(dest, ctx)
     -- the call has since completed normally via hangup_after_bridge.
     local disposition = get_var("originate_disposition", "")
     local last_bridge_hangup = get_var("last_bridge_hangup_cause", "")
+
+    -- The forwarded phone itself was busy / rang out (see far_end_final):
+    -- hand THAT back (486 / 480), not a 503 — a 503 makes the originating
+    -- carrier retry the call on another route and ring the phone again.
+    if far_end_final(disposition, ring_timeout) then
+        hangup(disposition, string.format(
+            "[%s] RCF %s -> %s: far end %s, returned to the caller (no failover, no 503)",
+            uuid, normalized_did, forward_to, disposition))
+        return
+    end
 
     -- If NO attempt ever connected, hangup with NORMAL_TEMPORARY_FAILURE (SIP 503)
     -- instead of falling through to the dialplan's 404 which would mask the real
