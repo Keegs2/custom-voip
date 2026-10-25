@@ -1,0 +1,52 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 16,
+  "version": 4,
+  "customer_id": 11,
+  "start": "n_menu",
+  "limits": {
+    "max_steps": 50,
+    "max_seconds": 600
+  },
+  "prompts": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ],
+  "nodes": {
+    "n_menu": {
+      "t": "menu",
+      "prompts": [
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "digits": {
+        "1": "n_hours_ivr",
+        "2": "n_tollfree"
+      },
+      "timeout_ms": 4000,
+      "retries": 1,
+      "on_noinput": "n_hours_ivr",
+      "on_nomatch": null
+    },
+    "n_hours_ivr": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550500",
+        "product": "ivr"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 30,
+      "on_noanswer": null
+    },
+    "n_tollfree": {
+      "t": "transfer",
+      "dest": {
+        "kind": "external",
+        "e164": "+18003330199"
+      },
+      "pass_caller_id": false,
+      "ring_timeout": 40,
+      "on_noanswer": "n_menu"
+    }
+  }
+}
