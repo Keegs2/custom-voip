@@ -1,3 +1,5 @@
+import { cn } from '../../utils/cn';
+
 interface Tab {
   id: string;
   label: string;
@@ -13,7 +15,8 @@ interface TabBarProps {
 }
 
 export function TabBar({ tabs, activeTab, onTabChange, className }: TabBarProps) {
-  // Glass segmented control — a frosted track with a glowing active pill.
+  // Segmented control on a raised panel — the active pill is an azure wash
+  // with an accent edge (and the azure glow on dark). Theme tokens only.
   return (
     <div
       className={['glass-surface', className].filter(Boolean).join(' ')}
@@ -37,29 +40,23 @@ export function TabBar({ tabs, activeTab, onTabChange, className }: TabBarProps)
             role="tab"
             aria-selected={isActive}
             onClick={() => onTabChange(tab.id)}
+            className={cn(
+              'transition-[color,background,box-shadow] duration-200 ease-out',
+              'focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[color:var(--t-focus)]',
+              isActive
+                ? 'text-[color:var(--t-text-strong)]'
+                : 'text-[color:var(--t-text-dim)] hover:text-[color:var(--t-text)] hover:bg-[color:var(--t-hover)]',
+            )}
             style={{
               padding: '8px 16px',
               fontSize: '0.875rem',
               fontWeight: isActive ? 700 : 500,
               whiteSpace: 'nowrap',
               borderRadius: 9,
-              color: isActive ? '#e2e8f0' : '#718096',
-              background: isActive
-                ? 'linear-gradient(135deg, rgba(47,125,246,0.24) 0%, rgba(47,125,246,0.12) 100%)'
-                : 'transparent',
-              boxShadow: isActive
-                ? 'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 16px rgba(47,125,246,0.22)'
-                : 'none',
+              background: isActive ? 'var(--t-accent-tint)' : undefined,
+              boxShadow: isActive ? 'inset 0 0 0 1px var(--t-accent-border), var(--t-glow)' : 'none',
               cursor: 'pointer',
               border: 'none',
-              transition: 'color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease',
-              outline: 'none',
-            }}
-            onMouseEnter={(e) => {
-              if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = '#cbd5e0';
-            }}
-            onMouseLeave={(e) => {
-              if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = '#718096';
             }}
           >
             {tab.label}
@@ -71,8 +68,8 @@ export function TabBar({ tabs, activeTab, onTabChange, className }: TabBarProps)
                   fontSize: '0.62rem',
                   fontWeight: 700,
                   borderRadius: 20,
-                  background: isActive ? 'rgba(47,125,246,0.2)' : 'rgba(30,33,48,0.8)',
-                  color: isActive ? '#93c5fd' : '#4a5568',
+                  background: isActive ? 'var(--t-accent-tint)' : 'var(--t-tint)',
+                  color: isActive ? 'var(--t-accent-text)' : 'var(--t-text-dim)',
                 }}
               >
                 {tab.count}

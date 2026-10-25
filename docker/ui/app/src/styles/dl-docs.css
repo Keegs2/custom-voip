@@ -1,16 +1,34 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   DL-DOCS — daylight-console documentation primitives (`dlx-` prefix)
+   DL-DOCS — documentation primitives (`dlx-` prefix)
 
-   Page styles for the Granite CRAG documentation pages (RcfDocsPage,
-   ApiDocsPage) built on the shared DAYLIGHT CONSOLE system in index.css.
-   Everything here references the shared `--rcf-*` custom properties declared
-   on `.dl-scope` — no re-stated scale values. Hand-written @media only
-   (never Tailwind md:* — see the container-build gotcha in CLAUDE.md).
+   Page styles for the Granite CRAG documentation pages (GuidesPage,
+   ApiDocsPage; root `.dl-scope.dlx-docs`) built on the shared DAYLIGHT
+   CONSOLE system in index.css. Colour comes from the theme layer (`--t-*`,
+   src/styles/theme.css — contract: docker/ui/CLAUDE.md §18): LIGHT is the
+   daylight console exactly as it was; DARK is the landing's granite.
+   Hand-written @media only (never Tailwind md:* — see the container-build
+   gotcha in CLAUDE.md).
 
    FLAG FOR CONSOLIDATION: these `dlx-` primitives are candidates for
    promotion into the shared `dl-*` block in index.css once a second page
    needs them (docs prose, code blocks, method chips, reference tables).
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Page roles. The four light values are exact daylight shades no theme token
+   carries (CLAUDE.md §18.3 rule 2); the DARK block re-points each at a token. */
+.dlx-docs {
+  --dlx-ic-bg: #eef2f8;          /* inline code chip */
+  --dlx-ic-line: #dbe3ee;
+  --dlx-admin-line: #b9c4d6;     /* "Admin" endpoint tag outline */
+  --dlx-warn-ink: #92400e;       /* amber-800: warn tag + planned-card title */
+}
+
+:root[data-theme='dark'] .dlx-docs {
+  --dlx-ic-bg: var(--t-surface-sunken);
+  --dlx-ic-line: var(--t-line);
+  --dlx-admin-line: var(--t-line-strong);
+  --dlx-warn-ink: var(--t-warn-fg);
+}
 
 /* ─── Readable docs measure inside the 1200px shell ─── */
 .dlx-docs-col {
@@ -37,17 +55,17 @@
 }
 
 .dlx-section-toggle:hover {
-  background: var(--rcf-tint-hover);
+  background: var(--t-tint-hover);
 }
 
 .dlx-section-toggle:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: -2px;
 }
 
 .dlx-section-toggle[aria-expanded='true'] {
-  background: var(--rcf-tint);
-  border-bottom-color: var(--rcf-line);
+  background: var(--t-tint);
+  border-bottom-color: var(--t-line);
 }
 
 .dlx-section-icon {
@@ -58,9 +76,9 @@
   width: 38px;
   height: 38px;
   border-radius: 10px;
-  background: rgba(47, 125, 246, 0.1);
-  border: 1px solid rgba(47, 125, 246, 0.22);
-  color: var(--rcf-azure-deep);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 22%, transparent);
+  color: var(--t-accent-text);
 }
 
 .dlx-section-id {
@@ -75,7 +93,7 @@
   font-size: 0.98rem;
   letter-spacing: -0.012em;
   line-height: 1.25;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   margin-bottom: 3px;
 }
 
@@ -83,18 +101,18 @@
   display: block;
   font-size: 0.76rem;
   line-height: 1.45;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 .dlx-section-chev {
   flex-shrink: 0;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   transform: rotate(-90deg);
   transition: transform var(--rcf-ease), color var(--rcf-ease);
 }
 
 .dlx-section-toggle:hover .dlx-section-chev {
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
 }
 
 .dlx-section-chev-open {
@@ -119,7 +137,7 @@
 .dlx-p {
   margin: 0 0 14px;
   font-size: 0.875rem;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   line-height: 1.75;
 }
 
@@ -134,14 +152,14 @@
   font-size: 0.95rem;
   letter-spacing: -0.012em;
   line-height: 1.3;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .dlx-h3::before {
   content: '';
   width: 6px;
   height: 6px;
-  background: var(--rcf-azure);
+  background: var(--t-accent-line);
   border-radius: 1px;
   flex-shrink: 0;
 }
@@ -150,20 +168,21 @@
   margin-top: 2px;
 }
 
-/* Inline code — light code surface, azure-deep ink */
+/* Inline code — light code surface (a sunken well on dark), accent ink */
 .dlx-ic {
-  background: #eef2f8;
-  border: 1px solid #dbe3ee;
+  background: var(--dlx-ic-bg);
+  border: 1px solid var(--dlx-ic-line);
   border-radius: 5px;
   padding: 1px 6px;
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.78rem;
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
 }
 
-/* ═══ Callout — tinted note row (accent tint set inline by the component) ═══ */
+/* ═══ Callout — tinted note row; the hue is the tone (info azure / warn amber) ═══ */
 
 .dlx-callout {
+  --dlx-co: var(--t-accent-line);
   display: flex;
   gap: 11px;
   padding: 13px 16px;
@@ -171,18 +190,56 @@
   margin: 0 0 16px;
   font-size: 0.82rem;
   line-height: 1.65;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
+  /* 13/255 and 48/255 — the original `${hex}0d` / `${hex}30` alphas */
+  background: color-mix(in srgb, var(--dlx-co) 5.0980392%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dlx-co) 18.8235294%, transparent);
 }
 
-/* ═══ Code blocks — ink-on-dark navy surface, one consistent treatment ═══ */
+.dlx-callout-warn { --dlx-co: var(--t-warn-fg); }
+
+.dlx-callout-icon {
+  color: var(--dlx-co);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ═══ Code blocks — a dark code surface in BOTH themes ═══
+   Syntax colours are a code theme, not UI colour: they stay the same in light
+   and dark (the same rationale as the granite header band), so they are the
+   one deliberate set of literals here. In light the block is ink-on-navy on
+   white paper; in dark it becomes a sunken well in the panel (DARK block). */
 
 .dlx-code {
+  --dlx-code-bg: #0f1a2e;
+  --dlx-code-edge: #0b1424;
+  --dlx-code-bar: #0b1322;
+  --dlx-code-label: #7d92b5;
+  --dlx-code-btn: #8fa3c4;
+  --dlx-code-btn-hover: #e6edf8;
+  --dlx-code-comment: #5b6d8f;
+  --dlx-code-text: #c9d5ea;
+  --dlx-code-key: #6fb0ff;
+  --dlx-code-string: #a3c9ff;
+  --dlx-code-literal: #5fd39a;
+  --dlx-code-number: #4cc9f0;
+  --dlx-code-shadow: 0 1px 2px color-mix(in srgb, var(--t-text) 10%, transparent);
+
   border-radius: 10px;
   overflow: hidden;
   margin: 0 0 16px;
-  background: #0f1a2e;
-  border: 1px solid #0b1424;
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.1);
+  background: var(--dlx-code-bg);
+  border: 1px solid var(--dlx-code-edge);
+  box-shadow: var(--dlx-code-shadow);
+  color: var(--dlx-code-text);
+}
+
+:root[data-theme='dark'] .dlx-code {
+  --dlx-code-comment: var(--dlx-code-label);  /* lifted to ≥ 4.5:1 on the well */
+  --dlx-code-bg: var(--t-surface-sunken);
+  --dlx-code-edge: var(--t-line);
+  --dlx-code-bar: var(--t-canvas);
+  --dlx-code-shadow: inset 0 1px 2px color-mix(in srgb, var(--t-canvas) 70%, transparent);
 }
 
 .dlx-code-bar {
@@ -191,26 +248,27 @@
   align-items: center;
   gap: 12px;
   padding: 7px 14px;
-  background: #0b1322;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--dlx-code-bar);
+  border-bottom: 1px solid color-mix(in srgb, var(--t-text-on-accent) 7%, transparent);
 }
 
 .dlx-code-label {
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.68rem;
-  color: #7d92b5;
+  color: var(--dlx-code-label);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* On the always-dark bar: the band's white washes (white 5 % / 10 %). */
 .dlx-code-copy {
   appearance: none;
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.68rem;
-  color: #8fa3c4;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--dlx-code-btn);
+  background: var(--t-band-tint);
+  border: 1px solid var(--t-band-line);
   border-radius: 5px;
   padding: 2px 9px;
   cursor: pointer;
@@ -219,18 +277,18 @@
 }
 
 .dlx-code-copy:hover {
-  color: #e6edf8;
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--dlx-code-btn-hover);
+  background: var(--t-band-line);
+  border-color: color-mix(in srgb, var(--t-text-on-accent) 18%, transparent);
 }
 
 .dlx-code-copy:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
 .dlx-code-copied {
-  color: #5fd39a;
+  color: var(--dlx-code-literal);
 }
 
 .dlx-code-body {
@@ -244,7 +302,15 @@
   overflow-wrap: break-word;
 }
 
-/* ═══ HTTP endpoint row + solid method chips ═══ */
+/* Syntax token colours (shared.tsx CodeLine) */
+.dlx-tok-comment { color: var(--dlx-code-comment); }
+.dlx-tok-text    { color: var(--dlx-code-text); }
+.dlx-tok-key     { color: var(--dlx-code-key); }
+.dlx-tok-string  { color: var(--dlx-code-string); }
+.dlx-tok-literal { color: var(--dlx-code-literal); }
+.dlx-tok-number  { color: var(--dlx-code-number); }
+
+/* ═══ HTTP endpoint row + method chips ═══ */
 
 .dlx-endpoint {
   display: flex;
@@ -253,11 +319,14 @@
   gap: 8px 12px;
   padding: 11px 14px;
   border-radius: 9px;
-  background: var(--rcf-tint);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-tint);
+  border: 1px solid var(--t-line);
   margin: 0 0 12px;
 }
 
+/* Method colours: GET azure, POST green, PUT/PATCH slate, DELETE red.
+   Light: solid fills with white text. Dark: the landing's chip — the tone's
+   text colour on a tint of itself with a hairline. */
 .dlx-method {
   display: inline-flex;
   align-items: center;
@@ -269,23 +338,29 @@
   font-size: 0.66rem;
   font-weight: 800;
   letter-spacing: 0.06em;
-  color: #ffffff;
+  color: var(--t-text-on-accent);
+  background: var(--dlx-m-fill);
   flex-shrink: 0;
   white-space: nowrap;
 }
 
-/* Method colors: GET azure, POST green, PUT/PATCH slate, DELETE red */
-.dlx-method-get    { background: var(--rcf-azure); }
-.dlx-method-post   { background: #16a34a; }
-.dlx-method-put    { background: #5d6f8c; }
-.dlx-method-patch  { background: #5d6f8c; }
-.dlx-method-delete { background: #dc2626; }
+.dlx-method-get    { --dlx-m-fill: var(--t-accent);       --dlx-m-ink: var(--t-accent-text); }
+.dlx-method-post   { --dlx-m-fill: var(--t-ok-solid);     --dlx-m-ink: var(--t-ok-fg); }
+.dlx-method-put,
+.dlx-method-patch  { --dlx-m-fill: var(--t-neutral-fg);   --dlx-m-ink: var(--t-neutral-fg); }
+.dlx-method-delete { --dlx-m-fill: var(--t-danger-solid); --dlx-m-ink: var(--t-danger-fg); }
+
+:root[data-theme='dark'] .dlx-method {
+  color: var(--dlx-m-ink);
+  background: color-mix(in srgb, var(--dlx-m-ink) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dlx-m-ink) 38%, transparent);
+}
 
 .dlx-endpoint-path {
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   flex-shrink: 0;
 }
 
@@ -294,17 +369,17 @@
   min-width: 0;
   font-size: 0.78rem;
   line-height: 1.5;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 /* ═══ Reference tables (params, status codes, retry matrix) ═══ */
 
 .dlx-table-wrap {
-  border: 1px solid var(--rcf-line);
+  border: 1px solid var(--t-line);
   border-radius: 10px;
   overflow-x: auto;
   margin: 0 0 20px;
-  background: var(--rcf-card);
+  background: var(--t-surface);
 }
 
 .dlx-table {
@@ -315,8 +390,8 @@
 
 .dlx-table td {
   padding: 10px 14px;
-  border-top: 1px solid var(--rcf-line-soft);
-  color: var(--rcf-ink-soft);
+  border-top: 1px solid var(--t-line-soft);
+  color: var(--t-text-soft);
   line-height: 1.55;
   vertical-align: top;
 }
@@ -327,14 +402,14 @@
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.78rem;
   font-weight: 600;
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
   white-space: nowrap;
 }
 
 .dlx-td-type {
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.75rem;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   white-space: nowrap;
 }
 
@@ -369,33 +444,33 @@
 .dlx-notecard {
   padding: 14px 16px;
   border-radius: 10px;
-  background: var(--rcf-tint);
-  border: 1px solid var(--rcf-line-soft);
+  background: var(--t-tint);
+  border: 1px solid var(--t-line-soft);
 }
 
 .dlx-notecard-title {
   font-size: 0.78rem;
   font-weight: 700;
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
   margin-bottom: 6px;
 }
 
 .dlx-notecard-body {
   font-size: 0.8rem;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   line-height: 1.6;
 }
 
 /* Warn-tinted variant (planned / coming-soon feature cards) */
 .dlx-notecard-warn {
-  background: rgba(180, 83, 9, 0.05);
-  border-color: rgba(180, 83, 9, 0.18);
+  background: color-mix(in srgb, var(--t-warn-fg) 5%, transparent);
+  border-color: color-mix(in srgb, var(--t-warn-fg) 18%, transparent);
 }
 
 .dlx-notecard-warn .dlx-notecard-title {
   font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.75rem;
-  color: #92400e;
+  color: var(--dlx-warn-ink);
 }
 
 /* ═══ Small pieces ═══ */
@@ -404,8 +479,8 @@
 .dlx-item {
   padding: 12px 16px;
   border-radius: 9px;
-  background: var(--rcf-tint);
-  border: 1px solid var(--rcf-line-soft);
+  background: var(--t-tint);
+  border: 1px solid var(--t-line-soft);
 }
 
 /* Numbered step circle for the quick-start walkthrough */
@@ -417,9 +492,9 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: rgba(47, 125, 246, 0.1);
-  border: 1px solid rgba(47, 125, 246, 0.24);
-  color: var(--rcf-azure-deep);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 24%, transparent);
+  color: var(--t-accent-text);
   font-family: "Archivo", "IBM Plex Sans", sans-serif;
   font-size: 0.78rem;
   font-weight: 700;
@@ -457,11 +532,11 @@
   padding: 16px 16px 14px;
   text-align: left;
   font-family: inherit;
-  background: var(--rcf-card);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-surface);
+  border: 1px solid var(--t-line);
   border-radius: 12px;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.04);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--t-text) 4%, transparent);
   transition:
     border-color var(--rcf-ease),
     background var(--rcf-ease),
@@ -470,21 +545,23 @@
 }
 
 .dlx8-pcard:hover {
-  border-color: rgba(47, 125, 246, 0.45);
+  border-color: color-mix(in srgb, var(--t-accent-line) 45%, transparent);
   transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(14, 23, 38, 0.07);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--t-text) 7%, transparent);
 }
 
 .dlx8-pcard:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 2px;
 }
 
 .dlx8-pcard-active,
 .dlx8-pcard-active:hover {
-  background: rgba(47, 125, 246, 0.05);
-  border-color: var(--rcf-azure);
-  box-shadow: inset 0 0 0 1px var(--rcf-azure), 0 2px 8px rgba(47, 125, 246, 0.12);
+  background: color-mix(in srgb, var(--t-accent-line) 5%, transparent);
+  border-color: var(--t-accent-line);
+  box-shadow:
+    inset 0 0 0 1px var(--t-accent-line),
+    0 2px 8px color-mix(in srgb, var(--t-accent-line) 12%, transparent);
   transform: none;
 }
 
@@ -496,16 +573,16 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: rgba(47, 125, 246, 0.1);
-  border: 1px solid rgba(47, 125, 246, 0.22);
-  color: var(--rcf-azure-deep);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 22%, transparent);
+  color: var(--t-accent-text);
   transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
 }
 
 .dlx8-pcard-active .dlx8-pcard-icon {
-  background: var(--rcf-azure);
-  border-color: var(--rcf-azure);
-  color: #ffffff;
+  background: var(--t-accent);
+  border-color: var(--t-accent);
+  color: var(--t-text-on-accent);
 }
 
 .dlx8-pcard-name-row {
@@ -522,13 +599,13 @@
   font-size: 0.88rem;
   letter-spacing: -0.012em;
   line-height: 1.25;
-  color: var(--rcf-ink);
+  color: var(--t-text);
 }
 
 .dlx8-pcard-desc {
   font-size: 0.73rem;
   line-height: 1.5;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
 }
 
 /* Selected marker — quiet azure dot in the top-right corner */
@@ -539,7 +616,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--rcf-azure);
+  background: var(--t-accent-line);
   opacity: 0;
   transition: opacity var(--rcf-ease);
 }
@@ -560,9 +637,9 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #46566f;
+  color: var(--t-text-soft);
   background: transparent;
-  border: 1px solid #b9c4d6;
+  border: 1px solid var(--dlx-admin-line);
   border-radius: 5px;
   padding: 2px 8px;
   white-space: nowrap;
@@ -584,7 +661,7 @@
   padding-left: 20px;
   font-size: 0.85rem;
   line-height: 1.65;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
 }
 
 .dlx8-ul li::before {
@@ -595,7 +672,7 @@
   width: 9px;
   height: 2px;
   border-radius: 1px;
-  background: var(--rcf-azure);
+  background: var(--t-accent-line);
 }
 
 /* Coming-soon tag — warn palette from the dl banner family */
@@ -606,10 +683,80 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #92400e;
-  background: rgba(180, 83, 9, 0.08);
-  border: 1px solid rgba(180, 83, 9, 0.26);
+  color: var(--dlx-warn-ink);
+  background: color-mix(in srgb, var(--t-warn-fg) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-warn-fg) 26%, transparent);
   border-radius: 5px;
   padding: 2px 8px;
   white-space: nowrap;
+}
+
+/* ═══ Dark theme — the landing's panels and chips on granite ═══════════════ */
+
+:root[data-theme='dark'] .dlx-section-icon,
+:root[data-theme='dark'] .dlx8-pcard-icon,
+:root[data-theme='dark'] .dlx-step-num {
+  background: var(--t-accent-tint);
+  border-color: var(--t-accent-border);
+}
+
+:root[data-theme='dark'] .dlx-section-toggle[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--t-tint) 70%, transparent);
+}
+
+:root[data-theme='dark'] .dlx-callout {
+  background: color-mix(in srgb, var(--dlx-co) 8%, transparent);
+  border-color: color-mix(in srgb, var(--dlx-co) 28%, transparent);
+}
+
+:root[data-theme='dark'] .dlx-table-wrap {
+  background: var(--t-surface-sunken);
+}
+
+:root[data-theme='dark'] .dlx-endpoint,
+:root[data-theme='dark'] .dlx-notecard,
+:root[data-theme='dark'] .dlx-item {
+  border-color: var(--t-line);
+}
+
+:root[data-theme='dark'] .dlx-notecard-warn {
+  background: var(--t-warn-bg);
+  border-color: var(--t-warn-border);
+}
+
+:root[data-theme='dark'] .dlx-tag-warn {
+  background: var(--t-warn-bg);
+  border-color: var(--t-warn-border);
+}
+
+:root[data-theme='dark'] .dlx8-pcard {
+  background: var(--t-panel-bg);
+  box-shadow: var(--t-shadow-card);
+}
+
+:root[data-theme='dark'] .dlx8-pcard:hover {
+  border-color: var(--t-accent-border);
+  box-shadow: var(--t-shadow-card-hover);
+}
+
+:root[data-theme='dark'] .dlx8-pcard-active,
+:root[data-theme='dark'] .dlx8-pcard-active:hover {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--t-accent-line) 12%, transparent) 0%, transparent 70%),
+    var(--t-surface);
+  border-color: var(--t-accent-line);
+  box-shadow:
+    inset 0 0 0 1px var(--t-accent-line),
+    var(--t-highlight),
+    var(--t-glow);
+}
+
+:root[data-theme='dark'] .dlx8-pcard-active .dlx8-pcard-icon {
+  background: var(--t-accent);
+  border-color: var(--t-accent-line);
+  box-shadow: var(--t-glow);
+}
+
+:root[data-theme='dark'] .dlx8-pcard-mark {
+  box-shadow: 0 0 8px var(--t-accent-line);
 }

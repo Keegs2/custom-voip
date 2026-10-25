@@ -5,9 +5,12 @@
 
    The `dlx-` prefix marks these as page-scoped, NOT part of the shared
    DAYLIGHT CONSOLE system in index.css. If a page outside the admin area
-   reaches for one of these, promote it into the shared `dl-*` block. Every
-   value references the shared `--rcf-*` custom properties declared on
-   `.dl-scope` — no re-stated magic numbers for color or rhythm.
+   reaches for one of these, promote it into the shared `dl-*` block.
+   Imported today by CallsPage + ReportingPage only. Colour is THEME TOKENS
+   only (`--t-*`, docker/ui/CLAUDE.md §18) plus the `--cq-*` page tokens
+   from dl-platform-b.css (both pages import it). Light-only alphas are
+   colour-mixes of the token whose light value is the old rgb, so light is
+   unchanged and dark follows the granite hue.
    Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -32,7 +35,7 @@
 .dlx-td {
   padding: 12px 16px;
   font-size: 0.82rem;
-  color: var(--rcf-ink-soft);
+  color: var(--t-text-soft);
   vertical-align: middle;
   white-space: nowrap;
 }
@@ -46,14 +49,14 @@
 
 /* ─── Tinted success button — mirrors .dl-btn-danger's tinted idiom ─── */
 .dlx-btn-ok {
-  background: rgba(22, 163, 74, 0.07);
-  border: 1px solid rgba(22, 163, 74, 0.3);
-  color: var(--rcf-green);
+  background: color-mix(in srgb, var(--t-ok-solid) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-ok-solid) 30%, transparent);
+  color: var(--t-ok-fg);
 }
 
 .dlx-btn-ok:hover:not(:disabled) {
-  background: rgba(22, 163, 74, 0.13);
-  border-color: rgba(22, 163, 74, 0.45);
+  background: color-mix(in srgb, var(--t-ok-solid) 13%, transparent);
+  border-color: color-mix(in srgb, var(--t-ok-solid) 45%, transparent);
 }
 
 .dlx-btn-ok:disabled {
@@ -74,13 +77,13 @@
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: -0.01em;
-  color: var(--rcf-azure-deep);
+  color: var(--t-accent-text);
   cursor: pointer;
   text-decoration: none;
   transition: color var(--rcf-ease);
 }
 
-.dlx-linkbtn:hover { color: var(--rcf-azure); }
+.dlx-linkbtn:hover { color: var(--t-accent-text-hover); }
 
 /* ─── Daylight segmented control (status filter, capacity mode) ─── */
 .dlx-seg {
@@ -88,8 +91,8 @@
   gap: 4px;
   padding: 4px;
   border-radius: 10px;
-  background: var(--rcf-tint);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-tint);
+  border: 1px solid var(--t-line);
 }
 
 .dlx-seg-btn {
@@ -101,7 +104,7 @@
   font-size: 0.76rem;
   font-weight: 600;
   letter-spacing: 0.01em;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
@@ -109,20 +112,20 @@
 }
 
 .dlx-seg-btn:hover:not(.dlx-seg-btn-active) {
-  color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.06);
+  color: var(--t-accent-text);
+  background: color-mix(in srgb, var(--t-accent-line) 6%, transparent);
 }
 
 .dlx-seg-btn-active {
-  color: var(--rcf-azure-deep);
-  background: var(--rcf-card);
-  border-color: rgba(47, 125, 246, 0.35);
-  box-shadow: 0 1px 3px rgba(14, 23, 38, 0.08);
+  color: var(--t-accent-text);
+  background: var(--t-surface-raised);
+  border-color: color-mix(in srgb, var(--t-accent-line) 35%, transparent);
+  box-shadow: var(--cq-shadow-seg);
   font-weight: 700;
 }
 
 .dlx-seg-btn:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: -2px;
 }
 
@@ -151,32 +154,32 @@
 }
 
 .dlx-xpanel {
-  background: #f7fafd;
-  border-top: 1px solid var(--rcf-line);
-  border-bottom: 1px solid var(--rcf-line);
+  background: var(--t-tint);
+  border-top: 1px solid var(--t-line);
+  border-bottom: 1px solid var(--t-line);
   padding: 22px 26px 20px;
-  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+  box-shadow: inset 2px 0 0 0 var(--t-accent-line);
 }
 
 /* ─── Bordered tinted wells (product blocks, outcome details) ─── */
 .dlx-well {
   padding: 14px 16px;
   border-radius: 10px;
-  background: rgba(47, 125, 246, 0.04);
-  border: 1px solid rgba(47, 125, 246, 0.18);
+  background: color-mix(in srgb, var(--t-accent-line) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 18%, transparent);
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
 .dlx-well-ok {
-  background: rgba(22, 163, 74, 0.05);
-  border-color: rgba(22, 163, 74, 0.22);
+  background: color-mix(in srgb, var(--t-ok-solid) 5%, transparent);
+  border-color: color-mix(in srgb, var(--t-ok-solid) 22%, transparent);
 }
 
 .dlx-well-err {
-  background: rgba(220, 38, 38, 0.04);
-  border-color: rgba(220, 38, 38, 0.2);
+  background: color-mix(in srgb, var(--t-danger-solid) 4%, transparent);
+  border-color: color-mix(in srgb, var(--t-danger-solid) 20%, transparent);
 }
 
 /* ─── Info pair grid + label/value (read-only detail fields) ─── */
@@ -192,13 +195,13 @@
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   margin-bottom: 4px;
 }
 
 .dlx-ivalue {
   font-size: 0.84rem;
-  color: var(--rcf-ink);
+  color: var(--t-text);
   line-height: 1.5;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -213,9 +216,9 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #92400e;
-  background: rgba(180, 83, 9, 0.08);
-  border: 1px solid rgba(180, 83, 9, 0.28);
+  color: var(--t-warn-fg);
+  background: var(--t-warn-bg);
+  border: 1px solid var(--t-warn-border);
   border-radius: 6px;
   padding: 4px 10px;
   white-space: nowrap;
@@ -228,12 +231,10 @@
   left: 0;
   right: 0;
   z-index: 50;
-  background: var(--rcf-card);
-  border: 1px solid var(--rcf-line);
+  background: var(--t-surface);
+  border: 1px solid var(--t-line);
   border-radius: 9px;
-  box-shadow:
-    0 1px 2px rgba(14, 23, 38, 0.06),
-    0 16px 36px -14px rgba(14, 23, 38, 0.3);
+  box-shadow: var(--t-shadow-pop);
   max-height: 220px;
   overflow-y: auto;
 }
@@ -244,15 +245,15 @@
   gap: 10px;
   padding: 8px 14px;
   cursor: pointer;
-  border-bottom: 1px solid var(--rcf-line-soft);
+  border-bottom: 1px solid var(--t-line-soft);
   transition: background var(--rcf-ease);
 }
 
 .dlx-dropdown-opt:last-child { border-bottom: none; }
 
-.dlx-dropdown-opt:hover { background: var(--rcf-tint-hover); }
+.dlx-dropdown-opt:hover { background: var(--t-tint-hover); }
 
-.dlx-dropdown-opt-hi { background: rgba(47, 125, 246, 0.1); }
+.dlx-dropdown-opt-hi { background: var(--t-accent-tint); }
 
 /* ─── Small round remove (✕) button — destructive, stays red ─── */
 .dlx-xbtn {
@@ -263,9 +264,9 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 1px solid rgba(220, 38, 38, 0.24);
-  background: rgba(220, 38, 38, 0.06);
-  color: var(--rcf-red);
+  border: 1px solid var(--t-danger-border);
+  background: var(--t-danger-bg);
+  color: var(--t-danger-fg);
   font-size: 0.68rem;
   line-height: 1;
   cursor: pointer;
@@ -273,8 +274,8 @@
 }
 
 .dlx-xbtn:hover:not(:disabled) {
-  background: rgba(220, 38, 38, 0.13);
-  border-color: rgba(220, 38, 38, 0.45);
+  background: color-mix(in srgb, var(--t-danger-solid) 13%, transparent);
+  border-color: color-mix(in srgb, var(--t-danger-solid) 45%, transparent);
 }
 
 .dlx-xbtn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -293,18 +294,18 @@
   gap: 10px;
   padding: 12px 16px;
   border-radius: 10px;
-  background: var(--rcf-tint);
-  border: 1px solid var(--rcf-line-soft);
+  background: var(--t-tint);
+  border: 1px solid var(--t-line-soft);
   cursor: pointer;
   user-select: none;
   transition: background var(--rcf-ease), border-color var(--rcf-ease);
 }
 
-.dlx-checkrow:hover { background: var(--rcf-tint-hover); }
+.dlx-checkrow:hover { background: var(--t-tint-hover); }
 
 .dlx-checkrow-on {
-  background: rgba(47, 125, 246, 0.06);
-  border-color: rgba(47, 125, 246, 0.28);
+  background: var(--t-accent-tint);
+  border-color: var(--t-accent-border);
 }
 
 /* ─── Daylight toggle switch (enabled/disabled in edit forms) ─── */
@@ -313,8 +314,8 @@
   width: 38px;
   height: 22px;
   border-radius: 11px;
-  border: 1px solid #c3cfe2;
-  background: #dde5f0;
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-line);
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
   padding: 0;
@@ -330,14 +331,14 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 3px rgba(14, 23, 38, 0.35);
+  background: var(--t-text-on-accent);
+  box-shadow: var(--t-shadow-xs);
   transition: left 0.2s ease;
 }
 
 .dlx-switch-on {
-  background: linear-gradient(135deg, var(--rcf-azure) 0%, var(--rcf-azure-deep) 100%);
-  border-color: var(--rcf-azure-deep);
+  background: linear-gradient(135deg, var(--t-accent) 0%, var(--t-accent-hover) 100%);
+  border-color: var(--t-accent-hover);
 }
 
 .dlx-switch-on::after { left: 18px; }
@@ -345,7 +346,7 @@
 .dlx-switch:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .dlx-switch:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 2px;
 }
 
@@ -361,7 +362,7 @@
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   pointer-events: none;
 }
 
@@ -377,9 +378,9 @@
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: var(--rcf-ink-dim);
+  color: var(--t-text-dim);
   cursor: pointer;
   transition: color var(--rcf-ease);
 }
 
-.dlx-search-clear:hover { color: var(--rcf-ink-soft); }
+.dlx-search-clear:hover { color: var(--t-text-soft); }

@@ -12,30 +12,55 @@
    load (.rcfd-routes-intro, ≤ ~400ms). Everything else moves only on user
    interaction, and nothing moves under prefers-reduced-motion.
 
-   Palette = existing tokens only (landing granite/cobalt/azure, --rcf-*,
-   quality.ts tones). No new hues.
+   Colour = theme tokens only (docker/ui/CLAUDE.md §18): --t-*, the
+   daylight page palette (--dl-*, index.css) and quality.ts tones. LIGHT is
+   the daylight look value for value; DARK carries the landing in (raised
+   panels, wells for fields, azure-bright lines, the accent wash for an
+   open row).
    ══════════════════════════════════════════════════════════════════════════ */
 
 .rcfd-scope,
 .rcfd-overlay-root {
-  --rcfd-granite: #070c16;
-  --rcfd-granite-hi: #0c1424;
-  --rcfd-cobalt: var(--lg-cobalt, #113398);
-  --rcfd-azure-bright: var(--brand-azure-bright, #4f92ff);
-  --rcfd-slate: #8b99b0;
-  --rcfd-slate-soft: #b6c2d4;
-  --rcfd-live: #22c55e; /* app success green — legible on granite */
-  --rcfd-warn: #b45309; /* quality.ts WARN */
-  --rcfd-shadow-board:
-    0 1px 2px rgba(14, 23, 38, 0.06),
-    0 2px 6px -2px rgba(14, 23, 38, 0.05),
-    0 18px 40px -16px rgba(14, 23, 38, 0.18);
-  --rcfd-shadow-rail:
-    0 1px 2px rgba(14, 23, 38, 0.05),
-    0 8px 20px -12px rgba(14, 23, 38, 0.14);
-  --rcfd-focus: 0 0 0 3px rgba(47, 125, 246, 0.28);
+  --rcfd-azure-bright: var(--brand-azure-bright);
+  --rcfd-slate: var(--t-text-faint);
+  --rcfd-slate-soft: var(--dl-slate-soft);
+  --rcfd-focus: 0 0 0 3px color-mix(in srgb, var(--t-focus) 28%, transparent);
   --rcfd-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --rcfd-display: "Archivo", "IBM Plex Sans", sans-serif;
+}
+
+/* Page tokens (§18.3 rule 2) — the board's and overlay's own elevation and
+   the open-route wash. LIGHT is today's value (ink-tinted shadows at the
+   old alphas, the pale-azure open row); DARK is the theme's recipe. */
+:root,
+[data-force-theme='light'] {
+  --rcfd-shadow-board:
+    0 1px 2px color-mix(in srgb, var(--t-text) 6%, transparent),
+    0 2px 6px -2px color-mix(in srgb, var(--t-text) 5%, transparent),
+    0 18px 40px -16px color-mix(in srgb, var(--t-text) 18%, transparent);
+  --rcfd-route-open-main: #f5f9ff;
+  --rcfd-status-off-bg: #f1f4f8;
+  --rcfd-overlay-scrim: rgba(7, 12, 22, 0.52);
+  --rcfd-overlay-shadow:
+    0 0 0 1px rgba(7, 12, 22, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 32px 80px -24px rgba(7, 12, 22, 0.65);
+  --rcfd-search-bg: var(--t-tint);
+  --rcfd-search-focus-bg: var(--t-surface);
+  --rcfd-filament-tail: rgba(47, 125, 246, 0.3); /* gradient stop: a plain colour, not color-mix() */
+}
+
+:root[data-theme='dark'],
+:root[data-landing],
+[data-force-theme='dark'] {
+  --rcfd-shadow-board: var(--t-shadow-card);
+  --rcfd-route-open-main: var(--t-accent-wash);
+  --rcfd-status-off-bg: var(--t-tint);
+  --rcfd-overlay-scrim: var(--t-scrim);
+  --rcfd-overlay-shadow: 0 0 0 1px var(--t-line), var(--t-shadow-modal);
+  --rcfd-search-bg: var(--t-field-bg);
+  --rcfd-search-focus-bg: var(--t-field-bg);
+  --rcfd-filament-tail: color-mix(in srgb, var(--t-accent-line) 30%, transparent);
 }
 
 .rcfd-shell {
@@ -89,7 +114,7 @@
   width: 64px;
   height: 0.8em;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--t-line-soft);
   vertical-align: middle;
 }
 
@@ -125,29 +150,33 @@
 }
 
 .rcfd-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
-.rcfd-btn:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+.rcfd-btn:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 
-/* Primary on paper. */
+/* Primary on paper — a fill: azure, deepening to azure-deep on hover (white
+   label in both themes), with the azure bloom on dark. */
 .rcfd-btn-primary {
-  color: #fff;
-  background: var(--rcf-azure);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 4px 12px -4px rgba(47, 125, 246, 0.55);
+  color: var(--t-text-on-accent);
+  background: var(--t-accent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--t-text-on-accent) 20%, transparent),
+    0 4px 12px -4px color-mix(in srgb, var(--t-accent) 55%, transparent),
+    var(--t-glow);
 }
 
-.rcfd-btn-primary:hover { background: var(--rcf-azure-deep); }
+.rcfd-btn-primary:hover { background: var(--t-accent-hover); }
 
 /* Secondary on paper — white key with an azure label. */
 .rcfd-btn-quiet {
   color: var(--rcf-azure-deep);
   background: var(--rcf-card);
   border-color: var(--rcf-line);
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.05);
+  box-shadow: var(--t-shadow-xs);
 }
 
 .rcfd-btn-quiet:hover {
   background: var(--rcf-tint-hover);
-  border-color: rgba(47, 125, 246, 0.4);
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.05), 0 4px 12px -6px rgba(47, 125, 246, 0.35);
+  border-color: color-mix(in srgb, var(--t-accent-line) 40%, transparent);
+  box-shadow: var(--t-shadow-xs), 0 4px 12px -6px color-mix(in srgb, var(--t-accent) 35%, transparent);
 }
 
 .rcfd-iconbtn {
@@ -166,8 +195,8 @@
 }
 
 .rcfd-iconbtn svg { width: 14px; height: 14px; }
-.rcfd-iconbtn:hover { color: var(--rcf-ink); border-color: #cdd7e6; background: var(--rcf-tint); }
-.rcfd-iconbtn:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+.rcfd-iconbtn:hover { color: var(--rcf-ink); border-color: var(--dl-field-hover); background: var(--rcf-tint); }
+.rcfd-iconbtn:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 
 /* ─── Page header (customer /rcf) ──────────────────────────────────────── */
 
@@ -199,7 +228,7 @@
 }
 
 .rcfn-crumb a:hover { text-decoration: underline; text-underline-offset: 3px; }
-.rcfn-crumb a:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+.rcfn-crumb a:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 
 .rcfn-title {
   margin: 0;
@@ -226,7 +255,7 @@
 
 .rcfd-panel {
   min-width: 0;
-  background: var(--rcf-card);
+  background: var(--t-panel-bg);
   border: 1px solid var(--rcf-line);
   border-radius: 14px;
   overflow: hidden;
@@ -325,7 +354,7 @@
   left: 11px;
   width: 14px;
   height: 14px;
-  color: #9aa9c0;
+  color: var(--t-field-placeholder);
   pointer-events: none;
 }
 
@@ -335,20 +364,20 @@
   padding: 0 12px 0 34px;
   border: 1px solid var(--rcf-line);
   border-radius: 9px;
-  background: var(--rcf-tint);
+  background: var(--rcfd-search-bg);
   font-family: inherit;
   font-size: 13.5px;
   color: var(--rcf-ink);
   transition: border-color var(--rcf-ease), background-color var(--rcf-ease), box-shadow var(--rcf-ease);
 }
 
-.rcfd-search input::placeholder { color: #9aa9c0; }
-.rcfd-search input:hover { border-color: #cdd7e6; }
+.rcfd-search input::placeholder { color: var(--t-field-placeholder); }
+.rcfd-search input:hover { border-color: var(--dl-field-hover); }
 
 .rcfd-search input:focus {
   outline: none;
-  border-color: var(--rcf-azure);
-  background: var(--rcf-card);
+  border-color: var(--t-focus);
+  background: var(--rcfd-search-focus-bg);
   box-shadow: var(--rcfd-focus);
 }
 
@@ -379,7 +408,7 @@
 }
 
 .rcfd-chip:hover { color: var(--rcf-ink); }
-.rcfd-chip:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 1px; }
+.rcfd-chip:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 1px; }
 
 .rcfd-chip-count {
   font-size: 11.5px;
@@ -392,13 +421,15 @@
 
 .rcfd-chip-active {
   color: var(--rcf-ink);
-  background: var(--rcf-card);
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.1), 0 0 0 1px rgba(14, 23, 38, 0.04);
+  background: var(--t-surface-raised);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--dl-shadow-ink) 10%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--dl-shadow-ink) 4%, transparent);
 }
 
 .rcfd-chip-active .rcfd-chip-count {
   color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.12);
+  background: color-mix(in srgb, var(--t-accent-line) 12%, transparent);
 }
 
 .rcfd-sort {
@@ -414,14 +445,14 @@
   padding: 0 10px;
   border: 1px solid var(--rcf-line);
   border-radius: 9px;
-  background: var(--rcf-card);
+  background: var(--t-field-bg);
   font-family: inherit;
   font-size: 13px;
   color: var(--rcf-ink);
   cursor: pointer;
 }
 
-.rcfd-sort select:focus-visible { outline: none; border-color: var(--rcf-azure); box-shadow: var(--rcfd-focus); }
+.rcfd-sort select:focus-visible { outline: none; border-color: var(--t-focus); box-shadow: var(--rcfd-focus); }
 
 /* Route rows — one grid template shared by the column header and rows. */
 .rcfd-routes-cols,
@@ -473,11 +504,11 @@
 
 .rcfd-route-main:hover {
   background: var(--rcf-tint-hover);
-  box-shadow: inset 3px 0 0 var(--rcf-azure);
+  box-shadow: inset 3px 0 0 var(--t-accent-line);
 }
 
 .rcfd-route-main:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: -2px;
 }
 
@@ -487,17 +518,17 @@
   margin: 8px 10px;
   border-radius: 12px;
   border-bottom-color: transparent;
-  background: var(--rcf-card);
+  background: var(--t-surface-raised);
   overflow: hidden;
   box-shadow:
-    0 0 0 1px rgba(47, 125, 246, 0.5),
-    0 0 0 4px rgba(47, 125, 246, 0.08),
-    0 14px 30px -14px rgba(29, 99, 221, 0.4);
+    0 0 0 1px color-mix(in srgb, var(--t-accent-line) 50%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--t-accent-line) 8%, transparent),
+    0 14px 30px -14px color-mix(in srgb, var(--t-accent-hover) 40%, transparent);
 }
 
 .rcfd-route-open > .rcfd-route-main {
-  background: #f5f9ff;
-  box-shadow: inset 3px 0 0 var(--rcf-azure);
+  background: var(--rcfd-route-open-main);
+  box-shadow: inset 3px 0 0 var(--t-accent-line);
 }
 
 .rcfd-route-from,
@@ -516,12 +547,13 @@
   white-space: nowrap;
 }
 
-.rcfd-route-label-empty { color: #a7b3c8; font-style: italic; }
+.rcfd-route-label-empty { color: var(--dl-slate-mute); font-style: italic; }
 
 .rcfd-route-off .rcfd-num { color: var(--rcf-ink-soft); }
 .rcfd-route-off .rcfd-num-dest { color: var(--rcf-ink-dim); }
 
-/* The connector filament: lit azure when forwarding, dashed slate when paused. */
+/* The connector filament: lit azure when forwarding, dashed slate when
+   paused. Azure in light, azure-bright (with its glow) on granite. */
 .rcfd-filament {
   display: flex;
   align-items: center;
@@ -534,8 +566,8 @@
   height: 2px;
   border-radius: 2px;
   transform-origin: left center;
-  background: linear-gradient(90deg, rgba(47, 125, 246, 0.3) 0%, var(--rcf-azure) 100%);
-  box-shadow: 0 0 6px rgba(47, 125, 246, 0.45);
+  background: linear-gradient(90deg, var(--rcfd-filament-tail) 0%, var(--t-accent-line) 100%);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--t-accent-line) 45%, transparent);
 }
 
 .rcfd-filament-head {
@@ -543,8 +575,8 @@
   height: 10px;
   flex-shrink: 0;
   margin-left: -2px;
-  stroke: var(--rcf-azure);
-  filter: drop-shadow(0 0 3px rgba(47, 125, 246, 0.5));
+  stroke: var(--t-accent-line);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--t-accent-line) 50%, transparent));
 }
 
 .rcfd-route-off .rcfd-filament-line {
@@ -557,7 +589,7 @@
 
 .rcfd-route-off .rcfd-filament-head { stroke: var(--rcfd-slate-soft); filter: none; }
 
-.rcfd-route-main:hover .rcfd-filament-line { box-shadow: 0 0 9px rgba(47, 125, 246, 0.6); }
+.rcfd-route-main:hover .rcfd-filament-line { box-shadow: 0 0 9px color-mix(in srgb, var(--t-accent-line) 60%, transparent); }
 .rcfd-route-off .rcfd-route-main:hover .rcfd-filament-line { box-shadow: none; }
 
 /* First-load light-up — the page's one orchestrated motion. */
@@ -573,8 +605,8 @@
 
 @keyframes rcfd-light {
   0%   { transform: scaleX(0); opacity: 0.25; box-shadow: none; }
-  70%  { box-shadow: 0 0 12px rgba(79, 146, 255, 0.9); }
-  100% { transform: scaleX(1); opacity: 1; box-shadow: 0 0 6px rgba(47, 125, 246, 0.45); }
+  70%  { box-shadow: 0 0 12px color-mix(in srgb, var(--brand-azure-bright) 90%, transparent); }
+  100% { transform: scaleX(1); opacity: 1; box-shadow: 0 0 6px color-mix(in srgb, var(--t-accent-line) 45%, transparent); }
 }
 
 .rcfd-route-kpi {
@@ -616,15 +648,15 @@
 
 .rcfd-status-on {
   color: var(--rcf-green);
-  background: rgba(21, 128, 61, 0.07);
-  border-color: rgba(21, 128, 61, 0.18);
+  background: color-mix(in srgb, var(--t-ok-fg) 7%, transparent);
+  border-color: color-mix(in srgb, var(--t-ok-fg) 18%, transparent);
 }
 
-.rcfd-status-on .rcfd-dot { box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.14); }
+.rcfd-status-on .rcfd-dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-ok-fg) 14%, transparent); }
 
 .rcfd-status-off {
   color: var(--rcf-ink-soft);
-  background: #f1f4f8;
+  background: var(--rcfd-status-off-bg);
   border-color: var(--rcf-line);
 }
 
@@ -633,19 +665,19 @@
 .rcfd-chev {
   width: 16px;
   height: 16px;
-  color: #9aa9c0;
+  color: var(--t-field-placeholder);
   transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), color var(--rcf-ease);
 }
 
 .rcfd-route-main:hover .rcfd-chev { color: var(--rcf-azure-deep); }
-.rcfd-route-open .rcfd-chev { transform: rotate(180deg); color: var(--rcf-azure); }
+.rcfd-route-open .rcfd-chev { transform: rotate(180deg); color: var(--t-accent-line); }
 
 /* The shared RowEditor, dressed for the dashboard (scoped — the console's
    own editor is untouched): no inner keyline, sentence-case labels. */
 .rcfd-route-editor .rcf-xpanel {
   border-bottom: none;
   box-shadow: none;
-  background: #f8fafd;
+  background: var(--dl-well-soft);
 }
 
 .rcfd-route-editor .rcf-xsection-title,
@@ -723,7 +755,7 @@
   align-items: center;
   justify-content: center;
   padding: 3vh 2vw;
-  background: rgba(7, 12, 22, 0.52);
+  background: var(--rcfd-overlay-scrim);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   animation: fx-fade 0.16s ease-out;
@@ -734,14 +766,11 @@
   flex-direction: column;
   width: min(1320px, 100%);
   max-height: 94vh;
-  background: var(--rcf-paper);
+  background: var(--t-canvas-bg);
   border-radius: 16px;
   overflow: hidden;
   outline: none;
-  box-shadow:
-    0 0 0 1px rgba(7, 12, 22, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7),
-    0 32px 80px -24px rgba(7, 12, 22, 0.65);
+  box-shadow: var(--rcfd-overlay-shadow);
   /* No fill-mode: the transform is gone once the pop ends, so fixed-position
      dialogs inside hosted tools (DID request confirm) stay viewport-fixed. */
   animation: rcfd-pop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
@@ -759,7 +788,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 18px 22px 16px;
-  background: var(--rcf-card);
+  background: var(--t-surface-raised);
   border-bottom: 1px solid var(--rcf-line);
 }
 
@@ -771,7 +800,7 @@
   right: 0;
   bottom: -1px;
   height: 2px;
-  background: linear-gradient(90deg, var(--rcf-azure) 0%, var(--rcfd-azure-bright) 40%, rgba(47, 125, 246, 0) 100%);
+  background: linear-gradient(90deg, var(--t-accent) 0%, var(--rcfd-azure-bright) 40%, transparent 100%);
 }
 
 .rcfd-overlay-id { min-width: 0; }
@@ -846,8 +875,9 @@
    rule other daylight pages use.
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* Figures inside the granite header, under the identity. */
-.rcfc-context strong { color: #fff; font-weight: 600; }
+/* Figures inside the granite header, under the identity (band tokens —
+   the same in both themes). */
+.rcfc-context strong { color: var(--t-band-text-strong); font-weight: 600; }
 
 .rcfc-figures {
   display: flex;
@@ -861,7 +891,7 @@
 .rcfc-figures dt {
   font-size: 11.5px;
   font-weight: 600;
-  color: #93a4c0;
+  color: var(--t-band-text-dim);
 }
 
 .rcfc-figures dd {
@@ -871,13 +901,13 @@
   line-height: 1.1;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
-  color: #fff;
+  color: var(--t-band-text-strong);
 }
 
 .rcfc-prompt-icon {
   color: var(--rcf-azure-deep);
-  background: color-mix(in srgb, var(--brand-azure, #2f7df6) 10%, #fff);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand-azure, #2f7df6) 22%, #fff);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, var(--t-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-accent-line) 22%, var(--t-surface));
 }
 
 /* ─── Tab rail — segmented pill on paper, same family as the switcher ─── */
@@ -919,13 +949,13 @@
 
 .rcfc-tab svg { width: 14px; height: 14px; flex-shrink: 0; }
 .rcfc-tab:hover { color: var(--rcf-azure-deep); background: var(--rcf-tint-hover); }
-.rcfc-tab:focus-visible { outline: 2px solid var(--brand-focus-ring, #4f92ff); outline-offset: 1px; }
+.rcfc-tab:focus-visible { outline: 2px solid var(--brand-focus-ring); outline-offset: 1px; }
 
 .rcfc-tab-active,
 .rcfc-tab-active:hover {
-  color: #fff;
-  background: var(--brand-btn-bg, linear-gradient(180deg, #2f7df6 0%, #1d63dd 62%));
-  box-shadow: var(--brand-btn-shadow, 0 6px 16px -8px rgba(47, 125, 246, 0.7));
+  color: var(--t-text-on-accent);
+  background: var(--brand-btn-bg);
+  box-shadow: var(--brand-btn-shadow), var(--t-glow);
 }
 
 /* ─── Numbers card ─── */
@@ -952,7 +982,7 @@
   padding: 0 10px;
   border-radius: 9px;
   border: 1px solid var(--rcf-line);
-  background: var(--rcf-tint);
+  background: var(--rcfd-search-bg);
   font-family: var(--ad-mono);
   font-size: 13px;
   text-align: center;
@@ -960,16 +990,16 @@
   color: var(--rcf-ink);
 }
 
-.rcfc-npa input:hover { border-color: #cdd7e6; }
+.rcfc-npa input:hover { border-color: var(--dl-field-hover); }
 
 .rcfc-npa input:focus-visible {
   outline: none;
-  background: #fff;
-  border-color: var(--rcf-azure);
+  background: var(--rcfd-search-focus-bg);
+  border-color: var(--t-focus);
   box-shadow: var(--ad-focus);
 }
 
-.rcfc-npa input.rcfc-npa-on { color: var(--rcf-azure-deep); border-color: color-mix(in srgb, var(--rcf-azure) 55%, #fff); }
+.rcfc-npa input.rcfc-npa-on { color: var(--rcf-azure-deep); border-color: color-mix(in srgb, var(--t-accent-line) 55%, var(--t-surface)); }
 
 /* Sortable headers are real buttons. */
 .rcfc-sort {
@@ -986,7 +1016,7 @@
 }
 
 .rcfc-sort:hover { color: var(--rcf-ink); }
-.rcfc-sort:focus-visible { outline: 2px solid var(--rcf-azure); outline-offset: 2px; }
+.rcfc-sort:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 .rcfc-sort-active { color: var(--rcf-azure-deep); }
 .rcfc-sort-glyph { font-size: 11px; opacity: 0.5; }
 .rcfc-sort-active .rcfc-sort-glyph { opacity: 1; }

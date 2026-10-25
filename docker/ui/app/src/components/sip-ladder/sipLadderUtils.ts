@@ -1,5 +1,6 @@
 import type { HomerSearchResult } from '../../api/homer';
 import type { NodeRole } from './sipLadderTypes';
+import { T, tMix } from '../../styles/theme';
 
 // ─── Color constants — THE ladder theme object ──────────────────────────────
 
@@ -10,85 +11,107 @@ import type { NodeRole } from './sipLadderTypes';
  * the ladder means editing THIS object only; components must never hard-code
  * a color literal of their own.
  *
- * DAYLIGHT theme: white canvas, hairline grid, ink text — aligned with the
- * app-wide daylight console (`--rcf-*` tokens on `.dl-scope` in index.css;
- * values mirrored here because this file styles inline, outside CSS var
- * scope guarantees).
+ * THEMED (docker/ui/CLAUDE.md §18): every value is a `var(--t-*)` theme
+ * token (or a `--ladder-*` page token from sipLadder.css, defined for both
+ * themes), so the ladder follows light / dark with no re-render. LIGHT
+ * resolves to exactly the daylight palette it always had (white canvas,
+ * hairline grid, ink text, arrow hues one shade darker-saturated so every
+ * label and arrow holds ≥ 4.5:1 on white). DARK takes the granite set: the
+ * same semantic hue per message — A-leg INVITE azure, B-leg amber, 1xx
+ * violet, 2xx green, 4xx/5xx red, ACK teal, BYE slate — lifted to the
+ * theme's dark-ground strengths (all ≥ 6:1 on the ladder card).
  *
- * Semantic arrow hues keep the SAME mapping the dark ladder had (INVITE
- * A-leg blue / B-leg orange / 1xx purple / 2xx green / 4xx-5xx red / ACK
- * cyan-teal / BYE gray / retransmissions dimmed / internal loopback dashed
- * slate) but are re-derived one shade darker-saturated so every label and
- * arrow holds ≥ 4.5:1 (WCAG AA, small text) against the white canvas.
+ * Because these are `var()` strings: paint SVG through `style` (never the
+ * `fill=` / `stroke=` attributes), and build translucent variants with
+ * `color-mix()` (`ladderMix`) — never by appending a hex alpha.
  */
 export const LADDER_COLORS = {
-  // Surface (mirrors --rcf-card / --rcf-tint / --rcf-tint-hover / --rcf-line)
-  bg: '#ffffff',
-  surface: '#f7f9fc',
-  surfaceHover: '#f2f7ff',
-  border: '#e2e8f2',
-  borderLight: '#edf1f7',
+  // Surface (light: #fff card / #f7f9fc tint / #f2f7ff hover / hairlines)
+  bg: T.surface,
+  surface: T.tint,
+  surfaceHover: T.tintHover,
+  /** Inset well under a code block (raw SIP / SDP) — = the tint on light. */
+  well: T.surfaceSunken,
+  border: T.line,
+  borderLight: T.lineSoft,
+  /** Hairline between packet-inspector header rows (ink 6 % on light). */
+  rowRule: tMix('text', 6),
 
-  // Text — the ink ramp (mirrors --rcf-ink / -soft / -dim)
-  text: '#0e1726',
-  textMuted: '#46566f',
-  textFaint: '#5d6f8c',
+  // Text — the ink ramp
+  text: T.text,
+  textMuted: T.textSoft,
+  textFaint: T.textDim,
 
   // SIP methods (requests)
-  invite: '#1d63dd',   // was #3b82f6 — azure-deep, 5.4:1 on white
-  bye: '#64748b',      // was #94a3b8 — slate-500, 4.8:1
-  ack: '#0e7490',      // was #22d3ee — cyan-700 keeps the teal read, 5.4:1
+  invite: T.accentText,        // azure-deep on light (5.4:1), azure-bright on dark
+  bye: 'var(--ladder-bye)',    // slate-500 on light (4.8:1); the neutral tone on dark
+  ack: T.teal,                 // cyan-700 on light keeps the teal read (5.4:1)
 
   // SIP responses
-  provisional: '#7c3aed', // was #8b5cf6 — violet-600, 5.7:1
-  success: '#15803d',     // was #22c55e — green-700 (--rcf-green), 5.0:1
-  redirect: '#b45309',    // was #f59e0b — amber-700, 5.0:1
-  clientError: '#b45309', // was #f59e0b — same amber family as before
-  serverError: '#b91c1c', // was #ef4444 — red-700 (--rcf-red), 6.5:1
+  provisional: T.violet,       // violet-600 on light (5.7:1)
+  success: T.okFg,             // green-700 on light (5.0:1)
+  redirect: T.warnFg,          // amber-700 on light (5.0:1)
+  clientError: T.warnFg,       // same amber family
+  serverError: T.dangerFg,     // red-700 on light (6.5:1)
 
   // Call legs
-  aLeg: '#1d63dd', // was #3b82f6
-  bLeg: '#b45309', // was #f59e0b
+  aLeg: T.accentText,
+  bLeg: T.warnFg,
 
   // Retransmission arrows — deliberately dimmed (duplicate wire noise; the
   // full-contrast original renders adjacent, and the filter can hide these).
-  retransmission: 'rgba(70,86,111,0.75)',
+  retransmission: tMix('text-soft', 75),
 
   // Internal loopback connector (synthetic VIP ↔ sibling-SBC same-box handoff).
-  // A muted dark slate that is clearly readable on the white ladder yet still
-  // reads as "inferred/internal" — distinct from every real SIP method/status
-  // hue, so the connector never masquerades as a captured packet.
-  internalHandoff: '#475569',
+  // A muted slate that is clearly readable on the ladder yet still reads as
+  // "inferred/internal" — distinct from every real SIP method/status hue, so
+  // the connector never masquerades as a captured packet.
+  internalHandoff: 'var(--ladder-loopback)',
 
   // Node roles (column-header sublabels) — same hue families as the arrows.
-  roleCarrier: '#b45309',
-  roleVip: '#7c3aed',
-  roleSbc: '#1d63dd',
-  roleMedia: '#15803d',
+  roleCarrier: T.warnFg,
+  roleVip: T.violet,
+  roleSbc: T.accentText,
+  roleMedia: T.okFg,
 
   // Endpoint bookend chips (the "CARRIER · ORIG" / "CARRIER · TERM" header
   // sublabels on the two external endpoint columns) — amber family, mirroring
   // roleCarrier at wash strength so the bookends read as a matched pair.
-  endpointChipEdge: 'rgba(180,83,9,0.3)',
-  endpointChipWash: 'rgba(180,83,9,0.07)',
+  endpointChipEdge: tMix('warn-fg', 30),
+  endpointChipWash: tMix('warn-fg', 7),
 
-  // Interactive accent (azure family — mirrors --rcf-azure / --rcf-azure-deep)
-  accent: '#1d63dd',
-  accentWash: 'rgba(47,125,246,0.08)',
-  accentWashSoft: 'rgba(47,125,246,0.04)',
-  accentChip: 'rgba(47,125,246,0.12)',
-  accentBorder: 'rgba(47,125,246,0.3)',
-  accentBorderStrong: 'rgba(47,125,246,0.5)',
+  // Interactive accent (azure family: accent text + azure-line washes)
+  accent: T.accentText,
+  accentWash: tMix('accent-line', 8),
+  accentWashSoft: tMix('accent-line', 4),
+  accentChip: tMix('accent-line', 12),
+  accentBorder: tMix('accent-line', 30),
+  accentBorderStrong: tMix('accent-line', 50),
+  /** An expanded message row's wash. */
+  accentRowOpen: tMix('accent-line', 7),
 
   // Control chrome (buttons/pills — mirrors the dlx5-seg-btn family)
-  controlBorder: '#cdd8e8',
-  controlBorderHover: '#a3b6d3',
-  inkChip: 'rgba(14,23,38,0.05)',
+  controlBorder: T.lineStrong,
+  controlBorderHover: T.fieldBorderHover,
+  inkChip: tMix('text', 5),
 
   // Diagram elements
-  columnLine: 'rgba(14,23,38,0.1)',
-  arrowHead: '#0e1726',
+  columnLine: tMix('text', 10),
+  arrowHead: T.text,
+
+  // Elevation (page tokens in sipLadder.css: the old paper shadows on
+  // light, the theme's card / popover lift on dark)
+  shadowCard: 'var(--ladder-shadow-card)',
+  shadowPanel: 'var(--ladder-shadow-panel)',
 } as const;
+
+/**
+ * A translucent variant of a ladder colour (`var()` string in, `color-mix()`
+ * out) — e.g. a leg chip's wash. Works for any CSS colour, theme-aware.
+ */
+export function ladderMix(color: string, percent: number): string {
+  return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
+}
 
 // ─── SIP response descriptions ─────────────────────────────────────────────
 

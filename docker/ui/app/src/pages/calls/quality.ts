@@ -30,14 +30,33 @@
  * Boundary self-test: ./quality.assert.ts (mirrors the Python tests).
  */
 
+import { T, TONE } from '../../styles/theme';
+
 export const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
 
-/** Ink-dark status tones tuned for legibility on the white paper canvas. */
-export const GOOD = '#15803d';
-export const WARN = '#b45309';
-export const BAD = '#b91c1c';
-export const INK_FAINT = '#8b99b0';
-export { BRAND_AZURE_DEEP as AZURE_DEEP } from '../../styles/brand';
+/**
+ * Status tones for SCREEN use — `var(--t-*)` strings that follow the light /
+ * dark theme (docker/ui/CLAUDE.md §18). Light resolves to exactly the old
+ * paper values (#15803d / #b45309 / #b91c1c / #8b99b0); dark to the granite
+ * set. Callers compare them by identity (`color === GOOD`), which still
+ * works: every helper below returns one of these four constants.
+ */
+export const GOOD = T.okFg;
+export const WARN = T.warnFg;
+export const BAD = T.dangerFg;
+export const INK_FAINT = T.textFaint;
+
+/**
+ * The same four tones as fixed HEX — PRINT / file output only (anything
+ * rendered where `var()` cannot resolve: @react-pdf, a <canvas>, an export).
+ * Screen code uses GOOD / WARN / BAD / INK_FAINT above.
+ */
+export const QUALITY_PRINT_HEX = {
+  good: '#15803d',
+  warn: '#b45309',
+  bad: '#b91c1c',
+  faint: '#8b99b0',
+} as const;
 
 /* ─── The one grade definition (§D) ─────────────────────────────────────── */
 
@@ -114,12 +133,14 @@ export interface QualityTone {
   border: string;
 }
 
-const TONE_GOOD: QualityTone = { text: GOOD, bg: 'rgba(22,163,74,0.1)', border: 'rgba(22,163,74,0.26)' };
-const TONE_WARN: QualityTone = { text: WARN, bg: 'rgba(180,83,9,0.09)', border: 'rgba(180,83,9,0.26)' };
-const TONE_BAD: QualityTone = { text: BAD, bg: 'rgba(220,38,38,0.07)', border: 'rgba(220,38,38,0.26)' };
-const TONE_NONE: QualityTone = { text: INK_FAINT, bg: 'rgba(93,111,140,0.08)', border: 'rgba(93,111,140,0.2)' };
+// The theme's status triples — light values are exactly the old paper pills
+// (green 10/26 %, amber-700 9/26 %, red 7/26 %, slate 8/20 %).
+const TONE_GOOD: QualityTone = { text: GOOD, bg: TONE.ok.bg, border: TONE.ok.border };
+const TONE_WARN: QualityTone = { text: WARN, bg: TONE.warn.bg, border: TONE.warn.border };
+const TONE_BAD: QualityTone = { text: BAD, bg: TONE.danger.bg, border: TONE.danger.border };
+const TONE_NONE: QualityTone = { text: INK_FAINT, bg: TONE.neutral.bg, border: TONE.neutral.border };
 
-/** Translucent pill tone for a grade on the white canvas. */
+/** Translucent pill tone for a grade (theme-aware). */
 export function gradeTone(grade: Grade | null | undefined): QualityTone {
   switch (grade) {
     case 'great':

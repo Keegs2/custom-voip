@@ -4,6 +4,35 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/crag.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Theme before first paint (no flash). Mirrors src/styles/theme.ts:
+      localStorage `crag_theme` ('light' | 'dark') wins, else the OS
+      preference. The public landing page ('/') is always dark
+      (data-landing); AppLayout keeps that attribute in step on navigation.
+      Keep this tiny and dependency-free. If a CSP is ever added, allow it
+      by hash.
+    -->
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var theme = null;
+        try {
+          var saved = window.localStorage.getItem('crag_theme');
+          if (saved === 'light' || saved === 'dark') theme = saved;
+        } catch (e) {}
+        if (!theme) {
+          try {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          } catch (e) {
+            theme = 'light';
+          }
+        }
+        root.setAttribute('data-theme', theme);
+        var landing = window.location.pathname === '/';
+        if (landing) root.setAttribute('data-landing', '');
+        root.style.colorScheme = landing ? 'dark' : theme;
+      })();
+    </script>
     <title>Granite CRAG</title>
     <meta
       name="description"

@@ -16,7 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getCallAttestation } from '../../api/stir';
 import { ApiError } from '../../api/client';
 import { Spinner } from '../ui/Spinner';
-import { BRAND_AZURE } from '../../styles/brand';
+import { T } from '../../styles/theme';
 import type { CallAttestation } from '../../types/stir';
 import {
   attestColor,
@@ -77,7 +77,7 @@ function NodeLabel({ children }: { children: React.ReactNode }) {
       style={{
         fontSize: '0.54rem',
         fontWeight: 700,
-        color: '#4a5568',
+        color: T.textSoft,
         textTransform: 'uppercase',
         letterSpacing: '0.06em',
       }}
@@ -92,7 +92,7 @@ function Arrow() {
   return (
     <span
       aria-hidden="true"
-      style={{ color: BRAND_AZURE, fontSize: '0.9rem', lineHeight: 1, opacity: 0.7, flexShrink: 0 }}
+      style={{ color: T.accentLine, fontSize: '0.9rem', lineHeight: 1, opacity: 0.7, flexShrink: 0 }}
     >
       →
     </span>
@@ -162,7 +162,7 @@ function ChainBody({ att }: { att: CallAttestation }) {
             {isIntent && (
               <span
                 aria-label="intent, not confirmed on wire"
-                style={{ color: '#94a3b8', fontSize: '0.62rem', fontWeight: 600, lineHeight: 1 }}
+                style={{ color: T.textFaint, fontSize: '0.62rem', fontWeight: 600, lineHeight: 1 }}
               >
                 ◌
               </span>
@@ -179,7 +179,7 @@ function ChainBody({ att }: { att: CallAttestation }) {
           gap: 10,
           flexWrap: 'wrap',
           fontSize: '0.66rem',
-          color: '#718096',
+          color: T.textDim,
         }}
       >
         <span title="Caller verification result">
@@ -196,7 +196,7 @@ function ChainBody({ att }: { att: CallAttestation }) {
         {diverged && (
           <span
             title={`Asked for ${attestLabel(intentLevel)} but the wire result was ${attestLabel(badge.level)}${att.stir_outcome ? ` (${att.stir_outcome})` : ''}`}
-            style={{ color: '#f59e0b', fontWeight: 600 }}
+            style={{ color: T.warnFg, fontWeight: 600 }}
           >
             intent {attestLabel(intentLevel)} → wire {attestLabel(badge.level)}
           </span>
@@ -251,7 +251,7 @@ export function AttestationChain({ callId, enabled = true }: AttestationChainPro
 
   if (isLoading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#718096', fontSize: '0.72rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.textDim, fontSize: '0.72rem' }}>
         <Spinner size="xs" /> Loading attestation…
       </div>
     );
@@ -267,7 +267,7 @@ export function AttestationChain({ callId, enabled = true }: AttestationChainPro
           alignItems: 'center',
           gap: 7,
           fontSize: '0.7rem',
-          color: '#64748b',
+          color: T.textDim,
         }}
         title="No STIR/SHAKEN attestation on record for this call (older, unsigned, or on-net)."
       >
@@ -277,7 +277,7 @@ export function AttestationChain({ callId, enabled = true }: AttestationChainPro
             width: 6,
             height: 6,
             borderRadius: '50%',
-            background: '#475569',
+            background: T.neutralSolid,
             flexShrink: 0,
           }}
         />
@@ -289,7 +289,7 @@ export function AttestationChain({ callId, enabled = true }: AttestationChainPro
   // Any other error — keep it quiet and inline (this is a supplementary panel).
   if (isError || !data) {
     return (
-      <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+      <div style={{ fontSize: '0.7rem', color: T.textDim }}>
         Attestation unavailable
         {error instanceof Error ? ` — ${error.message}` : ''}
       </div>

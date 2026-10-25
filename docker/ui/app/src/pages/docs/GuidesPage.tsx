@@ -24,9 +24,6 @@ import {
 import { ProductSelector } from './ProductSelector';
 import { GUIDE_PRODUCTS, isGuideProduct } from './docProducts';
 
-const ACCENT = '#2f7df6';
-const AMBER = '#b45309';
-
 /* ═══════════════════════════════════════════════════════════
    RCF — carried forward from the retired RcfDocsPage, updated
    to the current expandable-row portal UI.
@@ -47,7 +44,7 @@ function RcfGettingStarted() {
         numbers are listed, enabled, and forwarding to the correct destinations, then place a
         test call to verify.
       </P>
-      <Callout accent={ACCENT}>
+      <Callout>
         If you need your password reset, contact your administrator or
         email <strong style={{ color: C.text }}>solutions@granitenet.com</strong>.
       </Callout>
@@ -109,7 +106,7 @@ function RcfManagingNumbers() {
         line. Labels are for your reference only — they never affect routing.
       </P>
 
-      <Callout accent={ACCENT}>
+      <Callout>
         Phone numbers use <strong style={{ color: C.text }}>E.164 format</strong>: a <IC>+</IC>{' '}
         followed by country code and number with no spaces. US
         example: <IC>+17745551234</IC>. The maximum concurrent-call limit on a number is set by
@@ -181,7 +178,7 @@ function RcfNumberManagement() {
         before it is approved. Once approved, the number is removed from your account.
       </P>
 
-      <Callout accent={ACCENT}>
+      <Callout>
         Both flows are reviewed by Granite before anything changes hands — you can&rsquo;t lose a
         number by accident. If a request has been pending for an extended period, contact your
         account team.
@@ -211,7 +208,7 @@ function RcfSupport() {
           </div>
         ))}
       </div>
-      <Callout accent={ACCENT}>
+      <Callout>
         Email <strong style={{ color: C.text }}>solutions@granitenet.com</strong> with the
         affected number and the approximate time of the issue.
       </Callout>
@@ -257,7 +254,7 @@ function TrunkHowItWorks() {
           <>Unknown source IPs are rejected at the edge — keeping your authorized-IP list current is the one operational duty this model asks of you.</>,
         ]}
       />
-      <Callout accent={ACCENT}>
+      <Callout>
         Because there are no credentials to steal, IP peering removes the most common trunk-fraud
         vector. The trade-off: if your site&rsquo;s public IP changes (new ISP, new firewall,
         failover circuit), calls stop until the new address is added to the trunk.
@@ -315,7 +312,7 @@ function TrunkManagingIps() {
           <>Planning a firewall or ISP change? Add the new address <em>before</em> cutover so there is no gap in service.</>,
         ]}
       />
-      <Callout accent={ACCENT}>
+      <Callout>
         Treat the IP list like a security control — it is one. Keep it to addresses you actually
         operate, and remove decommissioned sites promptly.
       </Callout>
@@ -391,7 +388,7 @@ function TrunkMonitoring() {
       />
       <P>
         The same numbers are available programmatically — see the{' '}
-        <Link to="/docs/api/trunking" style={{ color: ACCENT, fontWeight: 600 }}>SIP Trunking API reference</Link>.
+        <Link to="/docs/api/trunking" style={{ color: C.accent, fontWeight: 600 }}>SIP Trunking API reference</Link>.
       </P>
     </AccordionSection>
   );
@@ -443,7 +440,7 @@ function TrunkTroubleshooting() {
           </div>
         ))}
       </div>
-      <Callout accent={ACCENT}>
+      <Callout>
         When you do open a ticket, include an example call: the from and to numbers and the
         approximate time. One concrete call lets engineering pull the full SIP trace immediately.
       </Callout>
@@ -538,7 +535,7 @@ curl "https://your-portal-url/api/v1/calls/$CALL_ID" \\
       <P>
         Full request/response schemas, the live-call control endpoint, and CPS-limit behavior are
         in the{' '}
-        <Link to="/docs/api/calling" style={{ color: ACCENT, fontWeight: 600 }}>API Calling reference</Link>.
+        <Link to="/docs/api/calling" style={{ color: C.accent, fontWeight: 600 }}>API Calling reference</Link>.
       </P>
     </AccordionSection>
   );
@@ -561,7 +558,7 @@ function CallingEvents() {
           <><strong style={{ color: C.text }}>CDRs</strong> — every API call produces a full call record with quality metrics, available seconds after hangup via <IC>GET /v1/cdrs</IC>.</>,
         ]}
       />
-      <Callout accent={AMBER}>
+      <Callout tone="warn">
         <strong style={{ color: C.text }}>Early access note:</strong> a <IC>webhook_url</IC> can
         be attached to each call, but pushed webhook event delivery is still maturing and should
         not yet be your only integration path. Build on status polling and CDRs today; your
@@ -588,7 +585,7 @@ function CallingGuide() {
 function VoicemailGuide() {
   return (
     <>
-      <Callout accent={AMBER}>
+      <Callout tone="warn">
         <strong style={{ color: C.text }}>Roadmap preview.</strong> Visual Voicemail is in
         development and not yet available — everything below describes what&rsquo;s coming, not
         what you can configure today.
@@ -624,7 +621,7 @@ function VoicemailGuide() {
           number&rsquo;s mailbox instead of ringing out. You&rsquo;ll choose which numbers get
           mailboxes — one line or your whole inventory — and manage them from the portal.
         </P>
-        <Callout accent={ACCENT}>
+        <Callout>
           Want in early? Email <strong style={{ color: C.text }}>solutions@granitenet.com</strong>{' '}
           to join the pilot list — pilot customers get first access and help shape the mailbox
           controls.
@@ -659,7 +656,7 @@ export function GuidesPage() {
   const Content = GUIDE_CONTENT[active];
 
   return (
-    <div className="dl-scope">
+    <div className="dl-scope dlx-docs">
       <div className="dl-shell">
         <DocsHeader
           crumb="Guides"

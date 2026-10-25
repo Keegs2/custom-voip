@@ -4,34 +4,42 @@
   --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  --color-bg: #0f1117;
-  --color-sidebar-bg: #0d0f15;
-  --color-surface: #1a1d27;
-  --color-surface-raised: #1e2130;
-  --color-border: #2a2f45;
-  --color-border-hover: #363c57;
-  --color-border-focus: #4f92ff; /* = --brand-azure-bright */
-  --color-text: #e2e8f0;
-  --color-muted: #718096;
-  /* Accent = the brand blue family (see :root below). Literal hex here
-     because @theme values are compiled by Tailwind; keep them equal to the
-     --brand-* tokens. */
-  --color-accent: #2f7df6;       /* = --brand-azure */
-  --color-accent-hover: #1d63dd; /* = --brand-azure-deep */
-  --color-accent-glow: rgba(47, 125, 246, 0.35); /* = --brand-glow */
-  --color-danger: #7f1d1d;
-  --color-danger-hover: #991b1b;
-  --color-danger-text: #fca5a5;
-  --color-danger-glow: rgba(239, 68, 68, 0.18);
-  --color-success-bg: #065f46;
-  --color-success-text: #6ee7b7;
-  --color-success: #22c55e;
-  --color-warn: #f59e0b;
-
   --radius: 10px;
-  --shadow: 0 1px 4px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,.55);
   --sidebar-w: 240px;
+}
+
+/* LEGACY Tailwind colour/shadow tokens — kept as ALIASES of the theme layer
+   (src/styles/theme.css) so any `bg-surface`, `text-muted`, `border-border`,
+   `shadow-lg`… utility flips with the theme. `inline` makes Tailwind write
+   `var(--t-…)` straight into each utility (resolved at the element, so it
+   also honours scoped overrides); opacity modifiers (`bg-accent/20`) become
+   color-mix() and work too. Nothing in src/ uses these today — new code
+   uses the --t-* tokens directly (docker/ui/CLAUDE.md "Theming"). Do not
+   add hex here. */
+@theme inline {
+  --color-bg: var(--t-canvas);
+  --color-sidebar-bg: var(--t-sb-bg-solid);
+  --color-surface: var(--t-surface);
+  --color-surface-raised: var(--t-surface-raised);
+  --color-border: var(--t-line);
+  --color-border-hover: var(--t-line-strong);
+  --color-border-focus: var(--t-focus);
+  --color-text: var(--t-text);
+  --color-muted: var(--t-text-dim);
+  --color-accent: var(--t-accent);
+  --color-accent-hover: var(--t-accent-hover);
+  --color-accent-glow: var(--brand-glow);
+  --color-danger: var(--t-danger-solid);
+  --color-danger-hover: var(--t-danger-fg);
+  --color-danger-text: var(--t-danger-fg);
+  --color-danger-glow: var(--t-danger-bg);
+  --color-success-bg: var(--t-ok-bg);
+  --color-success-text: var(--t-ok-fg);
+  --color-success: var(--t-ok-solid);
+  --color-warn: var(--t-warn-solid);
+
+  --shadow: var(--t-shadow-xs);
+  --shadow-lg: var(--t-shadow-pop);
 }
 
 /* ─── Shared brand tokens ───────────────────────────────────
@@ -72,7 +80,9 @@
     0 1px 2px rgba(11, 36, 110, 0.2),
     0 10px 24px -8px rgba(47, 125, 246, 0.85),
     0 0 0 4px rgba(47, 125, 246, 0.12);
-  --brand-focus-ring: var(--brand-azure-bright);
+  /* Focus ring follows the theme: azure on light paper, azure-bright on
+     dark (styles/theme.css --t-focus). The landing is always dark. */
+  --brand-focus-ring: var(--t-focus);
 
   /* Cobalt pair, hoisted from .landing-root so the app shell can use it
      too (sidebar collapse tab) — aliases of the family. */
@@ -92,8 +102,8 @@ html {
 
 body {
   font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #0f1117;
-  color: #e2e8f0;
+  background: var(--t-canvas);
+  color: var(--t-text);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -118,12 +128,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a2f45;
+  background: var(--t-scrollbar);
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #363c57;
+  background: var(--t-scrollbar-hover);
 }
 
 /* ─── Focus ring ─────────────────────────────────────────── */
@@ -171,89 +181,67 @@ body {
 
 /* ─── Selection highlight ─────────────────────────────────── */
 ::selection {
-  background: rgba(47, 125, 246, 0.28);
-  color: #e2e8f0;
+  background: var(--t-selection-bg);
+  color: var(--t-selection-fg);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   LIQUID-GLASS DESIGN SYSTEM
-   Blue-on-dark only (--brand-azure accent). Borderless: depth is drawn with light,
-   ambient shadow, and negative space — never a hard 1px outline.
+   PANEL SYSTEM (legacy `glass-*` class names) — theme-aware
 
-   Building blocks:
-     .glass-surface   frosted translucent panel — backdrop blur+saturate, a top
-                      inner-highlight line (light catching the glass edge), and a
-                      soft ambient float shadow. NO hard border.
-     .glass-hover     opt-in blue light-up on :hover — accent glow bloom (layered
-                      box-shadow), a faint lift, and a brighter top sheen. Pair it
-                      with .glass-surface. GPU-cheap (transform + box-shadow only).
-     .glass-header    the premium page-hero variant of .glass-surface (larger blur,
-                      stronger top edge, radial accent bleed via ::after).
-     .glass-row-hover per-row hover for tables — CHEAP (bg tint + inset highlight +
-                      soft shadow, NO backdrop-filter) so long lists stay smooth.
-     .glass-input     borderless frosted input/select field (see .form-control).
-
-   The blue "light-up" is a layered box-shadow: an outer accent bloom
-   (rgba(47,125,246,…) = --brand-glow family) for the glow, an ambient black drop for float depth, plus
-   an inset top-highlight line for the glass sheen — all animated together over
-   ~200ms ease. Motion (the lift) is disabled under prefers-reduced-motion.
+   The shared primitives (components/ui Card, StatCard, TabBar, TableWrap,
+   PageHeader) and a few old cards render these classes. They now draw the
+   landing page's panel recipe from the theme tokens, so they read right on
+   daylight paper AND on granite:
+     .glass-surface   raised panel — --t-panel-bg, 1px --t-line hairline,
+                      --t-shadow-card (inner top highlight + soft drop).
+     .glass-hover     opt-in lift on :hover — azure-tinted border + the
+                      card-hover shadow, 2px rise (none under reduced motion).
+     .glass-header    the page-hero variant: --t-keyline along the top edge
+                      and a faint azure pool in the corner.
+     .glass-row-hover per-row hover for tables — tint + azure leading edge.
+   No backdrop-filter: panels are opaque in both themes.
    ══════════════════════════════════════════════════════════════════════════ */
 
 .glass-surface {
   position: relative;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 42%),
-    linear-gradient(135deg, rgba(30, 33, 48, 0.72) 0%, rgba(19, 21, 29, 0.82) 100%);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
-  border: 1px solid transparent;      /* keeps layout box; no visible outline */
+  background: var(--t-panel-bg);
+  border: 1px solid var(--t-line);
   border-radius: 16px;
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),   /* top glass-edge highlight */
-    0 1px 2px rgba(0, 0, 0, 0.35),
-    0 12px 34px -14px rgba(0, 0, 0, 0.6);         /* soft ambient float */
-  transition: box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
-}
-
-.glass-hover:hover {
-  background:
-    linear-gradient(180deg, rgba(47, 125, 246, 0.05) 0%, transparent 46%),
-    linear-gradient(135deg, rgba(33, 38, 56, 0.8) 0%, rgba(20, 23, 33, 0.86) 100%);
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.1),          /* brighter sheen */
-    inset 0 0 0 1px rgba(47, 125, 246, 0.14),          /* faint blue edge */
-    0 2px 4px rgba(0, 0, 0, 0.35),
-    0 14px 40px -12px rgba(0, 0, 0, 0.62),
-    0 0 0 1px rgba(47, 125, 246, 0.1),
-    0 8px 40px -6px rgba(47, 125, 246, 0.35);          /* the blue glow bloom */
+  box-shadow: var(--t-shadow-card);
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
 }
 
 .glass-hover {
-  transition: box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
 }
 
 .glass-hover:hover {
+  border-color: var(--t-accent-border);
+  box-shadow: var(--t-shadow-card-hover);
   transform: translateY(-2px);
 }
 
-/* Premium page-hero surface — deeper blur, stronger edge, radial accent bleed */
+/* Page-hero surface — keyline on top, faint azure pool in the corner */
 .glass-header {
   position: relative;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 38%),
-    linear-gradient(135deg, rgba(24, 28, 42, 0.78) 0%, rgba(15, 17, 23, 0.86) 100%);
-  backdrop-filter: blur(22px) saturate(170%);
-  -webkit-backdrop-filter: blur(22px) saturate(170%);
-  border: 1px solid transparent;
+  background: var(--t-panel-bg);
+  border: 1px solid var(--t-line);
   border-radius: 20px;
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
-    0 1px 2px rgba(0, 0, 0, 0.4),
-    0 20px 50px -18px rgba(0, 0, 0, 0.62);
+  box-shadow: var(--t-shadow-card);
 }
 
-/* Radial blue accent bleed behind the header content */
+.glass-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: var(--t-keyline);
+  pointer-events: none;
+}
+
 .glass-header::after {
   content: '';
   position: absolute;
@@ -261,73 +249,61 @@ body {
   right: -60px;
   width: 340px;
   height: 340px;
-  background: radial-gradient(circle, rgba(47, 125, 246, 0.1) 0%, transparent 68%);
+  background: radial-gradient(circle, var(--t-accent-tint) 0%, transparent 68%);
   pointer-events: none;
   z-index: 0;
 }
 
-/* Cheap per-row hover for tables — no backdrop-filter (perf) */
+/* Cheap per-row hover for tables */
 .glass-row-hover {
   transition: background 0.18s ease, box-shadow 0.18s ease;
 }
 
 .glass-row-hover:hover {
-  background: rgba(47, 125, 246, 0.055);
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
-    inset 3px 0 0 0 rgba(47, 125, 246, 0.55),          /* accent leading edge */
-    0 1px 12px -2px rgba(47, 125, 246, 0.16);
+  background: var(--t-tint-hover);
+  box-shadow: inset 3px 0 0 0 var(--t-accent-line);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .glass-hover:hover { transform: none; }
 }
 
-/* ─── Form control base styles — borderless frosted glass ─── */
+/* ─── Form control (legacy class) — a field well in either theme ─── */
 .form-control {
   font-size: 0.875rem;
   padding: 9px 12px;
-  border: 1px solid transparent;
+  border: 1px solid var(--t-field-border);
   border-radius: 9px;
   outline: none;
-  transition: box-shadow 0.18s ease, background 0.18s ease;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, transparent 60%),
-    rgba(15, 17, 23, 0.55);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.04),
-    inset 0 0 0 1px rgba(47, 125, 246, 0.1);
-  color: #e2e8f0;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  background: var(--t-field-bg);
+  color: var(--t-text);
   width: 100%;
   font-family: inherit;
 }
 
-.form-control:hover {
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
-    inset 0 0 0 1px rgba(47, 125, 246, 0.2);
+.form-control:hover:not(:focus):not(:disabled) {
+  border-color: var(--t-field-border-hover);
 }
 
 .form-control:focus {
-  background:
-    linear-gradient(180deg, rgba(47, 125, 246, 0.04) 0%, transparent 60%),
-    rgba(15, 17, 23, 0.72);
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
-    inset 0 0 0 1px rgba(47, 125, 246, 0.5),
-    0 0 0 3px rgba(47, 125, 246, 0.16),
-    0 4px 18px -6px rgba(47, 125, 246, 0.28);
+  border-color: var(--t-focus);
+  box-shadow: var(--t-focus-halo);
+}
+
+.form-control:disabled {
+  background: var(--t-field-disabled-bg);
+  color: var(--t-text-faint);
+  cursor: not-allowed;
 }
 
 .form-control::placeholder {
-  color: #4a5568;
+  color: var(--t-field-placeholder);
 }
 
 .form-control option {
-  background: #1e2130;
-  color: #e2e8f0;
+  background: var(--t-surface-raised);
+  color: var(--t-text);
 }
 
 select.form-control {
@@ -351,9 +327,9 @@ select.form-control {
 .toggle-slider {
   position: absolute;
   inset: 0;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--t-tint);
   border-radius: 999px;
-  border: 1px solid #2a2f45;
+  border: 1px solid var(--t-line-strong);
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s;
 }
@@ -366,403 +342,33 @@ select.form-control {
   left: 2px;
   top: 2px;
   border-radius: 50%;
-  background: #4a5568;
+  background: var(--t-text-faint);
   transition: transform 0.2s, background 0.2s;
 }
 
 .toggle input:checked + .toggle-slider {
-  background: rgba(47, 125, 246, 0.2);
-  border-color: var(--brand-azure);
+  background: var(--t-accent-tint);
+  border-color: var(--t-accent);
 }
 
 .toggle input:checked + .toggle-slider::before {
   transform: translateX(16px);
-  background: var(--brand-azure);
+  background: var(--t-accent);
 }
 
-/* ─── Color-scheme for date/time inputs ──────────────────── */
-input[type="datetime-local"],
-input[type="date"],
-input[type="time"] {
-  color-scheme: dark;
-}
-
-/* ══════════════════════════════════════════════════════════════════════════
-   APP SHELL — sidebar offset + desktop collapse (AppLayout / Sidebar)
-
-   The authenticated shell can hide the dark sidebar entirely so light
-   pages (RCF daylight console) stand full-width. State lives in AppLayout
-   (localStorage `sidebar_collapsed`); these classes do the layout work.
-   Responsive layout is hand-written @media (NOT Tailwind md:* — see the
-   container-build gotcha in CLAUDE.md). Breakpoint 768px matches the
-   sidebar's existing mobile-drawer breakpoint (Tailwind `md`).
-   ══════════════════════════════════════════════════════════════════════════ */
-
-/* Main content — margin animates in sync with the sidebar slide */
-.app-main {
-  transition: margin-left 200ms ease;
-}
-
-.app-main--sidebar {
-  margin-left: var(--sidebar-w);
-}
-
-/* Desktop collapse: slide the fixed sidebar off-canvas. Uses `transform`
-   (Tailwind v4's translate utilities use the separate `translate` property,
-   so the mobile-drawer classes and this compose without fighting). */
-@media (min-width: 768px) {
-  .app-sidebar--collapsed {
-    transform: translateX(-100%);
-  }
-}
-
-/* Collapse/expand tab — slim cobalt pill seated on the sidebar↔content
-   boundary. Gradient (150deg, --lg-cobalt → --lg-cobalt-deep) so it reads
-   as intentional on both the dark shell and the RCF paper canvas. */
-.sidebar-collapse-tab {
-  position: fixed;
-  left: var(--sidebar-w);
-  top: 34%;
-  z-index: 120;               /* above the sidebar (z-100) */
-  width: 22px;
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid rgba(79, 146, 255, 0.4); /* azure keyline — lifts the tab off the dark shell */
-  border-left: none;
-  border-radius: 0 10px 10px 0;
-  background: linear-gradient(150deg, var(--lg-cobalt) 0%, var(--lg-cobalt-deep) 100%);
-  color: #fff;
-  cursor: pointer;
-  box-shadow:
-    2px 0 12px -2px rgba(11, 36, 110, 0.55),
-    0 0 16px -4px rgba(47, 125, 246, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
-  transition: left 200ms ease, width 150ms ease, filter 150ms ease;
-}
-
-.sidebar-collapse-tab:hover {
-  filter: brightness(1.3);
-  width: 27px;
-}
-
-.sidebar-collapse-tab:focus-visible {
-  outline: 2px solid #4f92ff;
+.toggle input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--t-focus);
   outline-offset: 2px;
 }
 
-/* When collapsed, the tab parks flush at the viewport's left edge */
-.sidebar-collapse-tab--collapsed {
-  left: 0;
-}
+/* ─── Date/time inputs follow the theme ──────────────────────
+   color-scheme is inherited from <html> (set per theme in
+   styles/theme.css), so native pickers match the page. The old
+   blanket `color-scheme: dark` here put white picker icons on
+   the daylight pages' white fields. */
 
-/* Mobile (<768px): the sidebar is a drawer driven by the topbar hamburger —
-   the desktop collapse tab defers to that pattern entirely. The sidebar
-   offset also disappears (drawer overlays content). */
-@media (max-width: 767px) {
-  .app-main--sidebar { margin-left: 0; }
-  .sidebar-collapse-tab { display: none; }
-}
-
-/* Reduced motion: snap, don't slide. !important beats the sidebar's inline
-   transition. */
-@media (prefers-reduced-motion: reduce) {
-  .app-main,
-  .app-sidebar,
-  .sidebar-collapse-tab {
-    transition: none !important;
-  }
-}
-
-/* ─── Sidebar nav hover (Sidebar.tsx) ───────────────────────
-   One shared hover treatment for every clickable nav row on the dark shell:
-   subtle light tint + text/icon brightening, 150ms ease, mirrored on
-   :focus-visible for keyboard users. The Sidebar is inline-style based, so
-   only the RESTING (non-active) colors of each row live here — inline styles
-   win over classes for the same property, which is exactly how ACTIVE rows
-   keep their gradient + border + glow untouched: their inline background/
-   color simply beat these hover rules. Product rows pass their accent as
-   `--sb-accent-tint` (accent @ ~8%) so the tint leans toward the product
-   color instead of plain white. */
-
-.sb-nav-row {
-  color: #64748b;
-  background: transparent;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
-}
-
-.sb-nav-row:hover,
-.sb-nav-row:focus-visible {
-  background: var(--sb-accent-tint, rgba(255, 255, 255, 0.06));
-  color: #94a3b8;
-}
-
-/* Icon swatch inside a nav row — resting colors here so the row hover can
-   brighten them (active swatches stay inline and win). */
-.sb-nav-icon {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: #475569;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-
-.sb-nav-row:hover .sb-nav-icon,
-.sb-nav-row:focus-visible .sb-nav-icon {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.12);
-  color: #94a3b8;
-}
-
-/* Collapsible group headers (Products / Documentation / Administration…) */
-.sb-group-head {
-  background: transparent;
-  color: #475569;
-  transition: background 150ms ease, color 150ms ease;
-}
-
-.sb-group-head:hover,
-.sb-group-head:focus-visible {
-  background: rgba(255, 255, 255, 0.06);
-  color: #94a3b8;
-}
-
-/* ─── Coming Soon (pre-launch) group — always the LAST nav group ─────────
-   Darkened at rest so previews never read as live product nav: dim slate
-   label + icon swatch, a muted slate "Soon" pill (no indigo), a quieter
-   group header, and a hairline divider separating it from the live groups.
-   Linked rows (preview pages) get only a faint NEUTRAL hover lift — no
-   product accent tint — and their active state is a neutral wash, never the
-   live gradient + glow. */
-.sb-soon-divider {
-  height: 1px;
-  margin: 12px 10px 8px;
-  background: linear-gradient(90deg, transparent, rgba(42, 47, 69, 0.75) 15%, rgba(42, 47, 69, 0.75) 85%, transparent);
-}
-
-.sb-group-head.sb-group-head--muted { color: #334155; }
-
-.sb-group-head.sb-group-head--muted:hover,
-.sb-group-head.sb-group-head--muted:focus-visible {
-  background: rgba(255, 255, 255, 0.04);
-  color: #64748b;
-}
-
-.sb-soon-row {
-  color: #3f4b5e;
-  background: transparent;
-  border: 1px solid transparent;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
-}
-
-.sb-soon-icon {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  color: #334155;
-  opacity: 0.8;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
-}
-
-.sb-soon-pill {
-  flex-shrink: 0;
-  font-size: 0.52rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  line-height: 1.6;
-  text-transform: uppercase;
-  color: #475569;
-  background: rgba(148, 163, 184, 0.06);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  border-radius: 999px;
-  padding: 1px 7px;
-  transition: color 150ms ease, border-color 150ms ease;
-}
-
-.sb-soon-row--link { cursor: pointer; }
-
-.sb-soon-row--link:hover,
-.sb-soon-row--link:focus-visible {
-  background: rgba(255, 255, 255, 0.03);
-  color: #64748b;
-}
-
-.sb-soon-row--link:hover .sb-soon-icon,
-.sb-soon-row--link:focus-visible .sb-soon-icon {
-  color: #64748b;
-  opacity: 1;
-}
-
-.sb-soon-row--link:hover .sb-soon-pill,
-.sb-soon-row--link:focus-visible .sb-soon-pill {
-  color: #64748b;
-  border-color: rgba(148, 163, 184, 0.2);
-}
-
-.sb-soon-row--link:focus-visible {
-  outline: 1px solid rgba(148, 163, 184, 0.35);
-  outline-offset: -1px;
-}
-
-/* On the preview page itself: a neutral "you are here" wash. */
-.sb-soon-row.sb-soon-row--active {
-  color: #94a3b8;
-  background: rgba(255, 255, 255, 0.045);
-  border-color: rgba(255, 255, 255, 0.07);
-}
-
-.sb-soon-row--active .sb-soon-icon {
-  color: #94a3b8;
-  opacity: 1;
-}
-
-/* View-as-Customer control — resting slate; the amber "viewing" treatment
-   stays inline in Sidebar.tsx and wins over these rules. */
-.sb-viewas {
-  background: transparent;
-  border: 1px solid rgba(42, 47, 69, 0.4);
-  transition: background 150ms ease, border-color 150ms ease;
-}
-
-.sb-viewas:hover,
-.sb-viewas:focus-visible {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(42, 47, 69, 0.7);
-}
-
-.sb-viewas .sb-viewas-label,
-.sb-viewas .sb-viewas-glyph {
-  color: #475569;
-  transition: color 150ms ease;
-}
-
-.sb-viewas:hover .sb-viewas-label,
-.sb-viewas:hover .sb-viewas-glyph,
-.sb-viewas:focus-visible .sb-viewas-label,
-.sb-viewas:focus-visible .sb-viewas-glyph {
-  color: #94a3b8;
-}
-
-/* Customer-preview picker (components/preview/CustomerPreviewPicker.tsx) —
-   the admin's "which customer am I previewing?" select. Dark tone sits in
-   the sidebar's amber customer-view banner; light tone on daylight pages. */
-.cvp {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.cvp-label {
-  font-size: 0.66rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-.cvp-select {
-  width: 100%;
-  min-width: 0;
-  height: 30px;
-  padding: 0 28px 0 9px;
-  border-radius: 7px;
-  font: inherit;
-  font-size: 0.76rem;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  appearance: none;
-  background-repeat: no-repeat;
-  background-position: right 9px center;
-  background-size: 10px 10px;
-  transition: border-color 150ms ease, box-shadow 150ms ease;
-}
-
-.cvp-select:disabled { cursor: progress; opacity: 0.7; }
-
-.cvp--dark .cvp-label { color: rgba(251, 191, 36, 0.8); }
-
-.cvp--dark .cvp-select {
-  color: #fde68a;
-  background-color: rgba(13, 15, 21, 0.85);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='none' stroke='%23f59e0b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 4l3 3 3-3'/%3E%3C/svg%3E");
-  border: 1px solid rgba(245, 158, 11, 0.4);
-}
-
-.cvp--dark .cvp-select:hover { border-color: rgba(245, 158, 11, 0.65); }
-
-.cvp--dark .cvp-select:focus-visible {
-  outline: none;
-  border-color: #f59e0b;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
-}
-
-.cvp--dark .cvp-select option { color: #0e1726; background: #fff; }
-
-.cvp--light .cvp-label { color: var(--rcf-ink-soft, #46566f); font-size: 0.78rem; }
-
-.cvp--light .cvp-select {
-  height: 38px;
-  font-size: 0.85rem;
-  color: var(--rcf-ink, #0e1726);
-  background-color: #fff;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='none' stroke='%231d63dd' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 4l3 3 3-3'/%3E%3C/svg%3E");
-  border: 1px solid var(--rcf-line, #e2e8f2);
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.05);
-}
-
-.cvp--light .cvp-select:hover { border-color: rgba(47, 125, 246, 0.4); }
-
-.cvp--light .cvp-select:focus-visible {
-  outline: none;
-  border-color: #2f7df6;
-  box-shadow: 0 0 0 3px rgba(47, 125, 246, 0.25);
-}
-
-/* Account footer link (avatar + name → /account) — active blue wash is
-   inline and wins over the hover tint. */
-.sb-account-link {
-  background: transparent;
-  transition: background 150ms ease;
-}
-
-.sb-account-link:hover,
-.sb-account-link:focus-visible {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-/* Sign-out — keeps its established red hover, now shared with keyboard
-   focus and the 150ms family. */
-.sb-signout {
-  background: transparent;
-  border: 1px solid rgba(42, 47, 69, 0.5);
-  color: #475569;
-  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
-}
-
-.sb-signout:hover,
-.sb-signout:focus-visible {
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.08);
-  border-color: rgba(239, 68, 68, 0.25);
-}
-
-/* Reduced motion: hover states snap instead of easing. */
-@media (prefers-reduced-motion: reduce) {
-  .sb-nav-row,
-  .sb-nav-icon,
-  .sb-group-head,
-  .sb-soon-row,
-  .sb-soon-icon,
-  .sb-soon-pill,
-  .sb-viewas,
-  .sb-viewas-label,
-  .sb-viewas-glyph,
-  .sb-account-link,
-  .sb-signout,
-  .cvp-select {
-    transition: none !important;
-  }
-}
+/* ── APP SHELL + SIDEBAR styles live in src/styles/app-shell.css
+      (imported by main.tsx). ── */
 
 /* ── LANDING PAGE styles live in src/styles/landing.css (imported by
       DashboardPage.tsx). ── */
@@ -850,22 +456,147 @@ input[type="time"] {
    ══════════════════════════════════════════════════════════════════════════ */
 
 .rcf-scope,
-.dl-scope {
-  /* palette — the daylight (paper) family */
-  --rcf-paper: #f4f6f9;
-  --rcf-card: #ffffff;
-  --rcf-ink: #0e1726;
-  --rcf-ink-soft: #46566f;
-  --rcf-ink-dim: #5d6f8c;
-  --rcf-azure: var(--brand-azure);
-  --rcf-azure-deep: var(--brand-azure-deep);
-  --rcf-line: #e2e8f2;
-  --rcf-line-soft: #edf1f7;
-  --rcf-tint: #f7f9fc;
-  --rcf-tint-hover: #f2f7ff;
-  --rcf-green: #15803d;
-  --rcf-red: #b91c1c;
+.dl-scope,
+[data-force-theme] {
+  /* palette — ALIASES of the theme layer (src/styles/theme.css). Light
+     resolves to exactly the old daylight values (noted on each line); dark
+     to the granite set, so every page written against --rcf-* flips for
+     free. New code uses the --t-* names directly. Also declared on
+     [data-force-theme] so a pinned subtree inside a daylight scope
+     re-resolves them (custom properties resolve where they are declared,
+     then inherit as values). */
+  --rcf-paper: var(--t-canvas);          /* #f4f6f9 */
+  --rcf-card: var(--t-surface);          /* #ffffff */
+  --rcf-ink: var(--t-text);              /* #0e1726 */
+  --rcf-ink-soft: var(--t-text-soft);    /* #46566f */
+  --rcf-ink-dim: var(--t-text-dim);      /* #5d6f8c */
+  --rcf-ink-faint: var(--t-text-faint);  /* #8b99b0 (was only a fallback) */
+  --rcf-azure: var(--t-accent);          /* brand azure — fills, rings, ticks */
+  --rcf-azure-deep: var(--t-accent-text);/* azure-deep — accent TEXT; on dark
+                                            azure-bright. Fills that carry
+                                            white text use --t-accent-hover. */
+  --rcf-line: var(--t-line);             /* #e2e8f2 */
+  --rcf-line-soft: var(--t-line-soft);   /* #edf1f7 */
+  --rcf-tint: var(--t-tint);             /* #f7f9fc */
+  --rcf-tint-hover: var(--t-tint-hover); /* #f2f7ff */
+  --rcf-green: var(--t-ok-fg);           /* #15803d */
+  --rcf-red: var(--t-danger-fg);         /* #b91c1c */
+}
 
+/* ─── DAYLIGHT PAGE PALETTE (§18.3 rule 2) ─────────────────────────────────
+   The few colours the daylight console (this block, the shared dl-*
+   primitives below, account-dashboard.css, rcf-dashboard.css and the RCF
+   TSX via pages/rcf/theme.ts `DL`) has always drawn that no --t-* token
+   carries exactly. LIGHT keeps each old value so the light theme stays
+   pixel-identical — these hex lines are the console's only colour literals;
+   DARK aliases the granite set, so every rule reads one name in both
+   themes. Light shadows are ink (= --t-text) at the old alphas; dark
+   swaps in the theme's elevation recipe. Declared on :root (not the page
+   scope) because the DID dialogs and the overlay portal can sit outside a
+   scope element, and re-declared on [data-force-theme] like the theme.
+   Prefer a --t-* token in new code; add here only a value that must stay
+   exactly as it was. */
+:root,
+[data-force-theme='light'] {
+  --dl-shadow-ink: var(--t-text);       /* tint of small detail shadows */
+  --dl-slate-soft: #b6c2d4;             /* separators, disabled glyphs, paused filament */
+  --dl-slate-mute: #a7b3c8;             /* an absent value ("—"), placeholder figures */
+  --dl-ctl-border: #d5deeb;             /* pager / segment / menu / count-pill borders */
+  --dl-ctl-border-hover: #b7c7dd;
+  --dl-field-hover: #cdd7e6;            /* search + inline field hover border */
+  --dl-rule: #dfe6f0;                   /* table-head rule, dialog + detail-card border */
+  --dl-th-hover: #eef3fa;               /* sortable header hover */
+  --dl-well: #f7fafd;                   /* expanded row editor (console) */
+  --dl-well-soft: #f8fafd;              /* expanded row editor (dashboard, routing board) */
+  --dl-icon-wash: #e4eeff;              /* azure icon tiles */
+  --dl-icon-wash-strong: #dfeaff;       /* selected menu option's icon tile */
+  --dl-icon-wash-mute: #eef2f8;         /* unselected menu option's icon tile */
+  --dl-note-wash: #eef4ff;              /* azure note box in a dialog */
+  --dl-btn-disabled: #b9cdf2;           /* disabled primary button: fill */
+  --dl-btn-disabled-fg: var(--t-text-on-accent);
+  --dl-btn-disabled-ring: 0 0 0 0 transparent;
+  --dl-ghost-hover-bg: #f2f6fc;
+  --dl-ghost-hover-border: #b5c4da;
+  --dl-panel-border-hover: #d7e0ee;
+  --dl-switch-track: #dde5f0;
+  --dl-switch-border: #c3cfe2;
+  --dl-amber: #f59e0b;                  /* staff-prompt icon tile (amber wash) */
+  --dl-warn-ink: #92400e;               /* text of the amber banner */
+  --dl-sky: #0369a1;                    /* "Release requested" — text */
+  --dl-sky-solid: #0284c7;              /* "Release requested" — dot, wash */
+  --dl-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7' fill='none'%3E%3Cpath d='M1 1.25 5.5 5.75 10 1.25' stroke='%235d6f8c' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --dl-panel-shadow:
+    0 1px 2px color-mix(in srgb, var(--t-text) 6%, transparent),
+    0 12px 30px -18px color-mix(in srgb, var(--t-text) 18%, transparent);
+  --dl-panel-shadow-hover:
+    0 1px 2px color-mix(in srgb, var(--t-text) 6%, transparent),
+    0 16px 36px -18px color-mix(in srgb, var(--t-text) 24%, transparent);
+  --dl-pop-shadow: 0 20px 44px -12px color-mix(in srgb, var(--t-text) 32%, transparent);
+  --dl-tip-shadow: 0 12px 28px -8px color-mix(in srgb, var(--t-text) 28%, transparent);
+  --dl-dialog-shadow: 0 24px 64px -12px color-mix(in srgb, var(--t-text) 40%, transparent);
+  --dl-dialog-shadow-strong: 0 24px 64px -12px color-mix(in srgb, var(--t-text) 45%, transparent);
+  --dl-detail-shadow: 0 8px 22px -14px color-mix(in srgb, var(--t-text) 25%, transparent);
+  --dl-dialog-scrim: rgba(10, 16, 28, 0.45);
+  --dl-dialog-scrim-strong: rgba(10, 16, 28, 0.5);
+  --dl-empty-note-bg: color-mix(in srgb, var(--t-surface) 92%, transparent);
+  /* Gradient stops stay plain rgba() on light: a color-mix() stop switches
+     the gradient to float interpolation and moves its pixels by a level. */
+  --dl-tab-hover-from: rgba(47, 125, 246, 0.07);
+  --dl-tab-hover-to: rgba(47, 125, 246, 0.015);
+  --dl-detail-line: rgba(47, 125, 246, 0.5);
+}
+
+:root[data-theme='dark'],
+:root[data-landing],
+[data-force-theme='dark'] {
+  --dl-shadow-ink: var(--t-canvas);
+  --dl-slate-soft: var(--t-text-faint);
+  --dl-slate-mute: var(--t-text-faint);
+  --dl-ctl-border: var(--t-line-strong);
+  --dl-ctl-border-hover: var(--t-field-border-hover);
+  --dl-field-hover: var(--t-field-border-hover);
+  --dl-rule: var(--t-line);
+  --dl-th-hover: var(--t-tint-hover);
+  /* the row editor sits a step below the panel; its fields are the darker wells */
+  --dl-well: var(--t-tint);
+  --dl-well-soft: var(--t-tint);
+  --dl-icon-wash: var(--t-accent-tint);
+  --dl-icon-wash-strong: color-mix(in srgb, var(--t-accent-line) 24%, transparent);
+  --dl-icon-wash-mute: var(--t-hover);
+  --dl-note-wash: var(--t-accent-tint);
+  /* disabled primary: a dim azure slab with an azure hairline and muted
+     label — still the brand button, clearly not pressable */
+  --dl-btn-disabled: color-mix(in srgb, var(--t-accent) 22%, var(--t-surface));
+  --dl-btn-disabled-fg: color-mix(in srgb, var(--t-text-on-accent) 55%, transparent);
+  --dl-btn-disabled-ring: inset 0 0 0 1px color-mix(in srgb, var(--t-accent-line) 32%, transparent);
+  --dl-ghost-hover-bg: var(--t-hover);
+  --dl-ghost-hover-border: var(--t-field-border-hover);
+  --dl-panel-border-hover: var(--t-line-strong);
+  --dl-switch-track: var(--t-line-strong);
+  --dl-switch-border: var(--t-field-border-hover);
+  --dl-amber: var(--t-warn-solid);
+  --dl-warn-ink: var(--t-warn-fg);
+  --dl-sky: var(--t-teal);
+  --dl-sky-solid: var(--t-teal);
+  /* the same chevron in mist (--t-text-dim on dark) */
+  --dl-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7' fill='none'%3E%3Cpath d='M1 1.25 5.5 5.75 10 1.25' stroke='%2397a8c6' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --dl-panel-shadow: var(--t-shadow-card);
+  --dl-panel-shadow-hover: var(--t-shadow-card);
+  --dl-pop-shadow: var(--t-shadow-pop);
+  --dl-tip-shadow: var(--t-shadow-pop);
+  --dl-dialog-shadow: var(--t-shadow-modal);
+  --dl-dialog-shadow-strong: var(--t-shadow-modal);
+  --dl-detail-shadow: var(--t-shadow-card);
+  --dl-dialog-scrim: var(--t-scrim);
+  --dl-dialog-scrim-strong: var(--t-scrim);
+  --dl-empty-note-bg: color-mix(in srgb, var(--t-surface-raised) 92%, transparent);
+  --dl-tab-hover-from: color-mix(in srgb, var(--t-accent-line) 9%, transparent);
+  --dl-tab-hover-to: color-mix(in srgb, var(--t-accent-line) 2%, transparent);
+  --dl-detail-line: color-mix(in srgb, var(--t-accent-line) 50%, transparent);
+}
+
+.rcf-scope,
+.dl-scope {
   /* rhythm + motion tokens — one spacing scale (4/8/12/16/20/24/32), one
      timing family. Zone gaps (header → scopebar → tabs → toolbar → panels)
      are --rcf-zone; sibling cards stack at --rcf-stack. */
@@ -884,7 +615,9 @@ input[type="time"] {
   margin-bottom: 0;
   margin-left: calc(-1 * clamp(24px, 3vw, 48px));
   margin-right: calc(-1 * clamp(24px, 3vw, 48px));
-  background: var(--rcf-paper);
+  /* the canvas shorthand: #f4f6f9 on light; granite + the faint azure pool
+     at the top on dark */
+  background: var(--t-canvas-bg);
   font-family: "Public Sans", "IBM Plex Sans", -apple-system, sans-serif;
   color: var(--rcf-ink);
 }
@@ -939,14 +672,14 @@ input[type="time"] {
   content: '';
   width: 6px;
   height: 6px;
-  background: var(--rcf-azure);
+  background: var(--t-accent-line);
   border-radius: 1px;
   flex-shrink: 0;
 }
 
 .rcf-crumb-sep,
 .dl-crumb-sep {
-  color: #b6c2d4;
+  color: var(--dl-slate-soft);
   font-weight: 400;
 }
 
@@ -1077,13 +810,13 @@ input[type="time"] {
 .rcf-tab:hover,
 .dl-tab:hover {
   color: var(--rcf-azure-deep);
-  background: linear-gradient(to top, rgba(47, 125, 246, 0.07), rgba(47, 125, 246, 0.015));
-  border-bottom-color: rgba(47, 125, 246, 0.35);
+  background: linear-gradient(to top, var(--dl-tab-hover-from), var(--dl-tab-hover-to));
+  border-bottom-color: color-mix(in srgb, var(--t-accent-line) 35%, transparent);
 }
 
 .rcf-tab:focus-visible,
 .dl-tab:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: -2px;
 }
 
@@ -1092,7 +825,7 @@ input[type="time"] {
 .dl-tab-active,
 .dl-tab-active:hover {
   color: var(--rcf-ink);
-  border-bottom-color: var(--rcf-azure);
+  border-bottom-color: var(--t-accent-line);
 }
 
 @media (max-width: 560px) {
@@ -1104,8 +837,8 @@ input[type="time"] {
 .rcf-input,
 .dl-input {
   box-sizing: border-box;
-  background: #ffffff;
-  border: 1px solid #c9d5e6;
+  background: var(--t-field-bg);
+  border: 1px solid var(--t-field-border);
   border-radius: 8px;
   padding: 8px 12px;
   font-size: 0.85rem;
@@ -1116,24 +849,24 @@ input[type="time"] {
 }
 
 .rcf-input::placeholder,
-.dl-input::placeholder { color: #9aa9c0; }
+.dl-input::placeholder { color: var(--t-field-placeholder); }
 
 /* Pre-focus hover — the border warms toward azure before the focus ring */
 .rcf-input:hover:not(:focus):not(:disabled),
 .dl-input:hover:not(:focus):not(:disabled) {
-  border-color: #a3b6d3;
+  border-color: var(--t-field-border-hover);
 }
 
 .rcf-input:focus,
 .dl-input:focus {
-  border-color: var(--rcf-azure);
-  box-shadow: 0 0 0 3px rgba(47, 125, 246, 0.16);
+  border-color: var(--t-focus);
+  box-shadow: var(--t-focus-halo);
 }
 
 .rcf-input:disabled,
 .dl-input:disabled {
-  background: #f1f4f9;
-  color: #8b99b0;
+  background: var(--t-field-disabled-bg);
+  color: var(--t-text-faint);
   cursor: not-allowed;
 }
 
@@ -1142,7 +875,7 @@ select.dl-input {
   appearance: none;
   cursor: pointer;
   padding-right: 32px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7' fill='none'%3E%3Cpath d='M1 1.25 5.5 5.75 10 1.25' stroke='%235d6f8c' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: var(--dl-select-chevron);
   background-repeat: no-repeat;
   background-position: right 12px center;
 }
@@ -1199,21 +932,22 @@ select.dl-input {
 .rcf-btn-primary,
 .dl-btn-primary {
   background: var(--brand-btn-bg);
-  color: #ffffff;
-  box-shadow: var(--brand-btn-shadow);
-  text-shadow: 0 1px 0 rgba(11, 36, 110, 0.25);
+  color: var(--t-text-on-accent);
+  /* --t-glow: the azure bloom on dark; a no-op layer on light */
+  box-shadow: var(--brand-btn-shadow), var(--t-glow);
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--brand-cobalt-deep) 25%, transparent);
 }
 
 .rcf-btn-primary:hover:not(:disabled),
 .dl-btn-primary:hover:not(:disabled) {
   background: var(--brand-btn-bg-hover);
-  box-shadow: var(--brand-btn-shadow-hover);
+  box-shadow: var(--brand-btn-shadow-hover), var(--t-glow);
 }
 
 .rcf-btn-primary:active:not(:disabled),
 .dl-btn-primary:active:not(:disabled) {
   background: var(--brand-btn-bg-active);
-  box-shadow: inset 0 1px 2px rgba(11, 36, 110, 0.3);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--brand-cobalt-deep) 30%, transparent);
 }
 
 .rcf-btn-primary:focus-visible,
@@ -1224,8 +958,9 @@ select.dl-input {
 
 .rcf-btn-primary:disabled,
 .dl-btn-primary:disabled {
-  background: #b9cdf2;
-  box-shadow: none;
+  background: var(--dl-btn-disabled);
+  color: var(--dl-btn-disabled-fg);
+  box-shadow: var(--dl-btn-disabled-ring);
   text-shadow: none;
   cursor: not-allowed;
 }
@@ -1233,49 +968,47 @@ select.dl-input {
 .rcf-btn-ghost,
 .dl-btn-ghost {
   background: transparent;
-  border: 1px solid #cdd8e8;
+  border: 1px solid var(--t-line-strong);
   color: var(--rcf-ink-soft);
 }
 
 .rcf-btn-ghost:hover:not(:disabled),
-.dl-btn-ghost:hover:not(:disabled) { background: #f2f6fc; border-color: #b5c4da; }
+.dl-btn-ghost:hover:not(:disabled) { background: var(--dl-ghost-hover-bg); border-color: var(--dl-ghost-hover-border); }
 
 .rcf-btn-ghost:disabled,
 .dl-btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .rcf-btn-danger,
 .dl-btn-danger {
-  background: rgba(220, 38, 38, 0.06);
-  border: 1px solid rgba(220, 38, 38, 0.28);
+  background: color-mix(in srgb, var(--t-danger-solid) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-danger-solid) 28%, transparent);
   color: var(--rcf-red);
 }
 
 .rcf-btn-danger:hover:not(:disabled),
 .dl-btn-danger:hover:not(:disabled) {
-  background: rgba(220, 38, 38, 0.12);
-  border-color: rgba(220, 38, 38, 0.45);
+  background: color-mix(in srgb, var(--t-danger-solid) 12%, transparent);
+  border-color: color-mix(in srgb, var(--t-danger-solid) 45%, transparent);
 }
 
 /* ─── Panels — white slabs on paper. Whole-card hover is a whisper of
    extra lift so interactive surfaces feel alive without shouting. ─── */
 .rcf-panel,
 .dl-panel {
-  background: var(--rcf-card);
+  /* white slab on light; the landing's raised panel on dark (sheen +
+     hairline + inner highlight + deep drop) */
+  background: var(--t-panel-bg);
   border: 1px solid var(--rcf-line);
   border-radius: 12px;
-  box-shadow:
-    0 1px 2px rgba(14, 23, 38, 0.06),
-    0 12px 30px -18px rgba(14, 23, 38, 0.18);
+  box-shadow: var(--dl-panel-shadow);
   overflow: hidden;
   transition: border-color var(--rcf-ease), box-shadow var(--rcf-ease);
 }
 
 .rcf-panel:hover,
 .dl-panel:hover {
-  border-color: #d7e0ee;
-  box-shadow:
-    0 1px 2px rgba(14, 23, 38, 0.06),
-    0 16px 36px -18px rgba(14, 23, 38, 0.24);
+  border-color: var(--dl-panel-border-hover);
+  box-shadow: var(--dl-panel-shadow-hover);
 }
 
 .rcf-panel-head,
@@ -1303,8 +1036,8 @@ select.dl-input {
   font-size: 0.66rem;
   font-weight: 700;
   color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.09);
-  border: 1px solid rgba(47, 125, 246, 0.24);
+  background: var(--t-accent-tint);
+  border: 1px solid var(--t-accent-border);
   border-radius: 4px;
   padding: 2px 8px;
   white-space: nowrap;
@@ -1324,7 +1057,7 @@ select.dl-input {
   text-transform: uppercase;
   color: var(--rcf-ink-dim);
   background: var(--rcf-tint);
-  border-bottom: 1px solid #dfe6f0;
+  border-bottom: 1px solid var(--dl-rule);
   user-select: none;
 }
 
@@ -1335,7 +1068,7 @@ select.dl-input {
 
 .rcf-th-sort:hover {
   color: var(--rcf-ink-soft);
-  background: #eef3fa;
+  background: var(--dl-th-hover);
 }
 
 .rcf-th-active { color: var(--rcf-azure-deep); }
@@ -1354,7 +1087,7 @@ select.dl-input {
 .rcf-row:hover,
 .dl-row:hover {
   background: var(--rcf-tint-hover);
-  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+  box-shadow: inset 2px 0 0 0 var(--t-accent-line);
 }
 
 /* ─── Expandable number rows ─── */
@@ -1369,12 +1102,14 @@ select.dl-input {
 .rcf-nrow:focus-visible {
   outline: none;
   background: var(--rcf-tint-hover);
-  box-shadow: inset 2px 0 0 0 var(--rcf-azure), inset 0 0 0 1px rgba(47, 125, 246, 0.35);
+  box-shadow:
+    inset 2px 0 0 0 var(--t-accent-line),
+    inset 0 0 0 1px color-mix(in srgb, var(--t-accent-line) 35%, transparent);
 }
 
 .rcf-nrow-open {
-  background: #eef4fe;
-  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+  background: var(--t-accent-wash);
+  box-shadow: inset 2px 0 0 0 var(--t-accent-line);
 }
 
 .rcf-nrow-open td { border-top-color: var(--rcf-line); }
@@ -1420,11 +1155,11 @@ select.dl-input {
 }
 
 .rcf-xpanel {
-  background: #f7fafd;
+  background: var(--dl-well);
   border-top: 1px solid var(--rcf-line);
   border-bottom: 1px solid var(--rcf-line);
   padding: 22px 26px 18px;
-  box-shadow: inset 2px 0 0 0 var(--rcf-azure);
+  box-shadow: inset 2px 0 0 0 var(--t-accent-line);
 }
 
 .rcf-xgrid {
@@ -1455,7 +1190,7 @@ select.dl-input {
   content: '';
   width: 8px;
   height: 8px;
-  background: var(--rcf-azure);
+  background: var(--t-accent-line);
   border-radius: 1px;
   flex-shrink: 0;
 }
@@ -1482,7 +1217,7 @@ select.dl-input {
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #8b99b0;
+  color: var(--t-text-faint);
   margin-bottom: 3px;
 }
 
@@ -1527,8 +1262,8 @@ select.dl-input {
   font-size: 0.78rem;
   font-weight: 500;
   font-family: inherit;
-  border: 1px solid #d5deeb;
-  background: #ffffff;
+  border: 1px solid var(--dl-ctl-border);
+  background: var(--t-surface);
   color: var(--rcf-ink-dim);
   cursor: pointer;
   user-select: none;
@@ -1537,19 +1272,19 @@ select.dl-input {
 
 .rcf-pgbtn:hover:not(:disabled):not(.rcf-pgbtn-active) {
   background: var(--rcf-tint-hover);
-  border-color: #b7c7dd;
+  border-color: var(--dl-ctl-border-hover);
   color: var(--rcf-ink-soft);
 }
 
 .rcf-pgbtn:disabled {
-  color: #b6c2d4;
+  color: var(--dl-slate-soft);
   opacity: 0.55;
   cursor: not-allowed;
 }
 
 .rcf-pgbtn-active {
-  border-color: rgba(47, 125, 246, 0.5);
-  background: rgba(47, 125, 246, 0.1);
+  border-color: color-mix(in srgb, var(--t-accent-line) 50%, transparent);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
   color: var(--rcf-azure-deep);
   font-weight: 700;
 }
@@ -1582,15 +1317,15 @@ select.dl-input {
 .rcf-pill-on,
 .dl-pill-on {
   color: var(--rcf-green);
-  background: rgba(22, 163, 74, 0.1);
-  border: 1px solid rgba(22, 163, 74, 0.26);
+  background: var(--t-ok-bg);
+  border: 1px solid var(--t-ok-border);
 }
 
 .rcf-pill-off,
 .dl-pill-off {
   color: var(--rcf-red);
-  background: rgba(220, 38, 38, 0.07);
-  border: 1px solid rgba(220, 38, 38, 0.26);
+  background: var(--t-danger-bg);
+  border: 1px solid var(--t-danger-border);
 }
 
 /* ─── Switches ─── */
@@ -1599,8 +1334,8 @@ select.dl-input {
   width: 38px;
   height: 22px;
   border-radius: 11px;
-  border: 1px solid #c3cfe2;
-  background: #dde5f0;
+  border: 1px solid var(--dl-switch-border);
+  background: var(--dl-switch-track);
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
   padding: 0;
@@ -1616,14 +1351,16 @@ select.dl-input {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 3px rgba(14, 23, 38, 0.35);
+  /* white in both themes — the knob rides the azure fill when on */
+  background: var(--t-text-on-accent);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--dl-shadow-ink) 35%, transparent);
   transition: left 0.2s ease;
 }
 
 .rcf-switch-on {
-  background: linear-gradient(135deg, var(--rcf-azure) 0%, var(--rcf-azure-deep) 100%);
-  border-color: var(--rcf-azure-deep);
+  /* a fill: azure → azure-deep in both themes (never the accent-TEXT alias) */
+  background: linear-gradient(135deg, var(--t-accent) 0%, var(--t-accent-hover) 100%);
+  border-color: var(--t-accent-hover);
 }
 
 .rcf-switch-on::after { left: 18px; }
@@ -1631,9 +1368,25 @@ select.dl-input {
 .rcf-switch:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .rcf-switch:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 2px;
 }
+
+/* ─── Confirmation dialogs (DID management) — a raised card with the azure
+   top edge over a dimmed, blurred page. `-strong` is the release dialog's
+   slightly heavier scrim + shadow. ─── */
+.rcf-dialog-scrim { background: var(--dl-dialog-scrim); }
+.rcf-dialog-scrim-strong { background: var(--dl-dialog-scrim-strong); }
+
+.rcf-dialog {
+  background: var(--t-surface-raised);
+  border: 1px solid var(--dl-rule);
+  border-top: 4px solid var(--t-accent-line);
+  box-shadow: var(--dl-dialog-shadow);
+  color: var(--t-text);
+}
+
+.rcf-dialog-strong { box-shadow: var(--dl-dialog-shadow-strong); }
 
 /* ─── Breadcrumb scope context (admin console) — last crumb segment ─── */
 .rcf-crumb-context {
@@ -1657,7 +1410,7 @@ select.dl-input {
 .rcf-scope-prompt svg {
   width: 30px;
   height: 30px;
-  color: #9aa9c0;
+  color: var(--t-field-placeholder);
   margin-bottom: 6px;
 }
 
@@ -1714,7 +1467,7 @@ select.dl-input {
   overflow: visible;
 }
 
-.rcf-act-bar-scoped { border-color: rgba(47, 125, 246, 0.4); }
+.rcf-act-bar-scoped { border-color: color-mix(in srgb, var(--t-accent-line) 40%, transparent); }
 
 .rcf-act-didpick {
   display: flex;
@@ -1722,6 +1475,43 @@ select.dl-input {
   gap: 12px;
   flex: 1 1 380px;
   min-width: 0;
+}
+
+/* DID picker menu (ActivityDidPicker) — a raised popover; options tint on
+   hover, the selected one keeps a faint azure wash. */
+.rcf-didpick-menu {
+  background: var(--t-surface-raised);
+  border: 1px solid var(--dl-ctl-border);
+  box-shadow: var(--dl-pop-shadow);
+}
+
+.rcf-didpick-opt {
+  background: transparent;
+  transition: background 0.14s;
+}
+
+.rcf-didpick-opt:hover { background: var(--rcf-tint-hover); }
+
+.rcf-didpick-opt-on,
+.rcf-didpick-opt-on:hover { background: color-mix(in srgb, var(--t-accent-line) 6%, transparent); }
+
+.rcf-didpick-opt-all.rcf-didpick-opt-on,
+.rcf-didpick-opt-all.rcf-didpick-opt-on:hover { background: color-mix(in srgb, var(--t-accent-line) 7%, transparent); }
+
+.rcf-didpick-clear {
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 30%, transparent);
+  background: color-mix(in srgb, var(--t-accent-line) 7%, transparent);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.rcf-didpick-clear:hover {
+  border-color: color-mix(in srgb, var(--t-accent-line) 50%, transparent);
+  background: color-mix(in srgb, var(--t-accent-line) 14%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rcf-didpick-opt,
+  .rcf-didpick-clear { transition: none; }
 }
 
 .rcf-act-bar-label {
@@ -1773,15 +1563,15 @@ select.dl-input {
 }
 
 .rcf-seg-btn:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 1px;
 }
 
 .rcf-seg-btn-active {
-  background: var(--rcf-card);
-  border-color: #d5deeb;
+  background: var(--t-surface-raised);
+  border-color: var(--dl-ctl-border);
   color: var(--rcf-azure-deep);
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.08);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--dl-shadow-ink) 8%, transparent);
 }
 
 @media (max-width: 560px) {
@@ -1814,10 +1604,10 @@ select.dl-input {
   min-width: 0;
   min-height: 112px;
   padding: 16px 18px 14px;
-  background: var(--rcf-card);
+  background: var(--t-panel-bg);
   border: 1px solid var(--rcf-line);
   border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(14, 23, 38, 0.05);
+  box-shadow: var(--t-shadow-xs);
   overflow: hidden;
 }
 
@@ -1854,7 +1644,7 @@ select.dl-input {
 }
 
 .rcf-kpi-toned .rcf-kpi-value { color: var(--rcf-kpi-tone); }
-.rcf-kpi-muted .rcf-kpi-value { color: #a7b3c8; }
+.rcf-kpi-muted .rcf-kpi-value { color: var(--dl-slate-mute); }
 
 .rcf-kpi-sub {
   margin-top: auto;
@@ -1865,7 +1655,7 @@ select.dl-input {
   font-variant-numeric: tabular-nums;
 }
 
-.rcf-kpis-loading .rcf-kpi-sub { color: #a7b3c8; }
+.rcf-kpis-loading .rcf-kpi-sub { color: var(--dl-slate-mute); }
 
 /* ─── Chart panel ─── */
 .rcf-act-head-sub {
@@ -1898,7 +1688,7 @@ select.dl-input {
 }
 
 .rcf-act-svg:focus-visible {
-  outline: 2px solid var(--rcf-azure);
+  outline: 2px solid var(--t-focus);
   outline-offset: 4px;
   border-radius: 6px;
 }
@@ -1912,7 +1702,7 @@ select.dl-input {
   max-width: calc(100% - 64px);
   padding: 8px 14px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--dl-empty-note-bg);
   border: 1px solid var(--rcf-line);
   font-size: 0.78rem;
   color: var(--rcf-ink-dim);
@@ -1927,10 +1717,10 @@ select.dl-input {
   pointer-events: none;
   box-sizing: border-box;
   padding: 10px 12px;
-  background: #ffffff;
-  border: 1px solid #dfe6f0;
+  background: var(--t-chart-tooltip-bg);
+  border: 1px solid var(--dl-rule);
   border-radius: 9px;
-  box-shadow: 0 12px 28px -8px rgba(14, 23, 38, 0.28);
+  box-shadow: var(--dl-tip-shadow);
   font-size: 0.72rem;
   color: var(--rcf-ink-soft);
 }
@@ -1965,7 +1755,7 @@ select.dl-input {
   font-weight: 700;
 }
 
-.rcf-act-tip-muted { color: #8b99b0; }
+.rcf-act-tip-muted { color: var(--t-text-faint); }
 .rcf-act-tip-alert strong { color: var(--rcf-red); }
 
 .rcf-act-tip-rule {
@@ -2040,7 +1830,7 @@ select.dl-input {
 
 .rcf-act-state-error {
   color: var(--rcf-red);
-  background: rgba(220, 38, 38, 0.04);
+  background: color-mix(in srgb, var(--t-danger-solid) 4%, transparent);
 }
 
 .rcf-act-chart-loading { min-height: 300px; }
@@ -2064,8 +1854,8 @@ select.dl-input {
 
 .rcf-act-chip-did {
   color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.08);
-  border-color: rgba(47, 125, 246, 0.24);
+  background: color-mix(in srgb, var(--t-accent-line) 8%, transparent);
+  border-color: var(--t-accent-border);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2084,7 +1874,7 @@ select.dl-input {
   transform: translateY(-50%);
   width: 14px;
   height: 14px;
-  color: #9aa9c0;
+  color: var(--t-field-placeholder);
   pointer-events: none;
 }
 
@@ -2116,7 +1906,7 @@ select.dl-input {
   font-variant-numeric: tabular-nums;
 }
 
-.rcf-act-tz { color: #8b99b0; }
+.rcf-act-tz { color: var(--t-text-faint); }
 
 .rcf-act-status {
   font-size: 0.68rem;
@@ -2264,8 +2054,8 @@ select.dl-input {
   gap: 9px;
   padding: 11px 14px;
   border-radius: 9px;
-  background: rgba(47, 125, 246, 0.05);
-  border: 1px solid rgba(47, 125, 246, 0.16);
+  background: color-mix(in srgb, var(--t-accent-line) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 16%, transparent);
   font-size: 0.75rem;
   line-height: 1.55;
   color: var(--rcf-ink-soft);
@@ -2280,21 +2070,21 @@ select.dl-input {
 }
 
 .dl-banner-ok {
-  background: rgba(22, 163, 74, 0.08);
-  border: 1px solid rgba(22, 163, 74, 0.26);
+  background: color-mix(in srgb, var(--t-ok-solid) 8%, transparent);
+  border: 1px solid var(--t-ok-border);
   color: var(--rcf-green);
 }
 
 .dl-banner-err {
-  background: rgba(220, 38, 38, 0.06);
-  border: 1px solid rgba(220, 38, 38, 0.24);
+  background: color-mix(in srgb, var(--t-danger-solid) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-danger-solid) 24%, transparent);
   color: var(--rcf-red);
 }
 
 .dl-banner-warn {
-  background: rgba(180, 83, 9, 0.07);
-  border: 1px solid rgba(180, 83, 9, 0.24);
-  color: #92400e;
+  background: color-mix(in srgb, var(--t-warn-fg) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-warn-fg) 24%, transparent);
+  color: var(--dl-warn-ink);
 }
 
 /* ─── Neutral label tag (account types, roles, plan names) ─── */
@@ -2306,8 +2096,8 @@ select.dl-input {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.09);
-  border: 1px solid rgba(47, 125, 246, 0.24);
+  background: var(--t-accent-tint);
+  border: 1px solid var(--t-accent-border);
   border-radius: 5px;
   padding: 2px 8px;
   white-space: nowrap;
@@ -2315,8 +2105,8 @@ select.dl-input {
 
 .dl-tag-slate {
   color: var(--rcf-ink-soft);
-  background: rgba(93, 111, 140, 0.09);
-  border-color: rgba(93, 111, 140, 0.26);
+  background: color-mix(in srgb, var(--t-neutral-fg) 9%, transparent);
+  border-color: color-mix(in srgb, var(--t-neutral-fg) 26%, transparent);
 }
 
 /* ─── Mono value chip (phone numbers, IPs) ─── */
@@ -2363,8 +2153,8 @@ select.dl-input {
   font-weight: 700;
   text-transform: uppercase;
   color: var(--rcf-azure-deep);
-  background: rgba(47, 125, 246, 0.1);
-  border: 1px solid rgba(47, 125, 246, 0.22);
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 22%, transparent);
 }
 
 .dl-avatar-sm {
@@ -2392,7 +2182,7 @@ select.dl-input {
 /* ─── Read-only field box (mirrors .dl-input's box, non-interactive) ─── */
 .dl-ro {
   box-sizing: border-box;
-  background: #f1f4f9;
+  background: var(--t-field-disabled-bg);
   border: 1px solid var(--rcf-line);
   border-radius: 8px;
   padding: 8px 12px;
@@ -2419,7 +2209,7 @@ select.dl-input {
   height: 60px;
   border-radius: 14px;
   margin-bottom: 4px;
-  background: #e4eeff;
+  background: var(--dl-icon-wash);
   color: var(--rcf-azure-deep);
 }
 
@@ -2433,4 +2223,60 @@ select.dl-input {
   color: var(--rcf-ink-dim);
   font-size: 0.8rem;
   line-height: 1.5;
+}
+
+/* ─── Narrow-screen modifiers (opt-in) ───
+   A tab rail or a metrics row with more items than a phone (or a tablet
+   beside the sidebar) can fit used to push the page sideways. Opt in per
+   page; at widths where everything fits, both render exactly like the
+   plain primitive. */
+
+/* Tab rail that scrolls sideways instead of overflowing the page. The auto
+   margins centre the tabs while they fit and collapse to 0 once they don't
+   (so the first tab is never cut off); the baseline moves from a border to
+   an inset shadow so nothing hangs outside the scroll box. Only below
+   1024px (phones, tablets beside the sidebar): a scroll container changes
+   how Chrome rasterises the whole page, so wide screens keep the plain
+   rail. */
+@media (max-width: 1023px) {
+  .dl-tabs-scroll {
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    border-bottom: none;
+    box-shadow: inset 0 -1px 0 var(--rcf-line);
+  }
+
+  .dl-tabs-scroll::-webkit-scrollbar { display: none; }
+
+  .dl-tabs-scroll > .dl-tab {
+    flex: none;
+    white-space: nowrap;
+    margin-bottom: 0;
+  }
+
+  .dl-tabs-scroll > :first-child { margin-left: auto; }
+  .dl-tabs-scroll > :last-child { margin-right: auto; }
+}
+
+/* Header metrics that wrap instead of overflowing; a two-up grid on phones. */
+.dl-metrics-wrap {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 14px;
+  min-width: 0;
+}
+
+@media (max-width: 560px) {
+  .dl-metrics-wrap {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    text-align: left;
+  }
+
+  .dl-metrics-wrap .dl-metric { padding: 0 16px; }
+  .dl-metrics-wrap .dl-metric:nth-child(odd) { padding-left: 0; border-left: none; }
 }

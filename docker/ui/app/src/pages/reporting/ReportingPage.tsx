@@ -52,6 +52,7 @@ import { useMyNumbers, useReportNumbers, useReportOverview, useReportTrend } fro
 import '../../styles/dl-admin.css';
 import '../../styles/dl-platform-b.css';
 import '../../styles/dl-reporting.css';
+import { T } from '../../styles/theme';
 
 /** Customers whose accounts have Reporting (mirrors utils/reportingAccess). */
 const REPORTABLE_TYPES = ['rcf', 'trunk', 'hybrid'];
@@ -307,8 +308,8 @@ function ReportingView() {
             <section className="dl-panel">
               <div className="dl-center">
                 <div className="dl-center-icon"><Info size={26} aria-hidden="true" /></div>
-                <p style={{ margin: 0, fontWeight: 700, color: 'var(--rcf-ink)' }}>Pick a customer to see their report</p>
-                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--rcf-ink-dim)' }}>
+                <p style={{ margin: 0, fontWeight: 700, color: T.text }}>Pick a customer to see their report</p>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: T.textDim }}>
                   Reports are always about one customer’s own calls.
                 </p>
               </div>

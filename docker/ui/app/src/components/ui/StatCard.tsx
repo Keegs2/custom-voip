@@ -36,7 +36,7 @@ export function StatCard({ label, value, icon, className }: StatCardProps) {
         style={{
           fontSize: '0.68rem',
           fontWeight: 600,
-          color: '#4a5568',
+          color: 'var(--t-text-dim)',
           textTransform: 'uppercase',
           letterSpacing: '0.05em',
           marginBottom: 10,
@@ -48,7 +48,7 @@ export function StatCard({ label, value, icon, className }: StatCardProps) {
         style={{
           fontSize: '1.9rem',
           fontWeight: 800,
-          color: '#e2e8f0',
+          color: 'var(--t-text-strong)',
           fontVariantNumeric: 'tabular-nums',
           lineHeight: 1,
         }}

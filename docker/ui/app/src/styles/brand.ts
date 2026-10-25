@@ -1,12 +1,14 @@
 /**
  * The brand blue family — the TS mirror of the `--brand-*` custom properties
- * in the `:root` block of src/index.css (keep the two equal). CSS should use
- * the custom properties; this module exists for the places CSS variables
- * can't reach: inline SVG fill/stroke attributes, chart series, computed
- * tones and the @react-pdf report document.
+ * in the `:root` block of src/index.css (keep the two equal).
  *
- * Taken from the account dashboard's hero header, so buttons, charts and
- * active states across the app read as one family.
+ * THEMING: these are fixed HEX identity values. They do NOT follow the
+ * light/dark theme, so screen code must not paint with them — use the theme
+ * tokens instead (src/styles/theme.ts): `T.accent` / `T.accentText` /
+ * `T.accentLine`, `tMix('accent', 10)` for washes, `CHART.*` for series,
+ * `TONE.*` for status. The hex exports remain for the places that are
+ * deliberately theme-less: the @react-pdf Reporting document (print —
+ * always light) and colour maths. See docker/ui/CLAUDE.md "Theming".
  */
 
 /** Primary buttons, primary chart series, links, active states. */
@@ -22,17 +24,22 @@ export const BRAND_COBALT_DEEP = '#0b246e';
 /** Glow shadow colour for buttons and active states. */
 export const BRAND_GLOW = 'rgba(47, 125, 246, 0.35)';
 
-/** Translucent azure for tints/washes, e.g. `brandAzureAlpha(0.07)`. */
+/**
+ * Translucent azure HEX-family wash, e.g. `brandAzureAlpha(0.07)`. Print /
+ * theme-less use only — on screen use `tMix('accent', 7)` (styles/theme.ts).
+ */
 export function brandAzureAlpha(alpha: number): string {
   return `rgba(47, 125, 246, ${alpha})`;
 }
 
 /**
- * Chart series roles. Primary = azure; a second quantitative series =
- * cobalt; a third (usually dashed) = azure-bright; the neutral/"didn't
- * happen" series (missed calls) = slate, matching the account dashboard's
- * Call volume card. Semantic status colours (good/warn/bad) are NOT here —
- * they come from pages/calls/quality.ts.
+ * Chart series roles — the LIGHT / PRINT values. Primary = azure; a second
+ * quantitative series = cobalt; a third (usually dashed) = azure-bright; the
+ * neutral/"didn't happen" series (missed calls) = slate.
+ *
+ * On screen use the theme-aware twin `CHART` from styles/theme.ts (same
+ * roles, `var(--t-chart-*)` strings that re-colour on dark: cobalt would
+ * vanish on granite). This hex set stays for the Reporting PDF.
  */
 export const CHART_SERIES = {
   primary: BRAND_AZURE,

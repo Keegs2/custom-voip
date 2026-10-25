@@ -28,7 +28,7 @@ import {
   fmtPhone,
   fmtWeekdayDate,
   GRADE_BLURB,
-  GRADE_TONE,
+  GRADE_TONE_PRINT,
   GRADE_WORD,
   honestWhole,
 } from './reportFormat';
@@ -44,6 +44,8 @@ export interface ReportPdfInput {
   numbers: ReportNumbers | null;
 }
 
+// PRINT palette — the PDF is always light and @react-pdf can't resolve var()
+// (docker/ui/CLAUDE.md §18.3 rule 8): these hex values stay by design.
 const INK = '#0e1726';
 const INK_SOFT = '#46566f';
 const INK_DIM = '#5d6f8c';
@@ -165,7 +167,7 @@ export function ReportDocument({ input }: { input: ReportPdfInput }) {
           <View style={s.twoCol}>
             <View style={s.col}>
               <Text style={s.eyebrow}>Call quality</Text>
-              <Text style={[s.big, { color: GRADE_TONE[q.grade] }]}>{GRADE_WORD[q.grade]}</Text>
+              <Text style={[s.big, { color: GRADE_TONE_PRINT[q.grade] }]}>{GRADE_WORD[q.grade]}</Text>
               <Text style={s.caption}>{GRADE_BLURB[q.grade]}</Text>
               {q.avg_mos != null && <Text style={s.caption}>Sound score {q.avg_mos.toFixed(1)} out of 5 (1 = hard to understand, 5 = crystal clear).</Text>}
               {q.pct_good_or_better != null && <Text style={s.caption}>{honestWhole(q.pct_good_or_better)} of every 100 measured calls sounded good or better.</Text>}

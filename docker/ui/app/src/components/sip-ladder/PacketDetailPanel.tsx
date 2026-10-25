@@ -171,7 +171,7 @@ const panelStyle: React.CSSProperties = {
   borderRadius: 12,
   background: LADDER_COLORS.bg,
   border: `1px solid ${LADDER_COLORS.controlBorder}`,
-  boxShadow: '0 1px 2px rgba(14,23,38,0.06), 0 10px 24px -16px rgba(14,23,38,0.2)',
+  boxShadow: LADDER_COLORS.shadowPanel,
 };
 
 const sectionHeaderStyle: React.CSSProperties = {
@@ -221,7 +221,7 @@ const rawBlockStyle: React.CSSProperties = {
   fontSize: '0.72rem',
   lineHeight: 1.6,
   color: LADDER_COLORS.textMuted,
-  background: LADDER_COLORS.surface,
+  background: LADDER_COLORS.well,
   borderRadius: 8,
   padding: '12px 16px',
   margin: '0 16px 16px',
@@ -322,11 +322,12 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
       height={14}
       viewBox="0 0 24 24"
       fill="none"
-      stroke={LADDER_COLORS.textFaint}
+      stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
       style={{
+        color: LADDER_COLORS.textFaint,
         transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
         transition: 'transform 0.15s ease',
       }}
@@ -555,7 +556,7 @@ export function PacketDetailPanel({ rawMsg, accentColor, onClose }: PacketDetail
                     padding: '3px 0',
                     borderBottom:
                       idx < parsed.headers.length - 1
-                        ? `1px solid rgba(14,23,38,0.06)`
+                        ? `1px solid ${LADDER_COLORS.rowRule}`
                         : 'none',
                   }}
                 >

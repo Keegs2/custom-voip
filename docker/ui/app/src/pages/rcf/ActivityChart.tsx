@@ -20,25 +20,29 @@
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import type { ActivityBucket, CdrActivityPoint } from '../../types/cdrActivity';
-import { TREND_COLORS } from '../reporting/reportFormat';
-import { CHART_SERIES, brandAzureAlpha } from '../../styles/brand';
+import { CHART, T } from '../../styles/theme';
+import { TREND_SERIES } from '../reporting/reportFormat';
 import { bucketRangeLabel, bucketTick, fmtPct1, fmtShareFloor, plural, tickStep } from './activityFormat';
 
-// Series colors — the brand chart roles (src/styles/brand.ts): columns
-// azure/slate (same pair as the Reporting page and the dashboard's Call
-// volume card); lines cobalt (solid) / azure-bright (dashed) — the dash is
-// the secondary channel, so the two blues never rely on hue alone.
-const C_ANSWERED = TREND_COLORS.answered;
-const C_MISSED = TREND_COLORS.missed;
-const C_ASR = CHART_SERIES.secondary;
-const C_GOOD = CHART_SERIES.tertiary;
+// Series colors — the theme's chart roles (styles/theme.ts CHART, same
+// roles as brand.ts CHART_SERIES): columns answered/missed are the Reporting
+// page's TREND_SERIES pair (also the dashboard's Call volume card); lines secondary
+// (solid) / tertiary (dashed) — the dash is the secondary channel, so the
+// two blues never rely on hue alone. Light = azure / slate / cobalt /
+// azure-bright exactly; dark re-colours each for granite. Every mark is
+// painted through `style` so the var() strings resolve (docs §18.3 rule 5).
+const C_ANSWERED = TREND_SERIES.answered;
+const C_MISSED = TREND_SERIES.missed;
+const C_ASR = CHART.secondary;
+const C_GOOD = CHART.tertiary;
 const GOOD_DASH = '5 3';
 
-const SURFACE = '#ffffff';
-const INK_TICK = '#5d6f8c';
-const GRID = 'rgba(14, 23, 38, 0.07)';
-const BASELINE = 'rgba(14, 23, 38, 0.16)';
-const HOVER_BAND = brandAzureAlpha(0.07);
+/** Ring around a highlighted dot — the panel colour, so the dot reads as cut out. */
+const SURFACE = T.surface;
+const INK_TICK = CHART.label;
+const GRID = CHART.grid;
+const BASELINE = CHART.axis;
+const HOVER_BAND = CHART.hoverBand;
 
 // Geometry (px). The rate plot sits under the volume plot with room for its
 // own caption; the shared x labels run once, under the rate plot.
@@ -247,8 +251,8 @@ export function ActivityChart({ bucket, points, windowEnd, tz, rangePhrase, refr
               const y = crisp(geom.yVol(t));
               return (
                 <g key={`v${t}`} aria-hidden="true">
-                  <line x1={PAD_L} y1={y} x2={width - PAD_R} y2={y} stroke={t === 0 ? BASELINE : GRID} strokeWidth={1} />
-                  <text x={PAD_L - 8} y={y + 3.5} textAnchor="end" fontSize={11} fill={INK_TICK} className="rcf-act-num">
+                  <line x1={PAD_L} y1={y} x2={width - PAD_R} y2={y} style={{ stroke: t === 0 ? BASELINE : GRID }} strokeWidth={1} />
+                  <text x={PAD_L - 8} y={y + 3.5} textAnchor="end" fontSize={11} style={{ fill: INK_TICK }} className="rcf-act-num">
                     {t.toLocaleString()}
                   </text>
                 </g>
@@ -256,15 +260,15 @@ export function ActivityChart({ bucket, points, windowEnd, tz, rangePhrase, refr
             })}
 
             {/* ── Rate plot caption, grid + y ticks (0 / 50 / 100%) ── */}
-            <text x={PAD_L} y={RATE_TOP - 12} fontSize={11} fontWeight={600} fill={INK_TICK} aria-hidden="true">
+            <text x={PAD_L} y={RATE_TOP - 12} fontSize={11} fontWeight={600} style={{ fill: INK_TICK }} aria-hidden="true">
               Rates · 0–100%
             </text>
             {[0, 50, 100].map((t) => {
               const y = crisp(geom.yRate(t));
               return (
                 <g key={`r${t}`} aria-hidden="true">
-                  <line x1={PAD_L} y1={y} x2={width - PAD_R} y2={y} stroke={t === 0 ? BASELINE : GRID} strokeWidth={1} />
-                  <text x={PAD_L - 8} y={y + 3.5} textAnchor="end" fontSize={11} fill={INK_TICK} className="rcf-act-num">
+                  <line x1={PAD_L} y1={y} x2={width - PAD_R} y2={y} style={{ stroke: t === 0 ? BASELINE : GRID }} strokeWidth={1} />
+                  <text x={PAD_L - 8} y={y + 3.5} textAnchor="end" fontSize={11} style={{ fill: INK_TICK }} className="rcf-act-num">
                     {t}%
                   </text>
                 </g>
@@ -274,8 +278,8 @@ export function ActivityChart({ bucket, points, windowEnd, tz, rangePhrase, refr
             {/* ── Crosshair band — spans both plots so they read as one x ── */}
             {active != null && (
               <g aria-hidden="true">
-                <rect x={PAD_L + geom.slot * active} y={VOL_TOP} width={geom.slot} height={VOL_H} fill={HOVER_BAND} rx={4} />
-                <rect x={PAD_L + geom.slot * active} y={RATE_TOP} width={geom.slot} height={RATE_H} fill={HOVER_BAND} rx={4} />
+                <rect x={PAD_L + geom.slot * active} y={VOL_TOP} width={geom.slot} height={VOL_H} style={{ fill: HOVER_BAND }} rx={4} />
+                <rect x={PAD_L + geom.slot * active} y={RATE_TOP} width={geom.slot} height={RATE_H} style={{ fill: HOVER_BAND }} rx={4} />
               </g>
             )}
 
@@ -291,15 +295,15 @@ export function ActivityChart({ bucket, points, windowEnd, tz, rangePhrase, refr
                 <g key={p.t} aria-hidden="true">
                   {p.answered > 0 && (
                     both ? (
-                      <rect x={x} y={answeredTop} width={geom.barW} height={Math.max(VOL_BASE - answeredTop, 1)} fill={C_ANSWERED} />
+                      <rect x={x} y={answeredTop} width={geom.barW} height={Math.max(VOL_BASE - answeredTop, 1)} style={{ fill: C_ANSWERED }} />
                     ) : (
-                      <path d={topRoundedRect(x, answeredTop, geom.barW, Math.max(VOL_BASE - answeredTop, 1), 4)} fill={C_ANSWERED} />
+                      <path d={topRoundedRect(x, answeredTop, geom.barW, Math.max(VOL_BASE - answeredTop, 1), 4)} style={{ fill: C_ANSWERED }} />
                     )
                   )}
                   {p.missed > 0 && (
                     <path
                       d={topRoundedRect(x, Math.min(totalTop, missedBottom - 1.5), geom.barW, Math.max(missedBottom - totalTop, 1.5), 4)}
-                      fill={C_MISSED}
+                      style={{ fill: C_MISSED }}
                     />
                   )}
                 </g>
@@ -308,19 +312,19 @@ export function ActivityChart({ bucket, points, windowEnd, tz, rangePhrase, refr
 
             {/* ── Rate lines (2px) — gaps where a bucket has no denominator ── */}
             <g aria-hidden="true">
-              <path d={linePaths.asr.d} fill="none" stroke={C_ASR} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-              <path d={linePaths.good.d} fill="none" stroke={C_GOOD} strokeWidth={2} strokeDasharray={GOOD_DASH} strokeLinejoin="round" strokeLinecap="round" />
+              <path d={linePaths.asr.d} fill="none" style={{ stroke: C_ASR }} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+              <path d={linePaths.good.d} fill="none" style={{ stroke: C_GOOD }} strokeWidth={2} strokeDasharray={GOOD_DASH} strokeLinejoin="round" strokeLinecap="round" />
               {linePaths.asr.lone.map((i) => (
-                <circle key={`al${i}`} cx={geom.xCenter(i)} cy={geom.yRate(points[i].asr_pct ?? 0)} r={3.5} fill={C_ASR} stroke={SURFACE} strokeWidth={2} />
+                <circle key={`al${i}`} cx={geom.xCenter(i)} cy={geom.yRate(points[i].asr_pct ?? 0)} r={3.5} style={{ fill: C_ASR, stroke: SURFACE }} strokeWidth={2} />
               ))}
               {linePaths.good.lone.map((i) => (
-                <circle key={`gl${i}`} cx={geom.xCenter(i)} cy={geom.yRate(points[i].good_share_pct ?? 0)} r={3.5} fill={C_GOOD} stroke={SURFACE} strokeWidth={2} />
+                <circle key={`gl${i}`} cx={geom.xCenter(i)} cy={geom.yRate(points[i].good_share_pct ?? 0)} r={3.5} style={{ fill: C_GOOD, stroke: SURFACE }} strokeWidth={2} />
               ))}
               {activePoint && active != null && activePoint.asr_pct != null && (
-                <circle cx={geom.xCenter(active)} cy={geom.yRate(activePoint.asr_pct)} r={4.5} fill={C_ASR} stroke={SURFACE} strokeWidth={2} />
+                <circle cx={geom.xCenter(active)} cy={geom.yRate(activePoint.asr_pct)} r={4.5} style={{ fill: C_ASR, stroke: SURFACE }} strokeWidth={2} />
               )}
               {activePoint && active != null && activePoint.good_share_pct != null && (
-                <circle cx={geom.xCenter(active)} cy={geom.yRate(activePoint.good_share_pct)} r={4.5} fill={C_GOOD} stroke={SURFACE} strokeWidth={2} />
+                <circle cx={geom.xCenter(active)} cy={geom.yRate(activePoint.good_share_pct)} r={4.5} style={{ fill: C_GOOD, stroke: SURFACE }} strokeWidth={2} />
               )}
             </g>
 
@@ -336,7 +340,7 @@ export function ActivityChart({ bucket, points, windowEnd, tz, rangePhrase, refr
                   y={SVG_H - 9}
                   textAnchor={nearRight ? 'end' : nearLeft ? 'start' : 'middle'}
                   fontSize={11}
-                  fill={active === i ? '#0e1726' : INK_TICK}
+                  style={{ fill: active === i ? CHART.labelStrong : INK_TICK }}
                   aria-hidden="true"
                 >
                   {bucketTick(bucket, points[i].t, tz)}

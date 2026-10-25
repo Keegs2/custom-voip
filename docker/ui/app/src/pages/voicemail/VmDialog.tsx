@@ -1,10 +1,13 @@
 /**
- * VmDialog — the voicemail page's light (daylight) modal. Same mechanics as
- * DashboardOverlay: portal to <body> with `.dl-scope` on the root so every
- * `--rcf-*` token and `dl-*` primitive resolves, scroll lock with scrollbar
- * compensation, Esc / backdrop close (a press that STARTED on the backdrop
- * only), a Tab trap, and focus returned to the opener. Mounted only while
- * open. `busy` blocks Esc/backdrop close while a request is in flight.
+ * VmDialog — the voicemail page's modal. It follows the theme (light /
+ * dark — docker/ui/CLAUDE.md §18): the colour tokens live on <html>, so the
+ * portal needs no scope for colour; its root still carries `.dl-scope` (the
+ * `dl-*` primitives' class rules + rhythm tokens) and `.vm-scope` (the
+ * `--vm-*` roles in dl-voicemail.css). Same mechanics as DashboardOverlay:
+ * portal to <body>, scroll lock with scrollbar compensation, Esc / backdrop
+ * close (a press that STARTED on the backdrop only), a Tab trap, and focus
+ * returned to the opener. Mounted only while open. `busy` blocks
+ * Esc/backdrop close while a request is in flight.
  *
  * ConfirmDialog (below) is the small yes/no built on it, with an optional
  * typed confirmation for destructive actions.

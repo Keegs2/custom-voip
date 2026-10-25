@@ -56,13 +56,17 @@ import type { User } from '../types/auth';
 import type { AccountType } from '../types/customer';
 import { Spinner } from '../components/ui/Spinner';
 import { fmt, fmtMoney } from '../utils/format';
+import { T, tMix } from '../styles/theme';
 
-/* ─── Design tokens (mirror the .rcf-scope / .dl-scope CSS vars) ─── */
+/* ─── Design tokens — theme `var()` strings (docker/ui/CLAUDE.md §18):
+   light resolves to the daylight ink / azure-deep values, dark to the
+   granite set. ─── */
 
-const INK = '#0e1726';
-const INK_SOFT = '#46566f';
-const INK_DIM = '#5d6f8c';
-const AZURE_DEEP = '#1d63dd';
+const INK = T.text;
+const INK_SOFT = T.textSoft;
+const INK_DIM = T.textDim;
+/** Accent text + glyphs (azure-deep on light, azure-bright on dark). */
+const AZURE_DEEP = T.accentText;
 
 const MONO =
   '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
@@ -339,8 +343,8 @@ function MonthlyBillCard() {
               gap: 16,
               padding: '15px 16px',
               borderRadius: 10,
-              background: 'rgba(47, 125, 246, 0.07)',
-              border: '1px solid rgba(47, 125, 246, 0.22)',
+              background: tMix('accent-line', 7),
+              border: `1px solid ${tMix('accent-line', 22)}`,
             }}
           >
             <span
@@ -1216,7 +1220,7 @@ interface TabDef {
 
 function AccountTabBar({ active, onChange, tabs }: { active: Tab; onChange: (t: Tab) => void; tabs: TabDef[] }) {
   return (
-    <div className="dl-tabs fx-load fx-load-d1" role="tablist">
+    <div className="dl-tabs dl-tabs-scroll fx-load fx-load-d1" role="tablist">
       {tabs.map((t) => {
         const isActive = active === t.id;
         return (
@@ -1275,7 +1279,7 @@ function MyAccountHeader({ customer, loaded }: { customer: MyCustomer | undefine
       </div>
 
       {loaded && metrics.length > 0 && (
-        <div className="dl-metrics">
+        <div className="dl-metrics dl-metrics-wrap">
           {metrics.map((m) => (
             <div className="dl-metric" key={m.label}>
               <div className="dl-metric-value">{m.value.toLocaleString()}</div>

@@ -93,10 +93,17 @@ so the frontend behaves identically to production without changing any URLs.
 Bootstraps the app. Provider nesting order (outermost first):
 ```
 StrictMode
-  QueryClientProvider     (TanStack React Query)
-    ToastProvider         (global toast notifications)
-      App                 (BrowserRouter + AuthProvider + Routes)
+  ThemeProvider           (light / dark — §18)
+    QueryClientProvider   (TanStack React Query)
+      ToastProvider       (global toast notifications)
+        App               (BrowserRouter + AuthProvider + Routes)
 ```
+Global CSS, in order: `index.css` (Tailwind, `@theme`, brand tokens, base
+rules, the daylight console primitives + their `--dl-*` page palette — §18.5),
+`styles/theme.css` (the `--t-*` theme tokens),
+`styles/app-shell.css` (canvas, sidebar, collapse tab, theme toggle).
+`index.html` carries a tiny inline script that sets the theme before first
+paint (§18).
 
 QueryClient defaults:
 - Queries: `staleTime: 30_000`, retry up to 2x — **no retries on 4xx**
@@ -334,6 +341,7 @@ Standard query key conventions:
 | Context | File | Purpose |
 |---|---|---|
 | `AuthContext` | `src/contexts/AuthContext.tsx` | Auth state, login, logout |
+| `ThemeContext` | `src/contexts/ThemeContext.tsx` | Light/dark: `useTheme()` → `{ theme, source, setTheme, toggleTheme, followSystem }`; `useResolvedToken()` (§18) |
 | `ToastContext` | `src/components/ui/ToastContext.tsx` | Global toast notifications |
 
 ---
@@ -365,7 +373,11 @@ DashboardPage.tsx and the layouts take any count.
   (measured for Archivo 900 @ `font-stretch: 104%`) — re-measure if the H1
   font, weight or width changes. Art: `public/crag-cube.{webp,png}` (nav +
   viz: `crag-mark.{webp,png}`), transparent cut-outs of `crag.png`, which
-  stays for the Sidebar and the favicon. The tag and proof strip respond to
+  stays for the favicon. The Sidebar uses the nav lockup (`crag-mark` +
+  "GRANITE CRAG" wordmark) since the theming work (§18).
+- **Theme-exempt.** The landing (and its `SignInModal`) is dark whatever the
+  user's theme: `<html data-landing>` forces the dark token set while `/` is
+  on screen (§18). landing.css keeps its own `--lg-*` palette. The tag and proof strip respond to
   the copy column's width (container `lg-hero-copy`). `index.html` loads
   Archivo as a variable font (`wdth 62..125`) for the wide wordmarks.
 - `components/layout/HaArchitectureViz.tsx` (landing only) models the real
@@ -394,7 +406,11 @@ switch remounts instead of changing hook order.
   (admin one-customer view: `/voicemail?customer=ID`), driven by the same
   `/v1/voicemail/summary` query + cache key as the sidebar; no dashboard
   panel), a quiet glass secondary action and the azure-glow primary action.
-  Also used by the admin `/rcf` console.
+  Also used by the admin `/rcf` console. **Dark in both themes:** the band's
+  frame reads `--t-band-*`, and its two content columns (`.ad-header-id`,
+  `.ad-header-tools`) carry `data-force-theme="dark"`, so every token inside
+  — and the native `<select>` popup — is the dark set on the light theme
+  too; band-only constants are `--adh-*` (§18.5).
 - **Holistic (every product).** The account view's numbers card, Numbers
   KPI, every call card and the Call activity overlay cover every product on
   the account (call forwarding, voicemail, SIP trunk, any future product via
@@ -500,8 +516,8 @@ switch remounts instead of changing hook order.
   "busiest numbers" (no cross-customer per-number/per-customer roll-up).
 - Styles `styles/account-dashboard.css` (`ad-`): 12-col card grid (8/4 spans) →
   2 cols → 1 col by CONTENT width (container queries); one load-in stagger;
-  reduced motion respected. Brand blues via `--brand-*` tokens. No money
-  anywhere.
+  reduced motion respected. Colour: theme tokens + the `--ad-*` page tokens
+  (§18.5). No money anywhere.
 
 **`RcfPage`** (`/rcf`)
 Picks one of three views (separate components, so toggling customer view or
@@ -552,12 +568,29 @@ via `enabled:`). Keys carry the scope.
 **`MyAccountPage`** — with `counts.numbers` (holistic API): one tile + header
 metric per product (`by_product`, catalog order) plus the SIP trunks tile, and
 a Voicemail section on Products when the account has mailbox numbers (same
-`['account-numbers', id, 'self']` list). Without it: the old tiles.
+`['account-numbers', id, 'self']` list). Without it: the old tiles. At
+phone widths its tab rail and header metrics opt into `.dl-tabs-scroll` /
+`.dl-metrics-wrap` (§18.6) — before that the page scrolled sideways at 390px.
 
 **`TrunksPage`** (`/trunks`)
-Currently a placeholder/coming-soon shell. Shows the page header but no data.
-Trunk administration lives in TED (the CRAG console) — there are no admin
-pages in this SPA (see "Admin pages" below).
+The customer **SIP Trunking portal** — read + self-serve; trunk creation and
+administration stay admin-only in TED (no admin pages in this SPA).
+- **Gate:** `user.account_type` ∈ `trunk`/`hybrid`, or any platform admin
+  (`isActualAdmin`); everyone else gets "SIP Trunking isn't part of your
+  plan". It reads `user`, not `effectiveCustomer`, so an admin in "View as
+  Customer" still sees the admin list, not the preview customer's.
+- **Data:** `listTrunks({ limit: 200 })` (owner-scoped by the API; admins get
+  every trunk), key `['trunks', { scope: 'portal' }]`; per trunk
+  `getTrunkStats` (`['trunk-stats', id]`, polls every 15 s), `getTrunkIps`,
+  `getTrunkDids`. No new endpoints.
+- **Per trunk (`TrunkPanel`):** live activity tiles (channels in use vs max,
+  answer rate 1 h, calls today, minutes today), plan summary (CPS tier,
+  call paths), connection / setup details for the PBX, authorized source IPs
+  (add with IPv4 validation, remove — `readonly` and `support` view only),
+  and its DIDs. States: loading, error + retry, "not provisioned yet".
+- **Styles:** the daylight `dl-*` primitives + `.dlx-trunks` page tokens in
+  `styles/dl-portal-pages.css`. Reached from the sidebar's Coming Soon group
+  (SIP Trunking is early access); `productHome` sends `trunk` accounts here.
 
 **`ApiDidsPage`** (`/api-dids`)
 API Calling showcase. **Retired 2026-09** — the page is kept in code but the route
@@ -643,16 +676,30 @@ lives in TED. `RequireAdmin` remains only for admin-gated pieces of shared pages
 
 **`AppLayout`**
 Renders `Sidebar` on the left (fixed, 240px) and `<Outlet />` in the main
-content area (max-width 1160px, centered). Background `#0f1117`.
+content area. Root is `.app-canvas` (`--t-canvas-bg`: paper on light,
+granite + a faint azure pool on dark). Also flips `<html data-landing>` on
+`/` (the theme-exempt landing, §18).
 
 **`Sidebar`**
-Fixed left sidebar (collapsible on desktop via `SidebarCollapse`). Authenticated
+Fixed left sidebar (collapsible on desktop via `SidebarCollapse`). Themed
+(§18): a white daylight panel on light, the original dark shell on dark —
+every colour is a `--t-sb-*` token via the `sb-*` classes in
+`styles/app-shell.css`; the only inline colour is each row's product accent
+(`--sb-accent` = `--t-sb-accent-azure|green|amber`, typed `SidebarAccent`).
+Brand: the landing nav lockup (cube `crag-mark` + "GRANITE CRAG"). Footer
+card, two rows: avatar + full name/email (→ /my-account), then the action
+row — **theme switch** (`ThemeToggle`, sun/moon + "Switch to dark|light",
+accessible name "Switch to dark theme") and "Sign out". Collapsed
+(desktop): the switch rides a slim icon tab under the collapse tab. Mobile
+(<768px): a real topbar (menu · lockup · icon switch) opens the drawer
+(Esc or the scrim closes it) — it had been `display:none` inline since
+April. Authenticated
 order: **Dashboard (top-level item) → Products → Insights (Reporting) →
 Administration/Support → Coming Soon**. **Dashboard** (`/dashboard`, normal live
 active style) shows for platform admins (the admin dashboard) and every
 non-support user with an `effectiveCustomer` (tenants, and an admin in
 customer view once a preview is picked). Sidebar blues are the brand family
-(`#2f7df6` accents, `#4f92ff` on dark, sign-in button `--brand-btn-*`). There is no
+via tokens (`--t-sb-accent-azure`, sign-in button `--brand-btn-*`). There is no
 Documentation group any more (2026-10). Coming Soon
 is ALWAYS last and rendered darkened (muted header, dim slate rows + "Soon"
 pill, no product accent even when active) — new pre-launch or de-prioritised
@@ -695,13 +742,13 @@ See section 4 above.
 | `Badge` | `variant: BadgeVariant` — covers status, account types, directions, traffic grades, SIPp verdicts |
 | `Modal` | `open`, `onClose`, `title`, `children`, `footer`, `maxWidth`. Closes on Escape, traps body scroll |
 | `FormField` | Polymorphic: `as: 'input'\|'select'\|'textarea'`. Renders label, field, hint, error. Passes all native HTML attributes through |
-| `Card` / `CardTitle` | Dark glass-morphism card container |
+| `Card` / `CardTitle` | Raised theme panel (`.glass-surface` = `--t-panel-bg` + hairline + `--t-shadow-card`), lifts on hover |
 | `StatCard` | Displays a single large metric with label and optional background icon |
 | `TabBar` | Horizontal tab bar with underline active indicator, optional count badges |
-| `Table` / `TableWrap` / `Thead` / `Th` / `Td` | Table primitives with dark theme styles |
+| `Table` / `TableWrap` / `Thead` / `Th` / `Td` | Table primitives on theme tokens (tint header, soft row rules) |
 | `Pagination` | "Showing X of Y" with "Load More" button (offset-based, not page-based) |
 | `Spinner` | Animated SVG ring, sizes `xs` and `sm` |
-| `Toast` / `ToastContext` | Toast system — `useToast()` returns `{ toastOk, toastErr }` |
+| `Toast` / `ToastContext` | Toast system — `useToast()` returns `{ toast, toastOk, toastErr }`; raised surface + status tone (`TONE`) |
 
 **Using the toast system:**
 ```typescript
@@ -710,6 +757,12 @@ toastOk('Customer created');
 toastErr(err.message);
 ```
 Toasts auto-dismiss after 4 seconds. They stack in the bottom-right corner.
+
+All `components/ui/*` primitives draw from the theme tokens only (no hex),
+so they read right in both themes; `Modal` is elevation 2 (raised surface,
+`--t-shadow-modal`, `--t-scrim` backdrop, azure keyline on dark).
+`ThemeToggle` (`components/layout/`) is the one theme switch — reuse it,
+never re-implement it.
 
 ### SIP Ladder (`src/components/sip-ladder/`)
 
@@ -724,12 +777,18 @@ component plus the `LadderLayout`, `LadderMessage`, `LadderNode` types.
 | `PacketDetailPanel.tsx` | Inline packet inspector shown when a message is selected. Parses the raw SIP message (`raw_msg`) into start line, headers (highlighting important ones — Via, Record-Route, Contact, From/To, Call-ID, CSeq, Session-Expires…), and SDP (c=, m=, codecs, ports). |
 | `sipLadderLayout.ts` | `computeLayout()` — turns raw `HomerSearchResult[]` + correlations into a `LadderLayout` (ordered nodes, processed messages, A-leg/B-leg Call-ID sets, duration). Handles node ordering and B-leg column splitting. |
 | `sipLadderTypes.ts` | `NodeRole`, `LadderNode`, `LadderMessage`, `LadderLayout` types. |
-| `sipLadderUtils.ts` | `LADDER_COLORS` design tokens, `formatTimeDelta`, and related helpers. |
+| `sipLadderUtils.ts` | `LADDER_COLORS` — the ladder's ONE colour object; every value is a `var()` string (`--t-*` theme tokens + the `--ladder-*` page tokens), so the ladder follows light/dark with no re-render. `ladderMix(color, pct)` builds translucent variants (`color-mix()`, never a hex-alpha suffix). Plus `formatTimeDelta` and related helpers. |
+| `sipLadder.css` | The `--ladder-*` page tokens (§18.5), scrollbar pseudo-elements and the opaque sticky-header paint — what inline styles can't express. |
 | `sipUtils.ts` | SIP parsing helpers (method/status extraction, leg detection, retransmission detection). |
 | `index.ts` | Barrel export. |
 
 Node names are pre-aliased by heplify-server (e.g. "BW-NY", "SBC-1", "FreeSWITCH"),
 so no IP resolution happens in the frontend.
+
+Theming: arrows, heads and markers paint through `style={{ fill, stroke }}`
+or `currentColor` — never the SVG `fill=` / `stroke=` attributes (§18.3
+rule 5). Message hues keep their meaning in both themes (A-leg INVITE azure,
+B-leg amber, 1xx violet, 2xx green, 4xx/5xx red, ACK teal, BYE slate).
 
 ### Icons (`src/components/icons/ProductIcons.tsx`)
 
@@ -752,11 +811,17 @@ inline edit/action affordances and live in the page directories (not `ui/`):
 | `CustomerExpandedView` | `pages/admin/CustomerExpandedView.tsx` | Inline expanded customer detail (RCF/API/trunk sections + add-credit) |
 | `SbcDistribution` | `pages/admin/SbcDistribution.tsx` | Live per-SBC call distribution panel (polls `getSbcStats`) |
 
+None of these render today: `RcfCard.tsx` and the `pages/admin/*` files no
+longer exist, and `TrunkCard` / `ApiDidCard` are imported nowhere
+(TrunksPage / ApiDidsPage don't use them) and were NOT converted to theme
+tokens (§18.8).
+
 ### `AdminCustomerSelector`
 
 Dropdown that lets admins filter portal pages by customer. Only renders when
 `isAdmin` is true. Loads up to 500 customers and can filter by `accountTypes`.
-Currently imported nowhere (legacy dark style, brand accent `#2f7df6`). The
+Currently imported nowhere and NOT themed (still hex literals — convert to
+tokens before reusing it). The
 admin dashboard and `/rcf` console use `pages/dashboard/AdminScopeSelect`
 (granite header dropdown) instead.
 
@@ -887,7 +952,8 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 
 - **RCF** (`account_type: 'rcf'`) — the primary product. Full CRUD, inline editing, bulk operations.
 - **SIP Trunks** (`account_type: 'trunk'`) — early access: the call path is live, trunk
-  administration lives in TED, the customer portal page is a placeholder.
+  administration lives in TED, and the customer portal (`/trunks`, §7) is
+  self-serve: trunks, live activity, connection details, authorized IPs, DIDs.
 - **Admin** — lives in TED (the CRAG console), not this SPA. Staff pages here: the admin
   dashboard, the admin `/rcf` console, Calls & Quality (`/cdrs`) and Troubleshooting.
 - **Visual Voicemail** — encrypted voicemail v1 + optional transcription (merged
@@ -1050,27 +1116,40 @@ times due to hooks placed after conditional early returns.
 
 ## 15. Design System Conventions
 
-The codebase mixes Tailwind utility classes and inline styles. The pattern is:
-- **Structural layout** (flex, grid, gap, margin, padding, min-height): Tailwind classes via `cn()`
-- **Design tokens** (colours, shadows, borders): inline styles using CSS custom values
+The codebase mixes Tailwind utility classes, page CSS files (`styles/*.css`,
+prefix per page: `ad-`, `rcfd-`, `vm-`, `cq-`…) and inline styles. The pattern:
+- **Structural layout** (flex, grid, gap, margin, padding): Tailwind classes
+  via `cn()` or page CSS. Load-bearing responsive layout is hand-written
+  `@media` / container queries, not Tailwind `md:*`.
+- **Colour, borders, shadows, glow: THEME TOKENS ONLY.** Every colour is a
+  `--t-*` custom property from `src/styles/theme.css`, defined for light AND
+  dark (§18). In CSS: `var(--t-text-dim)`. In TSX: the typed `T.*` /
+  `TONE.*` / `CHART.*` strings from `src/styles/theme.ts`
+  (`style={{ color: T.textDim }}`). In Tailwind arbitrary values:
+  `text-[color:var(--t-text-dim)]` (keep the `color:` hint). **No hex,
+  `rgb()`/`rgba()` or Tailwind palette colours (`text-red-400`,
+  `bg-blue-500/10`…) in new or touched code** — they cannot follow the theme.
+- **Brand blues** are the `--brand-*` family (index.css `:root`; azure
+  `#2f7df6`, azure-deep `#1d63dd`, azure-bright `#4f92ff`, cobalt `#113398`)
+  and reach pages through the theme's accent roles: `--t-accent` (fills),
+  `--t-accent-line` (indicators, rings), `--t-accent-text` (links, accent
+  text), `--t-accent-tint` / `-wash` / `-border`. Never Tailwind blue
+  `#3b82f6`. `styles/brand.ts` hex is print/PDF-only (§18).
+- **Alpha variants** of a token: `color-mix(in srgb, var(--t-accent) 12%,
+  transparent)` (TS: `tMix('accent', 12)`) — never `${hex}22` suffixes.
+- **Status** (good / warning / bad / info / neutral): the `--t-{ok,warn,
+  danger,info,neutral}-{fg,bg,border,solid}` tokens (TS: `TONE.ok.fg` …).
+  Grade *logic* stays in `pages/calls/quality.ts`.
+- **Elevation:** canvas (`--t-canvas-bg`) → panel (`--t-panel-bg` + 1px
+  `--t-line` + `--t-shadow-card`) → raised (`--t-surface-raised` +
+  `--t-shadow-pop`/`--t-shadow-modal`). Inputs sit in wells (`--t-field-*`).
+- **Fonts never change with the theme.** Display: Archivo; body: Public Sans
+  (daylight scope) / IBM Plex Sans (app default); mono: IBM Plex Mono.
 
-Colour palette used throughout:
-```
-Background:    #0f1117  (page)    #1a1d27 / #13151d  (surface)
-Border:        rgba(42,47,69,0.6)
-Text primary:  #e2e8f0
-Text muted:    #718096 / #94a3b8
-Text faint:    #475569 / #334155
-Accent blue:   brand tokens only — `--brand-*` (index.css) / `styles/brand.ts`
-               (#2f7df6 accent, #4f92ff on dark). Never Tailwind #3b82f6 in new code.
-Success green: #22c55e / #065f46
-Warning amber: #f59e0b
-Danger red:    #ef4444 / #7f1d1d
-```
-
-Active nav items use a coloured gradient background with a matching border and
-glow shadow — each product has its own accent colour defined in `Sidebar.tsx`
-(`#4ade80` for RCF, `#fbbf24` for trunks, `#c084fc` for API, `#22d3ee` for IVR).
+Sidebar active rows: a product-accent gradient wash + accent border + soft
+accent glow + dot. Accents are tokens per theme (`--t-sb-accent-azure` for
+products/dashboard/reporting, `-green` for Calls & Quality, `-amber` for
+Troubleshooting); the alpha steps live in `styles/app-shell.css`.
 
 ---
 
@@ -1092,6 +1171,17 @@ Contract: `docs/CALL_QUALITY_ACCURACY_PLAN.md` (§B.3 column semantics, §C.3
   hard-code a MOS/R/loss threshold in a component — Python
   (`services/call_quality.py`), SQL (`cq_grade`) and Grafana use the same cut
   points and must agree on every stored row.
+- **Colour constants (theming, §18).** `GOOD` / `WARN` / `BAD` / `INK_FAINT`
+  and everything `gradeColor` / `gradeTone` return are theme `var()` strings
+  (light = the old `#15803d` / `#b45309` / `#b91c1c` / `#8b99b0`; callers may
+  still compare them by identity). `QUALITY_PRINT_HEX` is the same four as
+  fixed hex for print / file output only. Reporting mirrors this in
+  `pages/reporting/reportFormat.ts`: `GRADE_TONE` (screen) vs
+  `GRADE_TONE_PRINT` (the PDF), and `TREND_SERIES` (screen chart roles,
+  `CHART.*`); the hex `TREND_COLORS` is legacy and imported by nothing.
+  STIR/SHAKEN pills: `components/stir/attestationColors.ts` exports
+  `ATTEST_TONES` (attestation label → `{ text, bg, border }` theme tokens),
+  shared by `AttestationChain` and the troubleshooting `CallBadges`.
 - **`quality.assert.ts`** is the boundary self-test (4.34/4.33, 4.02/4.01,
   3.60/3.59 — identical to the Python tests). Dev-only dynamic import from
   `CdrDetailModal.tsx`; run by hand with node type-stripping or esbuild.
@@ -1123,9 +1213,9 @@ dial-in).
   `CustomerVoicemail` (own account; `readonly` = play + download only);
   admin in customer view → same view on the PREVIEW customer with staff
   controls (`PreviewPrompt` until one is picked); admin normal view →
-  `AdminVoicemailConsole` (`?customer=<id>`, absent = All customers, light
+  `AdminVoicemailConsole` (`?customer=<id>`, absent = All customers, a
   "Viewing" select); support → productHome. Views are keyed by scope.
-- **Body** `pages/voicemail/VoicemailWorkspace.tsx`: daylight header (Unread /
+- **Body** `pages/voicemail/VoicemailWorkspace.tsx`: page header (Unread /
   Messages / Mailboxes, `EncryptionBadge`, New mailbox for staff), mailbox
   switcher (grouped by customer on All customers), suspended banner, tabs
   **Messages** (`InboxView`: Inbox/Saved/Trash with counts, `MessageList`,
@@ -1175,5 +1265,451 @@ dial-in).
     retry buttons follow the API's `can_retry` (admins: forced re-run on
     `done`); a rendered `done` transcript marks the message read once for
     writers. `VoicemailIntro` mentions optional transcripts only while available.
-- Styles `styles/dl-voicemail.css` (`vm-`), container queries on `.vm-body`;
-  dialogs are `VmDialog` (light portal, `.dl-scope` root). Brand blues only.
+- Styles `styles/dl-voicemail.css` (`vm-`), container queries on `.vm-body`.
+  Colour: theme tokens + the `--vm-*` roles on `.vm-scope` (§18.5).
+  Dialogs are `VmDialog`, a portal to `<body>` that follows the theme like
+  the page (the `--t-*` tokens inherit from `<html>`); its root carries
+  `.dl-scope.vm-scope` for the `dl-*` primitive rules and the `--vm-*`
+  roles. No longer a light-only portal.
+
+---
+
+## 18. Theming (light / dark)
+
+The signed-in app has two themes. **Light** = the daylight console exactly as
+it was (paper `#f4f6f9`, white cards, ink text) with a white sidebar in the
+same family. **Dark** = the landing page's granite (`#070c16`), raised panels
+with a hairline border and a soft inner top highlight, cloud/mist text,
+azure fills with azure-bright lines, links and glow — and the sidebar keeps
+its original dark colour. Fonts and layout never change between themes;
+only colour, elevation and glow do.
+
+Sources of truth: tokens `src/styles/theme.css` · typed names + helpers
+`src/styles/theme.ts` · provider `src/contexts/ThemeContext.tsx` · toggle
+`src/components/layout/ThemeToggle.tsx` · shell chrome
+`src/styles/app-shell.css` · sync check `scripts/check-theme-tokens.mjs`.
+
+### 18.1 Mechanism
+
+- **Where it lives:** `<html data-theme="light|dark">` plus
+  `style.colorScheme` (native controls, scrollbars and date pickers follow).
+  Tokens are defined on `:root[data-theme=…]`, so portals, modals and toasts
+  inherit them with no scope class.
+- **Choice + default:** an explicit pick persists in localStorage
+  **`crag_theme`** (`'light'` / `'dark'`; every access try/catch'd). With no
+  pick, the OS `prefers-color-scheme` decides and is tracked live. Other tabs
+  follow via the `storage` event. `useTheme()` →
+  `{ theme, source: 'user'|'system', setTheme, toggleTheme, followSystem }`.
+- **No flash:** an inline script in `index.html` sets `data-theme` (+
+  `data-landing`, + `colorScheme`) before first paint; `ThemeProvider` takes
+  over on mount. Keep the script and `styles/theme.ts` in step (same key,
+  same rules). If a CSP is ever added, allow the script by hash.
+- **Switching:** one cross-fade (View Transitions where supported, skipped
+  under reduced motion); `.theme-switching` on `<html>` suspends per-element
+  transitions for two frames so nothing animates out of step.
+- **Landing exemption:** the public landing (`/`, signed out — marketing
+  page, auth splash and `SignInModal`) is dark whatever the theme.
+  `<html data-landing>` forces the dark token set and a dark color-scheme
+  while `/` is on screen (index.html sets it before paint, `AppLayout` keeps
+  it in step). `landing.css` keeps its own `--lg-*` palette; nothing in the
+  theme layer reaches into `.landing-root`.
+- **Toggle:** `ThemeToggle` — a real button named "Switch to dark theme" /
+  "Switch to light theme", sun/moon icon showing the destination, visible
+  focus ring. Seats: the sidebar footer's action row (icon + "Switch to
+  dark", beside Sign out), the mobile topbar (icon), and a slim icon tab
+  under the collapse tab while the desktop sidebar is collapsed.
+- **Pinning a subtree:** `data-force-theme="light|dark"` on any element
+  re-declares that theme's whole token set (and `color-scheme`) on it, so
+  the subtree renders in that theme whatever `<html>` says. Use it for
+  surfaces that are one theme by design: the granite `DashboardHeader`
+  band's two content columns (`data-force-theme="dark"` keeps its native
+  `<select>` and every token-based child dark on the light theme), a
+  print/PDF preview (`"light"`). `--rcf-*` aliases and the `:root`-declared
+  page palettes (`--dl-*`, `--cq-*`… §18.5) are re-declared there too;
+  scope-keyed ones (`--vm-*`, `--dlx-*`) are not (§18.7).
+- **Fallback:** `:root` without the attribute resolves to light.
+
+### 18.2 Tokens
+
+Naming: `--t-<role>[-<variant>]`; sidebar-only `--t-sb-*`. "Shorthand" =
+a full `background` value (may carry gradients); "shadow" = a full
+`box-shadow` list. `brand-*` = the `--brand-*` blues in index.css `:root`.
+TS: `T.<camelCase>` (`T.textDim` = `'var(--t-text-dim)'`, `T.chart1` =
+`'var(--t-chart-1)'`).
+
+**Canvas, surfaces, lines**
+
+| Token | Use | Light | Dark |
+|---|---|---|---|
+| `canvas` | page background colour | `#f4f6f9` | `#070c16` |
+| `canvas-bg` | shorthand: the canvas incl. glow (`.dl-scope`, `.app-canvas`) | `#f4f6f9` | azure radial pool @ top-right + `#070c16` |
+| `surface` | cards, panels, tables (a colour) | `#ffffff` | `#0f1727` |
+| `panel-bg` | shorthand: a panel's full background | `#ffffff` | 5 % cloud sheen gradient + `#0f1727` |
+| `surface-raised` | menus, popovers, tooltips, modals, toasts | `#ffffff` | `#151f33` |
+| `surface-sunken` | wells, code blocks, inset areas | `#f7f9fc` | `#0a101c` |
+| `tint` | subtle fill inside a panel (table heads, chips) | `#f7f9fc` | `#121b2d` |
+| `tint-hover` | azure-leaning row/list hover | `#f2f7ff` | `#142036` |
+| `hover` / `pressed` | neutral translucent state washes | ink 4 % / 7 % | cloud 8 % / 13 % |
+| `scrim` | modal / drawer backdrop | `rgba(14,23,38,.34)` | `rgba(3,7,15,.72)` |
+| `line` | borders, dividers | `#e2e8f2` | cloud 16 % (hairline) |
+| `line-soft` | row rules, skeletons | `#edf1f7` | cloud 10 % |
+| `line-strong` | emphasised borders, tracks, ghost buttons | `#cdd8e8` | cloud 28 % |
+
+Surfaces are **opaque** in both themes (sticky headers and nested cards
+must not show what scrolls beneath); lines are translucent hairlines on dark.
+
+**Text**
+
+| Token | Use | Light | Dark |
+|---|---|---|---|
+| `text` | body + headings | `#0e1726` | `#f2f6ff` |
+| `text-strong` | display numerals, titles | `#0e1726` | `#ffffff` |
+| `text-soft` | secondary text | `#46566f` | `#c6d3ea` |
+| `text-dim` | labels, meta | `#5d6f8c` | `#97a8c6` |
+| `text-faint` | decorative / disabled only (2.9:1 on light) | `#8b99b0` | `#6f7f9d` |
+| `text-on-accent` | text on azure fills / solid status | `#ffffff` | `#ffffff` |
+
+**Accent, focus, fields**
+
+| Token | Use | Light | Dark |
+|---|---|---|---|
+| `accent` | fills: primary, selected, toggles, counts | brand-azure | brand-azure |
+| `accent-hover` | fill hover/pressed; fills carrying small white text | brand-azure-deep | brand-azure-deep |
+| `accent-line` | indicators, active borders, ticks, leading edges | brand-azure | brand-azure-bright |
+| `accent-text` | links, accent text, accent icons | brand-azure-deep | brand-azure-bright |
+| `accent-text-hover` | link hover | brand-cobalt | `#8ab6ff` |
+| `accent-wash` | selected row / item background (opaque) | `#eef4fe` | `#172743` |
+| `accent-tint` | chip / pill / active-tab fill | azure 9 % | azure-bright 14 % |
+| `accent-border` | chip / pill / selected border | azure 24 % | azure-bright 36 % |
+| `cobalt` | deep accent in gradients / secondary marks | brand-cobalt | `#6d8ff0` |
+| `focus` | 2px focus outline colour (`--brand-focus-ring` aliases it) | brand-azure | brand-azure-bright |
+| `focus-halo` | shadow: field focus halo | `0 0 0 3px` azure 16 % | `0 0 0 3px` azure-bright 30 % |
+| `field-bg` | input / select background | `#ffffff` | `#0a101c` (well) |
+| `field-border` / `-hover` | input border | `#c9d5e6` / `#a3b6d3` | cloud 28 % / 46 % |
+| `field-placeholder` | placeholder text | `#9aa9c0` | `#6f7f9d` |
+| `field-disabled-bg` | disabled field | `#f1f4f9` | `#0c1220` |
+| `chevron` | `url()` select chevron in the accent-text colour | azure-deep svg | azure-bright svg |
+
+**Status** — `fg` text/icon on a surface · `bg` + `border` pill/banner ·
+`solid` dots, bars, accent edges. TS: `TONE.ok.fg` … (`StatusTone`).
+
+| Tone | fg (L / D) | bg (L / D) | border (L / D) | solid (L / D) |
+|---|---|---|---|---|
+| `ok` | `#15803d` / `#6ee7b7` | green 10 % / emerald 12 % | 26 % / 34 % | `#16a34a` / `#34d399` |
+| `warn` | `#b45309` / `#fbbf24` | amber-700 9 % / amber 12 % | 26 % / 36 % | `#d97706` / `#f59e0b` |
+| `danger` | `#b91c1c` / `#f87171` | red 7 % / red-400 12 % | 26 % / 36 % | `#dc2626` / `#ef4444` |
+| `info` | azure-deep / `#a9c8ff` | azure 9 % / azure-bright 13 % | 24 % / 38 % | azure / azure-bright |
+| `neutral` | `#5d6f8c` / `#a9b6cf` | slate 8 % / cloud 8 % | 20 % / 24 % | `#8b99b0` / `#6f7f9d` |
+
+Light values are exactly the `quality.ts` tones (`callOutcome.ts`'s
+±0.02-alpha variants fold into them). Categorical hues for roles/tags:
+`violet` (`#7c3aed` / `#b49cfc`) and `teal` (`#0e7490` / `#5eead4`) — use
+`color-mix()` of them for washes.
+
+**Elevation + glow**
+
+| Token | Use | Light | Dark |
+|---|---|---|---|
+| `highlight` | shadow: inner top highlight alone | white 90 % | white 5 % |
+| `shadow-xs` | shadow: hairline lift (inputs, chips) | ink 5 % | black 45 % |
+| `shadow-card` | shadow: panels (= the old `--ad-shadow`) | highlight + soft cool drop | highlight + deep drop |
+| `shadow-card-hover` | shadow: interactive panel lift | + azure-deep tint | + azure tint |
+| `shadow-pop` | shadow: menus, popovers, toasts | soft cool | highlight + deep |
+| `shadow-modal` | shadow: dialogs | soft cool, large | highlight + very deep |
+| `glow` | shadow layer: azure bloom for primary/active | transparent no-op | `0 0 24px -6px` azure-bright 55 % |
+| `glow-text` | text-shadow for big accent numerals | `none` | azure 32 % bloom |
+| `keyline` | shorthand: 1px top keyline (`height:1px; background: var(--t-keyline)`) | `none` | azure-bright fade |
+
+Compose shadows: `box-shadow: var(--t-shadow-card), var(--t-glow);`.
+
+**Inverse band** — the granite header strip (`DashboardHeader`): dark in
+both themes; on dark it is lifted by an edge + azure pool instead. The
+`band-*` set paints the band's own frame; `DashboardHeader` puts
+`data-force-theme="dark"` on its two content columns so everything inside
+uses ordinary dark tokens (and band-only constants are `--adh-*`, §18.5).
+`band-bg` (shorthand), `band-edge`, `band-shadow`, `band-text`
+(`#e8eef9`), `band-text-strong` (`#fff`), `band-text-soft` (`#b4c2d9`),
+`band-text-dim` (`#93a4c0`), `band-line` / `band-tint` (white 10 % / 5 %),
+`band-accent` (azure-bright). Text tokens are equal in both themes.
+
+**Charts** (screen; the Reporting PDF keeps print hex — §18.3). TS: `CHART.*`.
+
+| Token | Use | Light | Dark |
+|---|---|---|---|
+| `chart-1` | primary series | brand-azure | brand-azure-bright |
+| `chart-2` | secondary series | brand-cobalt | `#a3c2ff` |
+| `chart-3` | tertiary (dashed) | brand-azure-bright | brand-azure |
+| `chart-neutral` | "didn't happen" (missed calls) | `#c3cede` | `#56647e` |
+| `chart-grid` / `chart-axis` | gridlines / baseline + axis | ink 7 % / 16 % | cloud 10 % / 28 % |
+| `chart-label` / `-strong` | tick labels / hovered label | `#5d6f8c` / `#0e1726` | `#97a8c6` / `#f2f6ff` |
+| `chart-hover-band` | hovered-bucket band | azure 7 % | azure-bright 10 % |
+| `chart-tooltip-bg` / `-border` / `-text` | tooltip card | `#fff` / `#e2e8f2` / ink | `#151f33` / cloud 22 % / `#f2f6ff` |
+
+**Document chrome:** `selection-bg` / `selection-fg`, `scrollbar` /
+`scrollbar-hover` (global rules in index.css).
+
+**Sidebar (`--t-sb-*`)** — light: white panel; dark: the original shell.
+
+| Token(s) | Use | Light | Dark |
+|---|---|---|---|
+| `sb-bg` / `sb-bg-solid` | panel (shorthand) / mobile topbar | `#fff` / `#fff` | `#0c0e16→#0a0c13` / `#0a0c12` |
+| `sb-border` / `sb-divider` | right edge / zone hairlines | `#e2e8f2` | `rgba(42,47,69,.7)` / `.8` |
+| `sb-glow` | brand-area radial | azure 6 % | azure 10 % |
+| `sb-wordmark` / `-dim` | "CRAG" / "GRANITE" | ink / `#5d6f8c` | `#f2f6ff` / `#97a8c6` |
+| `sb-mark-glow` | `filter` on the cube mark | soft drop shadow | azure glow |
+| `sb-text` / `-hover` / `-active` | nav row label | `#46566f` / ink / ink | `#74839b` / `#b4c2d9` / `#f1f5f9` |
+| `sb-hover` | neutral hover wash | ink 4 % | white 6 % |
+| `sb-icon*` | resting icon swatch (+ `-bg`, `-border`, `-hover`, `-bg-hover`, `-border-hover`) | paper swatch, `#5d6f8c` glyph | white 4 %/6 %, `#64748b` glyph |
+| `sb-head` / `-head-hover` / `sb-subhead` | group headers / "Support" sub-label | `#5d6f8c` / ink / `#8b99b0` | `#6e7d95` / `#b4c2d9` / `#56647b` |
+| `sb-muted*`, `sb-pill-*` | Coming Soon rows, header, "Soon" pill (≥ 3:1 by design) | `#7d8ba3` family | `#56647b` family |
+| `sb-accent-azure` / `-green` / `-amber` | per-row product accent (`--sb-accent`) | azure / `#15803d` / `#b45309` | azure / `#22c55e` / `#fbbf24` |
+| `sb-card-*`, `sb-name`, `sb-meta`, `sb-avatar-*` | user footer | `#f7f9fc` card, ink name | white 2 % card, `#a3b0c4` name |
+| `sb-btn-border` / `sb-btn-icon` | footer actions (theme switch, Sign out) + topbar icon buttons | `#e2e8f2` / `#5d6f8c` | `rgba(42,47,69,.55)` / `#74839b` |
+| `sb-scrollbar`, `sb-field-*` | nav scrollbar; sidebar sign-in form | daylight | original dark |
+| `sb-banner-*` | amber customer-view banner, View-as "ON", preview picker (`cvp--dark`) | `#fff6e5` bg, `#92400e` text | amber 12 % bg, `#f59e0b` text |
+
+The dark sidebar keeps today's background, border and accents exactly; only
+label colours that failed AA were lifted (rows `#64748b→#74839b`, headers
+`#475569→#6e7d95`, Coming Soon `#3f4b5e→#56647b`, footer meta
+`#334155→#6e7d95`).
+
+### 18.3 Rules for page authors
+
+1. **No colour literals** — no `#hex`, `rgb()/rgba()`, `hsl()` or Tailwind
+   palette colours in page CSS or TSX. Use `--t-*` tokens (CSS) or `T.*`,
+   `TONE.*`, `CHART.*`, `tMix()` (TSX, from `styles/theme.ts`).
+2. **Page-scoped tokens are allowed** in page CSS (`--ad-*`, `--vm-*`… —
+   the full list is §18.5) but must resolve in BOTH themes. Prefer aliasing
+   a theme token (`--ad-slate: var(--t-text-faint);`). If a page truly
+   needs its own colour, its LIGHT value may be a literal (the old daylight
+   value, kept for pixel parity) and its DARK value must point at a token.
+   Preferred shape — the one `--dl-*`, `--cq-*`, `--ts-*`, `--rpt-*`,
+   `--ladder-*`, `--ad-*` and `--rcfd-*` use:
+   ```css
+   :root,
+   [data-force-theme='light'] { --x-ring: #c3d0e4; }          /* light value */
+   :root[data-theme='dark'],
+   [data-force-theme='dark']  { --x-ring: var(--t-line-strong); }
+   ```
+   Declared on `:root`, the token also reaches portals and modals that sit
+   outside the page scope, and it follows a `data-force-theme` pin. The
+   shorter scope-keyed form (`.x-scope { … }` + `:root[data-theme='dark']
+   .x-scope { … }`, used by `--vm-*` and `--dlx-*`) is fine for content that
+   is never pinned — it does NOT follow `data-force-theme` (§18.7).
+   A colour more than one page needs belongs in `styles/theme.css` (or the
+   `--dl-*` palette) — add it to BOTH blocks, to `THEME_TOKENS` in
+   `styles/theme.ts` when it is a `--t-*` token, and to the tables here;
+   `node scripts/check-theme-tokens.mjs` must pass.
+3. **`--rcf-*` still works** — `.rcf-scope`/`.dl-scope` declare them as
+   aliases (`--rcf-ink` → `--t-text`, `--rcf-card` → `--t-surface`,
+   `--rcf-azure` → `--t-accent`, `--rcf-azure-deep` → `--t-accent-text`,
+   …), so those uses flip already. Prefer `--t-*` in new code.
+   **`--rcf-azure-deep` is now accent TEXT** (azure-bright on dark): a fill
+   that carries white text must use `--t-accent-hover` instead.
+4. **Status colours:** `--t-{ok,warn,danger,info,neutral}-{fg,bg,border,solid}`
+   (TS `TONE`). A pill = `fg` on `bg` with a `border`; a dot/bar = `solid`.
+   Grade logic stays in `quality.ts`; only its colour constants move to
+   tokens (keep its hex for the PDF — rule 8).
+5. **Charts and SVG:** series from `CHART.*` / `--t-chart-*`; gridlines,
+   axes, labels, hover band and tooltip from the chart tokens. **Paint SVG
+   through `style`** (`<rect style={{ fill: CHART.primary }} />`) or
+   `currentColor` — not the `fill=`/`stroke=` attributes, which do not
+   reliably resolve `var()`. Never dim a series below 3:1 against the panel.
+6. **Modals, portals, overlays:** tokens live on `<html>`, so a portal needs
+   no scope class for colour. Backdrop `--t-scrim`; panel
+   `--t-surface-raised` + 1px `--t-line` + `--t-shadow-modal`; optional
+   `--t-keyline` on the top edge. (A portal root may still carry
+   `.rcf-scope`/`.dl-scope` for the daylight *primitives*' class rules.)
+7. **Images and logos:** use transparent assets (`/crag-mark.*` — never the
+   dark-square `/crag.png` on a surface). Raster art that only works on one
+   ground needs a theme-aware swap or a token-coloured plate behind it.
+   Inline SVG icons use `currentColor`.
+8. **The Reporting PDF stays light** — `ReportPdfDocument` (@react-pdf) is
+   print: it keeps its own hex palette (`INK`, `LINE`… in the file) and the
+   print twins `GRADE_TONE_PRINT` (`reportFormat.ts`) / `QUALITY_PRINT_HEX`
+   (`quality.ts`); `styles/brand.ts` hex is the same kind of constant.
+   Never feed it `var()` strings (react-pdf can't resolve them). Same for
+   anything rendered to a file or `<canvas>` — resolve with
+   `useResolvedToken()` / `readToken()` first.
+9. **Focus rings:** `outline: 2px solid var(--t-focus); outline-offset: 2px`
+   (the global `:focus-visible` already does this); fields add
+   `box-shadow: var(--t-focus-halo)`. Never remove a ring without a visible
+   replacement.
+10. **Contrast targets:** WCAG AA — 4.5:1 for body/label text, 3:1 for large
+    text, UI component boundaries, icons and chart marks — in BOTH themes.
+    Measured on `surface`: light text/soft/dim 18.0/7.4/5.1, dark
+    16.6/11.9/7.5; accent-text 5.4 (L) / 5.9 (D); status fg ≥ 5.0 (L) /
+    ≥ 6.5 (D). Known, kept-as-is light values: `text-faint` 2.9:1 and
+    `field-placeholder` 2.4:1 (decorative/hint only — never the only carrier
+    of information), light ok/warn pills 4.4–4.5:1 (keep pill text ≥ 600),
+    light `chart-neutral` 1.6:1 (the de-emphasised "missed" series — pair it
+    with a legend + value labels).
+11. **Fonts are not theme-dependent**; neither is layout. Don't fork
+    markup per theme — a component reads `useTheme()` only for things CSS
+    can't express (e.g. which icon a toggle shows).
+12. **Elevation recipe (dark = the landing's panels):** canvas
+    `--t-canvas-bg` → panel `background: var(--t-panel-bg); border: 1px
+    solid var(--t-line); box-shadow: var(--t-shadow-card)` → hover
+    `border-color: var(--t-accent-border); box-shadow:
+    var(--t-shadow-card-hover)` → raised `--t-surface-raised` +
+    `--t-shadow-pop`. Primary actions use the `--brand-btn-*` recipe (same in
+    both themes); add `var(--t-glow)` for the dark bloom.
+
+**Legacy decisions (already done in the foundation):**
+- Tailwind `@theme` `--color-*` / `--shadow*` are now `@theme inline`
+  aliases of `--t-*` (`bg-surface`, `text-muted`… flip with the theme;
+  nothing in `src/` uses them). Don't add hex there.
+- The old `glass-*` classes (`.glass-surface`, `.glass-hover`,
+  `.glass-header`, `.glass-row-hover`), `.form-control` and `.toggle` are
+  theme panels/fields now (landing panel recipe, no backdrop blur).
+- `styles/brand.ts` hex (`BRAND_*`, `brandAzureAlpha`, `CHART_SERIES`) is
+  print/theme-less only; screen code uses `T` / `tMix` / `CHART`.
+- The global `input[type=date…] { color-scheme: dark }` rule is gone —
+  date pickers follow `<html>`'s color-scheme.
+
+### 18.4 Checklists
+
+**Converting a CSS file**
+1. Replace every `--rcf-*` with its `--t-*` equivalent (rule 3) — optional
+   but preferred; mandatory for `--rcf-azure-deep` used as a fill.
+2. Map each literal to a token: paper → `canvas`, white card → `surface`
+   (or `panel-bg` for a full panel background), `#f7f9fc`-ish fills →
+   `tint`, hovers → `tint-hover`/`hover`, `#e2e8f2`/`#edf1f7`/`#cdd8e8` →
+   `line`/`line-soft`/`line-strong`, ink ramp → `text`/`-soft`/`-dim`/
+   `-faint`, azure washes → `accent-tint`/`accent-wash`/`accent-border` or
+   `color-mix(in srgb, var(--t-accent) N%, transparent)`, status triples →
+   `--t-<tone>-*`, shadows → `shadow-*`, input colours → `field-*`, modal
+   backdrops → `scrim`, granite header → `band-*`.
+3. Page-scoped colour variables: alias a `--t-*` token, or define both
+   themes (rule 2).
+4. Hard-coded white text on azure → `text-on-accent`; `#fff` backgrounds
+   that are really "card" → `surface`.
+5. `node scripts/check-theme-tokens.mjs --literals <file>` → zero left, or
+   only the §18.8 exception kinds (a light-value page-token definition gets
+   its dark twin and a comment). The scan strips comments first, so prose
+   like "React #310" is ignored, and it does catch all-digit hex
+   (`#475569`). Whole tree: `node scripts/check-theme-tokens.mjs --literals
+   $(find src -name '*.css' -o -name '*.ts' -o -name '*.tsx')`.
+6. Look at the page in BOTH themes (screenshot harness or `npm run dev` +
+   the sidebar toggle); check hover, focus, empty/error/loading states, a
+   modal, and a 390px width.
+
+**Converting a TSX file**
+1. `import { T, TONE, CHART, tMix } from '…/styles/theme'`.
+2. Inline colours → `T.*` (`color: T.textDim`); alpha suffixes
+   (`${hex}22`) → `tMix(token, pct)`; status triples → `TONE.<tone>`.
+3. SVG: move `fill`/`stroke` to `style` or use `currentColor` (rule 5).
+4. Local palette modules export `var()` strings for screen use (all
+   converted: `pages/rcf/theme.ts` `INK`… + `DL`, `docs/tokens.ts` `C`,
+   `sip-ladder/sipLadderUtils.ts` `LADDER_COLORS`,
+   `stir/attestationColors.ts` `ATTEST_TONES`, `rcf/callOutcome.ts`,
+   `calls/quality.ts`, `reporting/reportFormat.ts`); a separate hex export
+   exists only where print/PDF needs it (`QUALITY_PRINT_HEX`,
+   `GRADE_TONE_PRINT`). Reuse these before adding a new palette.
+5. `onMouseEnter`/`onMouseLeave` colour hacks → a CSS `:hover` rule or
+   Tailwind `hover:text-[color:var(--t-text)]`.
+6. Need a resolved value (canvas, colour maths)? `useResolvedToken(name)`.
+7. `npx tsc -p tsconfig.app.json --noEmit`, `npx eslint <files>`, the
+   `--literals` scan, then both themes visually.
+
+### 18.5 Page-scoped palettes (what the page conversions built)
+
+Every page token below is defined for BOTH themes (light = the exact old
+daylight value; dark = a `--t-*` token or a recipe of them). Use the
+existing name before inventing one.
+
+| Family | Where | What it carries |
+|---|---|---|
+| `--dl-*` | `index.css` — the **DAYLIGHT PAGE PALETTE** block (on `:root` + `[data-force-theme]`) | The daylight console's own greys/washes/shadows that no `--t-*` token carries exactly: `slate-soft`/`-mute`, `ctl-border`(`-hover`), `field-hover`, `rule`, `th-hover`, `well`(`-soft`), `icon-wash`(`-strong`/`-mute`), `note-wash`, `btn-disabled`(`-fg`/`-ring`), `ghost-hover-bg/-border`, `panel-border-hover`, `switch-track/-border`, `amber`, `warn-ink`, `sky`(`-solid`), `select-chevron`, the panel/pop/tip/dialog/detail shadows, `dialog-scrim`(`-strong`), `tab-hover-from/-to`, `detail-line`. Used by the shared `dl-*`/`rcf-*` primitives, account-dashboard.css and rcf-dashboard.css. |
+| `DL` (TS) | `pages/rcf/theme.ts` | Typed `var(--dl-*)` strings for TSX (`DL.slateSoft`, `DL.rule`, `DL.iconWash`, `DL.sky`…) next to `INK`/`INK_SOFT`/`INK_DIM`/`INK_FAINT`/`AZURE`/`AZURE_DEEP`/`GREEN`/`RED` — TSX never spells a raw custom property. |
+| `--ad-*` | `account-dashboard.css` | Scope aliases on `.ad-scope` (`--ad-slate`, `--ad-shadow`…) + `:root` page tokens: card/KPI/action gradients (`--ad-card-bg`, `--ad-kpi-bg`, `--ad-action-hover-bg`), bar tops, search well, selected row. |
+| `--adh-*` | `account-dashboard.css` (`.ad-header`) | Granite-band constants (live dot, inset shade, the three radial glows, active product pill). Theme-INDEPENDENT on purpose — the band is dark in both themes. |
+| `--rcfd-*` | `rcf-dashboard.css` | Board/overlay elevation, open-route wash, paused-status bg, overlay scrim + shadow, search well, filament tail. |
+| `--cq-*` | `dl-platform-b.css` (Calls & Quality; also read by Reporting) | Ghost/note/link-off greys, control borders, ghost hover, amber ink, card/strip/seg/pop/modal shadows, scrim, KPI tile bg, and the dark-only keyline switch (`--cq-keyline-content`, `--cq-strip-position`). |
+| `--ts-*` (+ `--dlx5-accent*`) | `dl-troubleshoot.css` | Troubleshooting: ghost greys, control borders, ghost hover, seg shadow, scrim, cobalt accent wash, the CallTraceModal lift (`--ts-modal-shadow`). |
+| `--rpt-*` | `dl-reporting.css`, `dl-trend-chart.css` | Skeleton highlight, popover shadow, the trend chart's tick + grid ink (`--rpt-chart-tick`/`-grid`, painted via `style`). |
+| `--qtc-tip-shadow` | `dl-trend-chart.css` | The chart tooltip's lift. |
+| `--ladder-*` | `components/sip-ladder/sipLadder.css` | BYE + loopback arrow hues, card + panel shadows (read by `LADDER_COLORS`). |
+| `--vm-*` | `dl-voicemail.css`, on `.vm-scope` (page root AND the `VmDialog` portal root) | Voicemail roles (select tint, amber, labels, thumb, dialog bg, player line/bg, danger fill/glow, elevation, scrim) + light-only shades re-pointed in the DARK block `:root[data-theme='dark'] .vm-scope`. |
+| `--dlx-*` | `dl-docs.css` (`.dlx-docs`: inline-code chip, admin tag line, warn ink; `.dlx-code`: the code theme), `dl-portal-pages.css` (`.dlx-trunks`: warn ink, disabled-DID dot) | Docs / code blocks / SIP Trunking page roles. The `--dlx-code-*` syntax colours are a code theme, the SAME in both themes (§18.8). |
+
+**Consolidation candidate:** `--cq-*` and `--ts-*` duplicate `--dl-*`
+value for value in BOTH themes — `#b6c2d4` (`--cq-ghost` = `--ts-ghost` =
+`--dl-slate-soft`), `#d5deeb` / `#b7c7dd` (`--cq-`/`--ts-ctl-border(-hover)`
+= `--dl-ctl-border(-hover)`), `#f2f6fc` / `#b5c4da` (`--cq-`/`--ts-ghost-hover-bg/-border`
+= `--dl-ghost-hover-bg/-border`), `#92400e` (`--cq-amber-ink` = `--dl-warn-ink`,
+also `--dlx-warn-ink`), with the same dark twins — so they could alias the
+`--dl-*` names later with no visual change in either theme. A few others
+share only the LIGHT value and chose a different dark twin
+(`--dlx-dot-off` vs `--dl-slate-soft`, `--dlx-ic-bg` / `--vm-seg-bg` vs
+`--dl-icon-wash-mute`, `--vm-iconbtn-hover-line` vs `--dl-field-hover`):
+aliasing those would change dark slightly.
+
+### 18.6 Shared opt-in modifiers and dialog classes (index.css)
+
+- **`.dl-tabs-scroll`** (on a `.dl-tabs` rail): below 1024px the rail
+  scrolls sideways inside itself instead of pushing the page wider; auto
+  margins keep the tabs centred while they fit and never cut off the first
+  one; the baseline becomes an inset shadow. Wide screens keep the plain
+  rail on purpose (§18.7).
+- **`.dl-metrics-wrap`** (on a `.dl-metrics` row): header metrics wrap
+  instead of overflowing; a two-up grid below 560px.
+  Both render exactly like the plain primitive where everything fits; opt
+  in per page (MyAccountPage uses both).
+- **`.rcf-dialog`** (+ `.rcf-dialog-strong`, `.rcf-dialog-scrim`,
+  `.rcf-dialog-scrim-strong`): the DID-management confirmation dialogs — a
+  raised card with the azure top edge over a dimmed page; `-strong` is the
+  release dialog's heavier scrim + shadow.
+- **`.rcf-didpick-*`** (`-menu`, `-opt`, `-opt-on`, `-opt-all`, `-clear`):
+  the Call Activity DID picker popover (`ActivityDidPicker`) — raised menu,
+  tint-on-hover options, a faint azure wash on the selected one.
+
+### 18.7 Rendering gotchas (learned while keeping light pixel-identical)
+
+- **A `color-mix()` stop inside a gradient changes Chrome's gradient
+  interpolation** (it switches to float maths) and shifts the pixels by a
+  level. Keep gradient stops as plain colours (`rgba()` light values, or a
+  token that resolves to a plain colour); `color-mix()` is fine for flat
+  fills, borders and shadows.
+- **An `overflow: auto` scroller changes how Chrome rasterises the whole
+  page**, so adding one can move pixels far from it. That is why
+  `.dl-tabs-scroll` only scrolls below 1024px.
+- **A visually-hidden `position: absolute` element inside a horizontal
+  scroller needs a positioned ancestor** — otherwise it sits at its static
+  x far past the viewport and widens the document. `.dlx4-tablewrap` /
+  `.dlx5-tablewrap { position: relative }` fixed Reporting and
+  Troubleshooting scrolling sideways at 390px.
+- **Page tokens keyed on `:root[data-theme]` ignore `data-force-theme`
+  pins.** `:root[data-theme='dark'] .vm-scope` (and the `.dlx-*` blocks)
+  only look at `<html>`; a pinned subtree keeps the outer theme's values.
+  Use the `:root, [data-force-theme=…]` shape of §18.3 rule 2 for anything
+  that may sit under a pin.
+- **Native range thumbs** paint on their own path: a `color-mix()` shadow
+  there lands a few levels off at the anti-aliased edge, so
+  `--vm-shadow-thumb` keeps a legacy `rgba()` on light.
+
+### 18.8 Remaining colour literals — the allowed exceptions
+
+`node scripts/check-theme-tokens.mjs --literals` over all of `src/` lists
+only these kinds (anything else is a bug):
+- **Theme and brand sources:** `styles/theme.css` (every token's values),
+  the `:root` brand block in `index.css`, `styles/brand.ts`.
+- **Light-value definitions of page tokens** (§18.5), each with a dark
+  twin: `index.css` `--dl-*`, `account-dashboard.css`, `rcf-dashboard.css`,
+  `dl-platform-b.css`, `dl-troubleshoot.css`, `dl-reporting.css`,
+  `dl-voicemail.css`, `dl-portal-pages.css`, `dl-docs.css`,
+  `sip-ladder/sipLadder.css`; plus the theme-independent `--adh-*` band
+  constants.
+- **Print / PDF hex:** `ReportPdfDocument.tsx`, `GRADE_TONE_PRINT`
+  (`reportFormat.ts`), `QUALITY_PRINT_HEX` (`quality.ts`).
+- **The code theme:** `--dlx-code-*` syntax colours (`dl-docs.css`).
+- **The landing** (always dark, its own palette): `styles/landing.css`,
+  `components/layout/HaArchitectureViz.tsx` (and `pages/DashboardPage.tsx`).
+- **Not rendered, not converted** (convert before reviving any of them):
+  the IVR builder internals `pages/ivr/*` (IvrBuilderPage is a shell that
+  imports none of them), `pages/TrunkCard.tsx`, `pages/ApiDidCard.tsx`,
+  `components/AdminCustomerSelector.tsx`, the orphaned `pages/LoginPage.tsx`
+  + `components/layout/AnimatedGridBackground.tsx`, and the unimported
+  `styles/onboarding-brief.css` / `styles/dl-customer360.css`;
+  `styles/dl-api-calling.css` belongs to the retired `ApiDidsPage`
+  (unreachable while `API_CALLING_ENABLED` is false).

@@ -1,14 +1,29 @@
-import { Outlet } from 'react-router-dom';
+import { useLayoutEffect } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { SidebarCollapseTab } from './SidebarCollapse';
 import { useSidebarCollapse } from './useSidebarCollapse';
 import { useAuth } from '../../contexts/AuthContext';
+import { setLandingSurface } from '../../styles/theme';
 import { cn } from '../../utils/cn';
 
 export function AppLayout() {
   // Hooks first, unconditionally — React #310 guard (see CLAUDE.md §13).
   const { isAuthenticated, isLoading } = useAuth();
   const { collapsed, toggleCollapsed } = useSidebarCollapse();
+  const { pathname } = useLocation();
+
+  // The public landing page ('/' — DashboardPage: the marketing page, its
+  // granite auth-check splash, or the instant redirect of a signed-in user)
+  // keeps its own dark design whatever the theme: <html data-landing>
+  // forces the dark token set while it is on screen. index.html sets it
+  // before first paint; this keeps it in step on navigation. Layout effect
+  // so the canvas never paints a frame in the wrong scheme.
+  const onLanding = pathname === '/';
+  useLayoutEffect(() => {
+    setLandingSurface(onLanding);
+    return () => setLandingSurface(false);
+  }, [onLanding]);
 
   // The sidebar (and its 240px offset) only exists for signed-in users.
   // Signed-out visitors can only ever reach '/' inside this layout —
@@ -18,7 +33,7 @@ export function AppLayout() {
   const sidebarOpen = showSidebar && !collapsed;
 
   return (
-    <div className="min-h-screen bg-[#0f1117]">
+    <div className="app-canvas">
       {showSidebar && <Sidebar collapsed={collapsed} />}
 
       {/* Collapse/expand tab — shared with TroubleshootingPage via

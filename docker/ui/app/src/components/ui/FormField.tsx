@@ -29,16 +29,18 @@ type TextareaFieldProps = FormFieldBaseProps &
 
 type FormFieldProps = InputFieldProps | SelectFieldProps | TextareaFieldProps;
 
+// Theme tokens only (src/styles/theme.css) — a field well in either theme.
 const controlBase = [
   'text-sm px-3 py-2 rounded-lg w-full h-9',
-  'border border-[#2a2f45] bg-[#1e2130] text-[#e2e8f0]',
+  'border border-[color:var(--t-field-border)] bg-[color:var(--t-field-bg)] text-[color:var(--t-text)]',
   'outline-none transition-all duration-150',
-  'focus:border-[color:var(--brand-azure)] focus:shadow-[0_0_0_3px_rgba(47,125,246,0.2)]',
-  'placeholder:text-[#4a5568]',
-  'disabled:opacity-50 disabled:cursor-not-allowed',
+  'hover:border-[color:var(--t-field-border-hover)]',
+  'focus:border-[color:var(--t-focus)] focus:shadow-[var(--t-focus-halo)]',
+  'placeholder:text-[color:var(--t-field-placeholder)]',
+  'disabled:bg-[color:var(--t-field-disabled-bg)] disabled:text-[color:var(--t-text-faint)] disabled:cursor-not-allowed',
 ].join(' ');
 
-const labelBase = 'text-[0.68rem] font-semibold text-[#4a5568] uppercase tracking-[0.04em]';
+const labelBase = 'text-[0.68rem] font-semibold text-[color:var(--t-text-dim)] uppercase tracking-[0.04em]';
 
 export function FormField(props: FormFieldProps) {
   const { label, hint, error, required, className, fullWidth, as = 'input', ...rest } = props;
@@ -49,7 +51,7 @@ export function FormField(props: FormFieldProps) {
     <div className={cn('flex flex-col gap-1.5', fullWidth && 'col-span-2', className)}>
       <label htmlFor={id} className={labelBase}>
         {label}
-        {required && <span className="text-red-400 ml-0.5">*</span>}
+        {required && <span className="text-[color:var(--t-danger-fg)] ml-0.5">*</span>}
       </label>
 
       {as === 'select' ? (
@@ -69,16 +71,20 @@ export function FormField(props: FormFieldProps) {
       ) : (
         <input
           id={id}
-          className={cn(controlBase, error && 'border-red-500/60 focus:shadow-[0_0_0_3px_rgba(239,68,68,0.2)]')}
+          className={cn(
+            controlBase,
+            error && 'border-[color:var(--t-danger-border)] focus:border-[color:var(--t-danger-fg)] focus:shadow-[0_0_0_3px_var(--t-danger-bg)]',
+          )}
+          aria-invalid={error ? true : undefined}
           {...(rest as InputHTMLAttributes<HTMLInputElement>)}
         />
       )}
 
       {hint && !error && (
-        <p className="text-xs text-[#4a5568]">{hint}</p>
+        <p className="text-xs text-[color:var(--t-text-dim)]">{hint}</p>
       )}
       {error && (
-        <p className="text-xs text-red-400">{error}</p>
+        <p className="text-xs text-[color:var(--t-danger-fg)]">{error}</p>
       )}
     </div>
   );
