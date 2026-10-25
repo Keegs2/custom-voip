@@ -369,3 +369,9 @@ Nothing changes until you accept, and nothing goes live until you publish."
 ## Changes
 
 - 2026-10-25 — first version.
+- 2026-10-25 — settled during the build (all four builds implement these; wire shapes unchanged):
+  - **§1 wire:** the envelope is exactly `{v, payload_b64}`, and padded base64 is refused (400). `X-Request-Id` is only for TED's logs; the payload's `request_id` decides idempotency. TED checks the token before the switch, so a disabled TED without a token answers 401, not 503 (CRAG maps both to `assistant_unavailable`). A settled response replays whatever its status; a duplicate still running answers 429 `busy` with `retry_after_s: 10`.
+  - **§2:** `limits.max_new_prompts` is min(20, 100 − the customer's live prompts), so accepting can never pass the prompt cap. History carries only finished turns.
+  - **§3 transforms (never a 502):** TED turns integral floats into integers, drops unreferenced new prompts, drops an EMPTY `values` on an `anonymous` caller check, and replaces formatted NANP numbers and 7+ digit runs in free text and node labels with `[number removed]`.
+  - **§5 extra responses:** 409 `assist_not_refinable` (refining a job that isn't an open proposal); 409 `assist_not_a_proposal` (outcome or simulate on a job that isn't a finished proposal); 409 `assist_outcome_recorded` with `outcome` (a different outcome after one is recorded; the same one again is 204); 422 for a message outside 1–2000 characters or an invalid/oversized `draft_graph`; 503 for the admin PUT with `assist_enabled` before migration 61. A job error `assistant_busy` carries `retry_after_s`. An unknown, foreign or > 24 h `conversation_id` silently starts a new conversation; the response carries the id in use.
+  - **§8:** TED's switch can always turn the assistant OFF, even while Visual IVR is off; only turning it on needs Visual IVR.
