@@ -266,6 +266,13 @@ _FIDELITY_BLOCK: list[tuple[str, str, Callable[[Any], str]]] = [
     ("call_quality_grade",             "call_quality_grade",             _fmt_plain),
     ("call_mos",                       "call_mos",                       _fmt_num),
     ("call_quality_leg",               "call_quality_leg",               _fmt_plain),
+    # --- 60_cdr_ivr.sql (Visual IVR outcome; A-leg of an IVR call, else empty) ---
+    ("ivr_flow_id",                    "ivr_flow_id",                    _fmt_plain),
+    ("ivr_flow_version",               "ivr_flow_version",               _fmt_plain),
+    ("ivr_exit",                       "ivr_exit",                       _fmt_plain),
+    ("ivr_path",                       "ivr_path",                       _fmt_plain),
+    ("ivr_transfer_to",                "ivr_transfer_to",                _fmt_plain),
+    ("ivr_seconds",                    "ivr_seconds",                    _fmt_plain),
 ]
 
 _FIELD_DEFS: list[tuple[str, str, Callable[[Any], str]]] = _BILLING_BLOCK + _FIDELITY_BLOCK

@@ -24,12 +24,14 @@ as the validated `kyc` payload on the public POST, persisted to
 the 4-year retention enforcement are ADMIN/OPERATIONAL steps, out of scope for
 this intake endpoint — admins review the KYC data before completing a request.
 
-Product-aware intake (products-v1): applicants select one or more products
-(rcf / trunk / api / voicemail) and supply the setup information each selected
-product needs to provision — RCF: DID count / porting / forwarding plan;
-Trunk: PBX/SBC public signaling IPs (the platform is IP-peering only, no
-REGISTER auth) + concurrent call paths; API: use case / CPS / webhook;
-Voicemail: mailbox count + attachment target. Validated as the `products`
+Product-aware intake (products-v2; products-v1 payloads are still accepted):
+applicants select one or more products (rcf / trunk / api / voicemail / ivr)
+and supply the setup information each selected product needs to provision —
+RCF: DID count / porting / forwarding plan; Trunk: PBX/SBC public signaling
+IPs (the platform is IP-peering only, no REGISTER auth) + concurrent call
+paths; API: use case / CPS / webhook; Voicemail: mailbox count + attachment
+target; IVR (v2, docs/IVR_INTERFACES.md §8.3): number count 1-20 + optional
+notes. Validated as the `products`
 payload on the public POST, persisted to `onboarding_requests.products` JSONB
 (migration 36_onboarding_products.sql). The legacy top-level RCF columns are
 backfilled from products.rcf for backward compat.
@@ -249,7 +251,11 @@ class KycPayload(BaseModel):
         return self
 
 
-PRODUCTS_FORM_VERSION = "products-v1"
+#: Stamped on every new submission. v2 = v1 + the 'ivr' product; a v1-shaped
+#: payload (no ivr) is a valid v2 payload, and a client that still declares
+#: form_version 'products-v1' is accepted as long as it does not select ivr.
+PRODUCTS_FORM_VERSION = "products-v2"
+ACCEPTED_PRODUCTS_FORM_VERSIONS = ("products-v1", "products-v2")
 
 # Option strings shared with the public form (RequestAccessSection.tsx).
 # NOTE: DID counts use an EN dash (–); porting options use an EM dash (—).
@@ -265,7 +271,8 @@ ForwardingOption = Literal[
     "Need help deciding",
 ]
 
-ProductKey = Literal["rcf", "trunk", "api", "voicemail"]
+ProductKey = Literal["rcf", "trunk", "api", "voicemail", "ivr"]
+_PRODUCT_BLOCKS = ("rcf", "trunk", "api", "voicemail", "ivr")
 
 
 class RcfIntake(BaseModel):
@@ -338,6 +345,17 @@ class VoicemailIntake(BaseModel):
     attach_to: Literal["existing_numbers", "new_numbers", "unsure"]
 
 
+class IvrIntake(BaseModel):
+    """Visual IVR setup info (products-v2)."""
+    number_count: int = Field(ge=1, le=20)
+    notes: Optional[str] = Field(default=None, max_length=1000)
+
+    @field_validator("notes")
+    @classmethod
+    def strip_notes(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() or None if v is not None else None
+
+
 class ProductsPayload(BaseModel):
     """The `products` object on the public intake POST. Each product block
     must be present iff the product is selected. Stored in
@@ -348,6 +366,10 @@ class ProductsPayload(BaseModel):
     trunk: Optional[TrunkIntake] = None
     api: Optional[ApiIntake] = None
     voicemail: Optional[VoicemailIntake] = None
+    ivr: Optional[IvrIntake] = None
+    #: Optional client echo of the form contract; the server stamps
+    #: PRODUCTS_FORM_VERSION either way.
+    form_version: Optional[Literal["products-v1", "products-v2"]] = None
 
     @field_validator("selected")
     @classmethod
@@ -369,7 +391,9 @@ class ProductsPayload(BaseModel):
                 "be requested — deselect it (RCF, SIP Trunking and Voicemail "
                 "remain available)"
             )
-        for key in ("rcf", "trunk", "api", "voicemail"):
+        if self.form_version == "products-v1" and ("ivr" in self.selected or self.ivr is not None):
+            raise ValueError("the 'ivr' product needs form_version products-v2")
+        for key in _PRODUCT_BLOCKS:
             block = getattr(self, key)
             if key in self.selected and block is None:
                 raise ValueError(
@@ -503,7 +527,9 @@ async def submit_onboarding_request(body: OnboardingSubmit):
         "submitted_at": datetime.now(timezone.utc).isoformat(),
         "form_version": KYC_FORM_VERSION,
     }
-    products_doc = body.products.model_dump()
+    products_doc = body.products.model_dump(exclude={"form_version"})
+    if body.products.ivr is None:
+        products_doc.pop("ivr", None)  # a non-IVR document keeps the v1 key set
     products_doc["form_version"] = PRODUCTS_FORM_VERSION
 
     # Legacy-column backfill: prefer the mirrored top-level fields if the

@@ -441,3 +441,7 @@ All paths are under `/v1`. JSON request and response bodies use snake_case. Erro
 
 ## Changes
 - 2026-10-25: initial pin (orchestrator).
+- 2026-10-25 (orchestrator, from P4 TED; applied by P1):
+  - **Assign route path.** §8.3's "POST /v1/numbers/assign" means the EXISTING `POST /v1/numbers/{did}/assign` and `POST /v1/numbers/{did}/unassign` in `number_inventory.py`; they gain `product_type: "ivr"` (+ optional `name`). No new route.
+  - **Clearing a number's name.** `PUT /v1/ivr/admin/numbers/{id}` accepts `"name": null` to clear the name; an absent `name` leaves it unchanged (`model_fields_set`). The customer `PUT /v1/ivr/numbers/{id}` behaves the same way.
+  - **Voicemail assign body unchanged.** Voicemail assignment keeps `label`; only `ivr` assignment uses `name`.

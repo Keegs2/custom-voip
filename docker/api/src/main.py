@@ -20,7 +20,7 @@ from routers import (
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
     onboarding, freeswitch, carrier_status, live_trunk_stats,
-    stir, billing, carrier_trunks, reports, voicemail,
+    stir, billing, carrier_trunks, reports, voicemail, ivr,
 )
 from middleware.auth import JWTAuthMiddleware
 from services.voicemail import retention as voicemail_retention
@@ -194,6 +194,13 @@ app.include_router(reports.router, prefix="/reports", tags=["Reports"])
 # JWT-exempt (playback token inside the router).
 app.include_router(voicemail.router, prefix="/v1/voicemail", tags=["Voicemail"])
 app.include_router(voicemail.router, prefix="/voicemail", tags=["Voicemail"])
+# Visual IVR (docs/IVR_INTERFACES.md §8.2/§8.3). GET/HEAD
+# .../prompts/{id}/audio is JWT-exempt (playback token inside the router).
+# IvrApiError carries extra body keys next to `detail` (current_revision,
+# errors, flows, numbers).
+app.include_router(ivr.router, prefix="/v1/ivr", tags=["IVR"])
+app.include_router(ivr.router, prefix="/ivr", tags=["IVR"])
+app.add_exception_handler(ivr.IvrApiError, ivr.ivr_error_handler)
 
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
 # middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so

@@ -9,8 +9,9 @@ anything else:
 * ``aud="vm-playback"`` and ``typ="vm-playback"`` — the session decoder
   (``auth/security.decode_access_token``) rejects both, so even a token signed
   with the session key could not act as a Bearer;
-* bound to one object: ``k`` (``message``|``greeting``) and ``oid`` must match
-  the URL being served;
+* bound to one object: ``k`` (``message``|``greeting``, or ``ivr_prompt`` for
+  the IVR prompt preview — routers/ivr.py) and ``oid`` must match the URL
+  being served, so a token minted for one kind never plays another;
 * ``exp`` = issue time + 120 s; random ``jti`` (the router keys its
   decrypt-once cache and once-per-token audit on it).
 
@@ -32,7 +33,7 @@ PLAYBACK_AUDIENCE = "vm-playback"
 PLAYBACK_TOKEN_TYPE = "vm-playback"
 PLAYBACK_TTL_SECONDS = 120
 PLAYBACK_ALGORITHM = "HS256"
-PLAYBACK_KINDS = ("message", "greeting")
+PLAYBACK_KINDS = ("message", "greeting", "ivr_prompt")
 _MAX_TOKEN_CHARS = 4096
 
 
@@ -59,14 +60,14 @@ def _pos_int(value: Any) -> bool:
 
 def mint_playback_token(kind: str, obj_id: int, customer_id: int, user_id: int | str,
                         download: bool = False) -> str:
-    """Mint a 120-second playback token for one message/greeting.
+    """Mint a 120-second playback token for one message/greeting/IVR prompt.
 
     ``customer_id`` is the OWNER of the object (also for an admin previewing a
     customer). Raises ValueError on bad arguments, PlaybackNotConfigured (503)
     when the secret is unusable.
     """
     if kind not in PLAYBACK_KINDS:
-        raise ValueError("kind must be 'message' or 'greeting'")
+        raise ValueError("kind must be 'message', 'greeting' or 'ivr_prompt'")
     if not _pos_int(obj_id):
         raise ValueError("obj_id must be a positive int")
     if not _pos_int(customer_id):
