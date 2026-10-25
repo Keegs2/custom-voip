@@ -92,6 +92,11 @@ services:
       - VOICEMAIL_STT_CONCURRENCY=${VOICEMAIL_STT_CONCURRENCY:-}
       - VOICEMAIL_STT_DAILY_MINUTES_CAP=${VOICEMAIL_STT_DAILY_MINUTES_CAP:-}
       - VOICEMAIL_TRANSCRIPTION_POLL_S=${VOICEMAIL_TRANSCRIPTION_POLL_S:-}
+      # Visual IVR (docs/IVR_INTERFACES.md §8.1): the internal Piper TTS
+      # sidecar below, reached by service name on services-network only.
+      # Prompt playback tokens reuse VOICEMAIL_PLAYBACK_SECRET (kind ivr_prompt).
+      - IVR_TTS_URL=${IVR_TTS_URL:-http://tts:5000}
+      - IVR_TTS_TIMEOUT_S=${IVR_TTS_TIMEOUT_S:-30}
     # Plaintext voicemail audio is RAM-only (build plan D8 / §3.2): anything
     # that does spool to /tmp stays in RAM, and the API never core-dumps
     # decrypted audio to disk.
@@ -122,6 +127,29 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+    restart: unless-stopped
+
+  # Piper text-to-speech for Visual IVR prompts (docs/IVR_INTERFACES.md §8.1).
+  # CPU only, INTERNAL: no published port — only the api reaches it, at
+  # http://tts:5000 on services-network. Voices (public domain) are baked into
+  # the image at build time and sha256-verified; it never fetches at run time.
+  # Renders happen when a customer creates/previews a prompt, never on the
+  # call path (FreeSWITCH plays the stored 8 kHz WAV from its zone replica).
+  tts:
+    build: ./docker/tts
+    image: voip-tts:latest
+    container_name: voip-tts
+    environment:
+      - TTS_CONCURRENCY=${TTS_CONCURRENCY:-2}
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          memory: 256M
     restart: unless-stopped
 
   # CDR Export Forwarder — OPT-IN scheduled runner (Equinox → FileMage FTP).

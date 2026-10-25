@@ -1,0 +1,5 @@
+*
+!Dockerfile
+!voices.json
+!fetch_voices.py
+!server.py

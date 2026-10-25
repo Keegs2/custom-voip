@@ -189,6 +189,8 @@ services:
       - BANDWIDTH_API_CLIENT_SECRET=${BANDWIDTH_API_CLIENT_SECRET:-}
       - BANDWIDTH_ACCOUNT_ID=${BANDWIDTH_ACCOUNT_ID:-9900717}
       - BANDWIDTH_SIP_PEER_ID=${BANDWIDTH_SIP_PEER_ID:-1162116}
+      # Visual IVR: the internal Piper TTS sidecar below (docs/IVR_INTERFACES.md §8.1)
+      - IVR_TTS_URL=${IVR_TTS_URL:-http://tts:5000}
     ports:
       - "${API_PORT:-8088}:8000"
     networks:
@@ -201,6 +203,19 @@ services:
         reservations:
           cpus: '0.5'
           memory: 256M
+    restart: unless-stopped
+
+  # Piper TTS sidecar for Visual IVR prompts — internal only (no published port)
+  tts:
+    build: ./docker/tts
+    container_name: voip-tts
+    networks:
+      - voip-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
     restart: unless-stopped
 
   # Web UI — RCF management, customer admin, DID tools
