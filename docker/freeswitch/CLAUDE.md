@@ -297,3 +297,7 @@ so the scripts can land with a plain `git pull` (bind-mounted, next call). The
 `ivr_prompts` volume needs the one-time container recreate that the
 voicemail-resilience compose change brings. Turning IVR on is P5: one IVR test
 number, then `IVR_ENABLED=true` in that zone's media-VM `.env` + recreate.
+Order: migration 59 (`ivr_fs_number`) must be on the replicas BEFORE these
+scripts are pulled — STEP-1 arm e queries the view for every DID that no other
+product owns (a would-be 404), and before 59 that query fails and logs an ERR
+line per such call (the call still gets its 404).
