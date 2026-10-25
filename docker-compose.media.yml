@@ -71,6 +71,12 @@ services:
       # (e.g. east-fs-1). Unset => "<FS_ZONE>-fs". Set it where a zone runs a
       # second FreeSWITCH (fs-2) so CDRs can tell the two apart.
       - FS_NODE_ID=${FS_NODE_ID:-}
+      # Visual IVR (docs/IVR_INTERFACES.md §5.1). DEFAULT OFF: an IVR DID
+      # (direct or as an on-net terminal) is hard-rejected 603 with
+      # lua_routed=true — never a carrier hairpin. Only the exact value "true"
+      # (case-insensitive, trimmed) enables it, parsed like API_CALLING_ENABLED.
+      # Enabling needs IVR_ENABLED=true in /opt/revup/.env + container recreate.
+      - IVR_ENABLED=${IVR_ENABLED:-false}
     volumes:
       - ./docker/freeswitch/conf:/usr/local/freeswitch/conf
       - ./docker/freeswitch/scripts:/usr/local/freeswitch/scripts
@@ -91,6 +97,20 @@ services:
       #   (same value as the services VM's INGEST_SHARED_SECRET).
       # Read by curl via `-H @/run/revup/vm_ingest.header` — never on argv.
       - ./secrets/fs-voicemail:/run/revup:ro
+      # Visual IVR prompt cache (docs/IVR_INTERFACES.md §4): content-addressed
+      # /var/lib/crag/ivr-prompts/<sha256>.wav, filled from the zone replica on
+      # a miss (lib/ivr_prompts.lua). Persistent so a restart keeps the cache.
+      - ivr_prompts:/var/lib/crag/ivr-prompts
+      # Voicemail outage spool (docs/VOICEMAIL_OUTAGE_RESILIENCE.md): when the
+      # East API is unreachable at hang-up, lib/vm_spool.lua seals the message
+      # (CMS AuthEnvelopedData, AES-256-GCM + RSA-OAEP to the PUBLIC
+      # certificate(s) in ./secrets/fs-voicemail/vm_spool_recipients.pem, read
+      # through the /run/revup mount above) into <msg_uuid>.cms + .json here.
+      # CIPHERTEXT + routing metadata only — never plaintext audio, never a
+      # key. Shared with vm-forwarder below, which replays it. Lua refuses to
+      # seal unless this is a real mount (it never falls back to the
+      # container layer). Mounting it needs a container recreate.
+      - vm_spool:/var/lib/crag/vm-spool
     # Encrypted voicemail recording scratch (build plan §3.1 / D8): plaintext
     # audio exists ONLY in this RAM-backed mount — record writes
     # /dev/shm/vm/<uuid>.wav, the Lua deposits it to the API and unlinks it on
@@ -194,6 +214,62 @@ services:
       resources:
         limits:
           cpus: '0.5'
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # vm-forwarder — delivers voicemail FreeSWITCH SEALED to the vm_spool volume
+  # while the East API was unreachable (docs/VOICEMAIL_OUTAGE_RESILIENCE.md;
+  # docker/vm-forwarder/forwarder.py). Replays POST
+  # /v1/voicemail/fs/deposit-sealed oldest first with backoff (201/200 ->
+  # delete, 410 -> delete, 422 -> rejected/, else keep + retry) and enforces
+  # the caps: 7 days / 2 GiB per VM, oldest first, each drop journaled in
+  # vm_spool/audit/spool-audit.jsonl. Python stdlib only, NO KEYS (it cannot
+  # read what it forwards). Metrics on 127.0.0.1:9105 for the co-located
+  # vmagent (dashboard tile only — no alert).
+  #
+  # host network: reaches the East API (API_HOST/API_PORT, the same values as
+  # FreeSWITCH) over the VPC exactly like FS's own deposits. NO depends_on:
+  # freeswitch (a sidecar must never pull the call server into an up-set) —
+  # deploy with `up -d --no-deps --build vm-forwarder`. Hardened: read-only
+  # root, no capabilities, no-new-privileges, core 0. Runs as uid 0 only to
+  # own the root:root 0600 spool and header files.
+  # ---------------------------------------------------------------------------
+  vm-forwarder:
+    build: ./docker/vm-forwarder
+    image: voip-vm-forwarder:latest
+    container_name: voip-vm-forwarder
+    network_mode: host
+    environment:
+      - API_HOST=${API_HOST}
+      - API_PORT=${API_PORT:-8000}
+      - VM_FORWARDER_METRICS_PORT=${VM_FORWARDER_METRICS_PORT:-9105}
+    volumes:
+      - vm_spool:/var/lib/crag/vm-spool
+      # The SAME ingest-secret directory FreeSWITCH mounts (vm_ingest.header
+      # is read on every send, never logged); read-only.
+      - ./secrets/fs-voicemail:/run/revup:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      core: 0
+    healthcheck:
+      test: ["CMD", "python3", "-I", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${VM_FORWARDER_METRICS_PORT:-9105}/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
           memory: 128M
         reservations:
           memory: 32M
@@ -303,4 +379,11 @@ volumes:
     driver: local
   # vmagent remote_write on-disk buffer (survives store/WAN blips without loss).
   vmagent_data:
+    driver: local
+  # Visual IVR prompt cache (FreeSWITCH, lib/ivr_prompts.lua).
+  ivr_prompts:
+    driver: local
+  # Voicemail outage spool: sealed ciphertext + metadata only (FreeSWITCH
+  # writes, vm-forwarder replays). Never plaintext audio, never a key.
+  vm_spool:
     driver: local

@@ -31,3 +31,14 @@ scrape_configs:
   - job_name: node
     static_configs:
       - targets: ["127.0.0.1:9100"]
+
+  # vm-forwarder (docker-compose.media.yml) — the voicemail outage spool
+  # (docs/VOICEMAIL_OUTAGE_RESILIENCE.md): vm_spool_messages{state},
+  # vm_spool_bytes{state}, vm_spool_oldest_age_seconds, vm_spool_forwarded_total,
+  # vm_spool_dropped_total, vm_spool_api_reachable. Dashboard tile only — no
+  # alert rule (owner: no pagers). A scrape failure before the forwarder is
+  # deployed is harmless (up=0 for this job).
+  - job_name: vm_forwarder
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["127.0.0.1:9105"]
