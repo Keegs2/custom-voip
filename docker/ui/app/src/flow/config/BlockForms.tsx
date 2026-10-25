@@ -49,7 +49,7 @@ export function PlayForm({ node, config, update, readOnly }: FormProps<'play'>) 
 
 /* ─── Menu ────────────────────────────────────────────────── */
 
-const RETRY_WORDS = ['Don’t ask again', 'Ask once more', 'Ask up to 2 more times', 'Ask up to 3 more times', 'Ask up to 4 more times', 'Ask up to 5 more times'];
+const RETRY_WORDS = ['Don’t ask again', 'Ask once more', 'Ask 2 more times', 'Ask 3 more times', 'Ask 4 more times', 'Ask 5 more times'];
 
 export function MenuForm({ node, config, update, readOnly }: FormProps<'menu'>) {
   const { prompts } = useBuilderData();
