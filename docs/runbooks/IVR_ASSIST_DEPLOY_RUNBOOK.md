@@ -26,8 +26,8 @@ TED's two PRs (the assist endpoint, and the Customer 360 switch) ship the usual 
 ## 2. The `.env` lines (services VM)
 
 5. `cd /opt/revup && sudo grep -cE '^(IVR_ASSIST_ENABLED|TED_BASE_URL|TED_IVR_ASSIST_TOKEN|IVR_ASSIST_DAILY_PER_CUSTOMER|IVR_ASSIST_TED_TIMEOUT_SECONDS)=' .env` → `0`. If it prints more than `0` (an earlier attempt), remove them first: `cd /opt/revup && sudo sed -i -E '/^(IVR_ASSIST_ENABLED|TED_BASE_URL|TED_IVR_ASSIST_TOKEN|IVR_ASSIST_DAILY_PER_CUSTOMER|IVR_ASSIST_TED_TIMEOUT_SECONDS)=/d' .env && echo REMOVED` → `REMOVED`, then run step 5 again.
-6. TED's **production** public URL, from the TED runbook (it starts with `https://`): `cd /opt/revup && read -rp 'TED public URL (https://...): ' TEDURL && printf 'TED_BASE_URL=%s\n' "$TEDURL" | sudo tee -a .env >/dev/null && unset TEDURL && echo OK` → `OK`
-7. The **production** CRAG assist token, from the TED runbook (typing is hidden): `cd /opt/revup && read -rsp 'TED assist token (hidden): ' TEDTOK && echo && printf 'TED_IVR_ASSIST_TOKEN=%s\n' "$TEDTOK" | sudo tee -a .env >/dev/null && unset TEDTOK && echo OK` → an empty line, then `OK`
+6. TED's public URL, from the TED runbook (it starts with `https://`). **For the pilot use TED staging; switch to production in §9 after the go-ahead:** `cd /opt/revup && read -rp 'TED public URL (https://...): ' TEDURL && printf 'TED_BASE_URL=%s\n' "$TEDURL" | sudo tee -a .env >/dev/null && unset TEDURL && echo OK` → `OK`
+7. The CRAG assist token for the SAME TED environment as step 6 (staging for the pilot), from the TED runbook (typing is hidden): `cd /opt/revup && read -rsp 'TED assist token (hidden): ' TEDTOK && echo && printf 'TED_IVR_ASSIST_TOKEN=%s\n' "$TEDTOK" | sudo tee -a .env >/dev/null && unset TEDTOK && echo OK` → an empty line, then `OK`
 8. `cd /opt/revup && printf 'IVR_ASSIST_ENABLED=true\nIVR_ASSIST_DAILY_PER_CUSTOMER=40\nIVR_ASSIST_TED_TIMEOUT_SECONDS=60\n' | sudo tee -a .env >/dev/null && echo OK` → `OK`
 9. `cd /opt/revup && sudo grep -E '^(IVR_ASSIST_ENABLED|TED_BASE_URL|IVR_ASSIST_DAILY_PER_CUSTOMER|IVR_ASSIST_TED_TIMEOUT_SECONDS)=' .env && sudo grep -c '^TED_IVR_ASSIST_TOKEN=[!-~]' .env` → `TED_BASE_URL=https://…`, `IVR_ASSIST_ENABLED=true`, `IVR_ASSIST_DAILY_PER_CUSTOMER=40`, `IVR_ASSIST_TED_TIMEOUT_SECONDS=60`, then `1` (the token is there; it is not printed).
 10. `cd /opt/revup && sudo stat -c '%a %U' .env` → `600 root`. If it shows a wider mode (for example `644`), run `cd /opt/revup && sudo chmod 600 .env && echo OK` → `OK` (every compose command already runs with sudo).
@@ -81,3 +81,11 @@ Customer 11 must already have Visual IVR on (the IVR live test turned it on).
 ## 8. Rotating the token
 
 When TED rotates the CRAG assist token (TED runbook): `cd /opt/revup && sudo sed -i '/^TED_IVR_ASSIST_TOKEN=/d' .env && echo REMOVED` → `REMOVED`, then step 7 with the new token, then step 12 and step 17.
+
+## 9. Switch from TED staging to TED production (after the pilot)
+
+Do this only after the TED production promotion and the owner's go-ahead. TED production has its own token.
+
+29. `cd /opt/revup && sudo sed -i -E '/^(TED_BASE_URL|TED_IVR_ASSIST_TOKEN)=/d' .env && echo REMOVED` → `REMOVED`
+30. Step 6 with TED's **production** URL, then step 7 with the **production** token, then step 9 (`TED_BASE_URL=https://…` shows the production URL).
+31. Step 12, step 14 (`True True 40 60.0`), then step 17 → `1/1 cases passed`.
