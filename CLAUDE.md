@@ -301,6 +301,7 @@ FreeSWITCH implements outbound SBC-path and carrier failover in `inbound_router.
    - Which path ran is recorded in the CDR variable `term_trunks_source=db|fallback`.
    - The fallback is class-blind and can send 8YY via Bandwidth. That is a deliberate fail-open for RCF; trunk and API 8YY fail closed instead.
 4. **progress_timeout=10s:** This timeout bounds carrier PDD (Post-Dial Delay) — the total time allowed for the carrier to send back a provisional response (180/183). Once ringing starts, the call may ring up to call_timeout. Env-tunable via `BRIDGE_PROGRESS_TIMEOUT` (default 10). Do NOT use `originate_timeout` here — it caps total time-to-ANSWER including ring time, which cancels still-ringing forwarded calls. Worst-case PDD across a fully failing sweep is the number of launched attempts × 10 s.
+5. **A reached phone is never re-dialed (2026-10-25):** when an attempt rang through to the end unanswered (`NO_ANSWER` with a ring time longer than the PDD bound, or the phone's network ending the ringing with 480 after more than the PDD bound) or was busy (486), FS stops and hands that cause back to the caller (480 / 486) instead of re-dialing the same phone on the next route (it used to, up to 8 times) and instead of a 503, which made the originating carrier retry the call elsewhere. **A 503 or any other route/carrier failure always moves to the next trunk.** `far_end_final()` in `inbound_router.lua`; harness `onnet_router_harness.lua` [7b-7k].
 
 ### SIP Header Handling — What Works and What Doesn't
 

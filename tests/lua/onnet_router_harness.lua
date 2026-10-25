@@ -193,8 +193,10 @@ scenarios.rcf_offnet_legacy_allfail = {
 }
 
 -- (7) OFF-NET RCF, table-driven (carrier_trunks) 2 trunks x 2 SBCs = 4
---     attempts, SBC-2 (10.0.0.2) cached DOWN -> 2 launched; first fails,
---     second answers. Expect cdr_leg_attempt 1,2 (contiguous, skips uncounted).
+--     attempts, SBC-2 (10.0.0.2) cached DOWN -> 2 launched; first fails
+--     (a route failure, 503 — a far-end NO_ANSWER/USER_BUSY would end the
+--     sweep, see [7b-7g]), second answers. Expect cdr_leg_attempt 1,2
+--     (contiguous, skips uncounted).
 scenarios.rcf_offnet_table_skip = {
     inbound_did   = "+16170000021",
     sip_from_user = "+15085550102",
@@ -213,7 +215,7 @@ scenarios.rcf_offnet_table_skip = {
         { carrier = "bandwidth", pop = "la",     term_ip = "216.82.238.134", traffic_class = "any" },
     },
     sbc_down = { ["10.0.0.2"] = true },
-    bridge_results = { "NO_ANSWER", "SUCCESS" },
+    bridge_results = { "NORMAL_TEMPORARY_FAILURE", "SUCCESS" },
 }
 
 -- (8) ON-NET chain -> OFF-NET terminal: +16170000030 (RCF cust 10, pass=true)
@@ -372,6 +374,11 @@ local function run_scenario(sc, script_path)
     }
     for k, v in pairs(sc.extra_vars or {}) do session_vars[k] = v end
     local bridge_results = sc.bridge_results
+    -- Scripted clock: the router's os.time() returns `clock`, and each
+    -- scripted bridge attempt advances it by sc.bridge_secs[attempt] (the
+    -- attempt's length; far_end_final reads it). Starts at the real time so
+    -- the SBC health-cache seeds below stay fresh.
+    local clock = os.time()
     local bridge_idx = 0
     function session:getVariable(k) return session_vars[k] end
     function session:setVariable(k, v) session_vars[k] = v; captured.setvars[k] = v end
@@ -392,6 +399,7 @@ local function run_scenario(sc, script_path)
                 bridge_idx = bridge_idx + 1
                 session_vars.originate_disposition =
                     bridge_results[bridge_idx] or "NORMAL_TEMPORARY_FAILURE"
+                clock = clock + ((sc.bridge_secs and sc.bridge_secs[bridge_idx]) or 0)
             end
         elseif app == "lua" and data == "voice_webhook.lua" then
             captured.webhook = true
@@ -478,6 +486,7 @@ local function run_scenario(sc, script_path)
         RCF_FROM_PASSTHROUGH = true, BRIDGE_PROGRESS_TIMEOUT = true,
         FS_NODE_ID = true }
     local sandbox_os = setmetatable({
+        time = function(t) if t then return os.time(t) end return clock end,
         getenv = function(k)
             if sc_env[k] ~= nil then return sc_env[k] end
             if PINNED[k] ~= nil then return PINNED[k] end
@@ -822,6 +831,127 @@ do
           c.setvars["effective_caller_id_number"])
 end
 
+-- [7b-7g] Far-end final results end the failover sweep (no re-dial of a
+-- phone that was reached): USER_BUSY always, NO_ANSWER when the ring time is
+-- longer than the PDD bound (progress_timeout=10). The caller gets that
+-- cause back (486 / 480), never the 503 that invites a carrier retry.
+local function variant(base, over)
+    local function copy(v)
+        if type(v) ~= "table" then return v end
+        local t = {}
+        for k, x in pairs(v) do t[k] = copy(x) end
+        return t
+    end
+    local sc = copy(base)
+    for k, v in pairs(over) do sc[k] = v end
+    return sc
+end
+local function ring(sc, secs)
+    sc.step1.ring_timeout = secs
+    return sc
+end
+local TABLE_BASE = scenarios.rcf_offnet_table_skip
+local LEGACY_BASE = scenarios.rcf_offnet_legacy_allfail
+
+do
+    print("[7b] table-driven: far end BUSY on attempt 1 -> 1 bridge, USER_BUSY back, no 503")
+    local c = run_scenario(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "USER_BUSY", "SUCCESS", "SUCCESS", "SUCCESS" } }))
+    check("7b: exactly 1 launched bridge (not re-dialed)", #c.bridges == 1, #c.bridges)
+    check("7b: hangup USER_BUSY (486), exactly once",
+          #c.hangups == 1 and c.hangups[1] == "USER_BUSY", table.concat(c.hangups, ","))
+end
+
+do
+    print("[7c] table-driven: far end rang out (NO_ANSWER, ring 25 s) -> 1 bridge, NO_ANSWER back")
+    local c = run_scenario(ring(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NO_ANSWER", "SUCCESS", "SUCCESS", "SUCCESS" } }), 25))
+    check("7c: exactly 1 launched bridge (not re-dialed)", #c.bridges == 1, #c.bridges)
+    check("7c: hangup NO_ANSWER (480), exactly once",
+          #c.hangups == 1 and c.hangups[1] == "NO_ANSWER", table.concat(c.hangups, ","))
+    check("7c: call_timeout=25 on the one attempt",
+          c.bridges[1] and c.bridges[1]:find("call_timeout=25", 1, true) ~= nil, c.bridges[1])
+end
+
+do
+    print("[7d] table-driven: NO_ANSWER with ring 8 s (<= PDD bound 10) -> still fails over")
+    local c = run_scenario(ring(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NO_ANSWER", "SUCCESS" } }), 8))
+    check("7d: 2 launched bridges (an unanswered short ring is not proof of a phone)",
+          #c.bridges == 2, #c.bridges)
+    check("7d: no router hangup (2nd attempt answered)", #c.hangups == 0,
+          table.concat(c.hangups, ","))
+end
+
+do
+    print("[7e] table-driven: route failure, then far end busy -> stops after the busy attempt")
+    local c = run_scenario(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NORMAL_TEMPORARY_FAILURE", "USER_BUSY", "SUCCESS", "SUCCESS" } }))
+    check("7e: 2 launched bridges (the 503 failed over, the busy did not)",
+          #c.bridges == 2, #c.bridges)
+    check("7e: hangup USER_BUSY", #c.hangups == 1 and c.hangups[1] == "USER_BUSY",
+          table.concat(c.hangups, ","))
+end
+
+do
+    print("[7f] legacy fallback: far end BUSY on attempt 1 -> 1 bridge, USER_BUSY back")
+    local c = run_scenario(variant(LEGACY_BASE, {
+        bridge_results = { "USER_BUSY", "SUCCESS", "SUCCESS", "SUCCESS" } }))
+    check("7f: exactly 1 launched bridge", #c.bridges == 1, #c.bridges)
+    check("7f: hangup USER_BUSY", #c.hangups == 1 and c.hangups[1] == "USER_BUSY",
+          table.concat(c.hangups, ","))
+    check("7f: still the legacy path", c.setvars["term_trunks_source"] == "fallback",
+          c.setvars["term_trunks_source"])
+end
+
+do
+    print("[7g] legacy fallback: NO_ANSWER (ring 30 s) on the LAST attempt -> NO_ANSWER, not 503")
+    local c = run_scenario(variant(LEGACY_BASE, {
+        bridge_results = { "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE",
+                           "NORMAL_TEMPORARY_FAILURE", "NO_ANSWER" } }))
+    check("7g: 4 launched bridges (route failures still fail over)", #c.bridges == 4, #c.bridges)
+    check("7g: hangup NO_ANSWER", #c.hangups == 1 and c.hangups[1] == "NO_ANSWER",
+          table.concat(c.hangups, ","))
+end
+
+do
+    print("[7h] table-driven: phone rang 25 s, ITS network ended it (480) -> stop, 480 back")
+    local c = run_scenario(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NO_USER_RESPONSE", "SUCCESS", "SUCCESS", "SUCCESS" },
+        bridge_secs = { 25 } }))
+    check("7h: exactly 1 launched bridge (not re-dialed)", #c.bridges == 1, #c.bridges)
+    check("7h: hangup NO_USER_RESPONSE (480)",
+          #c.hangups == 1 and c.hangups[1] == "NO_USER_RESPONSE", table.concat(c.hangups, ","))
+end
+
+do
+    print("[7i] table-driven: immediate 480 (2 s, nothing rang) -> still fails over")
+    local c = run_scenario(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NO_USER_RESPONSE", "SUCCESS" }, bridge_secs = { 2 } }))
+    check("7i: 2 launched bridges", #c.bridges == 2, #c.bridges)
+    check("7i: no router hangup (2nd attempt answered)", #c.hangups == 0,
+          table.concat(c.hangups, ","))
+end
+
+do
+    print("[7j] table-driven: 503 AFTER 20 s of ringing -> still the next trunk (503 never final)")
+    local c = run_scenario(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NORMAL_TEMPORARY_FAILURE", "SUCCESS" }, bridge_secs = { 20 } }))
+    check("7j: 2 launched bridges", #c.bridges == 2, #c.bridges)
+    check("7j: no router hangup (2nd attempt answered)", #c.hangups == 0,
+          table.concat(c.hangups, ","))
+end
+
+do
+    print("[7k] table-driven: every attempt 503 -> all 4 tried, then 503 (unchanged)")
+    local c = run_scenario(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE",
+                           "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE" } }))
+    check("7k: 4 launched bridges", #c.bridges == 4, #c.bridges)
+    check("7k: 503 after all attempts",
+          #c.hangups == 1 and c.hangups[1] == "NORMAL_TEMPORARY_FAILURE", table.concat(c.hangups, ","))
+end
+
 do
     print("[8] ON-NET chain -> OFF-NET terminal (one carrier B-leg, call-level facts)")
     local sc = scenarios.rcf_chain_offnet
@@ -1069,10 +1199,14 @@ if BASELINE and BASELINE ~= "" then
     -- must be byte-identical: the new router's added setvar
     -- sofia_session_timeout is dropped, and the baseline's removed no-op
     -- exports are dropped. Their presence/absence is asserted by [12].
+    -- sofia_session_timeout is dropped on the baseline side too, so a
+    -- baseline that already has it (any router since 2026-09-24, e.g. the
+    -- RCF-V1 commit an IVR branch is cut from) compares cleanly; [12]
+    -- asserts its presence on the new router.
     local function strip_timer(c, is_baseline)
         local sv = {}
         for k, v in pairs(c.setvars) do
-            if is_baseline or k ~= "sofia_session_timeout" then sv[k] = v end
+            if k ~= "sofia_session_timeout" then sv[k] = v end
         end
         local ex = {}
         for _, e in ipairs(c.executes) do

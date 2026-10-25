@@ -1,0 +1,71 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 14,
+  "version": 2,
+  "customer_id": 11,
+  "start": "n_vip",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  ],
+  "nodes": {
+    "n_vip": {
+      "t": "caller",
+      "mode": "equals",
+      "values": [
+        "+15085550123"
+      ],
+      "match": "n_pbx",
+      "nomatch": "n_local"
+    },
+    "n_local": {
+      "t": "caller",
+      "mode": "prefix",
+      "values": [
+        "+1617",
+        "+1508"
+      ],
+      "match": "n_rcf",
+      "nomatch": "n_anon"
+    },
+    "n_anon": {
+      "t": "caller",
+      "mode": "anonymous",
+      "values": [],
+      "match": "n_reject",
+      "nomatch": "n_rcf"
+    },
+    "n_pbx": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550400",
+        "product": "trunk"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 30,
+      "on_noanswer": null
+    },
+    "n_rcf": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550200",
+        "product": "rcf"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 30,
+      "on_noanswer": null
+    },
+    "n_reject": {
+      "t": "hangup",
+      "prompts": [
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      ]
+    }
+  }
+}

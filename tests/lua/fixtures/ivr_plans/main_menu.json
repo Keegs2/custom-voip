@@ -1,0 +1,83 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_welcome",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  ],
+  "nodes": {
+    "n_welcome": {
+      "t": "play",
+      "prompts": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "next": "n_menu"
+    },
+    "n_menu": {
+      "t": "menu",
+      "prompts": [
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "digits": {
+        "1": "n_sales",
+        "2": "n_support",
+        "3": "n_vm",
+        "9": "n_menu",
+        "0": "n_bye",
+        "#": null
+      },
+      "timeout_ms": 5000,
+      "retries": 2,
+      "invalid_prompts": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      ],
+      "noinput_prompts": [
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ],
+      "on_noinput": null,
+      "on_nomatch": "n_bye"
+    },
+    "n_sales": {
+      "t": "transfer",
+      "dest": {
+        "kind": "external",
+        "e164": "+17742220100"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 30,
+      "on_noanswer": "n_vm"
+    },
+    "n_support": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550200",
+        "product": "rcf"
+      },
+      "pass_caller_id": false,
+      "ring_timeout": 20,
+      "on_noanswer": "n_menu"
+    },
+    "n_vm": {
+      "t": "voicemail",
+      "did": "+16175550300"
+    },
+    "n_bye": {
+      "t": "hangup",
+      "prompts": [
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      ]
+    }
+  }
+}

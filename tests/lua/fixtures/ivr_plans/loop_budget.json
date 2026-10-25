@@ -1,0 +1,49 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 15,
+  "version": 1,
+  "customer_id": 11,
+  "start": "n_m",
+  "limits": {
+    "max_steps": 7,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ],
+  "nodes": {
+    "n_m": {
+      "t": "menu",
+      "prompts": [
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "digits": {
+        "9": "n_p",
+        "1": "n_x"
+      },
+      "timeout_ms": 3000,
+      "retries": 0,
+      "on_noinput": "n_m",
+      "on_nomatch": "n_m"
+    },
+    "n_p": {
+      "t": "play",
+      "prompts": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "next": "n_m"
+    },
+    "n_x": {
+      "t": "transfer",
+      "dest": {
+        "kind": "external",
+        "e164": "+13126660111"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 15,
+      "on_noanswer": "n_m"
+    }
+  }
+}

@@ -406,6 +406,89 @@ function M.lookup_voicemail_did(did)
     return row
 end
 
+-- Lookup an IVR DID (Visual IVR, docs/IVR_INTERFACES.md §1.1 / §5.2).
+--
+-- FreeSWITCH's ONLY read path for IVR is the `ivr_fs_number` view (migration
+-- 59_ivr.sql, P1): exactly one row per IVR DID with the number, its owner,
+-- the per-number channel cap, the computed `enabled` flag
+-- (ivr_numbers.enabled AND customers.ivr_enabled AND customers.status =
+-- 'active') and the PUBLISHED plan of the bound flow (plan_json = the
+-- immutable call_flow_versions.plan, NULL when no flow is bound or nothing is
+-- published). inbound_router.lua reads it ONCE per call (version pinning: a
+-- publish mid-call never changes the caller's menu).
+--
+-- Deliberately UNFILTERED (same semantics as lookup_voicemail_did /
+-- resolve_destination): no row = "not ours" (404 path); a row with
+-- enabled=false or plan_json IS NULL = "ours, not callable" -> 603.
+-- traffic_grade comes from customers (the freeswitch role already has SELECT
+-- on customers, 02_schema_core.sql) for the same CDR variable every product sets.
+-- Before migration 59 the view does not exist: the query errors, this returns
+-- nil and the call keeps today's 404 (the lookup only runs for a DID every
+-- other STEP-1 arm missed).
+--
+-- Returns the raw row (strings/nil, as luasql returns them):
+--   did, ivr_number_id, customer_id, max_channels, enabled, flow_id,
+--   flow_version, plan_json, traffic_grade
+function M.lookup_ivr_did(did)
+    local clean_did = validate_did(did)
+    if not clean_did then
+        freeswitch.consoleLog("WARN", "Invalid DID format for IVR lookup: " .. tostring(did) .. "\n")
+        return nil
+    end
+
+    local sql = string.format([[
+        SELECT n.did, n.ivr_number_id, n.customer_id, n.max_channels,
+               n.enabled, n.flow_id, n.flow_version, n.plan_json,
+               c.traffic_grade
+        FROM ivr_fs_number n
+        JOIN customers c ON c.id = n.customer_id
+        WHERE n.did = %s
+        LIMIT 1
+    ]], sql_string(clean_did))
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("ERR", "IVR DID lookup failed: " .. tostring(err) .. "\n")
+        return nil
+    end
+
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+
+    return row
+end
+
+-- Fetch one IVR prompt's audio as lowercase hex (docs/IVR_INTERFACES.md §4,
+-- lib/ivr_prompts.lua cache miss) from the LOCAL replica. `sha` must be a
+-- 64-char lowercase hex string (checked here before interpolation — the only
+-- value this query ever carries). Returns hex | nil, reason.
+function M.fetch_ivr_prompt_hex(sha)
+    if type(sha) ~= "string" or #sha ~= 64 or not sha:match("^[0-9a-f]+$") then
+        return nil, "invalid sha"
+    end
+
+    local sql = string.format([[
+        SELECT encode(wav, 'hex') AS hex
+        FROM ivr_prompt_audio
+        WHERE sha256 = '%s'
+        LIMIT 1
+    ]], sha)
+
+    local cursor, err = execute_query(sql)
+    if not cursor then
+        freeswitch.consoleLog("ERR", "IVR prompt fetch failed: " .. tostring(err) .. "\n")
+        return nil, "query failed"
+    end
+
+    local row = cursor:fetch({}, "a")
+    cursor:close()
+
+    if not row or not row.hex then
+        return nil, "no row"
+    end
+    return row.hex
+end
+
 -- Lookup API DID
 function M.lookup_api_did(did)
     -- Validate and sanitize input
