@@ -173,6 +173,9 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://api:api_secret@host.docker.internal:6432/voip}
       # CDR export configuration (all optional; defaults in config.py).
       - CDR_EXPORT_ENABLED=${CDR_EXPORT_ENABLED:-false}
+      # Visual IVR columns (migration 60) in the Equinox file: OFF until Equinox
+      # confirms the 6 extra trailing columns (services/cdr_export/README.md).
+      - CDR_EXPORT_IVR_COLUMNS=${CDR_EXPORT_IVR_COLUMNS:-false}
       - CDR_EXPORT_FTP_HOST=${CDR_EXPORT_FTP_HOST:-10.142.0.71}
       - CDR_EXPORT_FTP_PORT=${CDR_EXPORT_FTP_PORT:-21}
       - CDR_EXPORT_FTP_USER=${CDR_EXPORT_FTP_USER:-}

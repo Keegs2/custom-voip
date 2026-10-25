@@ -202,6 +202,15 @@ SELECT_DERIVED: tuple[tuple[str, str], ...] = (
     ("leg", "COALESCE(leg, 'A')"),
 )
 
+#: Visual IVR outcome columns (migration 60). OPT-IN: exported only when
+#: CDR_EXPORT_IVR_COLUMNS is on (ExportConfig.include_ivr_columns), so the
+#: Equinox file stays byte-identical until Equinox is ready for the 6 extra
+#: trailing columns. Off = not even SELECTed (works without migration 60).
+IVR_COLUMNS: tuple[str, ...] = (
+    "ivr_flow_id", "ivr_flow_version", "ivr_exit", "ivr_path",
+    "ivr_transfer_to", "ivr_seconds",
+)
+
 #: Stored columns whose export value is the same-named derived field instead.
 SHADOWED_COLUMNS: frozenset[str] = frozenset({"call_id", "leg"})
 
@@ -209,10 +218,12 @@ SHADOWED_COLUMNS: frozenset[str] = frozenset({"call_id", "leg"})
 DERIVED_ALIASES: tuple[str, ...] = tuple(a for a, _ in SELECT_DERIVED)
 
 
-def select_list_sql() -> str:
-    """The export projection: pure columns + derived billing fields."""
-    return ", ".join(list(SELECT_COLUMNS)
-                     + [f"{expr} AS {alias}" for alias, expr in SELECT_DERIVED])
+def select_list_sql(include_ivr_columns: bool = False) -> str:
+    """The export projection: pure columns + derived billing fields.
+
+    The IVR_COLUMNS are projected only when ``include_ivr_columns`` is on."""
+    cols = [c for c in SELECT_COLUMNS if include_ivr_columns or c not in IVR_COLUMNS]
+    return ", ".join(cols + [f"{expr} AS {alias}" for alias, expr in SELECT_DERIVED])
 
 
 @dataclass
@@ -248,7 +259,7 @@ async def select_batch(pool: asyncpg.Pool, cfg: ExportConfig) -> list[asyncpg.Re
     landed. ORDER BY (start_time, id) matches idx_cdrs_unexported for a cheap
     scan. Every parameter carries an explicit ::type cast for asyncpg/PgBouncer.
     """
-    cols = select_list_sql()
+    cols = select_list_sql(cfg.include_ivr_columns)
     query = f"""
         SELECT {cols}
         FROM cdrs
@@ -288,7 +299,8 @@ def build_file(rows: Sequence[asyncpg.Record], cfg: ExportConfig,
     (row_count, min/max id, min/max start_time, byte_size, ids list) for the
     audit log and the post-upload watermark UPDATE.
     """
-    formatter = EquinoxFormatter(delimiter=cfg.delimiter, quote_all=cfg.quote_all)
+    formatter = EquinoxFormatter(delimiter=cfg.delimiter, quote_all=cfg.quote_all,
+                                 include_ivr_columns=cfg.include_ivr_columns)
 
     lines: list[str] = []
     header = formatter.header()

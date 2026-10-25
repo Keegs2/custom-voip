@@ -278,7 +278,21 @@ _FIDELITY_BLOCK: list[tuple[str, str, Callable[[Any], str]]] = [
 _FIELD_DEFS: list[tuple[str, str, Callable[[Any], str]]] = _BILLING_BLOCK + _FIDELITY_BLOCK
 
 # Module-level documentation of column order (output labels). Public API.
+# The FULL list — the IVR_FIELDS tail is emitted only with include_ivr_columns.
 FIELDS: list[str] = [name for (name, _src, _fmt) in _FIELD_DEFS]
+
+#: The migration-60 Visual IVR columns at the end of FIELDS. OPT-IN
+#: (CDR_EXPORT_IVR_COLUMNS): off, the header and every record are exactly the
+#: pre-IVR layout ending at call_quality_leg.
+IVR_FIELDS: tuple[str, ...] = (
+    "ivr_flow_id", "ivr_flow_version", "ivr_exit", "ivr_path",
+    "ivr_transfer_to", "ivr_seconds",
+)
+
+
+def export_fields(include_ivr_columns: bool = False) -> list[str]:
+    """The header labels actually emitted for this setting, in order."""
+    return [n for n in FIELDS if include_ivr_columns or n not in IVR_FIELDS]
 
 
 class EquinoxFormatter:
@@ -297,11 +311,15 @@ class EquinoxFormatter:
     """
 
     def __init__(self, delimiter: str = ",", quote_all: bool = False,
-                 include_header: bool = True, include_trailer: bool = False):
+                 include_header: bool = True, include_trailer: bool = False,
+                 include_ivr_columns: bool = False):
         self.delimiter = delimiter
         self.quote_all = quote_all
         self.include_header = include_header
         self.include_trailer = include_trailer
+        self.include_ivr_columns = include_ivr_columns
+        self._defs = [d for d in _FIELD_DEFS
+                      if include_ivr_columns or d[0] not in IVR_FIELDS]
 
     # -- CSV row rendering -------------------------------------------------
     def _csv_line(self, values: list[str]) -> str:
@@ -327,7 +345,7 @@ class EquinoxFormatter:
         """Return the header line, or None if headers are disabled."""
         if not self.include_header:
             return None
-        return self._csv_line(FIELDS)
+        return self._csv_line([name for (name, _src, _fmt) in self._defs])
 
     def format_record(self, row: Mapping[str, Any]) -> str:
         """Format a single CDR row (asyncpg.Record / dict-like) into one line.
@@ -338,7 +356,7 @@ class EquinoxFormatter:
         of dropping the whole batch.
         """
         values: list[str] = []
-        for _name, src_key, formatter in _FIELD_DEFS:
+        for _name, src_key, formatter in self._defs:
             try:
                 raw = row[src_key]
             except (KeyError, IndexError):

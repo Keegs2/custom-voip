@@ -27,7 +27,8 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from services.cdr_export.config import ExportConfig  # noqa: E402
-from services.cdr_export.formatter import EquinoxFormatter, FIELDS, _FIELD_DEFS  # noqa: E402
+from services.cdr_export.formatter import (  # noqa: E402
+    EquinoxFormatter, FIELDS, IVR_FIELDS, _FIELD_DEFS, export_fields)
 from services.cdr_export import exporter as exp  # noqa: E402
 from services.cdr_export.ftp_client import FTPClient  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
@@ -237,11 +238,11 @@ def test_formatter_field_count_and_header():
     fmt = EquinoxFormatter()
     header = fmt.header()
     assert header is not None
-    # Header column count == FIELDS count == format_record column count.
-    assert len(header.split(",")) == len(FIELDS)
+    # Default (IVR columns off): header count == emitted fields == record count.
+    assert len(header.split(",")) == len(export_fields(False)) == len(FIELDS) - len(IVR_FIELDS)
 
     line = fmt.format_record(make_row())
-    assert len(line.split(",")) == len(FIELDS)
+    assert len(line.split(",")) == len(export_fields(False))
 
 
 def test_formatter_key_field_rendering():
@@ -326,7 +327,7 @@ def test_formatter_quoting_of_embedded_delimiter():
     # csv should have quoted the field; re-parsing keeps the field count stable.
     import csv as _csv
     reparsed = next(_csv.reader([line]))
-    assert len(reparsed) == len(FIELDS)
+    assert len(reparsed) == len(export_fields(False))
     assert "WEIRD,CAUSE" in reparsed
 
 
@@ -943,6 +944,53 @@ def test_export_select_on_real_pg_a_b_legacy_unanswered():
     fmt = EquinoxFormatter()
     for r in by.values():
         import csv as _csv
-        assert len(next(_csv.reader([fmt.format_record(r)]))) == len(FIELDS)
+        assert len(next(_csv.reader([fmt.format_record(r)]))) == len(export_fields(False))
     # "count calls = leg='A' rows"
     assert sum(1 for r in by.values() if r["leg"] == "A") == 2
+
+
+# ---------------------------------------------------------------------------
+# Visual IVR columns are OPT-IN (CDR_EXPORT_IVR_COLUMNS): the Equinox file is
+# unchanged until Equinox confirms the 6 extra trailing columns.
+# ---------------------------------------------------------------------------
+
+def test_ivr_columns_off_by_default_header_ends_at_call_quality_leg():
+    hdr = EquinoxFormatter().header().split(",")
+    assert hdr[-1] == "call_quality_leg"
+    assert not any(h.startswith("ivr_") for h in hdr)
+    assert hdr == [f for f in FIELDS if f not in IVR_FIELDS]
+    sql = exp.select_list_sql()
+    assert not any(c in sql for c in exp.IVR_COLUMNS)   # not even SELECTed
+    assert exp.ExportConfig().include_ivr_columns is False
+
+
+def test_ivr_columns_on_appends_exactly_six_trailing_columns():
+    hdr = EquinoxFormatter(include_ivr_columns=True).header().split(",")
+    assert hdr == FIELDS
+    assert tuple(hdr[-6:]) == IVR_FIELDS == exp.IVR_COLUMNS
+    assert hdr[:-6] == EquinoxFormatter().header().split(",")
+    sql = exp.select_list_sql(True)
+    assert all(c in sql for c in exp.IVR_COLUMNS)
+    row = make_row(ivr_flow_id=12, ivr_exit="transfer", ivr_seconds=9)
+    rec = EquinoxFormatter(include_ivr_columns=True).format_record(row).split(",")
+    assert rec[-6] == "12" and rec[-4] == "transfer" and rec[-1] == "9"
+    # off: the same row renders without them, identical to the on-prefix
+    assert EquinoxFormatter().format_record(row).split(",") == rec[:-6]
+
+
+def test_ivr_columns_env_flag(monkeypatch):
+    monkeypatch.delenv("CDR_EXPORT_IVR_COLUMNS", raising=False)
+    assert exp.ExportConfig.from_env().include_ivr_columns is False
+    monkeypatch.setenv("CDR_EXPORT_IVR_COLUMNS", "true")
+    assert exp.ExportConfig.from_env().include_ivr_columns is True
+    monkeypatch.setenv("CDR_EXPORT_IVR_COLUMNS", "false")
+    assert exp.ExportConfig.from_env().include_ivr_columns is False
+
+
+def test_build_file_header_follows_the_flag():
+    cfg_off = exp.ExportConfig()
+    _, data, _ = exp.build_file([make_row()], cfg_off)
+    assert "ivr_flow_id" not in data.decode().splitlines()[0]
+    cfg_on = exp.ExportConfig(include_ivr_columns=True)
+    _, data, _ = exp.build_file([make_row()], cfg_on)
+    assert data.decode().splitlines()[0].endswith(",".join(IVR_FIELDS))
