@@ -1,4 +1,4 @@
--- Read-only: reports which hand-applied migrations (22..60) are present on this database.
+-- Read-only: reports which hand-applied migrations (22..61) are present on this database.
 -- Run on the East primary: sudo -u postgres psql -d voip -f /opt/revup/scripts/db/check_migrations.sql
 -- Init scripts only run on first initdb; every later migration is applied by hand, so check before assuming.
 -- 43 is a one-shot data backfill (jitter units) — if MISSING, read its header before running; never re-run it.
@@ -28,5 +28,6 @@ WITH c AS (SELECT table_name t, column_name col FROM information_schema.columns 
 ('57_trunk_dids_trunk_index', to_regclass('public.idx_trunk_dids_trunk') IS NOT NULL),
 ('58_vm_outage_resilience', to_regclass('public.vm_fs_mailbox') IS NOT NULL),
 ('59_ivr', to_regclass('public.ivr_prompt_audio') IS NOT NULL AND to_regclass('public.ivr_fs_number') IS NOT NULL AND EXISTS(SELECT 1 FROM c WHERE t='customers' AND col='ivr_enabled') AND EXISTS(SELECT 1 FROM pg_constraint WHERE conname='did_inventory_product_type_check' AND pg_get_constraintdef(oid) LIKE '%''ivr''%') AND CASE WHEN to_regclass('public.number_routing') IS NULL THEN false ELSE pg_get_viewdef(to_regclass('public.number_routing')) LIKE '%ivr_numbers%' END AND EXISTS(SELECT 1 FROM pg_proc WHERE proname='rate_cdr' AND prosrc LIKE '%59_ivr.sql%')),
-('60_cdr_ivr', EXISTS(SELECT 1 FROM c WHERE t='cdrs' AND col='ivr_exit') AND EXISTS(SELECT 1 FROM c WHERE t='cdrs' AND col='ivr_seconds'))
+('60_cdr_ivr', EXISTS(SELECT 1 FROM c WHERE t='cdrs' AND col='ivr_exit') AND EXISTS(SELECT 1 FROM c WHERE t='cdrs' AND col='ivr_seconds')),
+('61_ivr_assist', to_regclass('public.ivr_assist_jobs') IS NOT NULL AND EXISTS(SELECT 1 FROM c WHERE t='customers' AND col='ivr_assist_enabled') AND to_regclass('public.uq_ivr_assist_jobs_running_flow') IS NOT NULL AND EXISTS(SELECT 1 FROM pg_constraint WHERE conname='ivr_assist_jobs_flow_same_customer_fk'))
 ) SELECT m AS migration, CASE WHEN ok THEN 'applied' ELSE '*** MISSING ***' END AS status FROM chk;
