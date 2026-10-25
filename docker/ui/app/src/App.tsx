@@ -11,7 +11,6 @@ import { RcfPage } from './pages/RcfPage';
 import { AccountDashboard } from './pages/dashboard/AccountDashboard';
 import { ApiDidsPage } from './pages/ApiDidsPage';
 import { TrunksPage } from './pages/TrunksPage';
-import { IvrBuilderPage } from './pages/IvrBuilderPage';
 import { GuidesPage } from './pages/docs/GuidesPage';
 import { ApiDocsPage } from './pages/docs/ApiDocsPage';
 import { TroubleshootingPage } from './pages/TroubleshootingPage';
@@ -68,7 +67,6 @@ export function App() {
                 element={API_CALLING_ENABLED ? <ApiDidsPage /> : <ProductHomeRedirect />}
               />
               <Route path="trunks"     element={<TrunksPage />} />
-              <Route path="ivr"        element={<IvrBuilderPage />} />
               <Route
                 path="voicemail"
                 element={
