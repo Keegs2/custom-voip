@@ -518,7 +518,8 @@ async def simulate_flow(flow_id: int, body: SimulateBody, scope: IvrScope = Depe
     if not result.ok:
         raise _invalid_flow(result.errors, result.warnings)
     return simulator.simulate(result.plan, caller=caller, at=at, digits=body.digits,
-                              prompt_names=result.prompt_names)
+                              prompt_names=result.prompt_names,
+                              block_names=simulator.block_names_from_graph(graph))
 
 
 # ===========================================================================

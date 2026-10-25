@@ -126,3 +126,24 @@ def test_limit_and_unknown_node_and_pretty_number():
     assert out["outcome"] == "hangup"
     assert simulator.pretty_number("+17744045256") == "+1 774-404-5256"
     assert simulator.pretty_number("+447911123456") == "+447911123456"
+
+
+def test_transfer_note_names_blocks_and_own_number_kind_not_ids():
+    """The note is customer-facing: no node ids, no internal product codes."""
+    p = {"v": 1, "start": "n_x", "limits": {"max_steps": 200, "max_seconds": 1800},
+         "prompts": [], "nodes": {
+             "n_x": {"t": "transfer", "dest": {"kind": "own", "did": "+16175550101",
+                                              "product": "rcf"},
+                     "pass_caller_id": True, "ring_timeout": 30, "on_noanswer": "n_vm"},
+             "n_vm": {"t": "voicemail", "did": "+16175550102"}}}
+    graph = {"nodes": [{"id": "n_x", "type": "dial", "data": {"label": "Sales"}},
+                       {"id": "n_vm", "type": "voicemail", "data": {"label": "  "}}]}
+    names = simulator.block_names_from_graph(graph)
+    assert names == {"n_x": "Sales", "n_vm": "Voicemail"}
+    out = simulator.simulate(p, caller=None, at=datetime(2026, 10, 26, tzinfo=timezone.utc),
+                             block_names=names)
+    note = out["steps"][0]["note"]
+    assert "your call forwarding number" in note and "rcf" not in note
+    assert "continues at “Voicemail”." in note and "n_vm" not in note
+    out = simulator.simulate(p, caller=None, at=datetime(2026, 10, 26, tzinfo=timezone.utc))
+    assert "on the No answer route." in out["steps"][0]["note"]

@@ -87,11 +87,48 @@ def hours_state(node: Mapping[str, Any], at: datetime) -> tuple[bool, str]:
     return False, f"{stamp}: outside open hours"
 
 
+#: How a transfer to one of the customer's own numbers is described.
+OWN_TARGET_WORDS: dict[str, str] = {
+    "rcf": "your call forwarding number",
+    "voicemail": "your voicemail box",
+    "ivr": "your IVR",
+    "trunk": "your SIP trunk number",
+}
+
+#: Customer-facing name of each block type (the builder's palette labels),
+#: used when a block has no name of its own.
+BLOCK_TYPE_NAMES: dict[str, str] = {
+    "entry": "Start", "play": "Play message", "menu": "Menu", "schedule": "Business hours",
+    "condition": "Caller check", "dial": "Transfer", "voicemail": "Voicemail",
+    "goto": "Go to", "hangup": "Hang up",
+}
+
+
+def block_names_from_graph(graph: Mapping[str, Any]) -> dict[str, str]:
+    """node id -> the block's display name (its label, else its type's name)."""
+    out: dict[str, str] = {}
+    for n in (graph or {}).get("nodes") or []:
+        if not isinstance(n, Mapping) or not isinstance(n.get("id"), str):
+            continue
+        data = n.get("data") if isinstance(n.get("data"), Mapping) else {}
+        label = data.get("label")
+        name = label.strip() if isinstance(label, str) and label.strip() else \
+            BLOCK_TYPE_NAMES.get(n.get("type"), "the next block")
+        out[n["id"]] = name[:100]
+    return out
+
+
 def simulate(plan: Mapping[str, Any], *, caller: Optional[str], at: datetime,
              digits: list[str] | tuple[str, ...] = (),
-             prompt_names: Optional[Mapping[str, Mapping[str, list[str]]]] = None) -> dict:
-    """Walk ``plan``; return ``{"steps": [SimStep...], "outcome": str}``."""
+             prompt_names: Optional[Mapping[str, Mapping[str, list[str]]]] = None,
+             block_names: Optional[Mapping[str, str]] = None) -> dict:
+    """Walk ``plan``; return ``{"steps": [SimStep...], "outcome": str}``.
+
+    ``block_names`` (node id -> the block's name in the draft graph) lets a
+    note point at a block the customer recognises; the plan itself carries no
+    names (no customer free text, contract §3)."""
     names = prompt_names or {}
+    blocks = block_names or {}
     nodes: Mapping[str, Mapping[str, Any]] = plan.get("nodes", {})
     max_steps = int((plan.get("limits") or {}).get("max_steps", 200))
     keys = list(digits)
@@ -177,12 +214,14 @@ def simulate(plan: Mapping[str, Any], *, caller: Optional[str], at: datetime,
         elif t == "transfer":
             dest = node["dest"]
             number = dest.get("e164") or dest.get("did")
-            where = (f"your {dest.get('product', 'number')} number" if dest["kind"] == "own"
-                     else "an outside number")
+            where = (OWN_TARGET_WORDS.get(dest.get("product"), "one of your numbers")
+                     if dest["kind"] == "own" else "an outside number")
             shown = "the caller's number" if node.get("pass_caller_id") else "the IVR number"
             fallback = node.get("on_noanswer")
+            fallback_name = blocks.get(fallback) if fallback else None
             tail = (f" If nobody answers within {node.get('ring_timeout')} s the call continues "
-                    f"at {fallback}." if fallback else
+                    + (f"at \u201c{fallback_name}\u201d." if fallback_name
+                       else "on the No answer route.") if fallback else
                     f" If nobody answers within {node.get('ring_timeout')} s the call ends.")
             step(current, "transfer", [], f"Transfers to {pretty_number(number)} ({where}), "
                  f"showing {shown}.{tail}")
