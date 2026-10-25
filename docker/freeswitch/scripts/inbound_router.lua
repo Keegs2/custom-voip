@@ -174,6 +174,51 @@ do
 end
 
 -- ================================================================
+-- Visual IVR product gate (IVR_ENABLED=true|<anything else>)
+-- ================================================================
+-- docs/IVR_INTERFACES.md §5.1. Parsed EXACTLY like API_CALLING_ENABLED:
+-- only the value "true" (case-insensitive, trimmed) enables it; unset / empty
+-- / anything else = OFF. Passed through docker-compose.media.yml
+-- (IVR_ENABLED=${IVR_ENABLED:-false}); turning it on is a per-zone .env line
+-- + container recreate (P5).
+-- When OFF, an IVR DID is still recognized as OURS (STEP-1 lookup_ivr_did
+-- and the number_routing ivr arm) and is HARD-REJECTED CALL_REJECTED (603)
+-- + lua_routed=true — never answered, never hairpinned to the carrier:
+--   * direct inbound to an IVR DID (STEP 2 non-RCF branch)
+--   * an on-net RCF chain whose terminal resolves to an IVR DID
+-- When ON, TERMINATORS.ivr = terminate_ivr. RCF/trunk/voicemail/API paths
+-- never consult this flag (harness: tests/lua/ivr_egress_identity_harness.lua).
+local ivr_enabled = false
+do
+    local v = tostring(os.getenv("IVR_ENABLED") or ""):lower():match("^%s*(.-)%s*$")
+    if v == "true" then
+        ivr_enabled = true
+    end
+end
+
+-- ================================================================
+-- Egress "return disposition" mode (Visual IVR transfers)
+-- ================================================================
+-- The RCF egress (terminate_rcf: TCP pre-check, SBC x carrier failover,
+-- progress_timeout, carrier_trunks + 8YY class, From/PAI/RPID/Diversion, STIR
+-- div + outcome capture, [cdr_*] B-leg block) and the on-net chain resolver
+-- (run_onnet_chain) are shared with IVR transfers (ivr_transfer below). An
+-- IVR transfer that is not answered must RETURN to the IVR engine (the
+-- block's "No answer" exit) instead of hanging the caller up, so while an IVR
+-- transfer runs this flag is true and:
+--   * hard_reject records the cause instead of hanging up (the engine plays
+--     the technical-difficulty prompt, then hangs up with that cause);
+--   * terminate_rcf / terminate_trunk return a disposition instead of the 503;
+--   * the A-leg customer_id / product_type stay the IVR's (dispatch_terminal);
+--   * a far-end NO_ANSWER / USER_BUSY ends the failover sweep (the caller set
+--     a ring time; re-dialling the same number on the next SBC/carrier would
+--     multiply it).
+-- It is NEVER true on an RCF / trunk / voicemail / API call: only
+-- ivr_transfer sets it, and it is restored when the transfer returns.
+local egress_return_mode = false
+local egress_reject_cause = nil
+
+-- ================================================================
 -- SIP display-name hardening
 -- ================================================================
 -- A display name we hand to Kamailio in X-From-Name / X-Original-CID-Name is
@@ -209,14 +254,20 @@ end
 -- As above, plus a 64-char cap and a fallback when nothing printable is left
 -- (the cap is applied ONLY to caller-supplied names; the RCF line name keeps
 -- its historical uncapped rendering via sip_display_safe()). Never nil.
+-- '$', '{' and '}' are removed too: with the From pass-through on, this name
+-- is exported (`export origination_caller_id_name=<name>`), and FreeSWITCH
+-- expands ${var} / ${api(args)} inside every session:execute() argument
+-- (switch_core_session_exec). A CARRIER-supplied display name must never be
+-- able to run an API command (IVR contract §5 guard; a name without these
+-- three characters is byte-identical).
 local function sanitize_display_name(name, fallback)
-    local s = sip_display_safe(name)
+    local s = sip_display_safe((tostring(name or ""):gsub("[%${}]", "")))
     if #s > 64 then
         s = s:sub(1, 64)
         s = s:gsub("%s+$", "")
     end
     if s == "" then
-        s = sip_display_safe(fallback)
+        s = sip_display_safe((tostring(fallback or ""):gsub("[%${}]", "")))
     end
     return s
 end
@@ -803,8 +854,39 @@ local function lookup_voicemail_did()
     return nil
 end
 
+-- Try IVR DID (Visual IVR, docs/IVR_INTERFACES.md §5.2). LAST in the cascade
+-- — after voicemail, matching customer_numbers PRECEDENCE (rcf, api, trunk,
+-- voicemail, then ivr) — so it can never shadow another product and no
+-- existing call ever runs it: the query only executes for a DID every other
+-- arm missed (a call that would otherwise be a 404). db.lookup_ivr_did reads
+-- the ivr_fs_number view ONCE (version pinning) and is UNFILTERED: enabled=f
+-- or no published plan => 603 in terminate_ivr (or the IVR_ENABLED gate in
+-- STEP 2), never 404 — the number is ours.
+local function lookup_ivr_did()
+    if not db or not db.lookup_ivr_did then return nil end
+
+    local ivr_row = db.lookup_ivr_did(normalized_did)
+    if ivr_row then
+        freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] IVR DID hit\n")
+        local en = (ivr_row.enabled == "t" or ivr_row.enabled == true)
+        return {
+            product_type = "ivr",
+            customer_id = tonumber(ivr_row.customer_id),
+            product_ref_id = tonumber(ivr_row.ivr_number_id),
+            -- ivr_fs_number.enabled already folds in customers.status='active'
+            product_enabled = en and ivr_row.plan_json ~= nil,
+            customer_status = "active",
+            traffic_grade = ivr_row.traffic_grade or "standard",
+            max_channels = tonumber(ivr_row.max_channels) or 0,
+            ivr_row = ivr_row,
+        }
+    end
+
+    return nil
+end
+
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 1: DID lookup for " .. tostring(normalized_did) .. "\n")
--- RCF-V1: Execute lookups in order: RCF -> API -> Trunk -> Voicemail
+-- RCF-V1: Execute lookups in order: RCF -> API -> Trunk -> Voicemail -> IVR
 -- UCaaS extension routing removed — not needed for RCF-only deployment
 local routing = lookup_rcf()
 if not routing then
@@ -815,6 +897,9 @@ if not routing then
 end
 if not routing then
     routing = lookup_voicemail_did()
+end
+if not routing then
+    routing = lookup_ivr_did()
 end
 
 -- No match found
@@ -901,6 +986,16 @@ local MAX_HOPS = 5
 --   loop / hop-limit            -> EXCHANGE_ROUTING_ERROR (SIP 483)
 local function hard_reject(cause, log_msg)
     set_var("lua_routed", "true")
+    if egress_return_mode then
+        -- IVR transfer (see egress_return_mode): no carrier fallback either,
+        -- but the IVR engine owns the hangup (it plays the system prompt
+        -- first and hangs up with THIS cause).
+        egress_reject_cause = cause
+        if log_msg then
+            freeswitch.consoleLog("INFO", (log_msg:gsub("\n+$", "")) .. " [IVR transfer: returned to the IVR]\n")
+        end
+        return
+    end
     hangup(cause, log_msg)
 end
 
@@ -924,6 +1019,57 @@ local function normalize_dest(row)
         fallback_url    = row.fallback_url,
         trunk_id        = row.trunk_id,
     }
+end
+
+-- ================================================================
+-- IVR-transfer helpers (egress_return_mode only — never on an RCF call)
+-- ================================================================
+-- Far-end results that end an IVR transfer's failover sweep: the number was
+-- reached and rang out (call_timeout -> NO_ANSWER) or was busy (486).
+-- Every other cause (SBC/carrier trouble) keeps the RCF failover order.
+local IVR_FAR_END_FINAL = { NO_ANSWER = true, USER_BUSY = true }
+
+-- Map an unanswered bridge result to the IVR engine's dispositions.
+local function egress_disposition(disposition, last_cause, product)
+    local ready = false
+    pcall(function() ready = session:ready() end)
+    local cause = (last_cause and last_cause ~= "") and last_cause or disposition
+    local status
+    if not ready then
+        status = "caller_gone"
+    elseif disposition == "USER_BUSY" or cause == "USER_BUSY" then
+        status = "busy"
+    elseif disposition == "NO_ANSWER" or cause == "NO_ANSWER" then
+        status = "noanswer"
+    else
+        status = "failed"
+    end
+    return { status = status, cause = cause, product = product }
+end
+
+-- Concurrency pre-check for an IVR transfer onto a capped number (an RCF
+-- DID's max_channels, or another IVR number's). The `limit` app's over-limit
+-- action would HANG THE IVR CALLER UP; an IVR wants "busy" instead. So ask
+-- mod_hash first (`limit_usage hash <realm> <id>`) and only run the limit app
+-- when a slot is free. A slot THIS call already holds (an earlier transfer
+-- to the same number) is not counted against it: mod_hash never increments
+-- the same realm/id twice for one channel. Fails open (API error -> the limit
+-- app enforces as usual). A race for the last slot ends as the limit app's
+-- 486, exactly like an RCF call.
+local function limit_would_block(ctx, realm, id, max)
+    local key = realm .. "/" .. tostring(id)
+    if ctx.limits_held and ctx.limits_held[key] then return false end
+    local ok, out = pcall(function()
+        return freeswitch.API():executeString("limit_usage hash " .. realm .. " " .. tostring(id))
+    end)
+    local n = ok and tonumber(tostring(out or ""):match("^%s*(%d+)")) or nil
+    if not n then return false end
+    return n >= max
+end
+
+local function limit_mark_held(ctx, realm, id)
+    ctx.limits_held = ctx.limits_held or {}
+    ctx.limits_held[realm .. "/" .. tostring(id)] = true
 end
 
 -- ================================================================
@@ -1039,6 +1185,11 @@ local function terminate_rcf(dest, ctx)
     local normalized_did = dest.did
     local forward_to = dest.forward_to
     local ring_timeout = tonumber(dest.ring_timeout) or 30
+    -- IVR transfer: the Transfer block's ring time bounds the whole transfer,
+    -- including an own RCF number's chain terminal (egress_return_mode only).
+    if egress_return_mode and ctx.ring_timeout_override then
+        ring_timeout = ctx.ring_timeout_override
+    end
     -- Composed caller-ID identity ("last false hop wins", design §5).
     local pass_caller_id = ctx.pass_effective
     local original_caller_number = ctx.presented_cid
@@ -1464,6 +1615,15 @@ local function terminate_rcf(dest, ctx)
     -- On-net note (design §6): this runs against the TERMINAL DID only
     -- (intermediate RCF hops emit no B-leg, so they have no concurrency).
     local max_concurrent = tonumber(routing.max_channels) or 0
+    if max_concurrent > 0 and egress_return_mode
+        and limit_would_block(ctx, "inbound", normalized_did, max_concurrent) then
+        -- IVR transfer onto a full RCF number: "busy" goes back to the IVR
+        -- (its No-answer exit) instead of the limit app's 486 hangup.
+        freeswitch.consoleLog("WARNING", string.format(
+            "[inbound_router] DID %s at its %d concurrent call limit — IVR transfer busy\n",
+            normalized_did, max_concurrent))
+        return { status = "busy", cause = "USER_BUSY", product = "rcf" }
+    end
     if max_concurrent > 0 then
         freeswitch.consoleLog("INFO", string.format(
             "[inbound_router] Checking limit: DID %s, max %d concurrent\n",
@@ -1478,6 +1638,9 @@ local function terminate_rcf(dest, ctx)
                 normalized_did, max_concurrent
             ))
             return
+        end
+        if egress_return_mode then
+            limit_mark_held(ctx, "inbound", normalized_did)
         end
     end
 
@@ -1521,6 +1684,14 @@ local function terminate_rcf(dest, ctx)
     -- this call (shared by whichever PSTN loop runs below; skipped attempts
     -- are not counted). Feeds cdr_leg_attempt via cdr_b_leg_block().
     local carrier_legs_launched = 0
+
+    -- IVR transfer: this call may already have bridged (and failed) earlier
+    -- in the IVR, so the result variables are cleared first — a sweep whose
+    -- every attempt is skipped must never read an older disposition.
+    if egress_return_mode then
+        session:setVariable("originate_disposition", "")
+        session:setVariable("last_bridge_hangup_cause", "")
+    end
 
     if is_local_forward then
         -- Local extension: single bridge attempt (no SBC/carrier failover).
@@ -1573,6 +1744,11 @@ local function terminate_rcf(dest, ctx)
                     "[%s] No enabled 'tollfree' termination trunk for 8YY %s (DID %s) — failing closed NO_ROUTE_DESTINATION (8YY never terminates via 'any'/'ld' trunks)\n",
                     uuid, forward_to, normalized_did))
                 set_var("term_class_blocked", "tollfree")
+                if egress_return_mode then
+                    -- IVR transfer: still never via an 'any'/'ld' trunk, but
+                    -- the caller continues at the block's No-answer exit.
+                    return { status = "failed", cause = "NO_ROUTE_DESTINATION", product = "pstn" }
+                end
                 hard_reject("NO_ROUTE_DESTINATION",
                     "[" .. uuid .. "] 8YY termination blocked: no tollfree trunk enabled")
                 return
@@ -1666,6 +1842,9 @@ local function terminate_rcf(dest, ctx)
                     uuid, i, total_attempts, attempt.label,
                     get_var("last_bridge_hangup_cause", disposition)
                 ))
+                if egress_return_mode and IVR_FAR_END_FINAL[disposition] then
+                    break   -- IVR transfer: the far end rang out / was busy
+                end
             end
 
             -- If continue_on_fail tore the A-leg down (e.g. caller hung up
@@ -1766,6 +1945,9 @@ local function terminate_rcf(dest, ctx)
                     uuid, i, attempt.label,
                     get_var("last_bridge_hangup_cause", disposition)
                 ))
+                if egress_return_mode and IVR_FAR_END_FINAL[disposition] then
+                    break   -- IVR transfer: the far end rang out / was busy
+                end
             end
 
             -- If continue_on_fail tore the A-leg down (e.g. caller hung up
@@ -1793,9 +1975,16 @@ local function terminate_rcf(dest, ctx)
             "[%s] All bridges failed for RCF DID %s -> %s (disposition=%s last_cause=%s)\n",
             uuid, normalized_did, forward_to, disposition, last_bridge_hangup
         ))
+        if egress_return_mode then
+            -- IVR transfer: back to the engine (its No-answer exit), no 503.
+            return egress_disposition(disposition, last_bridge_hangup, "pstn")
+        end
         hangup("NORMAL_TEMPORARY_FAILURE",
             "[" .. uuid .. "] RCF bridge failed, returning 503 (DID was found, carrier unreachable)")
         return
+    end
+    if egress_return_mode then
+        return { status = "answered", product = "pstn" }
     end
 end
 
@@ -1855,6 +2044,7 @@ local function terminate_api(dest, ctx)
         freeswitch.consoleLog("ERR", "[" .. uuid .. "] API DID has no voice_url configured — rejecting\n")
         hangup("NORMAL_TEMPORARY_FAILURE")
     end
+    return { status = "delivered", product = "api" }
 end
 
 -- ================================================================
@@ -1903,6 +2093,10 @@ local function terminate_trunk(dest, ctx)
         freeswitch.consoleLog("WARNING", string.format(
             "[%s] No endpoint IPs found for trunk %s\n", uuid, tostring(trunk_id)
         ))
+        if egress_return_mode then
+            -- IVR transfer onto a trunk DID with no PBX: No-answer exit.
+            return { status = "failed", cause = "NO_ROUTE_DESTINATION", product = "trunk" }
+        end
         hangup("NO_ROUTE_DESTINATION", "[" .. uuid .. "] No PBX endpoint configured for trunk")
     else
         -- Media anchoring (proxy_media: trunk path ONLY; RCF runs in default media mode) + ringback (same as RCF)
@@ -2011,10 +2205,18 @@ local function terminate_trunk(dest, ctx)
         -- regardless. sip_copy_custom_headers is deliberately untouched.
         session:setVariable("sip_h_identity", "")
 
+        -- IVR transfer onto an own trunk number: the Transfer block's ring
+        -- time replaces the fixed 60 s (egress_return_mode only; every
+        -- trunk/RCF call keeps call_timeout=60 byte for byte).
+        local pbx_call_timeout = 60
+        if egress_return_mode and ctx.ring_timeout_override then
+            pbx_call_timeout = math.floor(tonumber(ctx.ring_timeout_override) or 60)
+        end
         local dial_string = string.format(
-            "{ignore_early_media=false,sip_enable_soa=false,call_timeout=60" ..
+            "{ignore_early_media=false,sip_enable_soa=false,call_timeout=%d" ..
             ",sip_session_timeout=1800,sip_minimum_session_expires=90,enable_timer=true" ..
             "}sofia/external/%s@%s:5060",
+            pbx_call_timeout,
             bridge_did,
             sbc_proxy_ip
         )
@@ -2030,6 +2232,11 @@ local function terminate_trunk(dest, ctx)
         -- X-Stir-Outcome arrives on this leg's replies via Kamailio's
         -- onreply_route[PBX_REPLY_HANDLER] (mode=pbx) — same A-leg capture
         -- as the carrier loop.
+        if egress_return_mode then
+            -- IVR transfer: never read an earlier transfer's result.
+            session:setVariable("originate_disposition", "")
+            session:setVariable("last_bridge_hangup_cause", "")
+        end
         stir_outcome_reset()
         session:execute("bridge", dial_string)
         stir_outcome_capture(uuid, "pbx " .. tostring(pbx_ip))
@@ -2043,6 +2250,12 @@ local function terminate_trunk(dest, ctx)
                 "[%s] Trunk inbound bridge failed: disposition=%s last_cause=%s\n",
                 uuid, disposition, get_var("last_bridge_hangup_cause", "")
             ))
+        end
+        if egress_return_mode then
+            if disposition == "SUCCESS" then
+                return { status = "answered", product = "trunk" }
+            end
+            return egress_disposition(disposition, get_var("last_bridge_hangup_cause", ""), "trunk")
         end
     end
 end
@@ -2128,11 +2341,14 @@ local function terminate_vvm(dest, ctx)
             "[%s] Voicemail flow raised: %s\n", uuid, tostring(err)))
         pcall(function() session:hangup("NORMAL_TEMPORARY_FAILURE") end)
     end
+    return { status = "delivered", product = "voicemail" }
 end
 
 -- Product-agnostic dispatch map (design §2/§8). A future product enrolls by
 -- adding a UNION-ALL arm to number_routing + a terminator here — detection,
 -- the hop loop, loop/limit/reject, and CDR emission stay untouched.
+-- (Visual IVR: TERMINATORS.ivr = terminate_ivr is registered below, only
+-- while IVR_ENABLED is on — contract §5.1.)
 local TERMINATORS = {
     rcf       = terminate_rcf,
     api       = terminate_api,
@@ -2143,9 +2359,18 @@ local TERMINATORS = {
 -- Set common CDR/terminal channel vars on the resolved TERMINAL destination,
 -- then dispatch to its product terminator (design §4/§5). customer_id is set to
 -- the TERMINAL customer so rate_cdr() (which rates customer_id) is unchanged.
+-- IVR transfer (egress_return_mode): the A-leg keeps the IVR's customer_id /
+-- product_type (contract §5.5 — the CDR row is the IVR call; its transfer
+-- B-legs carry cdr_product_type=ivr); the terminal facts below still record
+-- where the transfer went. dest.terminator lets the IVR's pseudo-hop (product
+-- ivr) use the RCF egress.
+-- Returns the terminator's result (a disposition table in egress_return_mode;
+-- ignored on every other call).
 local function dispatch_terminal(dest, ctx)
-    set_var("customer_id", tostring(dest.customer_id))
-    set_var("product_type", dest.product_type)
+    if not egress_return_mode then
+        set_var("customer_id", tostring(dest.customer_id))
+        set_var("product_type", dest.product_type)
+    end
     set_var("terminating_customer_id", tostring(dest.customer_id))
     set_var("origin_customer_id", tostring(ctx.origin_customer_id))
     set_var("on_net", ctx.on_net and "true" or "false")
@@ -2153,7 +2378,7 @@ local function dispatch_terminal(dest, ctx)
     if dest.trunk_id then
         set_var("trunk_id", tostring(dest.trunk_id))
     end
-    local fn = TERMINATORS[dest.product_type]
+    local fn = TERMINATORS[dest.terminator or dest.product_type]
     if not fn then
         -- Should never happen (view only yields known product types) — fail
         -- closed rather than fall through to the carrier.
@@ -2162,7 +2387,492 @@ local function dispatch_terminal(dest, ctx)
             ctx.uuid, tostring(dest.product_type)))
         return
     end
-    fn(dest, ctx)
+    return fn(dest, ctx)
+end
+
+-- ================================================================
+-- RCF branch point: 3-way on-net decision + in-memory chain
+-- ================================================================
+-- (design §2/§5/§6) — a chain of RCF->RCF forwards resolves entirely in
+-- memory (DB lookups only, NO SIP per hop) until it reaches a terminal:
+-- an off-net PSTN number, a local extension, or another product's DID.
+-- EXACTLY ONE B-leg is ever emitted (by the terminal terminator).
+--
+-- Extracted VERBATIM from the module-level `if product_type == "rcf"` body
+-- into a callable function (the only edits: `break` -> `return`, the IVR gate
+-- beside the API gate, and the optional own-number check) so an IVR Transfer
+-- block reuses it with a pseudo-hop (ivr_transfer). The RCF call path calls it
+-- once with the STEP-1 row and ignores the result — byte-identity proven by
+-- tests/lua/ivr_egress_identity_harness.lua against the pre-extraction router.
+--   start              the first hop (an RCF row, or the IVR pseudo-hop)
+--   own_customer_id    IVR "own number" transfers only: the FIRST resolution
+--                      must be a platform number of this customer, else the
+--                      transfer is rejected like a disabled terminal (603) —
+--                      contract §6 "ownership changed since publish".
+local function run_onnet_chain(start, ctx, own_customer_id)
+    local cur = start
+    local first = true
+
+    while true do
+        -- Compose caller-ID for THIS hop ("last false hop wins", design §5).
+        -- The terminal RCF hop participates too, so a single off-net RCF DID
+        -- yields exactly today's CID behavior.
+        if cur.pass_caller_id == false then
+            ctx.pass_effective = false
+            ctx.presented_cid = cur.did
+            ctx.presented_name = cur.did
+            -- Masking hop's RCF line name — used ONLY by terminate_trunk for
+            -- the on-net PBX leg's display name (terminate_rcf keeps using the
+            -- TERMINAL line's name via X-Original-CID-Name, unchanged).
+            ctx.masking_name = cur.product_name
+        end
+
+        local fwd = cur.forward_to
+
+        -- (1) Local extension terminal — existing user/<ext> bridge (unchanged).
+        if is_local_extension(fwd) then
+            ctx.on_net = ctx.on_net or false
+            return dispatch_terminal(cur, ctx)
+        end
+
+        -- (2) Resolve forward_to against the on-net oracle.
+        local fwd_e164 = normalize_did(fwd)
+        local resolved = nil
+        if db then
+            local ok, row = pcall(function() return db.resolve_destination(fwd_e164) end)
+            if ok then
+                resolved = normalize_dest(row)
+            else
+                freeswitch.consoleLog("ERR", string.format(
+                    "[%s] resolve_destination failed for %s: %s — treating as off-net\n",
+                    uuid, fwd_e164, tostring(row)))
+            end
+        end
+
+        -- IVR "own number" transfer: the dialed number must still be one of
+        -- the IVR owner's platform numbers (published against
+        -- customer_numbers; re-checked here at call time).
+        if first and own_customer_id then
+            if not resolved or tonumber(resolved.customer_id) ~= tonumber(own_customer_id) then
+                hard_reject("CALL_REJECTED", string.format(
+                    "[%s] IVR own-number transfer target %s is no longer customer %s's number "
+                    .. "(resolved customer=%s) — 603\n",
+                    uuid, tostring(fwd_e164), tostring(own_customer_id),
+                    tostring(resolved and resolved.customer_id)))
+                return
+            end
+        end
+        first = false
+
+        if not resolved then
+            -- (2a) OFF-NET: forward_to is not one of our DIDs. Terminate the
+            -- CURRENT RCF DID exactly as today (single carrier B-leg via the
+            -- 4-attempt failover loop). on_net reflects whether we short-
+            -- circuited any earlier hop in this chain.
+            -- Pin the classification explicitly (carrier B-leg): dispatch_terminal
+            -- exports the `on_net` channel variable read by the ESL metrics
+            -- exporter to label live channels; leaving it implicit here would
+            -- rely on nil->"false" coercion. Preserves an earlier true hop.
+            ctx.on_net = ctx.on_net or false
+            return dispatch_terminal(cur, ctx)
+        end
+
+        -- (2b) ON-NET: forward_to is a platform-owned DID.
+        -- Disabled/suspended terminal -> hard reject (no carrier fallback).
+        if (not resolved.product_enabled) or (resolved.customer_status ~= "active") then
+            hard_reject("CALL_REJECTED", string.format(
+                "[%s] On-net destination %s is disabled/suspended "
+                .. "(product_enabled=%s customer_status=%s) — 603\n",
+                uuid, fwd_e164, tostring(resolved.product_enabled),
+                tostring(resolved.customer_status)))
+            return
+        end
+
+        -- Retired product terminal (API Calling, API_CALLING_ENABLED off):
+        -- the number is ours, so hard reject exactly like a disabled
+        -- terminal (603, lua_routed=true, no carrier fallback).
+        if resolved.product_type == "api" and not api_calling_enabled then
+            hard_reject("CALL_REJECTED", string.format(
+                "[%s] API Calling retired (API_CALLING_ENABLED off): "
+                .. "rejecting on-net terminal DID %s (customer=%s) — 603\n",
+                uuid, tostring(resolved.did), tostring(resolved.customer_id)))
+            return
+        end
+
+        -- Visual IVR terminal with IVR_ENABLED off: ours -> 603, same shape.
+        if resolved.product_type == "ivr" and not ivr_enabled then
+            hard_reject("CALL_REJECTED", string.format(
+                "[%s] IVR disabled (IVR_ENABLED off): "
+                .. "rejecting on-net terminal DID %s (customer=%s) — 603\n",
+                uuid, tostring(resolved.did), tostring(resolved.customer_id)))
+            return
+        end
+
+        -- Loop guard: this DID already entered in the chain -> hard reject.
+        if ctx.visited[resolved.did] then
+            hard_reject("EXCHANGE_ROUTING_ERROR", string.format(
+                "[%s] Routing loop detected re-entering %s — 483\n",
+                uuid, resolved.did))
+            return
+        end
+
+        -- Count this on-net hop; enforce MAX_HOPS.
+        ctx.hops = ctx.hops + 1
+        ctx.visited[resolved.did] = true
+        ctx.on_net = true
+        freeswitch.consoleLog("INFO", string.format(
+            "[%s] ON-NET hop %d: %s -> %s (product=%s customer=%s)\n",
+            uuid, ctx.hops, cur.did, resolved.did, resolved.product_type,
+            tostring(resolved.customer_id)))
+
+        if ctx.hops > MAX_HOPS then
+            hard_reject("EXCHANGE_ROUTING_ERROR", string.format(
+                "[%s] On-net hop limit exceeded (>%d) at %s — 483\n",
+                uuid, MAX_HOPS, resolved.did))
+            return
+        end
+
+        -- If the resolved on-net destination is itself an RCF DID, keep
+        -- following the chain in memory (no SIP). Otherwise it is a terminal
+        -- of another product (api/trunk) — dispatch it and stop.
+        if resolved.product_type == "rcf" then
+            cur = resolved
+            -- loop again
+        else
+            -- The RCF DID that forwarded onto this other-product terminal is
+            -- the DIVERTING number of the delivery leg (terminate_trunk marks
+            -- the PBX leg div + Diversion from it; RFC 8946 div.tn).
+            ctx.last_rcf_did = cur.did
+            return dispatch_terminal(resolved, ctx)
+        end
+    end
+end
+
+-- ================================================================
+-- Visual IVR: transfer = the RCF egress with a pseudo-hop
+-- ================================================================
+-- docs/IVR_INTERFACES.md §3 "Transfer semantics", plan §7.3. The IVR's
+-- Transfer / Voicemail block becomes a pseudo RCF hop
+--   { did = the IVR DID, forward_to = the target, pass_caller_id = the block
+--     setting, max_channels = 0, terminator = "rcf" }
+-- fed to run_onnet_chain in egress_return_mode, so it reuses EVERYTHING an RCF
+-- forward does: on-net resolution of own numbers (RCF chain, voicemail DID ->
+-- terminate_vvm, another IVR -> terminate_ivr hop-limited, trunk DID ->
+-- terminate_trunk) and, off-net, terminate_rcf itself — cached TCP pre-check,
+-- table-driven carrier_trunks x {signaling VIP, SBC-1 direct} (legacy 4-attempt
+-- fallback), progress_timeout (never originate_timeout), the 8YY class
+-- (fail-closed), From = the IVR DID for Bandwidth auth, PAI/RPID = the caller
+-- (pass_caller_id=true) or the IVR DID (false), Diversion = the IVR DID, STIR
+-- `div` + X-In-Identity + stir_outcome capture, the per-leg [cdr_*] B-leg
+-- block (cdr_product_type=ivr, read off the A-leg), default media (no
+-- proxy_media, SOA on).
+-- Per transfer the cross-hop ctx (CID composition, hops, visited set) and the
+-- egress channel variables are put back to the IVR's state, so a second
+-- transfer after a no-answer starts exactly like the first (no stale
+-- Diversion / exported From / proxy_media, no false loop on the same number).
+-- Returns { status = answered|delivered|noanswer|busy|failed|rejected|
+--           caller_gone, cause = <FS cause>, product = pstn|rcf|trunk|
+--           voicemail|ivr|api }.
+local IVR_EGRESS_RESET_VARS = {
+    "sip_h_Diversion", "sip_h_X-Original-CID", "sip_h_X-Original-CID-Name",
+    "sip_h_X-From-Name", "sip_h_Remote-Party-ID", "sip_h_X-Attestation",
+    "sip_h_X-PBX-Dest", "outbound_caller_id_number", "outbound_caller_id_name",
+    "effective_caller_id_number", "effective_caller_id_name",
+    "origination_caller_id_number", "origination_caller_id_name", "proxy_media",
+}
+-- A-leg on-net facts that only describe a transfer that actually connected.
+local IVR_ONNET_VARS = { "on_net", "on_net_hops", "terminating_customer_id", "trunk_id" }
+
+local function ivr_snapshot(ctx)
+    local visited = {}
+    for k, v in pairs(ctx.visited) do visited[k] = v end
+    local vars = {}
+    for _, k in ipairs(IVR_ONNET_VARS) do vars[k] = get_var(k, "") end
+    return {
+        pass_effective = ctx.pass_effective, presented_cid = ctx.presented_cid,
+        presented_name = ctx.presented_name, masking_name = ctx.masking_name,
+        hops = ctx.hops, visited = visited, on_net = ctx.on_net,
+        last_rcf_did = ctx.last_rcf_did, vars = vars,
+    }
+end
+
+local function ivr_restore(ctx, snap)
+    ctx.pass_effective, ctx.presented_cid = snap.pass_effective, snap.presented_cid
+    ctx.presented_name, ctx.masking_name = snap.presented_name, snap.masking_name
+    ctx.hops, ctx.on_net, ctx.last_rcf_did = snap.hops, snap.on_net, snap.last_rcf_did
+    local visited = {}
+    for k, v in pairs(snap.visited) do visited[k] = v end
+    ctx.visited = visited
+    for k, v in pairs(snap.vars) do
+        pcall(function() session:setVariable(k, v) end)   -- "" deletes
+    end
+end
+
+local function ivr_reset_egress_vars()
+    for _, k in ipairs(IVR_EGRESS_RESET_VARS) do
+        pcall(function() session:setVariable(k, "") end)
+    end
+end
+
+local function ivr_transfer(ivr, spec, ctx)
+    local hop = {
+        did             = ivr.did,
+        product_type    = "ivr",
+        terminator      = "rcf",
+        customer_id     = ivr.customer_id,
+        product_enabled = true,
+        customer_status = "active",
+        forward_to      = spec.e164,
+        pass_caller_id  = (spec.pass_caller_id == true),
+        ring_timeout    = spec.ring_timeout,
+        max_channels    = 0,
+        product_name    = nil,     -- no customer text in any SIP header
+    }
+    freeswitch.consoleLog("INFO", string.format(
+        "[%s] IVR transfer: %s -> %s (kind=%s pass_cid=%s ring=%ss)\n",
+        ctx.uuid, tostring(ivr.did), tostring(spec.e164), tostring(spec.kind),
+        tostring(hop.pass_caller_id), tostring(spec.ring_timeout)))
+
+    local snap = ivr_snapshot(ctx)
+    ivr_reset_egress_vars()
+    local prev_mode, prev_ring = egress_return_mode, ctx.ring_timeout_override
+    egress_return_mode = true
+    egress_reject_cause = nil
+    ctx.ring_timeout_override = spec.ring_timeout
+    local ok, res = pcall(run_onnet_chain, hop, ctx,
+        (spec.kind == "own") and ivr.customer_id or nil)
+    ctx.ring_timeout_override = prev_ring
+    egress_return_mode = prev_mode
+    local reject = egress_reject_cause
+    egress_reject_cause = nil
+
+    if not ok then
+        freeswitch.consoleLog("ERR", string.format(
+            "[%s] IVR transfer raised: %s\n", ctx.uuid, tostring(res)))
+        res = { status = "rejected", cause = "NORMAL_TEMPORARY_FAILURE" }
+    elseif reject then
+        res = { status = "rejected", cause = reject }
+    elseif type(res) ~= "table" then
+        local up = false
+        pcall(function() up = session:ready() end)
+        res = { status = up and "failed" or "delivered", cause = "NORMAL_TEMPORARY_FAILURE" }
+    end
+
+    if res.status ~= "answered" and res.status ~= "delivered" then
+        ivr_restore(ctx, snap)
+        ivr_reset_egress_vars()
+    end
+    freeswitch.consoleLog("INFO", string.format(
+        "[%s] IVR transfer -> %s: %s (cause=%s product=%s)\n",
+        ctx.uuid, tostring(spec.e164), tostring(res.status),
+        tostring(res.cause), tostring(res.product)))
+    return res
+end
+
+-- ================================================================
+-- Terminator: Visual IVR  (dest = IVR number row, ctx = state)
+-- ================================================================
+-- docs/IVR_INTERFACES.md §5; plan §7.1-§7.4. Reached two ways, both through
+-- dispatch_terminal (customer_id = IVR owner, product_type = ivr):
+--   * DIRECT: an IVR DID dialed from the PSTN (STEP-1 lookup_ivr_did, LAST arm;
+--     dest.ivr_row is the ivr_fs_number row).
+--   * ON-NET: an RCF forward / chain — or another IVR's transfer — whose
+--     terminal resolves to the number_routing ivr arm (row read here).
+-- Flow: ONE ivr_fs_number read (version pinning) -> enabled + published or
+-- 603 -> `limit hash ivr <did> <max_channels>` (486 + ivr_exit=limit) -> plan
+-- decoded + validated closed-world (lib/ivr_engine.lua) -> every prompt
+-- prefetched into the local cache BEFORE answer (lib/ivr_prompts.lua; a 180
+-- first when a fetch is needed, so the caller hears ringback) ->
+-- lib/media_leg.prepare (rtp_timer_name=soft + jitterbuffer, this leg only)
+-- -> answer -> engine -> CDR vars. Any failure: answer, play
+-- sounds/ivr/technical_difficulty.wav, hang up, ivr_exit=error.
+-- Modules load lazily HERE, so RCF/trunk/voicemail calls never read them.
+-- Nested (an IVR transferred onto another IVR number): same steps on the
+-- already-answered channel, sharing the call's IVR CDR state; a full nested
+-- number is "busy" for the outer IVR.
+local IVR_FALLBACK_PROMPT = "/usr/local/freeswitch/scripts/sounds/ivr/technical_difficulty.wav"
+
+local function terminate_ivr(dest, ctx)
+    local uuid = ctx.uuid
+    local nested = (ctx.ivr_state ~= nil)
+    set_var("lua_routed", "true")
+
+    if not ivr_enabled then
+        hard_reject("CALL_REJECTED", string.format(
+            "[%s] IVR disabled (IVR_ENABLED off): rejecting DID %s — 603", uuid, tostring(dest.did)))
+        return
+    end
+
+    -- ONE read of the number (version pinning: this plan runs to the end).
+    local row = dest.ivr_row
+    if not row and db and db.lookup_ivr_did then
+        local ok, r = pcall(db.lookup_ivr_did, dest.did)
+        if ok then
+            row = r
+        else
+            freeswitch.consoleLog("ERR", string.format(
+                "[%s] IVR lookup raised for %s: %s\n", uuid, tostring(dest.did), tostring(r)))
+        end
+    end
+    local row_enabled = row and (row.enabled == "t" or row.enabled == true)
+    local plan_text = row and row.plan_json
+    local row_customer = row and tonumber(row.customer_id)
+    if not row or not row_enabled or type(plan_text) ~= "string" or plan_text == ""
+        or (dest.customer_id and row_customer ~= tonumber(dest.customer_id)) then
+        hard_reject("CALL_REJECTED", string.format(
+            "[%s] IVR DID %s not callable (row=%s enabled=%s plan=%s owner=%s/%s) — 603",
+            uuid, tostring(dest.did), tostring(row ~= nil), tostring(row_enabled),
+            tostring(type(plan_text) == "string" and plan_text ~= ""),
+            tostring(row_customer), tostring(dest.customer_id)))
+        return
+    end
+
+    local flow_id, flow_version = tonumber(row.flow_id), tonumber(row.flow_version)
+    if not nested then
+        set_var("ivr_flow_id", flow_id)
+        set_var("ivr_flow_version", flow_version)
+    end
+
+    local function log(level, msg)
+        freeswitch.consoleLog(level, string.format("[%s] IVR %s: %s\n", uuid, tostring(dest.did), msg))
+    end
+
+    -- State shared with nested IVRs on this call; created at the first answer.
+    local state = ctx.ivr_state
+
+    local function finalize()
+        if nested or not state then return end
+        local engine_mod = state.engine
+        local vars = engine_mod and engine_mod.cdr_vars(state, os.time()) or { ivr_exit = state.exit or "error" }
+        for k, v in pairs(vars) do
+            if v ~= nil and v ~= "" then set_var(k, v) end
+        end
+        log("INFO", string.format("exit=%s path=%s seconds=%s", tostring(vars.ivr_exit),
+            tostring(vars.ivr_path), tostring(vars.ivr_seconds)))
+        ctx.ivr_state = nil
+    end
+
+    -- The error path (contract §4/§5): system prompt, hang up, ivr_exit=error.
+    local media, prompts
+    local function fail(reason, cause)
+        log("ERR", reason)
+        local up = false
+        pcall(function() up = session:ready() end)
+        if up then
+            if media then media.prepare(session) end
+            pcall(function() session:answer() end)
+        end
+        if not state then
+            state = { path = "", answered_at = os.time(), exit = nil }
+            ctx.ivr_state = state
+        end
+        state.exit = state.exit or "error"
+        pcall(function() up = session:ready() end)
+        if up then
+            local p = prompts and prompts.system("technical_difficulty") or IVR_FALLBACK_PROMPT
+            pcall(function() session:execute("playback", p) end)
+            pcall(function() session:hangup(cause or "NORMAL_TEMPORARY_FAILURE") end)
+        end
+        finalize()
+        return { status = "delivered", product = "ivr" }
+    end
+
+    -- Per-number concurrency (§5.4): `limit hash ivr <did> <max_channels>`.
+    local max_ch = tonumber(row.max_channels) or 0
+    local did_ok = type(dest.did) == "string" and dest.did:match("^%+%d+$") ~= nil
+    if max_ch > 0 and did_ok then
+        if nested then
+            if limit_would_block(ctx, "ivr", dest.did, max_ch) then
+                log("WARNING", string.format("at its %d concurrent call limit — busy for the calling IVR", max_ch))
+                return { status = "busy", cause = "USER_BUSY", product = "ivr" }
+            end
+        end
+        session:execute("limit", string.format("hash ivr %s %d !USER_BUSY", dest.did, max_ch))
+        if not session:ready() then
+            log("WARNING", string.format("rejected — %d concurrent call limit reached (486)", max_ch))
+            if nested then
+                state.exit = state.exit or "limit"
+            else
+                set_var("ivr_exit", "limit")
+            end
+            return
+        end
+        if nested then limit_mark_held(ctx, "ivr", dest.did) end
+    end
+
+    -- Modules (lazy, house load_module; a missing one is the error path,
+    -- never a 404/503 or a carrier hairpin).
+    media = load_module("media_leg")
+    prompts = load_module("ivr_prompts")
+    local engine = load_module("ivr_engine")
+    local schedule = load_module("schedule")
+    local rules = load_module("rules")
+    if not (media and prompts and engine and schedule and rules) then
+        return fail("IVR modules failed to load")
+    end
+
+    local plan, perr = engine.load_plan(plan_text, {
+        flow_id = flow_id, version = flow_version, customer_id = row_customer,
+    })
+    if not plan then
+        return fail(tostring(perr))
+    end
+
+    -- Prefetch EVERY prompt before answer (D9: local replica + local disk).
+    if not nested and not prompts.all_cached(plan.prompts) then
+        pcall(function() session:execute("ring_ready") end)
+    end
+    local cache_token = tostring(uuid):gsub("[^%w%-]", "")
+    local pok, ferr, fsha = prompts.prefetch(plan.prompts, { db = db, token = cache_token })
+    if not pok then
+        return fail(string.format("prompt %s unavailable: %s", tostring(fsha), tostring(ferr)))
+    end
+
+    -- Media clocking for THIS leg only, then answer (§5.3).
+    if not nested then
+        media.prepare(session)
+        session:setVariable("playback_terminators", "none")
+        pcall(function() session:answer() end)
+        if not session:ready() then
+            state = { path = "", answered_at = nil, exit = "caller_hangup" }
+            ctx.ivr_state = state
+            finalize()
+            return
+        end
+        state = engine.new_state(os.time())
+        state.engine = engine
+        ctx.ivr_state = state
+    end
+    state.depth = (state.depth or 0) + 1
+    log("INFO", string.format("flow %s v%s, %d nodes, %d prompts (depth %d)",
+        tostring(flow_id), tostring(flow_version), (function()
+            local n = 0 for _ in pairs(plan.nodes) do n = n + 1 end return n end)(),
+        #plan.prompts, state.depth))
+
+    local ivr = { did = dest.did, customer_id = row_customer }
+    local ok, err = pcall(engine.run, session, {
+        plan = plan, state = state, prompts = prompts, schedule = schedule,
+        rules = rules, number_utils = number_utils,
+        caller = ctx.presented_cid, now = os.time, log = log,
+        transfer = function(spec) return ivr_transfer(ivr, spec, ctx) end,
+    })
+    state.depth = state.depth - 1
+    if not ok then
+        return fail("engine raised: " .. tostring(err))
+    end
+
+    if not nested then
+        -- Never hand a live channel back to the dialplan (its 503 fallback).
+        local up = false
+        pcall(function() up = session:ready() end)
+        if up then pcall(function() session:hangup("NORMAL_CLEARING") end) end
+        finalize()
+    end
+    return { status = "delivered", product = "ivr" }
+end
+
+if ivr_enabled then
+    TERMINATORS.ivr = terminate_ivr
 end
 
 freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] STEP 2: Routing product_type=" .. tostring(product_type) .. "\n")
@@ -2214,130 +2924,12 @@ local first_dest = {
     voice_url       = voice_url,
     fallback_url    = fallback_url,
     trunk_id        = trunk_id,
+    ivr_row         = routing.ivr_row,          -- ivr: the ivr_fs_number row (nil otherwise)
 }
 
 if product_type == "rcf" then
-    -- ============================================================
-    -- RCF branch point: 3-way on-net decision + in-memory chain
-    -- ============================================================
-    -- (design §2/§5/§6) — a chain of RCF->RCF forwards resolves entirely in
-    -- memory (DB lookups only, NO SIP per hop) until it reaches a terminal:
-    -- an off-net PSTN number, a local extension, or another product's DID.
-    -- EXACTLY ONE B-leg is ever emitted (by the terminal terminator).
-    local cur = first_dest
-
-    while true do
-        -- Compose caller-ID for THIS hop ("last false hop wins", design §5).
-        -- The terminal RCF hop participates too, so a single off-net RCF DID
-        -- yields exactly today's CID behavior.
-        if cur.pass_caller_id == false then
-            ctx.pass_effective = false
-            ctx.presented_cid = cur.did
-            ctx.presented_name = cur.did
-            -- Masking hop's RCF line name — used ONLY by terminate_trunk for
-            -- the on-net PBX leg's display name (terminate_rcf keeps using the
-            -- TERMINAL line's name via X-Original-CID-Name, unchanged).
-            ctx.masking_name = cur.product_name
-        end
-
-        local fwd = cur.forward_to
-
-        -- (1) Local extension terminal — existing user/<ext> bridge (unchanged).
-        if is_local_extension(fwd) then
-            ctx.on_net = ctx.on_net or false
-            dispatch_terminal(cur, ctx)
-            break
-        end
-
-        -- (2) Resolve forward_to against the on-net oracle.
-        local fwd_e164 = normalize_did(fwd)
-        local resolved = nil
-        if db then
-            local ok, row = pcall(function() return db.resolve_destination(fwd_e164) end)
-            if ok then
-                resolved = normalize_dest(row)
-            else
-                freeswitch.consoleLog("ERR", string.format(
-                    "[%s] resolve_destination failed for %s: %s — treating as off-net\n",
-                    uuid, fwd_e164, tostring(row)))
-            end
-        end
-
-        if not resolved then
-            -- (2a) OFF-NET: forward_to is not one of our DIDs. Terminate the
-            -- CURRENT RCF DID exactly as today (single carrier B-leg via the
-            -- 4-attempt failover loop). on_net reflects whether we short-
-            -- circuited any earlier hop in this chain.
-            -- Pin the classification explicitly (carrier B-leg): dispatch_terminal
-            -- exports the `on_net` channel variable read by the ESL metrics
-            -- exporter to label live channels; leaving it implicit here would
-            -- rely on nil->"false" coercion. Preserves an earlier true hop.
-            ctx.on_net = ctx.on_net or false
-            dispatch_terminal(cur, ctx)
-            break
-        end
-
-        -- (2b) ON-NET: forward_to is a platform-owned DID.
-        -- Disabled/suspended terminal -> hard reject (no carrier fallback).
-        if (not resolved.product_enabled) or (resolved.customer_status ~= "active") then
-            hard_reject("CALL_REJECTED", string.format(
-                "[%s] On-net destination %s is disabled/suspended "
-                .. "(product_enabled=%s customer_status=%s) — 603\n",
-                uuid, fwd_e164, tostring(resolved.product_enabled),
-                tostring(resolved.customer_status)))
-            break
-        end
-
-        -- Retired product terminal (API Calling, API_CALLING_ENABLED off):
-        -- the number is ours, so hard reject exactly like a disabled
-        -- terminal (603, lua_routed=true, no carrier fallback).
-        if resolved.product_type == "api" and not api_calling_enabled then
-            hard_reject("CALL_REJECTED", string.format(
-                "[%s] API Calling retired (API_CALLING_ENABLED off): "
-                .. "rejecting on-net terminal DID %s (customer=%s) — 603\n",
-                uuid, tostring(resolved.did), tostring(resolved.customer_id)))
-            break
-        end
-
-        -- Loop guard: this DID already entered in the chain -> hard reject.
-        if ctx.visited[resolved.did] then
-            hard_reject("EXCHANGE_ROUTING_ERROR", string.format(
-                "[%s] Routing loop detected re-entering %s — 483\n",
-                uuid, resolved.did))
-            break
-        end
-
-        -- Count this on-net hop; enforce MAX_HOPS.
-        ctx.hops = ctx.hops + 1
-        ctx.visited[resolved.did] = true
-        ctx.on_net = true
-        freeswitch.consoleLog("INFO", string.format(
-            "[%s] ON-NET hop %d: %s -> %s (product=%s customer=%s)\n",
-            uuid, ctx.hops, cur.did, resolved.did, resolved.product_type,
-            tostring(resolved.customer_id)))
-
-        if ctx.hops > MAX_HOPS then
-            hard_reject("EXCHANGE_ROUTING_ERROR", string.format(
-                "[%s] On-net hop limit exceeded (>%d) at %s — 483\n",
-                uuid, MAX_HOPS, resolved.did))
-            break
-        end
-
-        -- If the resolved on-net destination is itself an RCF DID, keep
-        -- following the chain in memory (no SIP). Otherwise it is a terminal
-        -- of another product (api/trunk) — dispatch it and stop.
-        if resolved.product_type == "rcf" then
-            cur = resolved
-            -- loop again
-        else
-            -- The RCF DID that forwarded onto this other-product terminal is
-            -- the DIVERTING number of the delivery leg (terminate_trunk marks
-            -- the PBX leg div + Diversion from it; RFC 8946 div.tn).
-            ctx.last_rcf_did = cur.did
-            dispatch_terminal(resolved, ctx)
-            break
-        end
-    end
+    -- RCF branch point: the on-net chain (run_onnet_chain above, unchanged).
+    run_onnet_chain(first_dest, ctx)
 else
     -- Non-RCF inbound (api / trunk): the first-hop DID is the terminal, exactly
     -- as before. No chain, no on-net decision (a directly-dialed platform DID is
@@ -2352,6 +2944,12 @@ else
         -- shape as the on-net disabled/suspended terminal reject.
         hard_reject("CALL_REJECTED", string.format(
             "[%s] API Calling retired (API_CALLING_ENABLED off): "
+            .. "rejecting DID %s (customer=%s) — 603\n",
+            uuid, tostring(normalized_did), tostring(customer_id)))
+    elseif product_type == "ivr" and not ivr_enabled then
+        -- Visual IVR with IVR_ENABLED off (contract §5.1): ours -> 603.
+        hard_reject("CALL_REJECTED", string.format(
+            "[%s] IVR disabled (IVR_ENABLED off): "
             .. "rejecting DID %s (customer=%s) — 603\n",
             uuid, tostring(normalized_did), tostring(customer_id)))
     else

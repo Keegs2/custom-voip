@@ -1069,10 +1069,14 @@ if BASELINE and BASELINE ~= "" then
     -- must be byte-identical: the new router's added setvar
     -- sofia_session_timeout is dropped, and the baseline's removed no-op
     -- exports are dropped. Their presence/absence is asserted by [12].
+    -- sofia_session_timeout is dropped on the baseline side too, so a
+    -- baseline that already has it (any router since 2026-09-24, e.g. the
+    -- RCF-V1 commit an IVR branch is cut from) compares cleanly; [12]
+    -- asserts its presence on the new router.
     local function strip_timer(c, is_baseline)
         local sv = {}
         for k, v in pairs(c.setvars) do
-            if is_baseline or k ~= "sofia_session_timeout" then sv[k] = v end
+            if k ~= "sofia_session_timeout" then sv[k] = v end
         end
         local ex = {}
         for _, e in ipairs(c.executes) do
