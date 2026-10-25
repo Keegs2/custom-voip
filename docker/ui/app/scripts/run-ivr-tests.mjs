@@ -8,7 +8,7 @@
  */
 import { spawnSync } from 'node:child_process';
 
-const SUITES = ['src/flow/compile/ivr.assert.ts', 'src/flow/model/model.assert.ts'];
+const SUITES = ['src/flow/compile/ivr.assert.ts', 'src/flow/model/model.assert.ts', 'src/flow/assist/assist.assert.ts'];
 
 let failed = 0;
 for (const suite of SUITES) {

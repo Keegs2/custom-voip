@@ -29,6 +29,16 @@ export function estimateHeight(node: BlockLike): number {
   return 84 + (exits > 0 ? 10 + exits * 30 : 0);
 }
 
+/**
+ * The order a caller meets the blocks: Tidy up's walk (depth-first from
+ * Start over each block's exits, in exit order — a Map keeps insertion
+ * order), then the blocks it never reaches. The Flow assistant reveals a
+ * proposal's blocks in this order, so it always matches the layout.
+ */
+export function callingOrder(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[]): string[] {
+  return [...tidyLayout(nodes, edges).keys()];
+}
+
 export function tidyLayout(
   nodes: readonly LayoutNode[],
   edges: readonly LayoutEdge[],
@@ -44,6 +54,7 @@ export function tidyLayout(
     const node = byId.get(id);
     if (!node || out.has(id)) return;
     maxDepth = Math.max(maxDepth, depth);
+    // Insertion order = visit order: callingOrder() reads it back.
     out.set(id, { x: depth * COLUMN_WIDTH, y: cursor });
     const children = outHandles(node)
       .map((h) => bySlot.get(`${id}\u0000${h.id}`))
