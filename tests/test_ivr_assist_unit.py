@@ -385,6 +385,8 @@ def test_new_prompts_become_negative_placeholders_in_order_and_unknown_refs_fail
                        {"source": "n_d", "sourceHandle": "noAnswer", "target": "n_v"}]}
     np_ids = ag.placeholder_ids([{"key": "NP7"}, {"key": "NP2"}])
     assert np_ids == {"NP7": -1, "NP2": -2}
+    assert ag.placeholder_ids([{"key": "NP1"}, {"key": "NP1"}, {"key": "NP3"}]) == \
+        {"NP1": -1, "NP3": -2}                    # a repeated key does not leave a gap
     d = ag.from_alias_graph(graph, b, np_ids)
     nodes = {n["id"]: n for n in d["nodes"]}
     assert nodes["n_p"]["data"]["config"]["prompts"] == [-1, -2, ag.UNKNOWN_PROMPT_ID]
@@ -555,6 +557,15 @@ def test_clarify_and_cannot_build_are_rendered(ted):
     ted.reset(lambda p: {"kind": "cannot_build", "message": "No texting for [N1]."})
     out = run(pipeline.run(inp(), ted_client.call))
     assert out.public == {"kind": "cannot_build", "message": "No texting for 508-555-2199."}
+
+
+def test_a_repeated_new_prompt_key_is_listed_once(ted):
+    dup = json.loads(json.dumps(GOOD))
+    dup["new_prompts"].append({"key": "NP1", "name": "Again", "text": "Twice."})
+    ted.reset(lambda p: dup)
+    out = run(pipeline.run(inp(), ted_client.call))
+    assert [n["placeholder_id"] for n in out.public["new_prompts"]] == [-1]
+    assert out.public["new_prompts"][0]["name"].startswith("Menu for")
 
 
 def test_new_message_problems_become_issues(ted):

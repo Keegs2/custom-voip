@@ -289,10 +289,10 @@ def _alias_target(target: Any, book: AliasBook) -> Optional[dict]:
 def placeholder_ids(new_prompts: list[Mapping[str, Any]]) -> dict[str, int]:
     """``NP`` key -> placeholder prompt id: -1, -2, … in ``new_prompts`` order."""
     out: dict[str, int] = {}
-    for i, np in enumerate(new_prompts[:config.MAX_NEW_PROMPTS]):
+    for np in new_prompts:
         key = np.get("key")
-        if isinstance(key, str) and key not in out:
-            out[key] = -(i + 1)
+        if isinstance(key, str) and key not in out and len(out) < config.MAX_NEW_PROMPTS:
+            out[key] = -(len(out) + 1)          # a repeated key keeps its first id
     return out
 
 

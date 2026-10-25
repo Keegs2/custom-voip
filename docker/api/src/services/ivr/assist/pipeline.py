@@ -171,7 +171,7 @@ def _de_alias_proposal(result: Mapping[str, Any], book: AliasBook,
     extra: list[Issue] = []
     for np in nps:
         pid = np_ids.get(np["key"])
-        if pid is None:
+        if pid is None or np["key"] in names:      # a repeated key: the first one wins
             continue
         name = clip(" ".join(book.render(np["name"]).split()), 100) or f"New message {-pid}"
         names[np["key"]] = name
