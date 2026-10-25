@@ -1,0 +1,93 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_hours",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "d72cc90213e4f8121961febde6e8258a79b34f97a23bedc43309004c8b7ab64c"
+  ],
+  "nodes": {
+    "n_hours": {
+      "t": "hours",
+      "tz": "America/New_York",
+      "weekly": {
+        "mon": [
+          [
+            540,
+            1020
+          ]
+        ],
+        "tue": [
+          [
+            540,
+            1020
+          ]
+        ],
+        "wed": [
+          [
+            540,
+            1020
+          ]
+        ],
+        "thu": [
+          [
+            480,
+            1050
+          ]
+        ],
+        "fri": [
+          [
+            540,
+            1020
+          ]
+        ],
+        "sat": [
+          [
+            600,
+            840
+          ]
+        ],
+        "sun": [
+          [
+            0,
+            1440
+          ]
+        ]
+      },
+      "closed_dates": [
+        "2026-11-26",
+        "2026-12-25"
+      ],
+      "open": "n_open",
+      "closed": "n_closed"
+    },
+    "n_open": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550101",
+        "product": "rcf"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 30,
+      "on_noanswer": null
+    },
+    "n_closed": {
+      "t": "play",
+      "prompts": [
+        "d72cc90213e4f8121961febde6e8258a79b34f97a23bedc43309004c8b7ab64c"
+      ],
+      "next": "n_closed_vm"
+    },
+    "n_closed_vm": {
+      "t": "voicemail",
+      "did": "+16175550201"
+    }
+  }
+}

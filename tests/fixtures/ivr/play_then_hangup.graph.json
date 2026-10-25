@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "entry",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "config": {}
+      }
+    },
+    {
+      "id": "n_play",
+      "type": "play",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Greeting \u2014 Acme Corp secret label",
+        "config": {
+          "prompts": [
+            101,
+            108,
+            109
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_bye",
+      "type": "hangup",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "hangup block",
+        "config": {
+          "prompts": [
+            103
+          ]
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_n_start_next_n_play",
+      "source": "n_start",
+      "sourceHandle": "next",
+      "target": "n_play"
+    },
+    {
+      "id": "e_n_play_next_n_bye",
+      "source": "n_play",
+      "sourceHandle": "next",
+      "target": "n_bye"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

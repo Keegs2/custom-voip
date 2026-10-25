@@ -1,0 +1,74 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_welcome",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73",
+    "3338bb868790796b1dd2b60c19bee8417d6a01db7024fc98d20be7ff921e346b",
+    "aa57aca9e6cfda9eeeb7b32202dad69e0042027cfe9b60bcd5ad15977643125b",
+    "e8ee0926b5326493fc11989b98040fab4dc640f6791e16dd171b43f5ee357f6e",
+    "6aa53095cf463f22a1c46c65d20da7024f8664e35c8071665b7199ea5d5af650"
+  ],
+  "nodes": {
+    "n_welcome": {
+      "t": "play",
+      "prompts": [
+        "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73"
+      ],
+      "next": "n_menu"
+    },
+    "n_menu": {
+      "t": "menu",
+      "prompts": [
+        "3338bb868790796b1dd2b60c19bee8417d6a01db7024fc98d20be7ff921e346b"
+      ],
+      "digits": {
+        "1": "n_sales",
+        "2": "n_vm",
+        "9": "n_menu"
+      },
+      "timeout_ms": 7000,
+      "retries": 3,
+      "invalid_prompts": [
+        "aa57aca9e6cfda9eeeb7b32202dad69e0042027cfe9b60bcd5ad15977643125b"
+      ],
+      "noinput_prompts": [
+        "e8ee0926b5326493fc11989b98040fab4dc640f6791e16dd171b43f5ee357f6e"
+      ],
+      "on_noinput": "n_bye",
+      "on_nomatch": "n_bye"
+    },
+    "n_sales": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550301",
+        "product": "ivr"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 25,
+      "on_noanswer": "n_vm_after"
+    },
+    "n_vm": {
+      "t": "voicemail",
+      "did": "+16175550201"
+    },
+    "n_bye": {
+      "t": "hangup",
+      "prompts": [
+        "6aa53095cf463f22a1c46c65d20da7024f8664e35c8071665b7199ea5d5af650"
+      ]
+    },
+    "n_vm_after": {
+      "t": "voicemail",
+      "did": "+16175550201"
+    }
+  }
+}

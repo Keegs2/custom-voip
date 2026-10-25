@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "entry",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "config": {}
+      }
+    },
+    {
+      "id": "n_vip",
+      "type": "condition",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "condition block",
+        "config": {
+          "mode": "equals",
+          "values": [
+            "(774) 404-5256",
+            "+17744045256",
+            "+447911123456"
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_local",
+      "type": "condition",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "condition block",
+        "config": {
+          "mode": "prefix",
+          "values": [
+            "+1617",
+            "+1 508"
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_anon",
+      "type": "condition",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "condition block",
+        "config": {
+          "mode": "anonymous",
+          "values": []
+        }
+      }
+    },
+    {
+      "id": "n_vip_x",
+      "type": "dial",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "dial block",
+        "config": {
+          "target": {
+            "kind": "own",
+            "did": "+16175550101"
+          },
+          "passCallerId": true
+        }
+      }
+    },
+    {
+      "id": "n_local_x",
+      "type": "dial",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "dial block",
+        "config": {
+          "target": {
+            "kind": "own",
+            "did": "+16175550401"
+          }
+        }
+      }
+    },
+    {
+      "id": "n_anon_bye",
+      "type": "hangup",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "hangup block",
+        "config": {
+          "prompts": [
+            103
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_rest",
+      "type": "voicemail",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "voicemail block",
+        "config": {
+          "did": "+16175550201"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_n_start_next_n_vip",
+      "source": "n_start",
+      "sourceHandle": "next",
+      "target": "n_vip"
+    },
+    {
+      "id": "e_n_vip_match_n_vip_x",
+      "source": "n_vip",
+      "sourceHandle": "match",
+      "target": "n_vip_x"
+    },
+    {
+      "id": "e_n_vip_noMatch_n_local",
+      "source": "n_vip",
+      "sourceHandle": "noMatch",
+      "target": "n_local"
+    },
+    {
+      "id": "e_n_local_match_n_local_x",
+      "source": "n_local",
+      "sourceHandle": "match",
+      "target": "n_local_x"
+    },
+    {
+      "id": "e_n_local_noMatch_n_anon",
+      "source": "n_local",
+      "sourceHandle": "noMatch",
+      "target": "n_anon"
+    },
+    {
+      "id": "e_n_anon_match_n_anon_bye",
+      "source": "n_anon",
+      "sourceHandle": "match",
+      "target": "n_anon_bye"
+    },
+    {
+      "id": "e_n_anon_noMatch_n_rest",
+      "source": "n_anon",
+      "sourceHandle": "noMatch",
+      "target": "n_rest"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

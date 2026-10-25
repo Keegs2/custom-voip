@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "entry",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "config": {}
+      }
+    },
+    {
+      "id": "n_hold",
+      "type": "play",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "play block",
+        "config": {
+          "prompts": [
+            108
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_x",
+      "type": "dial",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "dial block",
+        "config": {
+          "target": {
+            "kind": "own",
+            "did": "+16175550101"
+          },
+          "passCallerId": true,
+          "ringTimeoutSec": 20
+        }
+      }
+    },
+    {
+      "id": "n_vm",
+      "type": "voicemail",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "voicemail block",
+        "config": {
+          "did": "+16175550201"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_n_start_next_n_hold",
+      "source": "n_start",
+      "sourceHandle": "next",
+      "target": "n_hold"
+    },
+    {
+      "id": "e_n_hold_next_n_x",
+      "source": "n_hold",
+      "sourceHandle": "next",
+      "target": "n_x"
+    },
+    {
+      "id": "e_n_x_noAnswer_n_vm",
+      "source": "n_x",
+      "sourceHandle": "noAnswer",
+      "target": "n_vm"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

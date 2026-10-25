@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "entry",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "config": {}
+      }
+    },
+    {
+      "id": "n_msg",
+      "type": "play",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "play block",
+        "config": {
+          "prompts": [
+            101
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_vm",
+      "type": "voicemail",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "voicemail block",
+        "config": {
+          "did": "+16175550201"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_n_start_next_n_msg",
+      "source": "n_start",
+      "sourceHandle": "next",
+      "target": "n_msg"
+    },
+    {
+      "id": "e_n_msg_next_n_vm",
+      "source": "n_msg",
+      "sourceHandle": "next",
+      "target": "n_vm"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

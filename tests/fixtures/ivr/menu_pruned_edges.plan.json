@@ -1,0 +1,43 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_menu",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "3338bb868790796b1dd2b60c19bee8417d6a01db7024fc98d20be7ff921e346b",
+    "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73",
+    "645044e1fcad240e5f74fe3f3a43d50ead1fe8036be929b9f73db3f31f594ee6"
+  ],
+  "nodes": {
+    "n_menu": {
+      "t": "menu",
+      "prompts": [
+        "3338bb868790796b1dd2b60c19bee8417d6a01db7024fc98d20be7ff921e346b",
+        "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73"
+      ],
+      "digits": {
+        "1": "n_one",
+        "0": null
+      },
+      "timeout_ms": 5000,
+      "retries": 2,
+      "invalid_prompts": [],
+      "noinput_prompts": [],
+      "on_noinput": null,
+      "on_nomatch": null
+    },
+    "n_one": {
+      "t": "play",
+      "prompts": [
+        "645044e1fcad240e5f74fe3f3a43d50ead1fe8036be929b9f73db3f31f594ee6"
+      ],
+      "next": null
+    }
+  }
+}

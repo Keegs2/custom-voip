@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "entry",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "config": {}
+      }
+    },
+    {
+      "id": "n_menu",
+      "type": "menu",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "menu block",
+        "config": {
+          "prompts": [
+            102,
+            101
+          ],
+          "digits": [
+            "1",
+            "0"
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_one",
+      "type": "play",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "play block",
+        "config": {
+          "prompts": [
+            108
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_three",
+      "type": "dial",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "dial block",
+        "config": {
+          "target": {
+            "kind": "external",
+            "number": "+19005551234"
+          }
+        }
+      }
+    },
+    {
+      "id": "n_orphan",
+      "type": "play",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "play block",
+        "config": {
+          "prompts": [
+            107
+          ]
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_n_start_next_n_menu",
+      "source": "n_start",
+      "sourceHandle": "next",
+      "target": "n_menu"
+    },
+    {
+      "id": "e_n_menu_d1_n_one",
+      "source": "n_menu",
+      "sourceHandle": "d:1",
+      "target": "n_one"
+    },
+    {
+      "id": "e_n_menu_d3_n_three",
+      "source": "n_menu",
+      "sourceHandle": "d:3",
+      "target": "n_three"
+    },
+    {
+      "id": "e_n_orphan_next_n_menu",
+      "source": "n_orphan",
+      "sourceHandle": "next",
+      "target": "n_menu"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

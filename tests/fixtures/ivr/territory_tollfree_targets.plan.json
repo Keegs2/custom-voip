@@ -1,0 +1,87 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_hours",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [],
+  "nodes": {
+    "n_hours": {
+      "t": "hours",
+      "tz": "America/Puerto_Rico",
+      "weekly": {
+        "mon": [
+          [
+            480,
+            1080
+          ]
+        ],
+        "tue": [
+          [
+            480,
+            1080
+          ]
+        ],
+        "wed": [
+          [
+            480,
+            1080
+          ]
+        ],
+        "thu": [
+          [
+            480,
+            1080
+          ]
+        ],
+        "fri": [
+          [
+            480,
+            1080
+          ]
+        ],
+        "sat": [],
+        "sun": []
+      },
+      "closed_dates": [],
+      "open": "n_pr",
+      "closed": "n_tf"
+    },
+    "n_pr": {
+      "t": "transfer",
+      "dest": {
+        "kind": "external",
+        "e164": "+17872345678"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 5,
+      "on_noanswer": "n_tf"
+    },
+    "n_tf": {
+      "t": "transfer",
+      "dest": {
+        "kind": "external",
+        "e164": "+18882345678"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 120,
+      "on_noanswer": "n_ivr"
+    },
+    "n_ivr": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550301",
+        "product": "ivr"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 30,
+      "on_noanswer": null
+    }
+  }
+}
