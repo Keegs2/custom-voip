@@ -5,7 +5,7 @@ This runbook turns on the CRAG side of the **Flow assistant**: the customer desc
 - **Contract:** `docs/IVR_ASSIST_INTERFACES.md` (schemas in `docs/ivr_assist/`).
 - **Needs:** Visual IVR already deployed (migrations 59 + 60, `docs/runbooks/IVR_DEPLOY_RUNBOOK.md`), and the TED assist endpoint live. From the TED runbook you need **TED's public URL** and the **CRAG assist token** (for staging and for production).
 - **Nothing changes for anyone** until a customer is opted in (§5). The platform switch alone shows nothing: every customer starts opted out.
-- **No maintenance window:** only the API container is recreated (a few seconds; FreeSWITCH and calls are untouched).
+- **No maintenance window:** only the API and UI containers are recreated (a few seconds; FreeSWITCH and calls are untouched).
 
 Every command is one line and needs sudo. Run them in order, one at a time, on the **services** VM; the expected output follows each →. The token is typed at a hidden prompt (`read -rsp`), never put on a command line, and never printed.
 
@@ -32,10 +32,10 @@ TED's two PRs (the assist endpoint, and the Customer 360 switch) ship the usual 
 9. `cd /opt/revup && sudo grep -E '^(IVR_ASSIST_ENABLED|TED_BASE_URL|IVR_ASSIST_DAILY_PER_CUSTOMER|IVR_ASSIST_TED_TIMEOUT_SECONDS)=' .env && sudo grep -c '^TED_IVR_ASSIST_TOKEN=[!-~]' .env` → `TED_BASE_URL=https://…`, `IVR_ASSIST_ENABLED=true`, `IVR_ASSIST_DAILY_PER_CUSTOMER=40`, `IVR_ASSIST_TED_TIMEOUT_SECONDS=60`, then `1` (the token is there; it is not printed).
 10. `cd /opt/revup && sudo stat -c '%a %U' .env` → `600 root`. If it shows a wider mode (for example `644`), run `cd /opt/revup && sudo chmod 600 .env && echo OK` → `OK` (every compose command already runs with sudo).
 
-## 3. Rebuild and recreate the API
+## 3. Rebuild and recreate the API and the UI
 
-11. `cd /opt/revup && sudo docker compose -f docker-compose.services.yml build api` → the `voip-api` image is built.
-12. `cd /opt/revup && sudo docker compose -f docker-compose.services.yml up -d api` → `Container voip-api  Recreated`, then `Started`.
+11. `cd /opt/revup && sudo docker compose -f docker-compose.services.yml build api ui` → the `voip-api` and `voip-ui` images are built (the builder's Flow assistant panel ships in `ui`, from #164).
+12. `cd /opt/revup && sudo docker compose -f docker-compose.services.yml up -d api ui` → `Container voip-api  Recreated` and `Container voip-ui  Recreated`, then `Started`.
 13. About 20 s later: `sudo docker inspect -f '{{.State.Health.Status}}' voip-api` → `healthy` (`starting`: wait 10 s and run it again).
 14. `sudo docker exec voip-api python -c "from services.ivr.assist import config; print(config.enabled(), config.ted_configured(), config.daily_cap(), config.ted_timeout_s())"` → `True True 40 60.0`. `True False …` means the URL is not a usable `https://` URL or the token is empty: fix step 6 or 7 (remove the line with the step-5 `sed`, then re-add it), then step 12 again.
 15. `sudo docker exec voip-api python -c "from services.ivr.assist import schema; print(sorted(n for n in schema.SCHEMA_FILES if schema.validator(n)))"` → `['alias_graph', 'request', 'response']`
