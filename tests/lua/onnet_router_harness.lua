@@ -374,6 +374,11 @@ local function run_scenario(sc, script_path)
     }
     for k, v in pairs(sc.extra_vars or {}) do session_vars[k] = v end
     local bridge_results = sc.bridge_results
+    -- Scripted clock: the router's os.time() returns `clock`, and each
+    -- scripted bridge attempt advances it by sc.bridge_secs[attempt] (the
+    -- attempt's length; far_end_final reads it). Starts at the real time so
+    -- the SBC health-cache seeds below stay fresh.
+    local clock = os.time()
     local bridge_idx = 0
     function session:getVariable(k) return session_vars[k] end
     function session:setVariable(k, v) session_vars[k] = v; captured.setvars[k] = v end
@@ -394,6 +399,7 @@ local function run_scenario(sc, script_path)
                 bridge_idx = bridge_idx + 1
                 session_vars.originate_disposition =
                     bridge_results[bridge_idx] or "NORMAL_TEMPORARY_FAILURE"
+                clock = clock + ((sc.bridge_secs and sc.bridge_secs[bridge_idx]) or 0)
             end
         elseif app == "lua" and data == "voice_webhook.lua" then
             captured.webhook = true
@@ -480,6 +486,7 @@ local function run_scenario(sc, script_path)
         RCF_FROM_PASSTHROUGH = true, BRIDGE_PROGRESS_TIMEOUT = true,
         FS_NODE_ID = true }
     local sandbox_os = setmetatable({
+        time = function(t) if t then return os.time(t) end return clock end,
         getenv = function(k)
             if sc_env[k] ~= nil then return sc_env[k] end
             if PINNED[k] ~= nil then return PINNED[k] end
@@ -905,6 +912,44 @@ do
     check("7g: 4 launched bridges (route failures still fail over)", #c.bridges == 4, #c.bridges)
     check("7g: hangup NO_ANSWER", #c.hangups == 1 and c.hangups[1] == "NO_ANSWER",
           table.concat(c.hangups, ","))
+end
+
+do
+    print("[7h] table-driven: phone rang 25 s, ITS network ended it (480) -> stop, 480 back")
+    local c = run_scenario(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NO_USER_RESPONSE", "SUCCESS", "SUCCESS", "SUCCESS" },
+        bridge_secs = { 25 } }))
+    check("7h: exactly 1 launched bridge (not re-dialed)", #c.bridges == 1, #c.bridges)
+    check("7h: hangup NO_USER_RESPONSE (480)",
+          #c.hangups == 1 and c.hangups[1] == "NO_USER_RESPONSE", table.concat(c.hangups, ","))
+end
+
+do
+    print("[7i] table-driven: immediate 480 (2 s, nothing rang) -> still fails over")
+    local c = run_scenario(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NO_USER_RESPONSE", "SUCCESS" }, bridge_secs = { 2 } }))
+    check("7i: 2 launched bridges", #c.bridges == 2, #c.bridges)
+    check("7i: no router hangup (2nd attempt answered)", #c.hangups == 0,
+          table.concat(c.hangups, ","))
+end
+
+do
+    print("[7j] table-driven: 503 AFTER 20 s of ringing -> still the next trunk (503 never final)")
+    local c = run_scenario(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NORMAL_TEMPORARY_FAILURE", "SUCCESS" }, bridge_secs = { 20 } }))
+    check("7j: 2 launched bridges", #c.bridges == 2, #c.bridges)
+    check("7j: no router hangup (2nd attempt answered)", #c.hangups == 0,
+          table.concat(c.hangups, ","))
+end
+
+do
+    print("[7k] table-driven: every attempt 503 -> all 4 tried, then 503 (unchanged)")
+    local c = run_scenario(variant(TABLE_BASE, { sbc_down = {},
+        bridge_results = { "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE",
+                           "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE" } }))
+    check("7k: 4 launched bridges", #c.bridges == 4, #c.bridges)
+    check("7k: 503 after all attempts",
+          #c.hangups == 1 and c.hangups[1] == "NORMAL_TEMPORARY_FAILURE", table.concat(c.hangups, ","))
 end
 
 do
