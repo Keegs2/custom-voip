@@ -5,13 +5,14 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../api/client';
 import {
   IconRCF, IconTrunk, IconAPI, IconVoicemail, IconDocs,
-  IconSignal, IconTroubleshoot,
+  IconSignal, IconTroubleshoot, IconIVR,
 } from '../icons/ProductIcons';
 import { Package, Shield, ChevronDown, Clock, Eye, EyeOff, BookOpen, BarChart3, LayoutDashboard, LogOut, Menu, X } from 'lucide-react';
 import { CustomerPreviewPicker } from '../preview/CustomerPreviewPicker';
 import { API_CALLING_ENABLED } from '../../config/features';
 import { canSeeReporting } from '../../utils/reportingAccess';
 import { staffScope, tenantScope, useVoicemailSummary } from '../../pages/voicemail/voicemailData';
+import { ivrStaffScope, ivrTenantScope, useIvrSummary } from '../../pages/ivr/ivrData';
 import { T } from '../../styles/theme';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -66,6 +67,19 @@ const voicemailNavItem: NavItemDef = {
   accent: 'azure',
 };
 const VOICEMAIL_SOON_LABEL = 'Visual Voicemail';
+
+// IVR is the same kind of per-account entitlement (docs/IVR_INTERFACES.md
+// §8.2): it joins Products when GET /v1/ivr/summary says `enabled` for the
+// effective customer, and always for platform admins (their /ivr is the
+// staff console). Until then it sits in Coming Soon, linked to /ivr, which
+// explains the product.
+const ivrNavItem: NavItemDef = {
+  label: 'IVR',
+  icon: <IconIVR size={18} />,
+  to: '/ivr',
+  accent: 'azure',
+};
+const IVR_SOON_LABEL = 'IVR';
 
 /* ─── Dashboard (top-level, above Products) ───────────────── */
 
@@ -129,6 +143,7 @@ const COMING_SOON_ITEMS: ComingSoonItemDef[] = [
     ? [{ label: 'API Calling', icon: <IconAPI size={18} />, to: '/api-dids' }]
     : []),
   { label: 'Visual Voicemail', icon: <IconVoicemail size={18} />, to: '/voicemail' },
+  { label: IVR_SOON_LABEL, icon: <IconIVR size={18} />, to: '/ivr' },
   {
     label: 'Guides',
     icon: <BookOpen size={18} />,
@@ -529,9 +544,22 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
   const voicemailLive = !isSupport && (isAdmin || (voicemailScope !== null && voicemailSummary.data?.enabled === true));
   const voicemailUnread = !isAdmin && voicemailLive ? (voicemailSummary.data?.unread_count ?? 0) : 0;
 
+  // IVR summary — same scope rule and cache key as the /ivr page.
+  const ivrScope = !effectiveCustomer
+    ? null
+    : isActualAdmin
+      ? ivrStaffScope(effectiveCustomer.id)
+      : ivrTenantScope(effectiveCustomer.id);
+  const ivrSummary = useIvrSummary(
+    ivrScope ?? ivrStaffScope(0),
+    isAuthenticated && !isSupport && !isAdmin && ivrScope !== null,
+  );
+  const ivrLive = !isSupport && (isAdmin || (ivrScope !== null && ivrSummary.data?.enabled === true));
+
   const productNavItems = [
     ...allProductNavItems,
     ...(voicemailLive ? [{ ...voicemailNavItem, badge: voicemailUnread }] : []),
+    ...(ivrLive ? [ivrNavItem] : []),
   ].filter((item) => {
     if (isAdmin) return true;
     if (item.adminOnly) return false;
@@ -540,10 +568,10 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
     }
     return !item.accountTypes;
   });
-  // Coming Soon without Visual Voicemail once it is live for this viewer.
-  const soonItems = voicemailLive
-    ? COMING_SOON_ITEMS.filter((i) => i.label !== VOICEMAIL_SOON_LABEL)
-    : COMING_SOON_ITEMS;
+  // Coming Soon without Visual Voicemail / IVR once they are live for this viewer.
+  const soonItems = COMING_SOON_ITEMS.filter(
+    (i) => !(voicemailLive && i.label === VOICEMAIL_SOON_LABEL) && !(ivrLive && i.label === IVR_SOON_LABEL),
+  );
   // Never render an empty Products header (e.g. trunk-only accounts).
   const showProducts = !isSupport && productNavItems.length > 0;
 

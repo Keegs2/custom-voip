@@ -26,9 +26,20 @@ const ReportingPage = lazy(() =>
 );
 // Visual Voicemail is code-split the same way: the inbox, player and the
 // in-browser greeting recorder/transcoder load only when /voicemail opens.
+// IVR too — and its flow builder (React Flow) is a second chunk under it.
 const VisualVoicemailPage = lazy(() =>
   import('./pages/VisualVoicemailPage').then((m) => ({ default: m.VisualVoicemailPage })),
 );
+const IvrPage = lazy(() => import('./pages/IvrPage').then((m) => ({ default: m.IvrPage })));
+
+/** /ivr renders outside AppLayout (full-bleed builder), so its fallback is full-screen too. */
+function FullScreenFallback() {
+  return (
+    <div className="app-canvas" role="status" aria-label="Loading page" style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-dim)', fontSize: '0.85rem' }}>
+      <Spinner /> Loading…
+    </div>
+  );
+}
 
 function RouteFallback() {
   return (
@@ -123,6 +134,18 @@ export function App() {
             element={
               <RequireAuth>
                 <TroubleshootingPage />
+              </RequireAuth>
+            }
+          />
+          {/* Visual IVR — /ivr (numbers, flows, messages) and /ivr/flows/:id
+              (the full-bleed builder). Renders its own Sidebar. */}
+          <Route
+            path="ivr/*"
+            element={
+              <RequireAuth>
+                <Suspense fallback={<FullScreenFallback />}>
+                  <IvrPage />
+                </Suspense>
               </RequireAuth>
             }
           />
