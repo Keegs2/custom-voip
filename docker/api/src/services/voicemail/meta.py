@@ -105,8 +105,15 @@ def decode_meta_header(value: str | None) -> dict[str, Any]:
         raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
     except (binascii.Error, ValueError) as exc:
         raise MetaError("X-VM-Meta is not valid base64url") from exc
+    return decode_meta_bytes(raw)
+
+
+def decode_meta_bytes(raw: bytes | bytearray | memoryview) -> dict[str, Any]:
+    """Strict UTF-8 JSON object (no duplicate keys, <= MAX_KEYS keys) ->
+    dict. Shared by the X-VM-Meta header and the metadata sealed inside a
+    spool blob (``sealed.py``). Raises MetaError."""
     try:
-        text = raw.decode("utf-8", errors="strict")
+        text = bytes(raw).decode("utf-8", errors="strict")
     except UnicodeDecodeError as exc:
         raise MetaError("X-VM-Meta is not UTF-8") from exc
     try:

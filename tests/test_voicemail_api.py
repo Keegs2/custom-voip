@@ -1096,7 +1096,8 @@ def test_every_fs_route_requires_the_ingest_secret():
     from routers import voicemail
     fs_routes = [r for r in voicemail.router.routes if r.path.startswith("/fs/")]
     assert {r.path for r in fs_routes} == {"/fs/mailbox/{mailbox_id}",
-                                           "/fs/greetings/{greeting_id}/audio", "/fs/deposit"}
+                                           "/fs/greetings/{greeting_id}/audio", "/fs/deposit",
+                                           "/fs/deposit-sealed"}
     for r in fs_routes:
         assert any(d.dependency is require_ingest_secret for d in r.dependencies), r.path
     # The only token-authenticated (JWT-exempt) non-fs routes are GET/HEAD audio.

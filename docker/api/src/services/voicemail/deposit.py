@@ -53,6 +53,18 @@ The processing runs in a task the handler awaits through ``asyncio.shield``:
 if FS gives up and disconnects mid-upload the deposit still completes (and
 FS's retry gets the idempotent 200).
 
+Sealed replays (``POST /fs/deposit-sealed``, ``sealed.py``; plan D11) run the
+SAME claim -> seal -> finalize pipeline with a :class:`Mode` that only changes
+what the outcome means to the vm-forwarder: 201 stored / 200 duplicate /
+410 dropped + ``spool_drop`` audit (mailbox deleted or not accepting, key
+destroyed, longer than the mailbox allows) / 422 permanent, the row's
+``created_at`` = the caller's ``received_at`` (the inbox shows the original
+time; ``expires_at`` counts from it, but never less than a day from now), and
+a 'purged' row that was NEVER stored (a failed attempt the retention worker
+already swept) may be taken over — one that WAS stored (a ``deposit`` audit
+row exists) is a duplicate, never resurrected. ``Mode()`` (the default) is
+the direct FreeSWITCH deposit, unchanged.
+
 Audit (fail-closed): the ``deposit`` audit row is INSERTed in the SAME
 transaction as the UPDATE to 'stored' — a stored row without its audit row
 cannot exist. If that transaction fails the row stays 'pending' under this
@@ -64,7 +76,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid as _uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -118,8 +131,76 @@ class AlreadyStored:
     row_id: int
 
 
+@dataclass(frozen=True)
+class Mode:
+    """How a deposit's outcome is reported. ``Mode()`` = the direct FS
+    deposit (unchanged); ``sealed=True`` = a spool replay (``sealed.py``)."""
+    sealed: bool = False
+    #: The caller's original time (sealed only) -> created_at.
+    received_at: datetime | None = None
+    #: Who/where, for the sealed 410 ``spool_drop`` audit row.
+    info: audit.RequestInfo | None = None
+    #: Merged into the ``deposit`` audit detail (sealed: via/received_at).
+    detail_extra: dict = field(default_factory=dict)
+
+
+DIRECT = Mode()
+
+#: A purged row counts as delivered iff its ``deposit`` audit row exists
+#: (written in the same transaction as 'stored'; idx_vm_access_log_message).
+_WAS_DEPOSITED_SQL = ("SELECT EXISTS (SELECT 1 FROM voicemail_access_log "
+                      "WHERE message_id = $1::bigint AND action = 'deposit')")
+
+
 def _stored(message_id: int) -> JSONResponse:
     return JSONResponse({"status": "stored", "message_id": message_id})
+
+
+def _stored_as(mode: Mode, message_id: int) -> JSONResponse:
+    """A NEW row reached 'stored' (direct: 200; sealed: 201)."""
+    if mode.sealed:
+        return JSONResponse({"status": "stored", "message_id": message_id}, status_code=201)
+    return _stored(message_id)
+
+
+def _already(mode: Mode, message_id: int) -> JSONResponse:
+    """The msg_uuid was already stored (direct: 200 stored; sealed: 200 duplicate)."""
+    if mode.sealed:
+        return JSONResponse({"status": "duplicate", "message_id": message_id})
+    return _stored(message_id)
+
+
+class SpoolDrop(Exception):
+    """Sealed replay only: the message must be dropped (410) — raised inside
+    the claim transaction, audited and turned into 410 AFTER it ends."""
+
+    def __init__(self, reason: str, customer_id: int | None, mailbox_id: int):
+        super().__init__(reason)
+        self.reason = reason
+        self.customer_id = customer_id
+        self.mailbox_id = mailbox_id
+
+
+async def _drop_sealed(meta: "DepositMeta", drop: SpoolDrop, mode: Mode,
+                       duration_ms: int | None) -> HTTPException:
+    """Write the ``spool_drop`` audit row (fail-closed: no audit -> 503, the
+    forwarder keeps the file) and return the 410 to raise."""
+    try:
+        pool = db.pool or await db.get_pool()
+        async with pool.acquire() as conn:
+            await audit.write_audit(
+                conn, action="spool_drop", source="freeswitch",
+                customer_id=drop.customer_id, mailbox_id=drop.mailbox_id, info=mode.info,
+                detail={"msg_uuid": meta.msg_uuid, "reason": drop.reason,
+                        "received_at": mode.received_at.isoformat() if mode.received_at else None,
+                        "duration_ms": duration_ms, "zone": meta.zone})
+    except Exception as exc:  # noqa: BLE001 — never drop without its audit row
+        logger.error("voicemail sealed deposit %s: spool_drop audit failed (%s: %s) — 503",
+                     meta.msg_uuid, type(exc).__name__, exc)
+        return _err(503, "Voicemail database is unavailable; retry.", RETRY_AFTER)
+    logger.warning("voicemail sealed deposit %s: DROPPED (%s, mailbox %s) — audited",
+                   meta.msg_uuid, drop.reason, drop.mailbox_id)
+    return _err(410, f"dropped: {drop.reason}")
 
 
 async def handle_deposit(request: Any) -> JSONResponse:
@@ -194,13 +275,16 @@ def _spawn(coro) -> asyncio.Task:
 
 
 async def _process(meta: DepositMeta, slot: _Slot, duration_ms: int, deadline: float,
-                   info: audit.RequestInfo) -> JSONResponse:
+                   info: audit.RequestInfo, mode: Mode = DIRECT) -> JSONResponse:
     body = slot.body
-    claim = await _claim(meta, duration_ms, len(body))
+    try:
+        claim = await _claim(meta, duration_ms, len(body), mode)
+    except SpoolDrop as drop:
+        raise await _drop_sealed(meta, drop, mode, duration_ms)
     if isinstance(claim, AlreadyStored):
         logger.info("voicemail deposit %s: already stored as message %s (retry)",
                     meta.msg_uuid, claim.row_id)
-        return _stored(claim.row_id)
+        return _already(mode, claim.row_id)
 
     loop = asyncio.get_running_loop()
     seal = asyncio.create_task(seal_and_store(
@@ -221,13 +305,14 @@ async def _process(meta: DepositMeta, slot: _Slot, duration_ms: int, deadline: f
                      meta.msg_uuid, DEPOSIT_DEADLINE_S)
         slot.handed_off = True
         await _release(claim, lease_s=LATE_LEASE_S)
-        _spawn(_finish_late(meta, claim, seal, duration_ms, len(body), info, slot))
+        _spawn(_finish_late(meta, claim, seal, duration_ms, len(body), info, slot, mode))
         raise _err(503, "Voicemail storage is slow; retry.", RETRY_AFTER)
-    sealed = await _sealed_or_fail(meta, claim, seal)
-    return await _finalize(meta, claim, sealed, duration_ms, len(body), info)
+    sealed = await _sealed_or_fail(meta, claim, seal, mode, duration_ms)
+    return await _finalize(meta, claim, sealed, duration_ms, len(body), info, mode)
 
 
-async def _sealed_or_fail(meta: DepositMeta, claim: "Claim", seal: asyncio.Task) -> Any:
+async def _sealed_or_fail(meta: DepositMeta, claim: "Claim", seal: asyncio.Task,
+                          mode: Mode = DIRECT, duration_ms: int | None = None) -> Any:
     """The finished seal's result, or: mark this attempt 'failed' (fenced; no
     thread is left running, so an immediate takeover is safe) and raise."""
     try:
@@ -236,6 +321,9 @@ async def _sealed_or_fail(meta: DepositMeta, claim: "Claim", seal: asyncio.Task)
         logger.warning("voicemail deposit %s: customer %s was crypto-erased — rejected",
                        meta.msg_uuid, claim.customer_id)
         await _release(claim, failed=True)
+        if mode.sealed:
+            raise await _drop_sealed(meta, SpoolDrop("key_destroyed", claim.customer_id,
+                                                     claim.mailbox_id), mode, duration_ms)
         raise _err(404, "Mailbox not found.")
     except VoicemailCryptoUnavailable as exc:
         logger.error("voicemail deposit %s: KMS/GCS unavailable: %s", meta.msg_uuid, exc)
@@ -252,7 +340,8 @@ async def _sealed_or_fail(meta: DepositMeta, claim: "Claim", seal: asyncio.Task)
 
 
 async def _finish_late(meta: DepositMeta, claim: "Claim", seal: asyncio.Task, duration_ms: int,
-                       size: int, info: audit.RequestInfo, slot: _Slot) -> None:
+                       size: int, info: audit.RequestInfo, slot: _Slot,
+                       mode: Mode = DIRECT) -> None:
     """Background completion of a seal that missed the request deadline."""
     try:
         while True:
@@ -260,8 +349,8 @@ async def _finish_late(meta: DepositMeta, claim: "Claim", seal: asyncio.Task, du
             if done:
                 break
             await _release(claim, lease_s=LATE_LEASE_S)  # still running: keep the lease
-        sealed = await _sealed_or_fail(meta, claim, seal)
-        await _finalize(meta, claim, sealed, duration_ms, size, info)
+        sealed = await _sealed_or_fail(meta, claim, seal, mode, duration_ms)
+        await _finalize(meta, claim, sealed, duration_ms, size, info, mode)
         logger.warning("voicemail deposit %s: stored late (after the request deadline)",
                        meta.msg_uuid)
     except HTTPException as exc:
@@ -300,8 +389,42 @@ UPDATE voicemail_messages
  WHERE id = $1::bigint
 """
 
+# Sealed replay (Mode.sealed): created_at = the caller's received_at, so the
+# inbox (ORDER BY created_at) shows the original time; expires_at counts from
+# it like every other message, but never less than a day from now (a message
+# that waited in a spool must not be purged before anyone can see it).
+_INSERT_SEALED_SQL = """
+INSERT INTO voicemail_messages
+       (msg_uuid, mailbox_id, customer_id, caller_id_number, caller_id_name, duration_ms,
+        size_bytes, status, expires_at, call_uuid, fs_node, zone,
+        deposit_attempt_id, deposit_lease_until, created_at)
+VALUES ($1::uuid, $2::int, $3::int, $4::varchar, $5::varchar, $6::int,
+        $7::int, 'pending',
+        GREATEST($14::timestamptz + make_interval(days => $8::int), now() + interval '1 day'),
+        $9::varchar, $10::varchar, $11::varchar, $12::uuid,
+        now() + make_interval(secs => $13::int), $14::timestamptz)
+ON CONFLICT (msg_uuid) DO NOTHING
+RETURNING id
+"""
 
-async def _claim(meta: DepositMeta, duration_ms: int, size: int) -> Claim | AlreadyStored:
+# Sealed takeover of a failed / lease-expired pending / never-stored purged
+# row: also re-dates it and clears what a purge left behind.
+_TAKEOVER_SEALED_SQL = """
+UPDATE voicemail_messages
+   SET status = 'pending', duration_ms = $2::int, size_bytes = $3::int,
+       caller_id_number = $4::varchar, caller_id_name = $5::varchar, call_uuid = $6::varchar,
+       fs_node = $7::varchar, zone = $8::varchar, deposit_attempt_id = $9::uuid,
+       deposit_lease_until = now() + make_interval(secs => $10::int),
+       created_at = $11::timestamptz,
+       expires_at = GREATEST($11::timestamptz + make_interval(days => $12::int),
+                             now() + interval '1 day'),
+       purged_at = NULL, deleted_at = NULL, is_read = false, is_saved = false
+ WHERE id = $1::bigint
+"""
+
+
+async def _claim(meta: DepositMeta, duration_ms: int, size: int,
+                 mode: Mode = DIRECT) -> Claim | AlreadyStored:
     pool = db.pool or await db.get_pool()
     attempt_id = str(_uuid.uuid4())
     try:
@@ -310,11 +433,19 @@ async def _claim(meta: DepositMeta, duration_ms: int, size: int) -> Claim | Alre
                 existing = await conn.fetchrow(_CLAIM_EXISTING_SQL, meta.msg_uuid)
                 if existing is not None:
                     if existing["mailbox_id"] != meta.mailbox_id:
+                        if mode.sealed:
+                            raise _err(422, "bad_blob: msg_uuid already belongs to another mailbox.")
                         raise _err(409, "msg_uuid already belongs to another mailbox.")
                     if existing["status"] == "stored":
                         return AlreadyStored(existing["id"])
                     if existing["status"] == "purged":
-                        raise _err(409, "This message was already removed.")
+                        if not mode.sealed:
+                            raise _err(409, "This message was already removed.")
+                        # Sealed: delivered once (then deleted / expired) ->
+                        # duplicate; a purged row that never held the message
+                        # (an orphaned failed attempt) is taken over below.
+                        if await conn.fetchval(_WAS_DEPOSITED_SQL, existing["id"]):
+                            return AlreadyStored(existing["id"])
                     if existing["status"] == "pending" and existing["lease_live"]:
                         raise _err(503, "This message is already being stored; retry.",
                                    RETRY_AFTER)
@@ -322,16 +453,34 @@ async def _claim(meta: DepositMeta, duration_ms: int, size: int) -> Claim | Alre
                     MAILBOX_SELECT + " WHERE b.id = $1::int AND b.status <> 'deleted'",
                     meta.mailbox_id)
                 if box is None:
+                    if mode.sealed:
+                        owner = await conn.fetchval(
+                            "SELECT customer_id FROM voicemail_boxes WHERE id = $1::int",
+                            meta.mailbox_id)
+                        raise SpoolDrop("mailbox_deleted", owner, meta.mailbox_id)
                     raise _err(404, "Mailbox not found.")
                 accepting, reason = accepting_state(box)
                 if not accepting:
+                    if mode.sealed:
+                        raise SpoolDrop(f"not_accepting_{reason}", box["customer_id"], box["id"])
                     raise _err(409, f"Mailbox is not accepting messages ({reason}).")
                 if duration_ms > box["max_message_seconds"] * 1000 + DURATION_GRACE_MS:
+                    if mode.sealed:
+                        raise SpoolDrop("too_long", box["customer_id"], box["id"])
                     raise _err(422, "Recording is longer than the mailbox allows.")
                 if meta.did is not None and meta.did != box["did"]:
                     logger.warning("voicemail deposit %s: meta did %r != mailbox %s did %s",
                                    meta.msg_uuid, meta.did, box["id"], box["did"])
-                if existing is not None:
+                if existing is not None and mode.sealed:
+                    await conn.execute(
+                        _TAKEOVER_SEALED_SQL, existing["id"], duration_ms, size,
+                        meta.caller_id_number, meta.caller_id_name, meta.call_uuid,
+                        meta.fs_node, meta.zone, attempt_id, LEASE_S, mode.received_at,
+                        box["retention_days"])
+                    row_id = existing["id"]
+                    logger.warning("voicemail sealed deposit %s: taking over %s row %s",
+                                   meta.msg_uuid, existing["status"], row_id)
+                elif existing is not None:
                     await conn.execute(
                         _TAKEOVER_SQL, existing["id"], duration_ms, size,
                         meta.caller_id_number, meta.caller_id_name, meta.call_uuid,
@@ -340,11 +489,18 @@ async def _claim(meta: DepositMeta, duration_ms: int, size: int) -> Claim | Alre
                     logger.warning("voicemail deposit %s: taking over %s row %s",
                                    meta.msg_uuid, existing["status"], row_id)
                 else:
-                    row_id = await conn.fetchval(
-                        _INSERT_SQL, meta.msg_uuid, box["id"], box["customer_id"],
-                        meta.caller_id_number, meta.caller_id_name, duration_ms, size,
-                        box["retention_days"], meta.call_uuid, meta.fs_node, meta.zone,
-                        attempt_id, LEASE_S)
+                    if mode.sealed:
+                        row_id = await conn.fetchval(
+                            _INSERT_SEALED_SQL, meta.msg_uuid, box["id"], box["customer_id"],
+                            meta.caller_id_number, meta.caller_id_name, duration_ms, size,
+                            box["retention_days"], meta.call_uuid, meta.fs_node, meta.zone,
+                            attempt_id, LEASE_S, mode.received_at)
+                    else:
+                        row_id = await conn.fetchval(
+                            _INSERT_SQL, meta.msg_uuid, box["id"], box["customer_id"],
+                            meta.caller_id_number, meta.caller_id_name, duration_ms, size,
+                            box["retention_days"], meta.call_uuid, meta.fs_node, meta.zone,
+                            attempt_id, LEASE_S)
                     if row_id is None:
                         # A concurrent first attempt inserted the same msg_uuid
                         # between our SELECT and INSERT; it holds the lease.
@@ -352,7 +508,7 @@ async def _claim(meta: DepositMeta, duration_ms: int, size: int) -> Claim | Alre
                                    RETRY_AFTER)
                 return Claim(row_id=row_id, attempt_id=attempt_id,
                              customer_id=box["customer_id"], mailbox_id=box["id"])
-    except HTTPException:
+    except (HTTPException, SpoolDrop):
         raise
     except Exception as exc:  # DB down / pool exhausted -> transient
         logger.error("voicemail deposit %s: claim failed: %s: %s", meta.msg_uuid,
@@ -394,9 +550,13 @@ RETURNING m.id
 
 
 async def _finalize(meta: DepositMeta, claim: Claim, sealed: Any, duration_ms: int, size: int,
-                    info: audit.RequestInfo) -> JSONResponse:
+                    info: audit.RequestInfo, mode: Mode = DIRECT) -> JSONResponse:
     pool = db.pool or await db.get_pool()
     stored_id = None
+    detail = {"msg_uuid": meta.msg_uuid, "duration_ms": duration_ms,
+              "size_bytes": size, "fs_node": meta.fs_node,
+              "zone": meta.zone, "call_uuid": meta.call_uuid}
+    detail.update(mode.detail_extra)
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -408,10 +568,7 @@ async def _finalize(meta: DepositMeta, claim: Claim, sealed: Any, duration_ms: i
                     await audit.write_audit(
                         conn, action="deposit", source="freeswitch",
                         customer_id=claim.customer_id, mailbox_id=claim.mailbox_id,
-                        message_id=stored_id, info=info,
-                        detail={"msg_uuid": meta.msg_uuid, "duration_ms": duration_ms,
-                                "size_bytes": size, "fs_node": meta.fs_node,
-                                "zone": meta.zone, "call_uuid": meta.call_uuid})
+                        message_id=stored_id, info=info, detail=detail)
             if stored_id is None:
                 state = await conn.fetchrow(
                     "SELECT m.id, m.status, m.deposit_attempt_id::text AS attempt, "
@@ -425,14 +582,18 @@ async def _finalize(meta: DepositMeta, claim: Claim, sealed: Any, duration_ms: i
         raise _err(503, "Voicemail database is unavailable; retry.", RETRY_AFTER)
 
     if stored_id is not None:
-        logger.info("voicemail deposit %s stored as message %s (mailbox %s, %d ms, %d bytes)",
-                    meta.msg_uuid, stored_id, claim.mailbox_id, duration_ms, size)
-        return _stored(stored_id)
+        logger.info("voicemail deposit %s stored as message %s (mailbox %s, %d ms, %d bytes%s)",
+                    meta.msg_uuid, stored_id, claim.mailbox_id, duration_ms, size,
+                    ", from the spool" if mode.sealed else "")
+        return _stored_as(mode, stored_id)
     if state is not None and state["status"] == "stored":
-        return _stored(state["id"])
+        return _already(mode, state["id"])
     if state is not None and state["box_status"] == "deleted":
         logger.warning("voicemail deposit %s: mailbox %s deleted during upload — dropped "
                        "(row left for the retention worker)", meta.msg_uuid, claim.mailbox_id)
+        if mode.sealed:
+            raise await _drop_sealed(meta, SpoolDrop("mailbox_deleted", claim.customer_id,
+                                                     claim.mailbox_id), mode, duration_ms)
         raise _err(404, "Mailbox not found.")
     logger.error("voicemail deposit %s: lost the deposit lease before finalize (state %s)",
                  meta.msg_uuid, dict(state) if state else None)
