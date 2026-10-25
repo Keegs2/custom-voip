@@ -39,6 +39,7 @@ function BlockNodeImpl({ id, type, data, selected }: NodeProps<FlowNode>) {
   const title = blockTitle(node);
   const named = Boolean(data.label?.trim());
   const summary = summarizeBlock(node, view.summary);
+  const mark = view.marks?.get(id) ?? null;
 
   const className = [
     'ivr-node',
@@ -60,6 +61,7 @@ function BlockNodeImpl({ id, type, data, selected }: NodeProps<FlowNode>) {
           <BlockIcon type={type} size={15} />
         </span>
         <span className="ivr-node-kind">{meta.label}</span>
+        {mark && <span className={`ivr-node-mark ivr-node-mark--${mark}`}>{mark === 'new' ? 'New' : 'Changed'}</span>}
         {errors.length > 0 ? (
           <span className="ivr-node-flag ivr-node-flag-err" title={errors.map((e) => e.message).join('\n')}>
             <CircleAlert size={14} aria-hidden="true" />

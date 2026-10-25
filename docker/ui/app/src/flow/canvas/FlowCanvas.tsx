@@ -68,10 +68,21 @@ const DELETE_KEYS = ['Backspace', 'Delete'];
 
 export type CanvasMode = 'edit' | 'readonly' | 'preview';
 
+export interface CanvasOverride {
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  /**
+   * Blocks not revealed yet (a Flow assistant proposal appears block by
+   * block): they are laid out — so the first framing already fits the whole
+   * flow — but invisible, and no Go to line is drawn to or from them.
+   */
+  pending?: ReadonlySet<string>;
+}
+
 export interface FlowCanvasProps {
   mode: CanvasMode;
-  /** Nodes/edges to show instead of the draft (a published version). */
-  override?: { nodes: FlowNode[]; edges: FlowEdge[] } | null;
+  /** Nodes/edges to show instead of the draft (a published version, a proposal). */
+  override?: CanvasOverride | null;
   /** Phone width: no minimap, compact controls. */
   compact?: boolean;
 }
@@ -93,12 +104,14 @@ export function FlowCanvas({ mode, override = null, compact = false }: FlowCanva
 
   const nodes = override?.nodes ?? draftNodes;
   const edges = override?.edges ?? draftEdges;
+  const pending = override?.pending ?? null;
   const editable = mode === 'edit' && override === null;
 
   const allEdges = useMemo<Edge[]>(() => {
     const exitMarker = { type: MarkerType.ArrowClosed, width: 16, height: 16, color: 'var(--ivr-edge-color)' };
     const jumpMarker = { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'var(--ivr-goto)' };
-    const jumps: Edge[] = gotoJumps(nodes).map((j) => ({
+    const shown = pending ? nodes.filter((n) => !pending.has(n.id)) : nodes;
+    const jumps: Edge[] = gotoJumps(shown).map((j) => ({
       id: j.id,
       source: j.source,
       sourceHandle: 'jump',
@@ -112,7 +125,7 @@ export function FlowCanvas({ mode, override = null, compact = false }: FlowCanva
       zIndex: 0,
     }));
     return [...edges.map((e) => ({ ...e, markerEnd: exitMarker })), ...jumps];
-  }, [nodes, edges]);
+  }, [nodes, edges, pending]);
 
   // Frame the graph when a whole graph is swapped in (open, restore, version
   // view, tidy): the saved viewport on first open; else the whole flow when
