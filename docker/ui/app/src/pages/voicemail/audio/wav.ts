@@ -234,17 +234,21 @@ export function parseWav(buffer: ArrayBuffer): WavInfo {
 /* ─── Greeting limits ─────────────────────────────────────── */
 
 /** Human-readable reason the clip can't be a greeting, or null when it can. */
-export function greetingProblem({ durationSec, bytes }: { durationSec: number; bytes: number }): string | null {
+export function greetingProblem(
+  { durationSec, bytes }: { durationSec: number; bytes: number },
+  /** What the clip is called in the message ("greeting"; IVR prompts say "message"). */
+  noun = 'greeting',
+): string | null {
   if (!(durationSec >= GREETING_MIN_SECONDS)) {
-    return 'That recording is too short — a greeting needs at least a second of audio.';
+    return `That recording is too short — a ${noun} needs at least a second of audio.`;
   }
   if (durationSec > GREETING_MAX_SECONDS + 0.05) {
     const m = Math.floor(durationSec / 60);
     const s = Math.round(durationSec % 60);
-    return `That clip is ${m}:${String(s).padStart(2, '0')} long — greetings can be up to 2:00. Trim it and try again.`;
+    return `That clip is ${m}:${String(s).padStart(2, '0')} long — ${noun}s can be up to 2:00. Trim it and try again.`;
   }
   if (bytes > GREETING_MAX_BYTES) {
-    return 'That greeting is larger than 5 MB once converted. Try a shorter clip.';
+    return `That ${noun} is larger than 5 MB once converted. Try a shorter clip.`;
   }
   return null;
 }
