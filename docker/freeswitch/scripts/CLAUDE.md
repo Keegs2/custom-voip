@@ -61,7 +61,9 @@ inbound_router.lua executes:
      b. API DID: PostgreSQL (api_dids JOIN customers)
      c. Trunk DID: PostgreSQL (trunk_dids JOIN sip_trunks JOIN customers)
      d. Voicemail mailbox DID: number_routing view, product_type='voicemail'
-        (LAST; only runs for a DID a-c all missed; unfiltered on enabled)
+        (only runs for a DID a-c all missed; unfiltered on enabled)
+     e. Visual IVR DID: ivr_fs_number view (LAST; only runs for a DID a-d all
+        missed; unfiltered — enabled=f / no published plan => 603)
   5. If no match -> UNALLOCATED_NUMBER (SIP 404)
   6. Set channel variables: customer_id, product_type, traffic_grade, trunk_id
   7. Route via named terminators + a TERMINATORS dispatch map:
@@ -74,6 +76,9 @@ inbound_router.lua executes:
      |-- "trunk" -> terminate_trunk: Bridge to customer PBX via Kamailio
      |-- "voicemail" -> terminate_vvm: answer + record + deposit to the API
      |            (lib/vm_box.lua) — see "Encrypted voicemail" below
+     |-- "ivr" -> IVR_ENABLED off (default): hard reject CALL_REJECTED (603)
+     |            + lua_routed=true. On: terminate_ivr (lib/ivr_engine.lua) —
+     |            see "Visual IVR" below
 ```
 
 ### Encrypted voicemail (v1, dedicated-DID mailboxes) — `terminate_vvm`
@@ -148,6 +153,118 @@ list); plan: `docs/ENCRYPTED_VOICEMAIL_BUILD_PLAN.md` (D6/D8, §3.1). Tests:
 - **Requires:** migration 54 (number_routing voicemail arm — before it, the arm
   returns 0 rows and nothing changes), the API FS endpoints, and the
   `docker-compose.media.yml` recreate (tmpfs, core 0, secret dir mount).
+
+### Visual IVR — `terminate_ivr` (flag `IVR_ENABLED`, default OFF)
+
+Contract: `docs/IVR_INTERFACES.md` §3 (plan), §4 (prompt cache), §5 (call
+path + CDR vars), §6 (call-time shape check). Plan: `docs/IVR_PRODUCT_PLAN.md`
+§7. Tests: `tests/lua/ivr_engine_harness.lua`, `ivr_egress_identity_harness.lua`,
+`ivr_schedule_rules_harness.lua` (shared sandbox `tests/lua/ivr_sandbox.lua`).
+
+- **Gate.** `IVR_ENABLED`, parsed exactly like `API_CALLING_ENABLED`: on only
+  for `true` (case-insensitive, trimmed). OFF: an IVR DID — direct (STEP 2) or
+  as an on-net terminal (chain loop, beside the API gate) — is hard-rejected
+  `CALL_REJECTED` (603) + `lua_routed=true`, never answered, never sent to a
+  carrier. ON: `TERMINATORS.ivr = terminate_ivr`. RCF / trunk / voicemail / API
+  calls never read the flag (`ivr_egress_identity_harness.lua` replays every
+  existing scenario under unset / `false` / `true` against the pre-IVR router).
+- **Lookup (version pinning, D9 local-only).** STEP-1 arm **e** (after
+  voicemail = `customer_numbers.PRECEDENCE` + ivr): `db.lookup_ivr_did` reads
+  the `ivr_fs_number` view ONCE per IVR entry — owner, `max_channels`, computed
+  `enabled` (number on AND `customers.ivr_enabled` AND `status='active'`) and
+  the PUBLISHED plan (`plan_json`). No row = not ours (404). `enabled=f` or
+  `plan_json IS NULL` = 603. A publish mid-call never changes that caller's
+  menu. On-net (RCF forward / another IVR's transfer) reaches the same
+  terminator from the `number_routing` ivr arm and reads the row there.
+- **Call path (`terminate_ivr`).** `lua_routed=true` → `ivr_flow_id` /
+  `ivr_flow_version` → `limit hash ivr <did> <max_channels> !USER_BUSY` (over
+  → 486, `ivr_exit=limit`, never answered) → modules loaded lazily
+  (`media_leg`, `ivr_prompts`, `ivr_engine`, `schedule`, `rules` — RCF calls
+  never parse them) → plan decoded + validated closed-world → every prompt
+  prefetched into the local cache BEFORE answer (a 180 `ring_ready` first
+  when anything must be fetched, so the caller hears ringback) →
+  `media_leg.prepare` + `playback_terminators=none` → answer → engine → CDR
+  vars → the channel is always hung up before the script returns (the dialplan
+  fallback would otherwise `respond 503` on an answered call). Any failure
+  (bad plan, prompt miss/corrupt, module missing, engine error): answer, play
+  `sounds/ivr/technical_difficulty.wav` (tone fallback), hang up
+  `NORMAL_TEMPORARY_FAILURE`, `ivr_exit=error`.
+- **Media timer — IVR legs only.** `lib/media_leg.lua` sets
+  `rtp_timer_name=soft` + `jitterbuffer_msec=60:200` (vm_box's values) on THIS
+  leg before its answer. Never on a sofia profile: that would change the RTP
+  pacing of every RCF/trunk relay leg (docker/freeswitch/CLAUDE.md gotcha 13).
+  vm_box is not switched to media_leg in this project (contract §0).
+- **Prompt cache (`lib/ivr_prompts.lua`).** `/var/lib/crag/ivr-prompts/<sha256>.wav`
+  (volume `ivr_prompts`). Hit = the file's canonical 44-byte header matches its
+  length (no re-hash). Miss = `SELECT encode(wav,'hex') FROM ivr_prompt_audio
+  WHERE sha256=…` on the LOCAL replica (`db.fetch_ivr_prompt_hex`) → hex-decode
+  → sha256 (pure Lua, 0.16 s for the 120 s worst case) + RIFF/PCM/mono/8 kHz/
+  16-bit/single-data-chunk check → write `<sha>.tmp.<call-token>-N` → `os.rename`.
+  A corrupt cached file is a miss. Directory missing (volume not mounted yet) →
+  `mkdir -p` once, cache in the container layer. No eviction in v1
+  (content-addressed; per-customer audio is capped at 50 MB by the API).
+- **Engine (`lib/ivr_engine.lua`, closed world).** Menus = one
+  `play_and_get_digits 1 1 1 <ms> none <file> silence_stream://20 ivr_digit . <ms>`
+  per try (barge-in on the prompt; terminators `none`, so `#`/`*` are menu
+  keys; every key is collected and checked in Lua). No key → the next try's
+  file is `file_string://<noinput prompts>!<menu prompts>`; a key not in
+  `digits` → `<invalid prompts>!<menu prompts>`; after `retries` re-prompts the
+  last failure's prompt plays and the menu exits `on_noinput`/`on_nomatch` by
+  the LAST failure type (= services/ivr/simulator.py). Hours = `lib/schedule.lua`
+  (pinned TZ list incl. America/Puerto_Rico, exact US DST), Caller check =
+  `lib/rules.lua` (prefix/equals on canonical +E.164, anonymous). Budgets:
+  `max_steps` node entries (a transfer counts once), `max_seconds` from answer
+  → `goodbye.wav`, hang up, `ivr_exit=limit`.
+- **Transfer = the RCF egress (`ivr_transfer`).** The module-level RCF chain
+  is extracted VERBATIM into `run_onnet_chain(start, ctx, own_customer_id)`
+  (RCF calls it once with the STEP-1 row; byte-identity proven against the
+  pre-extraction router). A Transfer / Voicemail block calls it with a
+  pseudo-hop `{did = IVR DID, forward_to = target, pass_caller_id = block,
+  max_channels = 0, product_type = ivr, terminator = rcf}` in
+  `egress_return_mode`, so it reuses: on-net resolution (own RCF chain, mailbox
+  → `terminate_vvm`, another IVR → `terminate_ivr` hop-limited, trunk DID →
+  `terminate_trunk`), and off-net `terminate_rcf` itself — cached TCP
+  pre-check, table-driven `carrier_trunks` × {signaling VIP, SBC-1} (legacy
+  4-attempt fallback), `progress_timeout`, 8YY class (fail-closed), From = the
+  IVR DID, PAI/RPID = caller or IVR DID, Diversion = IVR DID, STIR `div` +
+  `stir_outcome`, the `[cdr_*]` block (`cdr_product_type=ivr`). Return mode
+  only: a no-answer / busy / all-failed result RETURNS to the engine
+  (`on_noanswer`) instead of the 503; a far-end `NO_ANSWER`/`USER_BUSY` ends
+  the failover sweep (RCF keeps re-dialling — unchanged); the block's ring time
+  overrides an own RCF terminal's ring_timeout and the trunk PBX leg's 60 s; a
+  capped own number that is full (`limit_usage` pre-check) is "busy" instead
+  of the limit app's 486 hangup; hard rejects (disabled / no longer the
+  customer's / loop / hop limit) are recorded, then the engine plays the
+  technical-difficulty prompt and hangs up with that cause (`ivr_exit=error`).
+  Per transfer the ctx CID composition / hops / visited set and the egress
+  channel vars are reset, so a second transfer starts like the first. The
+  A-leg keeps `customer_id` = IVR owner and `product_type=ivr`.
+- **CDR vars (A-leg, plain `setVariable`).** `product_type=ivr`, `customer_id`,
+  `ivr_flow_id`, `ivr_flow_version`, `ivr_exit` (transfer | voicemail | hangup |
+  caller_hangup | timeout = a no-input exit into a null branch | error | limit),
+  `ivr_path` (`n_a>n_m:1>n_x:noanswer>n_vm`, ≤ 512 bytes, `…` when cut),
+  `ivr_transfer_to` (last target), `ivr_seconds` (answer → final transfer
+  start, else → end). A nested IVR (IVR → own IVR number) shares the call's
+  state: path continues, the first flow's id/version stay.
+- **Guard (why the engine is closed-world).** FreeSWITCH expands `${var}` and
+  `${api(args)}` in every `session:execute` argument. The plan is validated
+  before answer (ids, digits, shas in the prefetch list, §6 E.164 shape plus a
+  premium/N11/555-01xx denylist for external targets, pinned TZ, integer
+  bounds); the only strings that reach FS are cache paths of validated shas,
+  fixed literals, integers and validated E.164 (via the RCF egress). The
+  harness asserts an allowlist over every execute of every run and that hostile
+  plans take the error path. `sanitize_display_name` (caller-supplied names,
+  From pass-through) now also strips `$ { }`.
+- **System prompts.** `sounds/ivr/technical_difficulty.wav`, `goodbye.wav`
+  (8 kHz mono PCM16) are espeak-ng PLACEHOLDERS (generated like `sounds/vm/`).
+  Regenerate them with the TTS sidecar (`docker/tts`, the same voice as the
+  customer prompts) when it is live; keep the format and file names.
+- **No image rebuild, no Kamailio change.** Scripts/sounds are bind-mounted;
+  `play_and_get_digits`, `playback`, `limit`, `file_string` (mod_dptools),
+  `limit hash` (mod_hash), WAV (mod_sndfile) and `silence_stream`/`tone_stream`
+  (mod_tone_stream) are already loaded (`modules.conf.xml`, Dockerfile).
+  Requires migrations 59 (`ivr_fs_number`, `ivr_prompt_audio`, number_routing
+  ivr arm) + 60 and the `docker-compose.media.yml` `ivr_prompts` volume.
 
 ### API Calling product — RETIRED (flag `API_CALLING_ENABLED`, default OFF)
 
@@ -420,9 +537,11 @@ body is stripped is obsolete.
 - `api_dids` JOIN `customers` -- API DID lookup (STEP 1)
 - `trunk_dids` JOIN `sip_trunks` JOIN `customers` -- Trunk DID lookup (STEP 1)
 - `number_routing` view -- on-net oracle for `forward_to` (resolve_destination)
+- `ivr_fs_number` view -- Visual IVR number + published plan (lookup_ivr_did, STEP-1 arm e)
+- `ivr_prompt_audio` -- IVR prompt audio by sha256, cache misses only (fetch_ivr_prompt_hex)
 
 **Channel variables set for CDR:**
-`customer_id` (=terminal customer), `product_type`, `traffic_grade`, `trunk_id`, `carrier_used`, `forward_to`, `direction`, `call_start_time`, `hangup_cause`, `blocked_reason`, `fraud_score`, `lua_routed`, the inbound-carrier attribution `inbound_carrier` / `inbound_carrier_pop` (from Kamailio's X-Inbound-Carrier/X-Inbound-PoP; "bandwidth"/"" when absent), and the on-net set `origin_customer_id`, `terminating_customer_id`, `on_net`, `on_net_hops`. These are all A-leg only. Carrier B-legs additionally get the per-leg `cdr_*` set (never on the A-leg) — see "CDR A/B leg split".
+`customer_id` (=terminal customer), `product_type`, `traffic_grade`, `trunk_id`, `carrier_used`, `forward_to`, `direction`, `call_start_time`, `hangup_cause`, `blocked_reason`, `fraud_score`, `lua_routed`, the inbound-carrier attribution `inbound_carrier` / `inbound_carrier_pop` (from Kamailio's X-Inbound-Carrier/X-Inbound-PoP; "bandwidth"/"" when absent), and the on-net set `origin_customer_id`, `terminating_customer_id`, `on_net`, `on_net_hops`. These are all A-leg only. Carrier B-legs additionally get the per-leg `cdr_*` set (never on the A-leg) — see "CDR A/B leg split". IVR calls add `ivr_flow_id`, `ivr_flow_version`, `ivr_exit`, `ivr_path`, `ivr_transfer_to`, `ivr_seconds` (see "Visual IVR").
 
 ### trunk_outbound.lua
 
@@ -600,7 +719,9 @@ container. Rollback = remove the line + recreate. Digit form follows the DID's: 
 a NANP caller, full +E.164 otherwise. `rcf_from_passthrough` (true/false) is
 recorded as a CDR breadcrumb.
 
-Display names are passed through `sip_display_safe()` first. Kamailio now assigns
+Display names are passed through `sip_display_safe()` first (caller-supplied
+names additionally lose `$ { }` in `sanitize_display_name`: the pass-through
+name is an `export` argument, and FreeSWITCH expands `${...}` there). Kamailio now assigns
 `$fn = "\"" + $hdr(X-From-Name) + "\""` (and the same for the `X-Original-CID-Name`
 fallback) — `pv_set_xto_attr()` case 3 inserts the value verbatim and adds no quotes
 of its own, so the cfg supplies the RFC 3261 quoted-string and the Lua MUST keep
@@ -703,6 +824,8 @@ PostgreSQL client with connection pooling.
 | `lookup_rcf(did)` | rcf_numbers JOIN customers | forward_to, customer_id, pass_caller_id, ring_timeout, traffic_grade, cpm_limit, daily_limit |
 | `resolve_destination(did)` | `number_routing` view (rcf/api/trunk[/voicemail after migration 54] UNION ALL JOIN customers) | 0/1 row: did, product_type, customer_id, product_ref_id, product_enabled, customer_status, forward_to, pass_caller_id, ring_timeout, max_channels, product_name, voice_url, trunk_id. **UNFILTERED** on enabled/active — caller decides on-net vs hard-reject. |
 | `lookup_voicemail_did(did)` | `number_routing` (product_type='voicemail') JOIN customers | 0/1 row: did, product_type, customer_id, product_ref_id (mailbox id), product_enabled, customer_status, product_name (label), traffic_grade. **UNFILTERED** (603 in terminate_vvm). STEP-1 arm, runs last. |
+| `lookup_ivr_did(did)` | `ivr_fs_number` JOIN customers | 0/1 row: did, ivr_number_id, customer_id, max_channels, enabled, flow_id, flow_version, plan_json, traffic_grade. **UNFILTERED** (603 for enabled=f / NULL plan). STEP-1 arm e (last). |
+| `fetch_ivr_prompt_hex(sha)` | `ivr_prompt_audio` | `encode(wav,'hex')` or nil + reason; `sha` must be `^[0-9a-f]{64}$` (checked before interpolation) |
 | `lookup_api_did(did)` | api_dids JOIN customers | voice_url, fallback_url, customer_id, traffic_grade, cpm_limit, daily_limit |
 | `lookup_trunk_did(did)` | trunk_dids JOIN sip_trunks JOIN customers | trunk_id, customer_id, max_channels, traffic_grade |
 | `lookup_trunk_by_ip(ip)` | trunk_auth_ips JOIN sip_trunks JOIN customers | trunk_id, customer_id, max_channels, cps_limit, traffic_grade |
@@ -736,6 +859,19 @@ The list is never keyed by IP, so two rows sharing a `source_ip` (migration 53:
 an inbound 8XX-T orig row + an outbound redundant termination row) never
 collapse — and only outbound/both rows are ever selected. Harness:
 `tests/lua/onnet_router_harness.lua` resolves this lib from the repo.
+
+### Visual IVR libraries
+
+All pure Lua 5.3, loaded lazily by `terminate_ivr` with `load_module()`; no
+FreeSWITCH globals at module scope (harness-loadable). See "Visual IVR" above.
+
+| Module | Purpose |
+|---|---|
+| `lib/ivr_engine.lua` | Null-preserving strict JSON decoder, closed-world plan validation (`load_plan`), the executor (`run`), CDR var builder (`cdr_vars`) |
+| `lib/ivr_prompts.lua` | Content-addressed prompt cache (`prefetch` / `ensure` / `all_cached`), pure-Lua SHA-256, hex decode, canonical WAV check, system prompts with tone fallback |
+| `lib/media_leg.lua` | `prepare(session)`: `rtp_timer_name=soft` + `jitterbuffer_msec=60:200` before answer (terminated legs only) |
+| `lib/schedule.lua` | Ported from `unified`: pinned TZ table (+ Puerto Rico), exact US DST, `hours_open(node, now)`, unified `matches()` |
+| `lib/rules.lua` | Ported from `unified`: `caller_matches(mode, values, caller)`, `is_anonymous`, unified `first_match()` |
 
 ### lib/redis_client.lua
 
@@ -811,7 +947,9 @@ trunk_auth_ips    (trunk_id, ip_address, description)
 extensions        (extension, customer_id, display_name, assigned_did, status)
 cps_tiers         (id, name, tier_type, cps_limit, monthly_fee, per_call_fee, description, features, is_active, sort_order)
 cdrs              (uuid, customer_id, product_type, trunk_id, direction, caller_id, destination, start_time, end_time, duration_ms, hangup_cause, carrier_used, traffic_grade, origin_customer_id, terminating_customer_id, on_net, on_net_hops)
-number_routing    VIEW: UNION ALL over rcf_numbers/api_dids/trunk_dids[/voicemail_boxes, migration 54] JOIN customers (on-net oracle; resolve_destination, lookup_voicemail_did). FS has NO grant on voicemail_* tables.
+number_routing    VIEW: UNION ALL over rcf_numbers/api_dids/trunk_dids[/voicemail_boxes, migration 54][/ivr_numbers, migration 59] JOIN customers (on-net oracle; resolve_destination, lookup_voicemail_did). FS has NO grant on voicemail_* tables.
+ivr_fs_number     VIEW (migration 59): did, ivr_number_id, customer_id, max_channels, enabled, flow_id, flow_version, plan_json — FS's ONLY IVR read path (no grant on ivr_numbers / call_flows / call_flow_versions)
+ivr_prompt_audio  (sha256 PK, wav BYTEA, bytes) — content-addressed IVR prompt audio (migration 59; FS SELECT)
 ```
 
 ---

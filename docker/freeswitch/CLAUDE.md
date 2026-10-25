@@ -2,7 +2,7 @@
 
 ## What This Is
 
-FreeSWITCH media server for the RevUp voice platform. Stripped to Remote Call Forwarding (RCF) only -- no UCaaS, WebRTC, mod_voicemail, conferencing, or IVR. Runs as a B2BUA bridging inbound DID calls to outbound PSTN destinations through Bandwidth carriers via a Kamailio SBC. Exception: the Lua-only **encrypted voicemail** deposit path (dedicated-DID mailboxes; `scripts/CLAUDE.md` "Encrypted voicemail") answers, records to a RAM tmpfs and uploads to the API — mod_voicemail stays unbuilt.
+FreeSWITCH media server for the RevUp voice platform. Stripped to Remote Call Forwarding (RCF) only -- no UCaaS, WebRTC, mod_voicemail, conferencing, or IVR. Runs as a B2BUA bridging inbound DID calls to outbound PSTN destinations through Bandwidth carriers via a Kamailio SBC. Exception: the Lua-only **encrypted voicemail** deposit path (dedicated-DID mailboxes; `scripts/CLAUDE.md` "Encrypted voicemail") answers, records to a RAM tmpfs and uploads to the API — mod_voicemail stays unbuilt. Second exception: the Lua-only **Visual IVR** (`scripts/CLAUDE.md` "Visual IVR", gate `IVR_ENABLED`, default off) answers IVR DIDs, plays cached prompts, collects DTMF and transfers through the RCF egress — FreeSWITCH's XML `ivr` menus (`ivr.conf`) are not used; it is `play_and_get_digits` + Lua.
 
 ## Architecture Position
 
@@ -119,6 +119,7 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 | `ESL_PASSWORD` | `ClueCon` | Event Socket password. CHANGE IN PRODUCTION. |
 | `TEST_MODE` | `false` | When true, plays tone instead of bridging to carrier |
 | `API_CALLING_ENABLED` | `false` | API Calling product (account_type `api`) is **RETIRED**. Only the exact value `true` (case-insensitive, trimmed) re-enables it. Off: api_did inbound (direct or on-net RCF terminal) is hard-rejected `CALL_REJECTED` (603, `lua_routed=true`, no carrier leg, no webhook) and `api_outbound.lua` / `outbound_api.lua` reject `CALL_REJECTED`. RCF/trunk unaffected. See `scripts/CLAUDE.md`. |
+| `IVR_ENABLED` | `false` | Visual IVR (`scripts/CLAUDE.md` "Visual IVR"). Only the exact value `true` (case-insensitive, trimmed) enables it; parsed like `API_CALLING_ENABLED`. Off: an IVR DID (direct or as an on-net terminal) is hard-rejected `CALL_REJECTED` (603, `lua_routed=true`, never answered, no carrier leg). RCF/trunk/voicemail never read it. Passed through `docker-compose.media.yml` (`IVR_ENABLED=${IVR_ENABLED:-false}`); stays unset until the P5 live test, then per zone `.env` + recreate. |
 | `BRIDGE_PROGRESS_TIMEOUT` | `10` | Per-attempt `progress_timeout` (seconds) on carrier bridges — max wait for a provisional response (180/183) before failing over. Do NOT replace with originate_timeout (caps time-to-answer incl. ring). |
 
 ## Health Check
@@ -168,7 +169,7 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 12. **Shared termination lib + trunk/API 8YY egress (2026-10, Sinch close-out)**: the carrier_trunks fetch/60s cache/validation, class coercion, `classify_destination`, class filter, post-filter cap, trunk-major attempt builder and the X-Carrier-IP dial-string builder live in `scripts/lib/term_trunks.lua` (loaded via `loadfile`, no Redis). `inbound_router.lua` delegates to it with byte-identical output (vars, dial strings, hangups, log lines — verified against the pre-extraction script); if the lib fails to load, RCF takes the legacy fail-open loop (same as a DB blip). `trunk_outbound.lua` and `api_outbound.lua` (direct-bridge path; webhook calls untouched) send NANP 8YY destinations ONLY over enabled `traffic_class='tollfree'` rows — same SQL, same process-wide cache entry (`term_trunks_<zone>`, shared by all three scripts), per-zone priority (`FS_ZONE`), trunk-major × {`SBC_PROXY_IP`, `SBC_PROXY_IP_FAILOVER`} with the cached TCP pre-check, `X-Carrier-IP`/`X-Carrier-Label`, `carrier_used=<carrier>-<pop>`, `term_trunks_source`. They FAIL CLOSED on every miss — no tollfree row, DB error/zero rows, or lib missing → `term_class_blocked=tollfree` + `NO_ROUTE_DESTINATION` + `lua_routed=true`, never Bandwidth (asymmetric with the RCF legacy fail-open on purpose: these products never had an 8YY route). Non-8YY trunk/API calls never consult carrier_trunks and are byte-identical to before. Ordering with the redundant rows (migration 53): LD = Bandwidth (10/20, west swaps) → sinch/atlanta-ld (30) → sinch/denver-ld (35); 8YY = sinch/denver-tf (40) → sinch/atlanta-tf (45). The redundant rows share source IPs with the inbound 8XX-T orig rows; FS's SELECT filters `direction IN ('outbound','both')` and the cache is an ordered list (never IP-keyed), so nothing collapses. See `scripts/CLAUDE.md` "lib/term_trunks.lua".
 
-13. **No RTP timer on the sofia profiles (source-derived, 2026-10-23)**: neither `internal.xml` nor `external.xml` sets `rtp-timer-name`. Vanilla FreeSWITCH profiles set it to `soft`, and mod_sofia has no default (at the pinned ref, `sofia.c:5285-5286` is the only assignment). So audio RTP sessions are created without a timer ("Not using a timer", `switch_rtp.c:4594`), and reads are paced by packet arrival. This is harmless for bridged RCF/trunk legs. It matters for anything that **terminates** media: a jitter buffer needs a timer, and so does a silence detector that must keep counting when RTP stops. The voicemail recording leg is the only such path, and `lib/vm_box.lua` sets `rtp_timer_name=soft` + `jitterbuffer_msec=60:200` per call before the answer (owner decision O6; see `scripts/CLAUDE.md` "Recording jitter buffer"). Do NOT add `rtp-timer-name` to a profile to get this: that would change the RTP pacing of every RCF/trunk leg. To verify on a node, an RCF CDR in `/var/log/freeswitch/json_cdr` has no `rtp_use_timer_name`, and a voicemail CDR has `rtp_use_timer_name=soft`.
+13. **No RTP timer on the sofia profiles (source-derived, 2026-10-23)**: neither `internal.xml` nor `external.xml` sets `rtp-timer-name`. Vanilla FreeSWITCH profiles set it to `soft`, and mod_sofia has no default (at the pinned ref, `sofia.c:5285-5286` is the only assignment). So audio RTP sessions are created without a timer ("Not using a timer", `switch_rtp.c:4594`), and reads are paced by packet arrival. This is harmless for bridged RCF/trunk legs. It matters for anything that **terminates** media: a jitter buffer needs a timer, and so does a silence detector that must keep counting when RTP stops. The voicemail recording leg and the Visual IVR leg are the only such paths: `lib/vm_box.lua` (voicemail, owner decision O6; see `scripts/CLAUDE.md` "Recording jitter buffer") and `lib/media_leg.lua` (IVR, called only by `terminate_ivr`) set `rtp_timer_name=soft` + `jitterbuffer_msec=60:200` per call before the answer. Do NOT add `rtp-timer-name` to a profile to get this: that would change the RTP pacing of every RCF/trunk leg. To verify on a node, an RCF CDR in `/var/log/freeswitch/json_cdr` has no `rtp_use_timer_name`, and a voicemail or IVR CDR has `rtp_use_timer_name=soft`.
 
 ## Volumes (docker-compose.media.yml)
 
@@ -177,6 +178,7 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 - `freeswitch_logs` named volume at `/var/log/freeswitch`
 - `./secrets/fs-voicemail` mounted READ-ONLY at `/run/revup` — holds only `vm_ingest.header` (single line `X-Ingest-Secret: <INGEST_SHARED_SECRET>`, root:root 0600), read by curl via `-H @file`. The directory (not the file) is mounted so a node without the secret still starts FS (Docker auto-creates a missing directory; voicemail calls then play `unavailable`), and a file added later is visible without a recreate. Git-ignored (`secrets/*`).
 - `tmpfs: /dev/shm/vm:size=512m,mode=0700,noexec,nosuid,nodev` — the ONLY place plaintext voicemail audio is written (Lua refuses to record unless it is a real tmpfs mount). FS runs as root in this image (no USER / `-u`), so `mode=0700` root-owned is correct.
+- `ivr_prompts` named volume at `/var/lib/crag/ivr-prompts` — the Visual IVR's content-addressed prompt cache (`<sha256>.wav`, written atomically by `lib/ivr_prompts.lua` from the local replica's `ivr_prompt_audio`; contract §4/§7, added to `docker-compose.media.yml` by the voicemail-resilience PR). Persistent so a recreate keeps the cache warm; safe to delete (refilled on the next call per sha). Without the volume the Lua creates the directory in the container layer.
 
 ### Encrypted voicemail — operator steps per FS node (all 6 nodes, FS-2 first)
 
@@ -280,4 +282,18 @@ docker/freeswitch/
   conf/                   # FreeSWITCH configuration (see conf/CLAUDE.md)
   scripts/                # Lua routing scripts (see scripts/CLAUDE.md); scripts/lib/term_trunks.lua = shared carrier_trunks termination
     sounds/vm/            # Voicemail prompts (8 kHz mono PCM16 WAV, bind-mounted)
+    sounds/ivr/           # Visual IVR system prompts: technical_difficulty.wav, goodbye.wav (espeak-ng placeholders; regenerate with the TTS sidecar)
 ```
+
+### Visual IVR — operator steps per FS node (P2; FS-2 first)
+
+No image rebuild and no Kamailio change: `play_and_get_digits` / `playback` /
+`limit` / `file_string` (mod_dptools), `limit hash` (mod_hash), WAV playback
+(mod_sndfile) and `silence_stream` / `tone_stream` (mod_tone_stream) are all
+built (Dockerfile `modules.conf.in` seds) and loaded (`modules.conf.xml`).
+With `IVR_ENABLED` unset the new code is inert for every existing call (RCF /
+trunk / voicemail are byte-identical — `tests/lua/ivr_egress_identity_harness.lua`),
+so the scripts can land with a plain `git pull` (bind-mounted, next call). The
+`ivr_prompts` volume needs the one-time container recreate that the
+voicemail-resilience compose change brings. Turning IVR on is P5: one IVR test
+number, then `IVR_ENABLED=true` in that zone's media-VM `.env` + recreate.

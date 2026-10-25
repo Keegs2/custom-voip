@@ -169,6 +169,8 @@ Loaded modules organized by purpose:
 | Database | mod_db, mod_hash | mod_odbc_query |
 | Disabled UCaaS | -- | mod_conference, mod_voicemail, mod_valet_parking, mod_av |
 
+**Visual IVR needs no module or config change:** its menus are `play_and_get_digits` and `playback` (mod_dptools, with `file_string://` and `limit`), the per-number cap is `limit hash` (mod_hash), prompts are 8 kHz WAV (mod_sndfile) and the menu's "invalid file" slot / tone fallbacks are `silence_stream://` / `tone_stream://` (mod_tone_stream) — all loaded above. Neither sofia profile changes: `rtp-timer-name` stays unset and the IVR leg gets its timer per call (`scripts/lib/media_leg.lua`).
+
 **Why mod_local_stream is disabled:** It requires `local_stream.conf.xml`. When xml_curl can't reach the API (startup or media VM), the missing config causes CRIT abort. RCF uses `silence_stream://` instead.
 
 **Why mod_httapi and mod_http_cache are disabled:** Same missing-config issue. Their configs would need to be served by xml_curl, which is unreachable during module load on the media VM.
