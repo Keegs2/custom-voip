@@ -171,7 +171,7 @@ def test_migration_57_header_and_check_migrations_row():
             "/opt/revup/docker/postgres/init/57_trunk_dids_trunk_index.sql") in txt
     chk = (REPO / "scripts" / "db" / "check_migrations.sql").read_text()
     assert chk.splitlines()[0].startswith(
-        "-- Read-only: reports which hand-applied migrations (22..60)")
+        "-- Read-only: reports which hand-applied migrations (22..61)")
     assert ("('57_trunk_dids_trunk_index', to_regclass('public.idx_trunk_dids_trunk') "
             "IS NOT NULL)") in chk
     assert "| `57_trunk_dids_trunk_index.sql` |" in (
