@@ -1,10 +1,14 @@
 """Flow assistant eval runner (contract docs/IVR_ASSIST_INTERFACES.md §9).
 
     python -m services.ivr.assist.eval --cases FILE|-  [--only ID,ID] [--json] [-v]
+                                       [--ted-url URL] [--token-stdin]
 
 Runs inside the API container against the TED configured in the environment
 (``TED_BASE_URL`` + ``TED_IVR_ASSIST_TOKEN``; ``IVR_ASSIST_ENABLED`` is not
-needed — this is an operator tool). It needs NO database: every case brings
+needed — this is an operator tool), or another TED for this run only
+(``--ted-url`` + ``--token-stdin``: the token is the first line of stdin, so
+it is never on a command line — e.g. TED staging before production). It needs
+NO database: every case brings
 its own synthetic customer (numbers, messages) from the case file. The case
 file lives in the repo at ``tests/fixtures/ivr_assist/eval_cases.json``, which
 is not in the API image — pipe it in with ``--cases -``.
@@ -29,6 +33,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -199,13 +204,34 @@ def main(argv: Optional[list[str]] = None, *, call_ted: Optional[pipeline.CallTe
     parser.add_argument("--only", default="", help="comma-separated case ids")
     parser.add_argument("--json", action="store_true", help="print a JSON report")
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("--ted-url", default=None,
+                        help="TED base URL for this run only (default: TED_BASE_URL), e.g. "
+                             "TED staging")
+    parser.add_argument("--token-stdin", action="store_true",
+                        help="read the assist token from the FIRST line of stdin (then the "
+                             "cases, with --cases -) instead of TED_IVR_ASSIST_TOKEN, so it "
+                             "never appears on a command line")
     args = parser.parse_args(argv)
+    stdin_rest = None
+    if args.token_stdin:
+        token = sys.stdin.readline().strip()
+        if not token:
+            print("--token-stdin: the first line of stdin must be the token.", file=sys.stderr)
+            return 2
+        os.environ[config.ENV_TOKEN] = token          # this process only
+        stdin_rest = sys.stdin.read() if args.cases == "-" else None
+    if args.ted_url is not None:
+        os.environ[config.ENV_BASE_URL] = args.ted_url
     if call_ted is None and not config.ted_configured():
         print("TED_BASE_URL and TED_IVR_ASSIST_TOKEN must be set (TED's public URL and the "
               "assist token, from the TED runbook).", file=sys.stderr)
         return 2
     try:
-        text = sys.stdin.read() if args.cases == "-" else open(args.cases, encoding="utf-8").read()
+        if args.cases == "-":
+            text = stdin_rest if stdin_rest is not None else sys.stdin.read()
+        else:
+            with open(args.cases, encoding="utf-8") as fh:
+                text = fh.read()
         doc = load_cases(text)
     except (OSError, ValueError) as exc:
         print(f"could not read the cases: {exc}", file=sys.stderr)

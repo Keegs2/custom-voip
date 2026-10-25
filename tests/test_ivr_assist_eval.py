@@ -236,6 +236,23 @@ def test_main_only_json_and_stdin(wire, monkeypatch):
     assert [c["id"] for c in report["cases"]] == ["acme-main-menu", "refuse-sms"]
 
 
+def test_main_token_from_stdin_and_ted_url_override(wire, monkeypatch, capsys):
+    """The owner's staging run: URL on the command line, token as stdin line 1."""
+    monkeypatch.setenv("TED_BASE_URL", "https://wrong.invalid")
+    monkeypatch.delenv("TED_IVR_ASSIST_TOKEN")
+    wire.reset(reference_script())
+    monkeypatch.setattr(sys, "stdin", io.StringIO(fake.TOKEN + "\n" + CASES_PATH.read_text()))
+    out = io.StringIO()
+    code = assist_eval.main(["--ted-url", fake.BASE_URL, "--token-stdin", "--cases", "-",
+                             "--only", "acme-main-menu"], out=out)
+    assert code == 0 and "PASS  acme-main-menu" in out.getvalue()
+    assert wire.wire[0].headers["X-TED-Trigger-Token"] == fake.TOKEN
+    assert str(wire.wire[0].url).startswith(fake.BASE_URL)
+    assert fake.TOKEN not in out.getvalue() + capsys.readouterr().err
+    monkeypatch.setattr(sys, "stdin", io.StringIO("\n"))
+    assert assist_eval.main(["--token-stdin", "--cases", str(CASES_PATH)]) == 2
+
+
 def test_main_exit_codes(wire, monkeypatch, capsys):
     wire.reset(lambda payload: {"kind": "cannot_build", "message": "no"})
     out = io.StringIO()
