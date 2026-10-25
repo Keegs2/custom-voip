@@ -3,9 +3,14 @@
 -- a harness over the existing scenarios").
 --
 -- WHAT IS COMPARED. Every scenario runs twice under tests/lua/ivr_sandbox.lua:
---   BASELINE  the pre-extraction router (default: `git show
---             cd69af1:docker/freeswitch/scripts/inbound_router.lua`, the RCF-V1
---             commit this branch is cut from; override with BASELINE_ROUTER=)
+--   BASELINE  the pre-extraction router: BASELINE_REF=<commit> (git show
+--             <commit>:docker/freeswitch/scripts/inbound_router.lua — cd69af1
+--             is the RCF-V1 commit the IVR extraction was cut from) or
+--             BASELINE_ROUTER=<file>. OPT-IN: with neither set the harness
+--             prints SKIPPED and exits 0. It is a one-off proof for a refactor
+--             of the router, not a standing regression test — once the router
+--             changes on purpose it no longer matches any old baseline, and
+--             CI's shallow checkout has no history to extract one from.
 --   NEW       docker/freeswitch/scripts/inbound_router.lua
 -- and the FULL ordered event log must be identical: every setVariable (name +
 -- value, incl. sofia_session_timeout, CID/Diversion/PAI/RPID/STIR vars and the
@@ -34,14 +39,23 @@ end
 local SB = dofile(script_dir() .. "/ivr_sandbox.lua")
 
 local BASELINE = os.getenv("BASELINE_ROUTER")
+local BASELINE_REF = os.getenv("BASELINE_REF")
 local tmp_baseline
+if (not BASELINE or BASELINE == "") and (not BASELINE_REF or BASELINE_REF == "") then
+    print("SKIPPED: the RCF egress byte-identity proof is opt-in. Run it against the router")
+    print("from before a refactor: BASELINE_REF=cd69af1 lua tests/lua/ivr_egress_identity_harness.lua")
+    print("ALL IVR EGRESS IDENTITY ASSERTIONS SKIPPED (no baseline requested)")
+    SB.cleanup()
+    os.exit(0)
+end
 if not BASELINE or BASELINE == "" then
+    assert(BASELINE_REF:match("^[%w._/-]+$"), "BASELINE_REF must be a plain git ref")
     tmp_baseline = SB.SCRATCH .. "/inbound_router.baseline.lua"
     local ok = os.execute(string.format(
-        "git -C '%s' show cd69af1:docker/freeswitch/scripts/inbound_router.lua > '%s' 2>/dev/null",
-        SB.REPO, tmp_baseline))
+        "git -C '%s' show '%s:docker/freeswitch/scripts/inbound_router.lua' > '%s' 2>/dev/null",
+        SB.REPO, BASELINE_REF, tmp_baseline))
     if not ok then
-        print("cannot extract the baseline router (git show cd69af1:...); set BASELINE_ROUTER=")
+        print("cannot extract the baseline router (git show " .. BASELINE_REF .. ":...); set BASELINE_ROUTER=")
         os.exit(2)
     end
     BASELINE = tmp_baseline

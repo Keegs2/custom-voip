@@ -160,6 +160,12 @@ Contract: `docs/IVR_INTERFACES.md` §3 (plan), §4 (prompt cache), §5 (call
 path + CDR vars), §6 (call-time shape check). Plan: `docs/IVR_PRODUCT_PLAN.md`
 §7. Tests: `tests/lua/ivr_engine_harness.lua`, `ivr_egress_identity_harness.lua`,
 `ivr_schedule_rules_harness.lua` (shared sandbox `tests/lua/ivr_sandbox.lua`).
+The egress identity proof is OPT-IN (`BASELINE_REF=cd69af1 lua
+tests/lua/ivr_egress_identity_harness.lua`; without it, it prints SKIPPED): it
+compares against the router from before the refactor, which CI's shallow
+checkout doesn't have and which stops matching once the router changes on
+purpose. Re-run it with the pre-change commit whenever `run_onnet_chain()` or
+the RCF egress is refactored again.
 
 - **Gate.** `IVR_ENABLED`, parsed exactly like `API_CALLING_ENABLED`: on only
   for `true` (case-insensitive, trimmed). OFF: an IVR DID — direct (STEP 2) or

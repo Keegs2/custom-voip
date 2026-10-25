@@ -292,7 +292,7 @@ No image rebuild and no Kamailio change: `play_and_get_digits` / `playback` /
 (mod_sndfile) and `silence_stream` / `tone_stream` (mod_tone_stream) are all
 built (Dockerfile `modules.conf.in` seds) and loaded (`modules.conf.xml`).
 With `IVR_ENABLED` unset the new code is inert for every existing call (RCF /
-trunk / voicemail are byte-identical — `tests/lua/ivr_egress_identity_harness.lua`),
+trunk / voicemail are byte-identical — `BASELINE_REF=cd69af1 lua tests/lua/ivr_egress_identity_harness.lua`),
 so the scripts can land with a plain `git pull` (bind-mounted, next call). The
 `ivr_prompts` volume needs the one-time container recreate that the
 voicemail-resilience compose change brings. Turning IVR on is P5: one IVR test
