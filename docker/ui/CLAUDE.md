@@ -17,7 +17,7 @@ Read this before touching any frontend code.
 | Styling | Tailwind CSS v4 (via `@tailwindcss/vite` plugin) + inline styles |
 | UI primitives | Hand-rolled components in `src/components/ui/` — no third-party UI library |
 | Icons | `lucide-react` (product icons wrapped in `src/components/icons/ProductIcons.tsx`) |
-| Drag-and-drop | `@dnd-kit/core` + `@dnd-kit/sortable` (IVR builder only) |
+| Flow canvas | `@xyflow/react` 12 (React Flow) + `zustand` 5 + `nanoid` 5 — the Visual IVR builder only, in its own lazy chunk (§19) |
 | Class merging | `clsx` + `tailwind-merge` via `src/utils/cn.ts` |
 | Build check | `tsc -b && vite build` (TypeScript errors block the Docker build) |
 
@@ -122,7 +122,6 @@ QueryClient defaults:
 /rcf                      RcfPage (customer numbers manager / admin console, + pages/rcf/ Call Activity)
 /api-dids                 ApiDidsPage — RETIRED: ProductHomeRedirect while API_CALLING_ENABLED=false
 /trunks                   TrunksPage
-/ivr                      IvrBuilderPage (placeholder)
 /voicemail                VisualVoicemailPage (lazy) — Visual Voicemail (§17): tenant inbox, admin preview,
                           admin console (?customer=ID | All customers); support → productHome
 /reporting                ReportingPage (lazy; RequireReportingAccess — rcf/trunk/hybrid + admin)
@@ -134,6 +133,8 @@ QueryClient defaults:
 
 ── full-screen, outside AppLayout, RequireAuth ──
 /troubleshooting          TroubleshootingPage      (renders its own Sidebar)
+/ivr, /ivr/flows/:id      IvrPage (lazy; renders its own Sidebar) — Visual IVR: numbers,
+                          flows, messages; the builder is a second lazy chunk (§19)
 
 *                         → redirect to /
 ```
@@ -290,7 +291,7 @@ return { items: raw.items ?? [], total: raw.total ?? raw.items?.length ?? 0 };
 | `cdrs.ts` | `/cdrs` | `searchCdrs`, `getCdr`, `rateCdr`, `getCdrSummary`, `getCdrActivity`, customer-scoped helpers. `product_type` may be `'all'` (= no product filter; `/cdrs/activity` defaults to rcf when omitted); `number` = one of the customer's own numbers (inbound destination OR outbound caller ID), sent only when set |
 | `reports.ts` | `/reports` | Reporting endpoints; `getMyNumbers(customerId?)` = the customer's numbers, EVERY product — also the dashboard's numbers list (§7) |
 | `rates.ts` | `/rates` | CRUD + `getMarginsData`, `lookupRate` |
-| `ivr.ts` | `/ivr` | CRUD for IVR flows |
+| `ivr.ts` | `/v1/ivr` | Visual IVR, typed 1:1 to `docs/IVR_INTERFACES.md` §8.2: summary, flows (CRUD, validate, publish `{revision}`, versions, restore, simulate), numbers, destinations, prompts (TTS, multipart upload, rename, delete, tts-preview, playback URL), voices. Staff pass `customer_id` on EVERY route (§19) |
 | `documents.ts` | `/documents` | folders CRUD, document upload/download/update/delete, stats |
 | `sipp.ts` | `/sipp` | `listSippPresets`, `runSipp` |
 | `health.ts` | `/health` | `getHealth`, `getDetailedHealth` |
@@ -303,6 +304,9 @@ return { items: raw.items ?? [], total: raw.total ?? raw.items?.length ?? 0 };
 `apiRequestRaw<T>(method, path, body, contentType)` (client.ts) is the raw-body
 sibling of `apiRequest` (same auth / 401 / ApiError handling) — used for the
 voicemail greeting upload (`audio/wav` bytes, never multipart).
+`apiRequestForm<T>(method, path, FormData)` (multipart — the IVR prompt
+upload) and `apiPostForBlob(path, body)` (JSON in, binary out — the IVR
+text-to-speech preview) are siblings with the same handling.
 
 ---
 
@@ -325,14 +329,14 @@ Standard query key conventions:
 ['rates', { ...params }]
 ['carriers']
 ['tiers']
-['ivr-flows']
+['ivr', <scope key>, …]         // Visual IVR — §19
 ```
 
 ### Client state — React `useState` / `useReducer`
 
 - **Form state:** local `useState` inside each page.
-- **IVR builder:** `useReducer` in `src/pages/ivr/useIvrFlow.ts` — all mutations
-  to the node tree go through typed `IvrAction` dispatches.
+- **IVR builder:** one zustand store per mounted builder
+  (`src/flow/store/flowStore.ts`, created in `FlowBuilder`) — §19.
 - **Sidebar group open/close:** `useState` + persisted to `localStorage` under
   key `sidebar_groups_open`.
 
@@ -596,9 +600,7 @@ administration stay admin-only in TED (no admin pages in this SPA).
 API Calling showcase. **Retired 2026-09** — the page is kept in code but the route
 redirects to the user's product home while `API_CALLING_ENABLED` is false.
 
-**`IvrBuilderPage`** (`/ivr`)
-Currently a placeholder/coming-soon shell. The IVR engine code
-(`src/pages/ivr/`) is complete but the page wrapper shows "Phase 2".
+**`IvrPage`** (`/ivr`, `/ivr/flows/:id`, lazy) — Visual IVR: see §19.
 
 **`RcfDocsPage`** (`/docs/rcf`) and **`ApiDocsPage`** (`/docs/api`)
 Static inline documentation pages. No API calls. `/documentation` redirects to
@@ -716,7 +718,8 @@ auto-open. Coming Soon rows show to every non-support user regardless of
 Products (with an unread badge) when `GET /v1/voicemail/summary` (same cache
 key as the page; tenant = no customer_id, admin preview = the preview
 customer) says `enabled`, and always for admins in normal view. A failed
-summary call leaves it in Coming Soon (still linked).
+summary call leaves it in Coming Soon (still linked). **IVR** follows the
+same rule with `GET /v1/ivr/summary` (`ivrData.ts` scope + key).
 Products holds only live products, filtered by the EFFECTIVE account type
 (`effectiveCustomer.account_type`, falling back to `user.account_type`; admins in
 normal view see all) — today just RCF (`rcf`, `hybrid`); the Products group
@@ -841,7 +844,7 @@ All types live in `src/types/`. They map 1:1 to FastAPI Pydantic schemas.
 | `carrier.ts` | `Carrier`, `CarrierCreate`, `CarrierUpdate`, `CarrierTestResult`, `CarrierTransport`, `CarrierAuthType` |
 | `cdr.ts` | `Cdr` (with full RTP/quality fields), `CdrSearchParams`, `CdrSearchResult`, `ProductType`, `CallDirection` |
 | `rate.ts` | `Rate`, `RateCreate`, `RateUpdate`, `RatesResponse`, `MarginsData`, `CdrSummaryRow`, `CdrSummaryResponse` |
-| `ivr.ts` | `IvrNode`, `IvrFlow`, `IvrFlowListItem`, `IvrFlowSave`, `IvrVerbType` |
+| `ivr.ts` | §2 graph (`IvrGraph`, `IvrNode` — a union discriminated on `type`, `IvrEdge`, per-block configs) + §8.2 shapes (`IvrSummary`, `IvrNumber`, `FlowSummary`, `Flow`, `Prompt`, `Issue`, `Destinations`, `SimulateResult`, …) |
 | `tier.ts` | `Tier`, `CustomerTierResponse`, `TierType` |
 | `health.ts` | `HealthCheck`, `DetailedHealth`, `ComponentHealth`, `HealthStatus` |
 | `documents.ts` | `SharedDocument`, `DocumentFolder`, `DocumentStats`, `DocumentListResult`, `UploadProgress` |
@@ -868,7 +871,7 @@ call quality and troubleshooting (no edit access).
 ### Products catalog (`src/config/products.ts`)
 
 The ONE place that names the product a customer's number belongs to (rcf ·
-api (hidden while retired) · trunk · voicemail): `label` ("Call forwarding"),
+api (hidden while retired) · trunk · voicemail · ivr): `label` ("Call forwarding"),
 `tag` ("RCF"), on/off words ("Forwarding"/"Paused", "Taking
 messages"/"Off"), `mixWord`, "where calls go" copy, `order`, `hidden`.
 Helpers: `productInfo`, `productLabel`, `productTag`, `isProductHidden`,
@@ -905,42 +908,10 @@ composed so conflicting utilities are resolved correctly.
 
 ## 11. IVR Builder Internals
 
-The IVR builder (`src/pages/ivr/`) is fully implemented but the `IvrBuilderPage`
-page wrapper currently shows a "Phase 2 / Coming Soon" placeholder.
-
-### Architecture
-
-```
-IvrBuilderPage → useIvrFlow() (useReducer)
-               → IvrTopbar    (save, load, new, name)
-               → IvrPalette   (verb drag source)
-               → IvrCanvas    (node tree render + drop targets)
-               → IvrConfigPanel (selected node editor)
-               → IvrXmlModal   (XML preview)
-               → IvrLoadModal  (load existing flow)
-```
-
-### `BuilderNode` (internal type, extends `IvrNode`)
-
-The API's `IvrNode.branches` is `Record<string, string>` (id references). The
-builder extends this to `Record<string, BuilderNode[]>` (nested children) and adds
-a `prompt: BuilderNode[]` array for Gather verbs and `_activeBranch: string | null`
-for UI tab state.
-
-### Reducer actions
-
-All mutations dispatch typed `IvrAction` objects. Notable actions:
-- `ADD_NODE` — deep-clones tree, splices new node at path/position
-- `REMOVE_NODE` — deep-clones, removes by id
-- `MOVE_NODE` — removes from source, inserts at target (adjusts index if same array)
-- `UPDATE_CONFIG` — merges into `node.config`
-- `ADD_BRANCH` / `REMOVE_BRANCH` / `SET_ACTIVE_BRANCH` — Gather verb branch management
-- `LOAD_FLOW` — replaces entire state (used when loading a saved flow)
-
-### XML generation
-
-`nodesToXml()` and `generateXml()` in `ivrUtils.ts` produce TwiML-compatible XML.
-Gather branch routing is emitted as XML comments (webhook callbacks handle routing).
+Moved to §19 (Visual IVR). The old `@dnd-kit` builder (`src/pages/ivr/*`,
+`IvrBuilderPage`, TwiML XML generation) was deleted when the product
+shipped — its save dropped every branch and prompt and could not be
+revived.
 
 ---
 
@@ -958,6 +929,9 @@ This is the RCF-V1 production architecture. Know what is and is not available:
   dashboard, the admin `/rcf` console, Calls & Quality (`/cdrs`) and Troubleshooting.
 - **Visual Voicemail** — encrypted voicemail v1 + optional transcription (merged
   2026-10-23), enabled per account; see §17.
+- **Visual IVR** — per-account entitlement (`customers.ivr_enabled`, set in
+  TED); the /ivr page, builder and messages; see §19. Calls only reach it
+  once FreeSWITCH runs with `IVR_ENABLED=true` and a number is assigned.
 - **Call Quality** — platform-wide CDR quality analysis with MOS/jitter/packet-loss metrics.
 - **Troubleshooting** — native React SIP-trace search (`POST /homer/search`) with a
   custom `<SipLadder>` diagram and inline packet-detail inspection. Grafana
@@ -970,7 +944,7 @@ This is the RCF-V1 production architecture. Know what is and is not available:
   API-product surface is gated on `API_CALLING_ENABLED` in `src/config/features.ts`
   (currently `false`; mirrors the backend/FreeSWITCH env var of the same name — flip
   BOTH to restore): the `/api-dids` route (redirects to product home), the Sidebar
-  "Coming Soon" item, My Account's API DID section/tiles, the IVR topbar DID fetch,
+  "Coming Soon" item, My Account's API DID section/tiles,
   the Guides + `/docs/api` "calling" sections (slug redirects to the hub default),
   the Calls "API" product filter and the onboarding API product option. (The
   landing page no longer has any API Calling copy, flag or not.) With the flag
@@ -981,8 +955,6 @@ This is the RCF-V1 production architecture. Know what is and is not available:
 - **Payments Demo** — REMOVED 2026-09 (`pages/admin/payments-demo/*` incl.
   `X402Visualizer`, `styles/dl-payments.css`, its `/admin/payments-demo` route and
   sidebar item). There is no revup `/admin` UI left; admin lives in TED.
-- **IVR Builder** — `IvrBuilderPage` is a placeholder. The IVR engine in `src/pages/ivr/`
-  is complete code but not exposed to customers yet.
 - **UCaaS** (`ucaas_enabled: true`) — `CustomerUcaasSection` provides extension/voicemail
   management for admin. The softphone widget (WebRTC/Verto) is referenced in nginx
   (`/ws/verto/` proxy) but the softphone component itself is not in this codebase.
@@ -994,7 +966,7 @@ card overview — top-level sidebar item) and get RCF (`/rcf`, the full numbers
 manager) under Products and Reporting under Insights. Coming Soon (darkened, last) lists SIP Trunking (NOT a link for them —
 `linkAccountTypes` limits the link to admins and trunk/hybrid), Visual Voicemail
 (until voicemail is enabled on the account — then it is under Products),
-Guides and API Reference. Products are filtered in `Sidebar.tsx` against
+IVR (likewise, until IVR is enabled), Guides and API Reference. Products are filtered in `Sidebar.tsx` against
 the effective account type (`allProductNavItems`) — an admin previewing an RCF
 customer in "View as Customer" sees exactly this nav, scoped to that customer.
 
@@ -1232,7 +1204,9 @@ dial-in).
   `<audio src>`; re-minted when ~100 s old (token = 120 s); a media error
   (e.g. a Range request after expiry → 401) is recovered once by minting and
   seeking back. Download = token with `download: true` + an `<a download>`.
-- **Greetings** (`GreetingDialog.tsx` + `audio/`): record (Web Audio PCM via
+- **Greetings** (`GreetingDialog.tsx` + `audio/`; the capture itself is the
+  shared `useAudioCapture` + `AudioCapturePanel`, also used by the IVR prompt
+  dialog at 8 kHz — §19): record (Web Audio PCM via
   AudioWorklet, ScriptProcessor fallback; auto-stop 2:00) or upload any audio
   file (`decodeAudioData`) → mono → 16 kHz (OfflineAudioContext) → PCM16 WAV
   → limits (≤ 120 s, ≤ 5,000,000 B) → local preview → raw `audio/wav` POST
@@ -1631,6 +1605,7 @@ existing name before inventing one.
 | `--qtc-tip-shadow` | `dl-trend-chart.css` | The chart tooltip's lift. |
 | `--ladder-*` | `components/sip-ladder/sipLadder.css` | BYE + loopback arrow hues, card + panel shadows (read by `LADDER_COLORS`). |
 | `--vm-*` | `dl-voicemail.css`, on `.vm-scope` (page root AND the `VmDialog` portal root) | Voicemail roles (select tint, amber, labels, thumb, dialog bg, player line/bg, danger fill/glow, elevation, scrim) + light-only shades re-pointed in the DARK block `:root[data-theme='dark'] .vm-scope`. |
+| `--ivr-*` | `ivr.css` (on `:root` + `[data-force-theme]`) | One hue per IVR block (`--ivr-entry|play|menu|schedule|condition|dial|voicemail|goto|hangup`) and its text ink (`--ivr-<type>-ink`), canvas ground/dots, edge colours, keycap face/edge, `--ivr-key-on`. ALL aliases of `--t-*` tokens (voicemail = a `color-mix()` of violet + red), so there are no literals; dark marks ≥ 3:1, inks ≥ 4.5:1 in both themes. The MiniMap reads the same hues RESOLVED (`flow/canvas/useBlockHues.ts`). |
 | `--dlx-*` | `dl-docs.css` (`.dlx-docs`: inline-code chip, admin tag line, warn ink; `.dlx-code`: the code theme), `dl-portal-pages.css` (`.dlx-trunks`: warn ink, disabled-DID dot) | Docs / code blocks / SIP Trunking page roles. The `--dlx-code-*` syntax colours are a code theme, the SAME in both themes (§18.8). |
 
 **Consolidation candidate:** `--cq-*` and `--ts-*` duplicate `--dl-*`
@@ -1706,10 +1681,103 @@ only these kinds (anything else is a bug):
 - **The landing** (always dark, its own palette): `styles/landing.css`,
   `components/layout/HaArchitectureViz.tsx` (and `pages/DashboardPage.tsx`).
 - **Not rendered, not converted** (convert before reviving any of them):
-  the IVR builder internals `pages/ivr/*` (IvrBuilderPage is a shell that
-  imports none of them), `pages/TrunkCard.tsx`, `pages/ApiDidCard.tsx`,
+  `pages/TrunkCard.tsx`, `pages/ApiDidCard.tsx`,
   `components/AdminCustomerSelector.tsx`, the orphaned `pages/LoginPage.tsx`
   + `components/layout/AnimatedGridBackground.tsx`, and the unimported
   `styles/onboarding-brief.css` / `styles/dl-customer360.css`;
   `styles/dl-api-calling.css` belongs to the retired `ApiDidsPage`
   (unreachable while `API_CALLING_ENABLED` is false).
+
+---
+
+## 19. Visual IVR (`/ivr`)
+
+Contract: `docs/IVR_INTERFACES.md` (§2 the draft graph, §8.2 the API this
+page consumes); plan `docs/IVR_PRODUCT_PLAN.md` §6. **The server compiles.**
+The browser edits the §2 graph and sends only that (autosave) and
+`{ revision }` (publish); its own compile is a mirror for instant
+validation and the "what callers hear" preview, never sent (plan D2).
+
+### Files
+
+| Where | What |
+|---|---|
+| `pages/IvrPage.tsx` | Route entry (lazy, full-bleed OUTSIDE AppLayout with its own `Sidebar` + `SidebarCollapseTab`, like Troubleshooting; `.dl-scope.ivr-canvas`). Picks the persona and provides `IvrWorkspaceContext`; inner routes `/ivr` and `/ivr/flows/:id` (the builder is a second lazy chunk, `flow/FlowBuilderRoute`). **Focus mode:** inside the builder the app sidebar starts collapsed — session-only state, the saved `sidebar_collapsed` preference is never touched. |
+| `pages/ivr/IvrContext.ts` | `{ scope, viewer: tenant\|preview\|admin, staff, canEdit, customerName, href() }` — no IVR component reads `user` / `effectiveCustomer` itself. `href()` keeps the admin console's `?customer=`. |
+| `pages/ivr/ivrData.ts` | Scope (tenant `self:<id>` / staff `c:<id>`, like voicemail), query keys `['ivr', key, …]`, hooks, and `readIvrError` / `ivrErrorText` (flattens `stale_revision` + `current_revision`, `invalid_flow` + `errors`, `prompt_in_use` + `flows`, `flow_in_use`, `ivr_not_enabled`, whether FastAPI puts them top-level or under `detail`). |
+| `pages/ivr/IvrHome.tsx`, `IvrIntro.tsx`, `IvrDialogs.tsx`, `format.ts` | `/ivr`: not entitled → `IvrIntro`; entitled, no numbers → build now + "ask for a number"; else numbers (flow, live/not published, last publish; choose flow / rename), flows (status, used by, open, rename, delete → `flow_in_use`), messages. |
+| `pages/ivr/prompts/` | `PromptManager` (play via a minted URL, rename, delete → `prompt_in_use` names the flows) and `PromptDialog` (Type text → voice + Preview (`tts-preview`, not stored) → save; Record / Upload through the SHARED voicemail capture `useAudioCapture` + `AudioCapturePanel` at **8 kHz** mono PCM16 → multipart upload with an additive `kind` field). |
+| `flow/model/` (pure) | `blocks.ts` catalog + exits (§2 handles: `next`, `d:<key>`, `noInput`, `noMatch`, `open`, `closed`, `match`, `noAnswer`); `graph.ts` §2 ⇄ working graph (unknown fields kept in `keep*` and re-emitted; a Start is guaranteed and undeletable); `history.ts` undo; `layout.ts` Tidy up; `summary.ts` the wording. |
+| `flow/compile/` (pure) | `ivr.ts` the compile mirror + `describePlan` (the transcript); `policy.ts` the US-only outside-number rule (mirror of the server's `services/ivr/policy.py`). |
+| `flow/store/flowStore.ts` | ONE zustand store per mounted builder (created in `FlowBuilder`, keyed by flow id; the page is keyed by customer) — a customer switch or logout drops it. All graph edits go through `commit()` (history + `changeSeq` for autosave + `contentSeq` for analysis; pure moves don't bump `contentSeq`). |
+| `flow/FlowBuilder.tsx`, `canvas/`, `panels/`, `config/` | The builder UI (below). |
+| `flow/useAutosave.ts`, `useFlowAnalysis.ts` | Autosave under the revision lock; client mirror + debounced server `/validate`. |
+| `styles/ivr.css`, `styles/ivr-builder.css` | Page + shared pieces / the builder (loaded with its chunk). Prefix `ivr-`. |
+
+### Personas
+
+Tenant `user` edits; tenant `readonly` gets the same page and a VIEW-ONLY
+builder (no palette, no publish, Outline tab first; test calls disabled —
+`/simulate` is a POST). Admin in "View as Customer" works on the preview
+customer as staff (`PreviewPrompt` until one is picked, same as voicemail).
+Admin in normal view gets a console with a customer picker (`?customer=ID`)
+— there is no "all customers" IVR view, because every §8.2 route needs a
+customer (the API answers 400 `customer_id required`). Support → product home.
+
+### The builder
+
+- **Layout:** top bar (← IVR, name, live version, save state, undo / redo /
+  Tidy up, Test call, History, Publish) · left Blocks | Outline · React
+  Flow canvas · right settings panel or a sheet (Publish / Test call /
+  History). Opens at a readable zoom anchored at Start when the whole flow
+  wouldn't fit legibly (the MiniMap shows the rest); a saved viewport wins.
+- **Keyboard:** blocks are focusable (Tab), Enter/Space selects — selecting
+  a block opens its panel (click, keyboard, Outline or an issue link alike).
+  Every exit has a "Where each choice goes" `<select>` (existing block,
+  NEW block of any type, or nothing). ⌘Z / Ctrl+Z, ⇧⌘Z / Ctrl+Y, Esc
+  deselects, Delete removes (never Start). Focus rings are restored on
+  React Flow nodes.
+- **Rules kept by the store:** one edge per exit; nothing into Start; no
+  cycles (loops are Go to blocks — drawn as dashed return lines, compiled
+  away); a removed menu key takes its edge; deleting a Go to's target
+  clears it.
+- **Validation:** the mirror on every content change; `POST /validate`
+  2.5 s later; server findings win at the same block/exit. Publish is
+  gated by the SERVER only.
+- **Autosave:** 1.2 s after the last edit, `PUT {draft_graph, name?,
+  revision}`; retries 2/5/15/30 s with "Save now"; 409 `stale_revision` →
+  `ConflictDialog` (load the latest / keep mine at `current_revision`).
+  `beforeunload` while anything is unsaved; leaving the builder flushes.
+- **Publish panel:** saves, server-checks, shows errors (click → block),
+  who hears it, changes since the live version, the transcript, then
+  `POST /publish {revision}` (422 `invalid_flow` errors shown; 409 → conflict).
+- **History:** View = the version read-only on the canvas (draft
+  untouched); Restore = confirm → `…/restore {revision}` → loaded as an
+  undoable edit. Nothing publishes.
+- **Test call:** caller (number / withheld), time in the flow's time zone
+  (first Business hours block), keys; `POST /simulate` with the CURRENT
+  draft; steps one at a time, the canvas follows each step.
+- **Transfer:** `TransferPicker` — the account's numbers from
+  `GET /ivr/destinations`, grouped Call forwarding (RCF) / Voicemail /
+  Other IVRs / SIP trunk with name + what it does, filter chips, search;
+  this IVR's own numbers shown but disabled; or an outside US number
+  checked as you type. Caller-ID choice, ring time, a visible "No answer
+  or busy" exit. The Voicemail block picks from the voicemail group.
+- **Phone width (< 768 px):** read-only diagram + the outline, "edit on a
+  larger screen". The canvas column never collapses to 0 px (React Flow
+  warns while a window narrows into the phone view).
+
+### Theming
+
+React Flow `colorMode` follows `useTheme()`; every `--xy-*` variable is
+mapped to a `--t-*` token in `ivr-builder.css`; the MiniMap gets RESOLVED
+colours (`useBlockHues`, `useResolvedToken`). Block hues are the `--ivr-*`
+palette (§18.5). `--literals` over `pages/ivr`, `flow`, `ivr*.css`: 0.
+
+### Checks
+
+`node scripts/run-ivr-tests.mjs` (the compile mirror's fixture tests —
+prompt order, Go to loops, removed keys, transfer policy, hours, transcript
+— and the model: §2 round trip with unknown fields, undo coalescing,
+layout; no dependencies). Visual: the theme harness with the §8.2 mock
+(2 IVR numbers, 3 flows incl. one with errors and one that always 409s).
