@@ -160,7 +160,7 @@ Contract: `docs/IVR_INTERFACES.md` §3 (plan), §4 (prompt cache), §5 (call
 path + CDR vars), §6 (call-time shape check). Plan: `docs/IVR_PRODUCT_PLAN.md`
 §7. Tests: `tests/lua/ivr_engine_harness.lua`, `ivr_egress_identity_harness.lua`,
 `ivr_schedule_rules_harness.lua` (shared sandbox `tests/lua/ivr_sandbox.lua`).
-The egress identity proof is OPT-IN (`BASELINE_REF=c6aa829 lua
+The egress identity proof is OPT-IN (`BASELINE_REF=37a56f0 lua
 tests/lua/ivr_egress_identity_harness.lua`; without it, it prints SKIPPED): it
 compares against the router from before the refactor, which CI's shallow
 checkout doesn't have and which stops matching once the router changes on
@@ -420,17 +420,21 @@ inbound_router.lua (product_type == "rcf"):
        CDR-split block (`cdr_leg_attempt` = launched count, 1..N) — see
        "CDR A/B leg split" below. The local-extension bridge never does.
      - Loop breaks on `originate_disposition == "SUCCESS"` (the real FS bridge-result variable; `bridge_result` is NOT a channel variable and must never be used). `carrier_used` is set per attempt, so breaking on success records the winning carrier.
-     - Loop ALSO breaks on a **far-end final** result (`far_end_final()`,
-       2026-10-25): `USER_BUSY` (486) always, and `NO_ANSWER` when the ring
-       time (`call_timeout`) is longer than `BRIDGE_PROGRESS_TIMEOUT` — the
-       forwarded phone was reached, so another SBC/carrier attempt would only
-       ring it again (it used to re-dial up to 8 times). The caller then gets
-       that cause back (`USER_BUSY` → 486, `NO_ANSWER` → 480), not the 503,
-       which also invited the originating carrier to retry the call on
-       another route. With a ring time ≤ the PDD bound a NO_ANSWER can be a
-       silent route, so it still fails over. Every other cause (5xx,
-       PROGRESS_TIMEOUT, CALL_REJECTED, SBC down …) fails over as before.
-       Harness: `tests/lua/onnet_router_harness.lua` [7b-7g].
+     - Loop ALSO breaks when the attempt **reached the phone**
+       (`far_end_final()`, 2026-10-25) — it rang through to the end, or was
+       busy — because another SBC/carrier attempt would only ring the same
+       phone again (it used to re-dial up to 8 times):
+       `NO_ANSWER` (our `call_timeout` ended the ringing) when the ring time
+       is longer than `BRIDGE_PROGRESS_TIMEOUT`; `NO_USER_RESPONSE` (480 —
+       the phone's own network ended the ringing) when the attempt lasted
+       longer than that bound (timed with `os.time()` around the bridge);
+       `USER_BUSY` (486). The caller gets that cause back (480 / 486), not
+       the 503, which also invited the originating carrier to retry the call
+       on another route. **A 503 — and every other route/carrier failure
+       (5xx, PROGRESS_TIMEOUT, SBC down, CALL_REJECTED …) — always moves to
+       the next trunk, even after ringing.** An answered call (including the
+       phone's own voicemail answering) is SUCCESS and never re-dialed.
+       Harness: `tests/lua/onnet_router_harness.lua` [7b-7k].
      - RFC 4028: NO export (the old no-op exports were removed 2026-09-24).
        The A-leg answer interval is `sofia_session_timeout=1800`, `set` at top
        level before any answer/bridge (the only per-call knob; read after the

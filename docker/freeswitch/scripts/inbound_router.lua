@@ -122,23 +122,36 @@ bridge_progress_timeout = math.floor(bridge_progress_timeout)
 -- ================================================================
 -- Far-end final results: never re-dial a phone that was reached
 -- ================================================================
--- A bridge attempt that ends USER_BUSY (the far end answered 486 busy) or
--- NO_ANSWER (it rang for the whole call_timeout) reached the forwarded
--- PHONE, not a broken route. The next SBC / carrier attempt would only ring
--- that same phone again — up to 8 times — so the failover sweep stops there
--- and the caller gets that answer back (USER_BUSY -> 486, NO_ANSWER -> 480)
--- instead of a 503, which also invites the originating carrier to retry
--- the whole call on another of our routes. Every other cause (SBC / carrier
--- trouble, PROGRESS_TIMEOUT, 5xx, CALL_REJECTED …) keeps the failover order.
--- NO_ANSWER counts only when the ring time is longer than the PDD bound:
--- with call_timeout <= progress_timeout a route that never answered at all
--- also ends NO_ANSWER, and that one must still fail over.
-local function far_end_final(disposition, call_timeout)
+-- An attempt that reached the forwarded PHONE — it rang through to the end
+-- unanswered, or answered busy — is final: the next SBC / carrier attempt
+-- would only ring that same phone again (it used to, up to 8 times). The
+-- sweep stops there and the caller gets that answer back (NO_ANSWER -> 480,
+-- NO_USER_RESPONSE -> 480, USER_BUSY -> 486) instead of a 503, which also
+-- invites the originating carrier to retry the whole call on another route.
+-- A route or carrier failure — 503 and every other 5xx, PROGRESS_TIMEOUT,
+-- SBC down, CALL_REJECTED … — is NOT final, even after ringing: the next
+-- trunk is tried exactly as before.
+--   * NO_ANSWER: OUR call_timeout ended the ringing. Final only when the
+--     ring time is longer than the PDD bound (progress_timeout): a route
+--     that never sent 180/183 is cut at the bound with PROGRESS_TIMEOUT, so
+--     a NO_ANSWER after it proves the phone rang. With call_timeout <= the
+--     bound a silent route also ends NO_ANSWER, and that still fails over.
+--   * NO_USER_RESPONSE (480): the PHONE's network ended the ringing (a
+--     long ring time outlasted its no-answer timer). Final only when the
+--     attempt lasted longer than the PDD bound, i.e. it rang; an immediate
+--     480 (handset unreachable, nothing rang) still fails over.
+--   * USER_BUSY (486): the phone was reached and is busy.
+local function far_end_final(disposition, call_timeout, attempt_secs)
     if disposition == "USER_BUSY" then
         return true
     end
-    return disposition == "NO_ANSWER"
-        and (tonumber(call_timeout) or 0) > bridge_progress_timeout
+    if disposition == "NO_ANSWER" then
+        return (tonumber(call_timeout) or 0) > bridge_progress_timeout
+    end
+    if disposition == "NO_USER_RESPONSE" then
+        return (tonumber(attempt_secs) or 0) > bridge_progress_timeout
+    end
+    return false
 end
 
 -- ================================================================
@@ -1059,7 +1072,8 @@ local function egress_disposition(disposition, last_cause, product)
         status = "caller_gone"
     elseif disposition == "USER_BUSY" or cause == "USER_BUSY" then
         status = "busy"
-    elseif disposition == "NO_ANSWER" or cause == "NO_ANSWER" then
+    elseif disposition == "NO_ANSWER" or cause == "NO_ANSWER"
+        or disposition == "NO_USER_RESPONSE" or cause == "NO_USER_RESPONSE" then
         status = "noanswer"
     else
         status = "failed"
@@ -1210,6 +1224,7 @@ local function terminate_rcf(dest, ctx)
     if egress_return_mode and ctx.ring_timeout_override then
         ring_timeout = ctx.ring_timeout_override
     end
+    local last_attempt_secs = 0   -- length of the last bridge attempt (far_end_final)
     -- Composed caller-ID identity ("last false hop wins", design §5).
     local pass_caller_id = ctx.pass_effective
     local original_caller_number = ctx.presented_cid
@@ -1838,9 +1853,11 @@ local function terminate_rcf(dest, ctx)
                 ))
 
                 stir_outcome_reset()
+                local bridge_started = os.time()
                 pcall(function()
                     session:execute("bridge", attempt_dial)
                 end)
+                last_attempt_secs = os.time() - bridge_started
                 stir_outcome_capture(uuid, attempt.label)
             end
 
@@ -1862,7 +1879,7 @@ local function terminate_rcf(dest, ctx)
                     uuid, i, total_attempts, attempt.label,
                     get_var("last_bridge_hangup_cause", disposition)
                 ))
-                if far_end_final(disposition, ring_timeout) then
+                if far_end_final(disposition, ring_timeout, last_attempt_secs) then
                     freeswitch.consoleLog("INFO", string.format(
                         "[%s] RCF far end %s on attempt %d/%d: not re-dialing %s on another route\n",
                         uuid, disposition, i, total_attempts, forward_to
@@ -1940,9 +1957,11 @@ local function terminate_rcf(dest, ctx)
                 ))
 
                 stir_outcome_reset()
+                local bridge_started = os.time()
                 pcall(function()
                     session:execute("bridge", attempt_dial)
                 end)
+                last_attempt_secs = os.time() - bridge_started
                 stir_outcome_capture(uuid, attempt.label)
             end
 
@@ -1969,7 +1988,7 @@ local function terminate_rcf(dest, ctx)
                     uuid, i, attempt.label,
                     get_var("last_bridge_hangup_cause", disposition)
                 ))
-                if far_end_final(disposition, ring_timeout) then
+                if far_end_final(disposition, ring_timeout, last_attempt_secs) then
                     freeswitch.consoleLog("INFO", string.format(
                         "[%s] RCF far end %s on attempt %d/4: not re-dialing %s on another route\n",
                         uuid, disposition, i, forward_to
@@ -1998,7 +2017,7 @@ local function terminate_rcf(dest, ctx)
     -- carrier retry the call on another route and ring the phone again.
     -- An IVR transfer (egress_return_mode) never hangs up here: it returns
     -- the disposition to the engine below (the block's No-answer exit).
-    if not egress_return_mode and far_end_final(disposition, ring_timeout) then
+    if not egress_return_mode and far_end_final(disposition, ring_timeout, last_attempt_secs) then
         hangup(disposition, string.format(
             "[%s] RCF %s -> %s: far end %s, returned to the caller (no failover, no 503)",
             uuid, normalized_did, forward_to, disposition))

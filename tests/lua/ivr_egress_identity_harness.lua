@@ -4,7 +4,7 @@
 --
 -- WHAT IS COMPARED. Every scenario runs twice under tests/lua/ivr_sandbox.lua:
 --   BASELINE  the pre-extraction router: BASELINE_REF=<commit> (git show
---             <commit>:docker/freeswitch/scripts/inbound_router.lua — c6aa829
+--             <commit>:docker/freeswitch/scripts/inbound_router.lua — 37a56f0
 --             = RCF-V1 + the no-redial fix, the router this extraction must
 --             leave RCF identical to; cd69af1 before that fix) or
 --             BASELINE_ROUTER=<file>. OPT-IN: with neither set the harness
@@ -44,7 +44,7 @@ local BASELINE_REF = os.getenv("BASELINE_REF")
 local tmp_baseline
 if (not BASELINE or BASELINE == "") and (not BASELINE_REF or BASELINE_REF == "") then
     print("SKIPPED: the RCF egress byte-identity proof is opt-in. Run it against the router")
-    print("from before a refactor: BASELINE_REF=c6aa829 lua tests/lua/ivr_egress_identity_harness.lua")
+    print("from before a refactor: BASELINE_REF=37a56f0 lua tests/lua/ivr_egress_identity_harness.lua")
     print("ALL IVR EGRESS IDENTITY ASSERTIONS SKIPPED (no baseline requested)")
     SB.cleanup()
     os.exit(0)
