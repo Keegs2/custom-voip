@@ -1,0 +1,34 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_play",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73",
+    "645044e1fcad240e5f74fe3f3a43d50ead1fe8036be929b9f73db3f31f594ee6",
+    "6aa53095cf463f22a1c46c65d20da7024f8664e35c8071665b7199ea5d5af650"
+  ],
+  "nodes": {
+    "n_play": {
+      "t": "play",
+      "prompts": [
+        "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73",
+        "645044e1fcad240e5f74fe3f3a43d50ead1fe8036be929b9f73db3f31f594ee6",
+        "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73"
+      ],
+      "next": "n_bye"
+    },
+    "n_bye": {
+      "t": "hangup",
+      "prompts": [
+        "6aa53095cf463f22a1c46c65d20da7024f8664e35c8071665b7199ea5d5af650"
+      ]
+    }
+  }
+}

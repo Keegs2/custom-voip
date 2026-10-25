@@ -1,0 +1,39 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_hold",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "645044e1fcad240e5f74fe3f3a43d50ead1fe8036be929b9f73db3f31f594ee6"
+  ],
+  "nodes": {
+    "n_hold": {
+      "t": "play",
+      "prompts": [
+        "645044e1fcad240e5f74fe3f3a43d50ead1fe8036be929b9f73db3f31f594ee6"
+      ],
+      "next": "n_x"
+    },
+    "n_x": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550101",
+        "product": "rcf"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 20,
+      "on_noanswer": "n_vm"
+    },
+    "n_vm": {
+      "t": "voicemail",
+      "did": "+16175550201"
+    }
+  }
+}

@@ -142,16 +142,18 @@ When a forwarded/placed destination is a number the platform **owns** (any produ
 | Type | Description | Features |
 |------|------------|----------|
 | `rcf` | Remote Call Forwarding — **GA** | DID → forward_to mapping. Customers log in to the portal, which lands on `/dashboard`. `/rcf` is the full numbers manager; Call activity, Reporting and Calls & Quality are also available. |
-| `api` | API Calling — **RETIRED (2026-09-23, e408e15)** | Switched OFF, code kept: `API_CALLING_ENABLED` (API + FS env, UI `config/features.ts`) is off unless exactly `true`. Off ⇒ `/v1/calls` + API tiers unmounted, new `api` accounts/DID assignments rejected, calls to an API DID (direct or as an on-net terminal) hard-rejected 603, never hairpinned. |
+| `api` | API Calling — **switched OFF (2026-09-23, e408e15), still on the roadmap** | Code kept: `API_CALLING_ENABLED` (API + FS env, UI `config/features.ts`) is off unless exactly `true`. Off ⇒ `/v1/calls` + API tiers unmounted, new `api` accounts/DID assignments rejected, calls to an API DID (direct or as an on-net terminal) hard-rejected 603, never hairpinned. |
 | `trunk` | SIP Trunking — **early access** | IP-authenticated SIP trunks (IP-peering only, REGISTER declined). The call path is live: `route[TRUNK_AUTH]`, `trunk_outbound.lua`, and PBX delivery from any zone. The customer `/trunks` page is a placeholder and the nav lists it under Coming Soon. |
 | `hybrid` | RCF + SIP Trunking | Both RCF and trunk features (was API + Trunk before API Calling was retired). Granite Telephony is hybrid. |
 | `ucaas` | UCaaS (Full-System branch only) | WebRTC, voicemail, conferencing, chat |
+
+**Visual IVR is a per-customer flag too** (`customers.ivr_enabled`, migration 59): any account type can have IVR numbers, entitled in TED. See "Visual IVR" below.
 
 **Visual Voicemail is a per-customer flag, not an account type.** It is controlled by `customers.voicemail_enabled` (migration 54): encrypted mailboxes on dedicated DIDs, created by admins, for any account type. See "Encrypted Voicemail" below. Treat it as early access: merged 2026-10-23.
 
 **Not productized on RCF-V1:**
 - AI voice agents: no code exists.
-- IVR builder: the engine code exists, but the page is a "Phase 2" placeholder.
+- Visual IVR: built 2026-10-25 (see "Visual IVR" below) but not live until it is deployed and `IVR_ENABLED=true` is set per zone after the owner's live test.
 - Toll-free numbers: Sinch 8XX-T origination works on test TNs only.
 - UCaaS.
 
@@ -181,6 +183,8 @@ Do not market any of these as available.
 - **2026-10-23 (#150 → migration 55): `cdr_refresh_call_quality()` no longer DMLs compressed chunks.** That DML was the root cause of the 2026-10-23 WAL/disk-full outage of the PG primary. Re-applying 50 reverts this function, so re-apply 55 after it.
 - **2026-10-23 (#152): holistic customer numbers.** Every product's numbers now come from `number_routing` (`services/customer_numbers.py`; migration 57 index).
 - **2026-10-23 (#147, #148, #153):** GitHub Actions CI, CRAG Ops alert prerequisites, and readable CRAG alert emails.
+- **2026-10-24/25 (#154, #156): landing redesign + light/dark themes** for the signed-in app (`docker/ui/CLAUDE.md` §18).
+- **2026-10-25: Visual IVR + voicemail East-outage resilience** (migrations 58/59/60). See "Visual IVR" below.
 - **STIR signing outage, 2026-10-15 → 10-23 (2026-10-23 maintenance record):** the 10-15 deploy recreated the SBCs' Kamailio without `docker-compose.stir-key.yml`, so signing failed open and calls went out unsigned. It was fixed by recreating each SBC with the overlay (Gotcha 15). Verify signing with the `cdrs.stir_eff_actual` mix after any SBC recreate.
 
 ## Encrypted Voicemail (RCF-V1, merged 2026-10-23)
@@ -203,10 +207,20 @@ Contract: `docs/ENCRYPTED_VOICEMAIL_INTERFACES.md`. Plans: `docs/ENCRYPTED_VOICE
   - a daily cap on billed minutes.
   
   Transcripts are sealed the same way as the audio.
+- **East outage (migration 58, `docs/VOICEMAIL_OUTAGE_RESILIENCE.md`):** if the East API can't be reached, the mailbox check falls back to the zone replica view `vm_fs_mailbox`, and a message whose deposit fails is sealed (`openssl cms`, AES-256-GCM + RSA-OAEP to the spool certificate) into the media VM's `vm_spool` volume instead of being lost. The `vm-forwarder` container delivers it to `/v1/voicemail/fs/deposit-sealed` when East returns, keeping the original time. No plaintext and no private key on media VMs; custom greetings fall back to the default during an outage.
 - **Open items:**
   - The prompts in `scripts/sounds/vm/` are espeak-ng placeholders.
   - Equinox must skip `product_type=voicemail`.
   - The live end-to-end test was still pending at merge (owner notes).
+
+## Visual IVR (built 2026-10-25)
+
+Plan `docs/IVR_PRODUCT_PLAN.md`, contract `docs/IVR_INTERFACES.md`. Its own product (not API Calling — no `api_dids`, no webhooks).
+
+- **Build (East):** customers draw a flow in the portal (`/ivr`, React Flow builder). The SERVER compiles it (`services/ivr/compiler.py`, the only plan writer) with the dial policy (outside transfers US only; own numbers verified; caller-ID = pass-through or the IVR number, per transfer). Publish writes an immutable `call_flow_versions` row. Prompts are text-to-speech (Piper `tts` sidecar on the services VM, rendered at publish/save) or recordings, stored as canonical 8 kHz WAV in `ivr_prompt_audio` (Postgres, content-addressed).
+- **Call (every zone, local only):** `number_routing` `ivr` arm → `terminate_ivr` → `lib/ivr_engine.lua` reads the published plan from the zone replica (`ivr_fs_number`) and caches prompt audio on the `ivr_prompts` volume, so an IVR call never needs the East API. Menus use `play_and_get_digits` (barge-in, retries); the per-leg RTP timer + jitter buffer come from `lib/media_leg.lua`. Transfers reuse the RCF egress/on-net chain (`run_onnet_chain()`), so failover, STIR, Diversion and B-leg CDRs behave exactly like RCF. No customer text ever reaches a FreeSWITCH app argument.
+- **Gate:** `IVR_ENABLED` on the media VMs, off unless exactly `true`; off ⇒ IVR DIDs 603. Entitlement + numbers + kill switch are TED operations (`/v1/ivr/admin/*`, `numbers.assign` `product_type=ivr`).
+- **Billing:** `rate_cdr()` rates `ivr` to $0 for now (pricing pending); CDRs carry `ivr_flow_id/version/exit/path/transfer_to/seconds` (migration 60).
 
 ## Testing
 
@@ -494,6 +508,7 @@ These env vars are set per-VM in `/opt/revup/.env`. Getting any of them wrong br
 | `FS_ZONE` | `east` (default) | `west` / `central` on those zones — selects the `priority_<zone>` column for the termination order |
 | `FS_NODE_ID` | `east-fs-1` | `<zone>-fs-1` / `<zone>-fs-2` — CDR `freeswitch_node` + metrics identity (Gotcha 17) |
 | `API_CALLING_ENABLED` | `false` (default) | API Calling is retired; only exactly `true` re-enables it (it must match the services VM and the UI constant) |
+| `IVR_ENABLED` | `false` (default) | Visual IVR call path; only exactly `true` enables it. Off ⇒ IVR DIDs are rejected 603. Turned on per zone after the owner's live test |
 | `RCF_FROM_PASSTHROUGH` | `off` (default) | Original caller in the carrier From. Off until the per-PoP canary; enable order is in `docker/freeswitch/scripts/CLAUDE.md` |
 
 Voicemail on media VMs needs no env var. It needs the ingest header file `/opt/revup/secrets/fs-voicemail/vm_ingest.header` (root 0600) and the compose `/dev/shm/vm` tmpfs (see `docker/freeswitch/CLAUDE.md`).
@@ -510,6 +525,8 @@ Voicemail on media VMs needs no env var. It needs the ingest header file `/opt/r
 | `VOICEMAIL_TRANSCRIPTION_ENABLED` (+ `VOICEMAIL_STT_*`) | unset = off | Voicemail transcription kill switch. `VOICEMAIL_STT_LOCATION` must be `us`. Each mailbox is also an admin opt-in. Full list: `docker/api/CLAUDE.md` |
 | `VOICEMAIL_KMS_PROJECT` (+ `_LOCATION` us-east1, `_KEYRING` voicemail-prod, `VOICEMAIL_BUCKET` voip-voicemail) | `rugged-night-193017` | Encrypted voicemail: per-customer Cloud KMS keys + GCS ciphertext bucket. Missing ⇒ voicemail endpoints 503 (fail-closed, never plaintext). `VOICEMAIL_KMS_PROVIDER` stays `gcpkms`; optional `VOICEMAIL_IMPERSONATE_SA` |
 | `VOICEMAIL_PLAYBACK_SECRET` | (secret) | 120 s playback-URL key; ≥ 32 chars, ≠ `JWT_SECRET_KEY` |
+| `VOICEMAIL_SPOOL_PRIVATE_KEY_B64` | (secret) | Opens voicemail sealed on a media VM during an East outage (`/v1/voicemail/fs/deposit-sealed`); unset ⇒ 503 and the forwarders keep retrying. Runbook `docs/runbooks/VOICEMAIL_OUTAGE_RESILIENCE_DEPLOY.md` |
+| `IVR_TTS_URL` | `http://tts:5000` (default) | Visual IVR Piper text-to-speech sidecar (services-network only; never on the call path) |
 | `INGEST_SHARED_SECRET` | (secret) | `X-Ingest-Secret` FS sends on `/v1/voicemail/fs/*` (same value as `/opt/revup/secrets/fs-voicemail/vm_ingest.header` on every FS node); ≥ 32 chars, unset ⇒ 503 |
 
 ## GCP Production Topology (3 zones — East / West / Central, all LIVE 2026-07-23)

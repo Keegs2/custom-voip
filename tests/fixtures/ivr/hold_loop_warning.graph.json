@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "entry",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "config": {}
+      }
+    },
+    {
+      "id": "n_hold",
+      "type": "play",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "play block",
+        "config": {
+          "prompts": [
+            108
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_loop",
+      "type": "goto",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "goto block",
+        "config": {
+          "targetNodeId": "n_hold"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_n_start_next_n_hold",
+      "source": "n_start",
+      "sourceHandle": "next",
+      "target": "n_hold"
+    },
+    {
+      "id": "e_n_hold_next_n_loop",
+      "source": "n_hold",
+      "sourceHandle": "next",
+      "target": "n_loop"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

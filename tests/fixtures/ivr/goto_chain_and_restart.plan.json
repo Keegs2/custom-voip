@@ -1,0 +1,38 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_m",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "3338bb868790796b1dd2b60c19bee8417d6a01db7024fc98d20be7ff921e346b"
+  ],
+  "nodes": {
+    "n_m": {
+      "t": "menu",
+      "prompts": [
+        "3338bb868790796b1dd2b60c19bee8417d6a01db7024fc98d20be7ff921e346b"
+      ],
+      "digits": {
+        "1": "n_m",
+        "*": "n_m",
+        "#": "n_end"
+      },
+      "timeout_ms": 5000,
+      "retries": 0,
+      "invalid_prompts": [],
+      "noinput_prompts": [],
+      "on_noinput": "n_end",
+      "on_nomatch": "n_m"
+    },
+    "n_end": {
+      "t": "hangup",
+      "prompts": []
+    }
+  }
+}

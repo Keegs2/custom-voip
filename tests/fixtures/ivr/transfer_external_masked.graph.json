@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "entry",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "config": {}
+      }
+    },
+    {
+      "id": "n_x",
+      "type": "dial",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "dial block",
+        "config": {
+          "target": {
+            "kind": "external",
+            "number": "(774) 404-5256"
+          },
+          "passCallerId": false,
+          "ringTimeoutSec": 45
+        }
+      }
+    },
+    {
+      "id": "n_bye",
+      "type": "hangup",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "hangup block",
+        "config": {
+          "prompts": [
+            103
+          ]
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_n_start_next_n_x",
+      "source": "n_start",
+      "sourceHandle": "next",
+      "target": "n_x"
+    },
+    {
+      "id": "e_n_x_noAnswer_n_bye",
+      "source": "n_x",
+      "sourceHandle": "noAnswer",
+      "target": "n_bye"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

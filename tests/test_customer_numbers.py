@@ -64,7 +64,7 @@ MIG_57 = REPO / "docker" / "postgres" / "init" / "57_trunk_dids_trunk_index.sql"
 # ---------------------------------------------------------------------------
 def test_constants_are_sql_safe_and_ordered():
     assert cn.HIDDEN_PRODUCTS == ("api",)
-    assert cn.PRECEDENCE == ("rcf", "api", "trunk", "voicemail")
+    assert cn.PRECEDENCE == ("rcf", "api", "trunk", "voicemail", "ivr")
     assert cn.ALL_PRODUCTS == "all"
     assert cn.TENANT_NUMBER_KEYS == ("number", "name", "product", "enabled", "forwards_to")
     sql = cn.owned_numbers_sql("$1::int")
@@ -171,7 +171,7 @@ def test_migration_57_header_and_check_migrations_row():
             "/opt/revup/docker/postgres/init/57_trunk_dids_trunk_index.sql") in txt
     chk = (REPO / "scripts" / "db" / "check_migrations.sql").read_text()
     assert chk.splitlines()[0].startswith(
-        "-- Read-only: reports which hand-applied migrations (22..57)")
+        "-- Read-only: reports which hand-applied migrations (22..60)")
     assert ("('57_trunk_dids_trunk_index', to_regclass('public.idx_trunk_dids_trunk') "
             "IS NOT NULL)") in chk
     assert "| `57_trunk_dids_trunk_index.sql` |" in (

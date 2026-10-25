@@ -1,0 +1,111 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_hours",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "d72cc90213e4f8121961febde6e8258a79b34f97a23bedc43309004c8b7ab64c",
+    "6aa53095cf463f22a1c46c65d20da7024f8664e35c8071665b7199ea5d5af650",
+    "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73",
+    "3338bb868790796b1dd2b60c19bee8417d6a01db7024fc98d20be7ff921e346b"
+  ],
+  "nodes": {
+    "n_hours": {
+      "t": "hours",
+      "tz": "America/Phoenix",
+      "weekly": {
+        "mon": [
+          [
+            540,
+            1020
+          ]
+        ],
+        "tue": [],
+        "wed": [],
+        "thu": [],
+        "fri": [
+          [
+            540,
+            1020
+          ]
+        ],
+        "sat": [],
+        "sun": []
+      },
+      "closed_dates": [],
+      "open": "n_cid",
+      "closed": "n_closed"
+    },
+    "n_cid": {
+      "t": "caller",
+      "mode": "prefix",
+      "values": [
+        "+1480"
+      ],
+      "match": "n_welcome",
+      "nomatch": "n_welcome"
+    },
+    "n_closed": {
+      "t": "hangup",
+      "prompts": [
+        "d72cc90213e4f8121961febde6e8258a79b34f97a23bedc43309004c8b7ab64c",
+        "6aa53095cf463f22a1c46c65d20da7024f8664e35c8071665b7199ea5d5af650"
+      ]
+    },
+    "n_welcome": {
+      "t": "play",
+      "prompts": [
+        "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73"
+      ],
+      "next": "n_menu"
+    },
+    "n_menu": {
+      "t": "menu",
+      "prompts": [
+        "3338bb868790796b1dd2b60c19bee8417d6a01db7024fc98d20be7ff921e346b"
+      ],
+      "digits": {
+        "1": "n_ext",
+        "2": "n_trunk",
+        "3": "n_vm"
+      },
+      "timeout_ms": 5000,
+      "retries": 2,
+      "invalid_prompts": [],
+      "noinput_prompts": [],
+      "on_noinput": "n_welcome",
+      "on_nomatch": "n_welcome"
+    },
+    "n_ext": {
+      "t": "transfer",
+      "dest": {
+        "kind": "external",
+        "e164": "+18002345678"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 30,
+      "on_noanswer": "n_vm"
+    },
+    "n_trunk": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550401",
+        "product": "trunk"
+      },
+      "pass_caller_id": false,
+      "ring_timeout": 30,
+      "on_noanswer": "n_vm"
+    },
+    "n_vm": {
+      "t": "voicemail",
+      "did": "+16175550201"
+    }
+  }
+}

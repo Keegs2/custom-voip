@@ -696,6 +696,7 @@ def _all_cdrs_columns() -> list[str]:
         + _cdrs_added_columns("47_cdr_stir_outcome.sql")
         + _cdrs_added_columns("48_cdr_call_legs.sql")
         + _cdrs_added_columns("50_cdr_quality_accuracy.sql")
+        + _cdrs_added_columns("60_cdr_ivr.sql")
     ):
         if col in _WATERMARK_EXCLUDED or col in seen:
             continue
@@ -734,7 +735,12 @@ def test_schema_parse_smoke():
         "packets_expected", "loss_bursts", "packets_reordered", "ssrc_changes",
         "burst_ratio", "inbound_media_ratio", "call_quality_status",
         "call_quality_grade", "call_mos", "call_quality_leg"]
-    assert list(exp.SELECT_COLUMNS[-17:]) == _cdrs_added_columns("50_cdr_quality_accuracy.sql")
+    # 60 (Visual IVR) appends 6 more after the 50 block.
+    assert _cdrs_added_columns("60_cdr_ivr.sql") == [
+        "ivr_flow_id", "ivr_flow_version", "ivr_exit", "ivr_path", "ivr_transfer_to",
+        "ivr_seconds"]
+    assert list(exp.SELECT_COLUMNS[-23:-6]) == _cdrs_added_columns("50_cdr_quality_accuracy.sql")
+    assert list(exp.SELECT_COLUMNS[-6:]) == _cdrs_added_columns("60_cdr_ivr.sql")
 
 
 def test_drift_guard_covers_every_cdrs_add_column_migration():
@@ -743,7 +749,7 @@ def test_drift_guard_covers_every_cdrs_add_column_migration():
     guarded = {"16_cdr_detail_columns.sql", "18_sbc_id_column.sql",
                "23_onnet_cdr_columns.sql", "40_carrier_trunks.sql",
                "47_cdr_stir_outcome.sql", "48_cdr_call_legs.sql",
-               "50_cdr_quality_accuracy.sql",
+               "50_cdr_quality_accuracy.sql", "60_cdr_ivr.sql",
                "21_cdr_export.sql"}   # 21 = exported_at watermark (excluded)
     for f in sorted(_INIT.glob("*.sql")):
         code = "\n".join(line.split("--", 1)[0] for line in f.read_text().splitlines())
@@ -812,8 +818,9 @@ BILLING_HEADER = [
 def test_header_billing_block_first_exact_order():
     assert FIELDS[:len(BILLING_HEADER)] == BILLING_HEADER
     # new migration columns are APPENDED (existing positions never move again)
-    assert FIELDS[-20:-17] == ["stir_outcome", "stir_eff_actual", "leg_attempt"]
-    assert FIELDS[-17:] == list(exp.SELECT_COLUMNS[-17:])   # the migration-50 block
+    assert FIELDS[-26:-23] == ["stir_outcome", "stir_eff_actual", "leg_attempt"]
+    assert FIELDS[-23:-6] == list(exp.SELECT_COLUMNS[-23:-6])   # the migration-50 block
+    assert FIELDS[-6:] == list(exp.SELECT_COLUMNS[-6:])         # the migration-60 block
     # plan §8 item 2: STIR outcome is in the export
     assert {"stir_outcome", "stir_eff_actual"} <= set(FIELDS)
     header = EquinoxFormatter().header()

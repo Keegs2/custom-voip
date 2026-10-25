@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_msg",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73"
+  ],
+  "nodes": {
+    "n_msg": {
+      "t": "play",
+      "prompts": [
+        "6bc930e952a86d14662ee0e0d5a2166a6ea8df0f6765af5d50fa3ca592790c73"
+      ],
+      "next": "n_vm"
+    },
+    "n_vm": {
+      "t": "voicemail",
+      "did": "+16175550201"
+    }
+  }
+}

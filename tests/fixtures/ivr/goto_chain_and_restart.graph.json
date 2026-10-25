@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "entry",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "config": {}
+      }
+    },
+    {
+      "id": "n_m",
+      "type": "menu",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "menu block",
+        "config": {
+          "prompts": [
+            102
+          ],
+          "digits": [
+            "1",
+            "*",
+            "#"
+          ],
+          "retries": 0
+        }
+      }
+    },
+    {
+      "id": "n_g1",
+      "type": "goto",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "goto block",
+        "config": {
+          "targetNodeId": "n_g2"
+        }
+      }
+    },
+    {
+      "id": "n_g2",
+      "type": "goto",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "goto block",
+        "config": {
+          "targetNodeId": "n_m"
+        }
+      }
+    },
+    {
+      "id": "n_restart",
+      "type": "goto",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "goto block",
+        "config": {
+          "targetNodeId": "n_start"
+        }
+      }
+    },
+    {
+      "id": "n_end",
+      "type": "hangup",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "hangup block",
+        "config": {}
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_n_start_next_n_m",
+      "source": "n_start",
+      "sourceHandle": "next",
+      "target": "n_m"
+    },
+    {
+      "id": "e_n_m_d1_n_g1",
+      "source": "n_m",
+      "sourceHandle": "d:1",
+      "target": "n_g1"
+    },
+    {
+      "id": "e_n_m_d*_n_restart",
+      "source": "n_m",
+      "sourceHandle": "d:*",
+      "target": "n_restart"
+    },
+    {
+      "id": "e_n_m_d#_n_end",
+      "source": "n_m",
+      "sourceHandle": "d:#",
+      "target": "n_end"
+    },
+    {
+      "id": "e_n_m_noInput_n_end",
+      "source": "n_m",
+      "sourceHandle": "noInput",
+      "target": "n_end"
+    },
+    {
+      "id": "e_n_m_noMatch_n_g1",
+      "source": "n_m",
+      "sourceHandle": "noMatch",
+      "target": "n_g1"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

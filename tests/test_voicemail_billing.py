@@ -68,10 +68,11 @@ def test_54_rate_cdr_is_05_plus_only_the_voicemail_clause():
     stripped = clause.sub("", RATE_CDR_54)
     stripped = stripped.replace("    v_product_type VARCHAR;  -- 54_voicemail.sql (D5)\n", "", 1)
     assert stripped == RATE_CDR_05
-    # Only 05 and 54 define it (54 is the latest definition).
+    # Only 05, 54 and 59 define it (59 = 54 + the ivr clause, pinned by
+    # tests/test_ivr_migration.py — the latest definition).
     definers = sorted(p.name for p in INIT.glob("*.sql")
                       if "FUNCTION rate_cdr" in p.read_text())
-    assert definers == ["05_schema_cdr.sql", "54_voicemail.sql"]
+    assert definers == ["05_schema_cdr.sql", "54_voicemail.sql", "59_ivr.sql"]
 
 
 def _ingest_variables(**overrides):

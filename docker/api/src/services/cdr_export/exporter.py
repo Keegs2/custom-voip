@@ -68,7 +68,8 @@ LINE_TERMINATOR = "\r\n"
 #
 # Order = base-table declaration order (05_schema_cdr.sql) followed by the
 # ADD COLUMN migrations in file-number order: 18 (sbc_id), 23 (on-net columns),
-# 40 (inbound-carrier attribution), 47 (STIR outcome), 48 (leg split).
+# 40 (inbound-carrier attribution), 47 (STIR outcome), 48 (leg split),
+# 50 (call quality), 60 (Visual IVR outcome).
 # `id` and `start_time` are also required by the watermark/meta (BatchMeta).
 # The FILE column order is the formatter's (billing block first), not this.
 #
@@ -169,6 +170,13 @@ SELECT_COLUMNS: tuple[str, ...] = (
     "call_quality_grade",
     "call_mos",
     "call_quality_leg",
+    # --- 60_cdr_ivr.sql (Visual IVR outcome) ---
+    "ivr_flow_id",
+    "ivr_flow_version",
+    "ivr_exit",
+    "ivr_path",
+    "ivr_transfer_to",
+    "ivr_seconds",
 )
 
 # The billing contract: fields DERIVED in the SELECT, never stored, so every

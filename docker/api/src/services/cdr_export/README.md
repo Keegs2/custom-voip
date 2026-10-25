@@ -212,6 +212,13 @@ Deployed with `docs/CALL_QUALITY_ACCURACY_PLAN.md`. For Equinox:
   `loss_bursts`, `packets_reordered`, `ssrc_changes`, `burst_ratio`,
   `inbound_media_ratio`, `call_quality_status`, `call_quality_grade`, `call_mos`,
   `call_quality_leg`. The header row names them; existing positions do not move.
+- **Visual IVR (migration 60) — 6 more trailing columns** after `call_quality_leg`:
+  `ivr_flow_id`, `ivr_flow_version`, `ivr_exit`
+  (`transfer|voicemail|hangup|caller_hangup|timeout|error|limit`), `ivr_path`,
+  `ivr_transfer_to`, `ivr_seconds`. Filled on the A-leg of a call an IVR answered
+  (`product_type=ivr`), empty on every other row. IVR rows (A and transfer B legs)
+  are rated to zero in v1 (59's `rate_cdr()`), so `billed_ms` / `billed_seconds`
+  are 0 once rated; the timing columns are kept for later pricing.
 - **`quality_source` tells old from new:** `fs_patch_v1` / `fs_legacy` = written by
   the new API; `backfill_v1` = history recomputed in place by
   `docker/postgres/backfill/50_cdr_quality_backfill.psql`; empty = a row exported

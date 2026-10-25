@@ -39,6 +39,12 @@ VOICEMAIL_AUDIO_RE = re.compile(
     r"^/(v1/)?voicemail/(messages|greetings)/\d+/audio$", re.ASCII)
 
 
+# Visual IVR prompt playback (docs/IVR_INTERFACES.md §8.2) authenticates with
+# a short-lived playback token (?t=, kind ivr_prompt) INSIDE routers/ivr.py.
+# GET/HEAD only; same fullmatch + re.ASCII rules.
+IVR_AUDIO_RE = re.compile(r"^/(v1/)?ivr/prompts/\d+/audio$", re.ASCII)
+
+
 def _has_dot_segment(path: str) -> bool:
     return any(seg in (".", "..") for seg in path.split("/"))
 
@@ -64,6 +70,17 @@ def is_voicemail_exempt(path: str, method: str) -> bool:
     if method in ("GET", "HEAD") and VOICEMAIL_AUDIO_RE.fullmatch(path):
         return True
     return False
+
+
+def is_ivr_exempt(path: str, method: str) -> bool:
+    """True for the IVR prompt audio route (playback token checked in the router).
+
+    Same contract as ``is_voicemail_exempt``: ``path`` is ``scope["path"]`` and
+    any control character refuses the exemption.
+    """
+    if _has_control_char(path):
+        return False
+    return method in ("GET", "HEAD") and IVR_AUDIO_RE.fullmatch(path) is not None
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
@@ -111,6 +128,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         # Encrypted voicemail: FS endpoints (X-Ingest-Secret) and audio
         # playback (playback token) authenticate inside the router.
         if is_voicemail_exempt(request.scope.get("path", path), request.method):
+            return await call_next(request)
+
+        # Visual IVR prompt audio: playback token checked inside the router.
+        if is_ivr_exempt(request.scope.get("path", path), request.method):
             return await call_next(request)
 
         # Require a valid Bearer SESSION JWT for everything else.

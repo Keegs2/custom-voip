@@ -45,6 +45,7 @@ from db import redis_client as cache
 from auth.dependencies import require_admin, get_current_user, get_customer_filter
 from services import customer_numbers as cn
 from services.bandwidth_client import get_all_tns, _credentials_configured
+from services.ivr import store as ivr_store
 from services.voicemail import mailboxes as vm_mailboxes
 from services.voicemail.audit import RequestInfo as VmRequestInfo
 from utils import phone
@@ -83,11 +84,14 @@ class AssignRequest(BaseModel):
     # product_type='voicemail' only: the new mailbox's name (default
     # 'Voicemail'). Ignored for every other product type.
     label: Optional[str] = None
+    # product_type='ivr' only: the IVR number's display name (optional,
+    # docs/IVR_INTERFACES.md §8.3). Ignored for every other product type.
+    name: Optional[str] = None
 
     @field_validator("product_type")
     @classmethod
     def validate_product_type(cls, v: str) -> str:
-        allowed = ("rcf", "trunk", "api", "ucaas", "voicemail")
+        allowed = ("rcf", "trunk", "api", "ucaas", "voicemail", "ivr")
         if v not in allowed:
             raise ValueError(f"product_type must be one of {allowed}")
         return _reject_retired_api_product(v)
@@ -248,7 +252,7 @@ async def _reconcile_product_tables() -> dict:
     """
     pool = await db.get_pool()
     reconciled = 0
-    by_product = {"rcf": 0, "api": 0, "trunk": 0, "voicemail": 0}
+    by_product = {"rcf": 0, "api": 0, "trunk": 0, "voicemail": 0, "ivr": 0}
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -361,11 +365,40 @@ async def _reconcile_product_tables() -> dict:
                     )
                     by_product["voicemail"] += 1
 
+            # --- IVR numbers (migration 59; skipped until applied) ---
+            # product_ref_id is the ivr_numbers id (the number_routing ivr arm's ref).
+            if await ivr_store.ivr_schema_present(conn):
+                ivr_rows = await conn.fetch(
+                    """
+                    SELECT n.id AS ref_id, n.did, n.customer_id, n.created_at
+                      FROM ivr_numbers n
+                      JOIN customers c ON n.customer_id = c.id
+                    """
+                )
+                for row in ivr_rows:
+                    await conn.execute(
+                        """
+                        INSERT INTO did_inventory (did, customer_id, product_type, product_ref_id,
+                                                   status, assigned_at, updated_at)
+                        VALUES ($1, $2, 'ivr', $3, 'assigned', $4, NOW())
+                        ON CONFLICT (did) DO UPDATE
+                           SET customer_id = EXCLUDED.customer_id,
+                               product_type = EXCLUDED.product_type,
+                               product_ref_id = EXCLUDED.product_ref_id,
+                               status = 'assigned',
+                               assigned_at = COALESCE(did_inventory.assigned_at, EXCLUDED.assigned_at),
+                               updated_at = NOW()
+                        """,
+                        row["did"], row["customer_id"], row["ref_id"], row["created_at"],
+                    )
+                    by_product["ivr"] += 1
+
     reconciled = sum(by_product.values())
     logger.info(
-        "Product table reconciliation complete: %d total (rcf=%d, api=%d, trunk=%d, voicemail=%d)",
+        "Product table reconciliation complete: %d total (rcf=%d, api=%d, trunk=%d, voicemail=%d, "
+        "ivr=%d)",
         reconciled, by_product["rcf"], by_product["api"], by_product["trunk"],
-        by_product["voicemail"],
+        by_product["voicemail"], by_product["ivr"],
     )
 
     return {"reconciled": reconciled, "by_product": by_product}
@@ -936,6 +969,29 @@ async def assign_did(
             "product_ref_id": mailbox_id,
         }
 
+    if body.product_type == "ivr":
+        # docs/IVR_INTERFACES.md §8.3, the voicemail rule above: claims the DID
+        # (not already routed by any product), creates the ivr_numbers row,
+        # assigns did_inventory and sets customers.ivr_enabled=true if it was
+        # false — one transaction (services/ivr/store.assign_number).
+        pool = await db.get_pool()
+        number_id = await ivr_store.assign_number(
+            pool, customer_id=body.customer_id, did=e164, name=body.name,
+            actor_user_id=admin_user_id, notes=body.notes)
+        await cache.cache_delete("bandwidth:tns")
+        logger.info(
+            "DID assigned: did=%s, customer=%s (%d), product=ivr, ivr_number=%d, by_user=%d",
+            e164, customer["name"], body.customer_id, number_id, admin_user_id,
+        )
+        return {
+            "status": "assigned",
+            "did": e164,
+            "customer_id": body.customer_id,
+            "customer_name": customer["name"],
+            "product_type": "ivr",
+            "product_ref_id": number_id,
+        }
+
     pool = await db.get_pool()
     product_ref_id = None
 
@@ -1081,6 +1137,9 @@ async def unassign_did(
                 await conn.execute("DELETE FROM api_dids WHERE did = $1", e164)
             elif product_type == "trunk":
                 await conn.execute("DELETE FROM trunk_dids WHERE did = $1", e164)
+            elif product_type == "ivr":
+                # The number's flows stay with the customer (only unbound).
+                await conn.execute("DELETE FROM ivr_numbers WHERE did = $1::varchar", e164)
 
             # Reset did_inventory
             now = datetime.now(timezone.utc)

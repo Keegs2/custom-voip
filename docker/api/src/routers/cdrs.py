@@ -903,6 +903,88 @@ async def _refresh_call_quality(call_id: Optional[str], anchor: Optional[datetim
 
 
 # ---------------------------------------------------------------------------
+# Visual IVR outcome columns (migration 60; docs/IVR_INTERFACES.md §5.5)
+# ---------------------------------------------------------------------------
+# FreeSWITCH (lib/ivr_engine.lua) sets ivr_flow_id / ivr_flow_version /
+# ivr_exit / ivr_path / ivr_transfer_to / ivr_seconds on the A-leg of a call an
+# IVR answered. They are applied by ONE UPDATE of that A row AFTER its INSERT
+# committed (inserted or duplicate — idempotent), ONLY when at least one of
+# them is present: every other product's ingest is byte-for-byte unchanged
+# (no extra statement, the 73-param INSERT and its tier fallback untouched).
+# The UPDATE pins uuid AND start_time (both constants), so TimescaleDB plans
+# exactly one chunk (docker/postgres/CLAUDE.md: never DML cdrs without a
+# constant start_time bound). Never raises; a missing migration 60 is logged
+# at ERROR (rate-limited) with the remedy and the call row stays as inserted.
+_IVR_VARS = ("ivr_flow_id", "ivr_flow_version", "ivr_exit", "ivr_path",
+             "ivr_transfer_to", "ivr_seconds")
+_IVR_EXIT_RE = re.compile(r"^[a-z_]{1,16}$", re.ASCII)
+_IVR_E164_RE = re.compile(r"^\+[1-9][0-9]{1,14}$", re.ASCII)
+_IVR_UPDATE_SQL = """
+    UPDATE cdrs
+       SET ivr_flow_id = $3::bigint, ivr_flow_version = $4::int, ivr_exit = $5::varchar,
+           ivr_path = $6::varchar, ivr_transfer_to = $7::varchar, ivr_seconds = $8::int
+     WHERE uuid = $1::varchar AND start_time = $2::timestamptz
+"""
+_ivr_last_logged_mono = _NEVER_LOGGED
+_ivr_failure_count = 0
+
+
+def _ivr_columns(variables: dict) -> Optional[tuple]:
+    """The six migration-60 values from the FS channel vars, or None when the
+    CDR carries none of them (= not an IVR call; nothing to write)."""
+    raw = {k: _var_str(variables, k) for k in _IVR_VARS}
+    if not any(v is not None for v in raw.values()):
+        return None
+    flow_id = _safe_int(raw["ivr_flow_id"])
+    if flow_id is not None and not 0 < flow_id <= 9_223_372_036_854_775_807:
+        flow_id = None
+    version = _safe_int(raw["ivr_flow_version"])
+    if version is not None and not 0 < version <= _INT32_MAX:
+        version = None
+    exit_ = raw["ivr_exit"]
+    if exit_ is not None and not _IVR_EXIT_RE.match(exit_):
+        exit_ = None
+    path = raw["ivr_path"]
+    if path is not None and len(path) > 512:
+        path = path[:511] + "\u2026"
+    transfer_to = raw["ivr_transfer_to"]
+    if transfer_to is not None and not _IVR_E164_RE.match(transfer_to):
+        transfer_to = None
+    seconds = _safe_int(raw["ivr_seconds"])
+    if seconds is not None:
+        seconds = min(max(seconds, 0), _INT32_MAX)
+    return (flow_id, version, exit_, path, transfer_to, seconds)
+
+
+async def _apply_ivr_columns(call_uuid: str, start_time: Optional[datetime],
+                             variables: dict) -> None:
+    global _ivr_last_logged_mono, _ivr_failure_count
+    values = _ivr_columns(variables)
+    if values is None or start_time is None:
+        return
+    try:
+        await db.execute(_IVR_UPDATE_SQL, str(call_uuid), start_time, *values)
+    except Exception as exc:  # noqa: BLE001 — must never break ingest
+        _ivr_failure_count += 1
+        now = time.monotonic()
+        if now - _ivr_last_logged_mono >= _PRE47_LOG_INTERVAL_SEC:
+            _ivr_last_logged_mono = now
+            if isinstance(exc, asyncpg.exceptions.UndefinedColumnError):
+                logger.error(
+                    "CDR ingest: cdrs is missing the migration-60 IVR columns (%s) — IVR "
+                    "outcome NOT recorded for uuid=%s (%d failure(s) so far in this worker; "
+                    "the call row itself is stored). Apply on the East primary: sudo -u "
+                    "postgres psql -d voip -v ON_ERROR_STOP=on -f "
+                    "/opt/revup/docker/postgres/init/60_cdr_ivr.sql",
+                    exc, call_uuid, _ivr_failure_count)
+            else:
+                logger.warning(
+                    "CDR ingest: IVR outcome update failed for uuid=%s (%s: %s; %d failure(s) "
+                    "so far in this worker) — the CDR itself is stored", call_uuid,
+                    type(exc).__name__, exc, _ivr_failure_count)
+
+
+# ---------------------------------------------------------------------------
 # Leg-split helpers (docs/CDR_LEG_SPLIT_CONTRACT.md)
 # ---------------------------------------------------------------------------
 
@@ -1471,6 +1553,10 @@ async def _process_cdr_body(body: dict) -> dict:
                                            carrier_leg, answer_time is not None)
 
         result = await _execute_cdr_insert(str(call_uuid), params)
+
+        # ---- Visual IVR outcome (migration 60) -----------------------------
+        # No-op (no statement) unless the CDR carries an ivr_* var.
+        await _apply_ivr_columns(str(call_uuid), start_time, variables)
 
         # ---- Call-level quality (worse direction; plan §C) ----------------
         # Own statement AFTER the INSERT committed, inserted OR duplicate

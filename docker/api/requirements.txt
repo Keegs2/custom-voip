@@ -44,3 +44,8 @@ cryptography>=42.0.0
 # lazily, only when a job runs with the platform flag on. Shares grpcio /
 # google-api-core / protobuf with google-cloud-kms.
 google-cloud-speech>=2.38.0,<3.0.0
+
+# Visual IVR prompt audio (services/ivr/audio.py): integer polyphase resampling
+# of uploads / Piper output to the canonical 8 kHz PCM16 WAV. manylinux wheels
+# for python:3.12-slim — no build deps.
+numpy>=1.26,<3

@@ -3,7 +3,8 @@
 Plan: docs/CUSTOMER_NUMBERS_HOLISTIC_PLAN.md §3 (contract §4).
 
 Source: the ``number_routing`` view (22_number_routing.sql + the voicemail arm
-from 54_voicemail.sql) — one row per platform-owned DID across EVERY product
+from 54_voicemail.sql + the ivr arm from 59_ivr.sql) — one row per
+platform-owned DID across EVERY product
 arm, the same oracle FreeSWITCH routes on. A product enrolls by adding a
 ``number_routing`` arm (which FreeSWITCH needs anyway to route the number); it
 then appears in Reporting (/reports/numbers, /reports/my-numbers and the
@@ -20,7 +21,9 @@ Ownership rules (plan §3.2):
   * Owned = currently on the account in ANY product, enabled or not. Disabled
     RCF numbers, disabled trunks, suspended mailboxes and mailboxes of a
     customer whose ``voicemail_enabled`` is off are IN (``enabled`` false);
-    deleted mailboxes are OUT (54's arm filters ``status <> 'deleted'``);
+    deleted mailboxes are OUT (54's arm filters ``status <> 'deleted'``); an
+    IVR number is IN whether or not its flow is published, the number is
+    switched off or the customer's ``ivr_enabled`` is off (``enabled`` false);
     customer status is NOT applied (it is still their number).
   * ``api`` (API Calling, RETIRED) is never one of a customer's numbers in a
     customer-facing list or the admin dashboard counts (HIDDEN_PRODUCTS). The
@@ -50,10 +53,10 @@ from utils.phone import normalize_e164
 HIDDEN_PRODUCTS: tuple[str, ...] = ("api",)
 
 #: Duplicate-DID tie-break = FreeSWITCH STEP-1 order (inbound_router.lua
-#: direct-dial lookups: rcf, then api, then trunk, then voicemail). Also the
-#: display order of products in every roll-up below; unknown (future)
-#: products sort after these, by name.
-PRECEDENCE: tuple[str, ...] = ("rcf", "api", "trunk", "voicemail")
+#: direct-dial lookups: rcf, then api, then trunk, then voicemail, then ivr —
+#: 59_ivr.sql). Also the display order of products in every roll-up below;
+#: unknown (future) products sort after these, by name.
+PRECEDENCE: tuple[str, ...] = ("rcf", "api", "trunk", "voicemail", "ivr")
 
 #: product_type sentinel meaning "no product filter" (GET /cdrs, /cdrs/summary,
 #: /cdrs/activity). An empty product_type already meant that.
@@ -161,7 +164,8 @@ def owned_numbers_sql(customer_bind: Optional[str]) -> str:
     (the same pushdown FreeSWITCH relies on for `did`), so each arm reads its
     customer index: idx_rcf_customer, idx_api_did_customer,
     idx_trunks_customer -> idx_trunk_dids_trunk (migration 57),
-    idx_voicemail_boxes_customer. The result is a tiny set; callers wrap it
+    idx_voicemail_boxes_customer, idx_ivr_numbers_customer (migration 59).
+    The result is a tiny set; callers wrap it
     in a CTE (`owned`) and join CDRs to it, never the other way round.
     """
     where = [_hidden_sql("nr.product_type")]

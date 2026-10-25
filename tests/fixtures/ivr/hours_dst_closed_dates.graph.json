@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "entry",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "config": {}
+      }
+    },
+    {
+      "id": "n_hours",
+      "type": "schedule",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "schedule block",
+        "config": {
+          "tz": "America/New_York",
+          "weekly": {
+            "mon": [
+              [
+                "12:00",
+                "17:00"
+              ],
+              [
+                "09:00",
+                "12:00"
+              ]
+            ],
+            "tue": [
+              [
+                "09:00",
+                "17:00"
+              ]
+            ],
+            "wed": [
+              [
+                "09:00",
+                "17:00"
+              ]
+            ],
+            "thu": [
+              [
+                "08:00",
+                "10:00"
+              ],
+              [
+                "09:30",
+                "17:30"
+              ]
+            ],
+            "fri": [
+              [
+                "09:00",
+                "17:00"
+              ]
+            ],
+            "sat": [
+              [
+                "10:00",
+                "14:00"
+              ]
+            ],
+            "sun": [
+              [
+                "00:00",
+                "24:00"
+              ]
+            ]
+          },
+          "closedDates": [
+            "2026-12-25",
+            "2026-11-26",
+            "2026-12-25"
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_open",
+      "type": "dial",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "dial block",
+        "config": {
+          "target": {
+            "kind": "own",
+            "did": "+16175550101"
+          }
+        }
+      }
+    },
+    {
+      "id": "n_closed",
+      "type": "play",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "play block",
+        "config": {
+          "prompts": [
+            106
+          ]
+        }
+      }
+    },
+    {
+      "id": "n_closed_vm",
+      "type": "voicemail",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "voicemail block",
+        "config": {
+          "did": "+16175550201"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_n_start_next_n_hours",
+      "source": "n_start",
+      "sourceHandle": "next",
+      "target": "n_hours"
+    },
+    {
+      "id": "e_n_hours_open_n_open",
+      "source": "n_hours",
+      "sourceHandle": "open",
+      "target": "n_open"
+    },
+    {
+      "id": "e_n_hours_closed_n_closed",
+      "source": "n_hours",
+      "sourceHandle": "closed",
+      "target": "n_closed"
+    },
+    {
+      "id": "e_n_closed_next_n_closed_vm",
+      "source": "n_closed",
+      "sourceHandle": "next",
+      "target": "n_closed_vm"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

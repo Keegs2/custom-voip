@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "entry",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Start",
+        "config": {}
+      }
+    },
+    {
+      "id": "n_hours",
+      "type": "schedule",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "schedule block",
+        "config": {
+          "tz": "America/Puerto_Rico",
+          "weekly": {
+            "mon": [
+              [
+                "08:00",
+                "18:00"
+              ]
+            ],
+            "tue": [
+              [
+                "08:00",
+                "18:00"
+              ]
+            ],
+            "wed": [
+              [
+                "08:00",
+                "18:00"
+              ]
+            ],
+            "thu": [
+              [
+                "08:00",
+                "18:00"
+              ]
+            ],
+            "fri": [
+              [
+                "08:00",
+                "18:00"
+              ]
+            ],
+            "sat": [],
+            "sun": []
+          }
+        }
+      }
+    },
+    {
+      "id": "n_pr",
+      "type": "dial",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "dial block",
+        "config": {
+          "target": {
+            "kind": "external",
+            "number": "+17872345678"
+          },
+          "ringTimeoutSec": 5
+        }
+      }
+    },
+    {
+      "id": "n_tf",
+      "type": "dial",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "dial block",
+        "config": {
+          "target": {
+            "kind": "external",
+            "number": "1-888-234-5678"
+          },
+          "ringTimeoutSec": 120
+        }
+      }
+    },
+    {
+      "id": "n_ivr",
+      "type": "dial",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "dial block",
+        "config": {
+          "target": {
+            "kind": "own",
+            "did": "+16175550301"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_n_start_next_n_hours",
+      "source": "n_start",
+      "sourceHandle": "next",
+      "target": "n_hours"
+    },
+    {
+      "id": "e_n_hours_open_n_pr",
+      "source": "n_hours",
+      "sourceHandle": "open",
+      "target": "n_pr"
+    },
+    {
+      "id": "e_n_hours_closed_n_tf",
+      "source": "n_hours",
+      "sourceHandle": "closed",
+      "target": "n_tf"
+    },
+    {
+      "id": "e_n_pr_noAnswer_n_tf",
+      "source": "n_pr",
+      "sourceHandle": "noAnswer",
+      "target": "n_tf"
+    },
+    {
+      "id": "e_n_tf_noAnswer_n_ivr",
+      "source": "n_tf",
+      "sourceHandle": "noAnswer",
+      "target": "n_ivr"
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

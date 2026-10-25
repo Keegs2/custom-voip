@@ -1,0 +1,345 @@
+{
+ "_doc": "Per-fixture expectations (tests/test_ivr_compiler.py, tests/test_ivr_simulator.py): compiler warnings as [code, node_id, handle]; simulator cases (caller, ISO instant, keys) -> outcome + the node_id of every transcript step (path_len = number of steps instead of the path).",
+ "all_blocks_defaults": {
+  "warnings": [],
+  "simulations": [
+   {
+    "caller": "+14805550123",
+    "at": "2026-07-06T17:00:00Z",
+    "digits": [
+     "1"
+    ],
+    "outcome": "transfer",
+    "path": [
+     "n_hours",
+     "n_cid",
+     "n_welcome",
+     "n_menu",
+     "n_ext"
+    ]
+   },
+   {
+    "caller": "+14805550123",
+    "at": "2026-07-04T17:00:00Z",
+    "digits": [],
+    "outcome": "hangup",
+    "path": [
+     "n_hours",
+     "n_closed"
+    ]
+   }
+  ]
+ },
+ "caller_modes": {
+  "warnings": [
+   [
+    "exit_unconnected",
+    "n_vip_x",
+    "noAnswer"
+   ],
+   [
+    "exit_unconnected",
+    "n_local_x",
+    "noAnswer"
+   ]
+  ],
+  "simulations": [
+   {
+    "caller": "+17744045256",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [],
+    "outcome": "transfer",
+    "path": [
+     "n_vip",
+     "n_vip_x"
+    ]
+   },
+   {
+    "caller": "+16175550142",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [],
+    "outcome": "transfer",
+    "path": [
+     "n_vip",
+     "n_local",
+     "n_local_x"
+    ]
+   },
+   {
+    "caller": "anonymous",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [],
+    "outcome": "hangup",
+    "path": [
+     "n_vip",
+     "n_local",
+     "n_anon",
+     "n_anon_bye"
+    ]
+   },
+   {
+    "caller": "+12125550123",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [],
+    "outcome": "voicemail",
+    "path": [
+     "n_vip",
+     "n_local",
+     "n_anon",
+     "n_rest"
+    ]
+   }
+  ]
+ },
+ "goto_chain_and_restart": {
+  "warnings": [],
+  "simulations": [
+   {
+    "caller": "+12125550123",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [
+     "1",
+     "*",
+     "#"
+    ],
+    "outcome": "hangup",
+    "path": [
+     "n_m",
+     "n_m",
+     "n_m",
+     "n_end"
+    ]
+   },
+   {
+    "caller": "+12125550123",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [
+     "5"
+    ],
+    "outcome": "hangup",
+    "path": [
+     "n_m",
+     "n_m",
+     "n_end"
+    ]
+   }
+  ]
+ },
+ "hold_loop_warning": {
+  "warnings": [
+   [
+    "loop_without_menu",
+    "n_hold",
+    null
+   ]
+  ],
+  "simulations": [
+   {
+    "caller": "+12125550123",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [],
+    "outcome": "limit",
+    "path_len": 201
+   }
+  ]
+ },
+ "hours_dst_closed_dates": {
+  "warnings": [
+   [
+    "exit_unconnected",
+    "n_open",
+    "noAnswer"
+   ]
+  ],
+  "simulations": [
+   {
+    "caller": "+12125550123",
+    "at": "2026-03-09T13:30:00Z",
+    "digits": [],
+    "outcome": "transfer",
+    "path": [
+     "n_hours",
+     "n_open"
+    ]
+   },
+   {
+    "caller": "+12125550123",
+    "at": "2026-03-06T13:30:00Z",
+    "digits": [],
+    "outcome": "voicemail",
+    "path": [
+     "n_hours",
+     "n_closed",
+     "n_closed_vm"
+    ]
+   },
+   {
+    "caller": "+12125550123",
+    "at": "2026-12-25T15:00:00Z",
+    "digits": [],
+    "outcome": "voicemail",
+    "path": [
+     "n_hours",
+     "n_closed",
+     "n_closed_vm"
+    ]
+   },
+   {
+    "caller": "+12125550123",
+    "at": "2026-11-01T05:30:00Z",
+    "digits": [],
+    "outcome": "transfer",
+    "path": [
+     "n_hours",
+     "n_open"
+    ]
+   }
+  ]
+ },
+ "menu_pruned_edges": {
+  "warnings": [
+   [
+    "connection_pruned",
+    "n_menu",
+    "d:3"
+   ],
+   [
+    "unreachable",
+    "n_three",
+    null
+   ],
+   [
+    "unreachable",
+    "n_orphan",
+    null
+   ],
+   [
+    "exit_unconnected",
+    "n_menu",
+    "d:0"
+   ],
+   [
+    "exit_unconnected",
+    "n_menu",
+    "noInput"
+   ],
+   [
+    "exit_unconnected",
+    "n_menu",
+    "noMatch"
+   ],
+   [
+    "exit_unconnected",
+    "n_one",
+    "next"
+   ]
+  ],
+  "simulations": []
+ },
+ "menu_repeat_goto": {
+  "warnings": [],
+  "simulations": [
+   {
+    "caller": "+12125550123",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [
+     "9",
+     "1"
+    ],
+    "outcome": "transfer",
+    "path": [
+     "n_welcome",
+     "n_menu",
+     "n_menu",
+     "n_sales"
+    ]
+   },
+   {
+    "caller": "+12125550123",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [],
+    "outcome": "hangup",
+    "path": [
+     "n_welcome",
+     "n_menu",
+     "n_menu",
+     "n_menu",
+     "n_menu",
+     "n_bye"
+    ]
+   },
+   {
+    "caller": "+12125550123",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [
+     "7",
+     "2"
+    ],
+    "outcome": "voicemail",
+    "path": [
+     "n_welcome",
+     "n_menu",
+     "n_menu",
+     "n_vm"
+    ]
+   }
+  ]
+ },
+ "play_then_hangup": {
+  "warnings": [],
+  "simulations": [
+   {
+    "caller": "anonymous",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [],
+    "outcome": "hangup",
+    "path": [
+     "n_play",
+     "n_bye"
+    ],
+    "says": [
+     [
+      "Welcome",
+      "Please hold",
+      "Welcome (copy)"
+     ],
+     [
+      "Goodbye"
+     ]
+    ]
+   }
+  ]
+ },
+ "territory_tollfree_targets": {
+  "warnings": [
+   [
+    "exit_unconnected",
+    "n_ivr",
+    "noAnswer"
+   ]
+  ],
+  "simulations": []
+ },
+ "transfer_external_masked": {
+  "warnings": [],
+  "simulations": [
+   {
+    "caller": "+12125550123",
+    "at": "2026-10-26T15:00:00Z",
+    "digits": [],
+    "outcome": "transfer",
+    "path": [
+     "n_x"
+    ]
+   }
+  ]
+ },
+ "transfer_own_pass_noanswer": {
+  "warnings": [],
+  "simulations": []
+ },
+ "voicemail_direct": {
+  "warnings": [],
+  "simulations": []
+ }
+}

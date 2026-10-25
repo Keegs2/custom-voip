@@ -1,0 +1,76 @@
+{
+  "v": 1,
+  "compiler": "ivr-1",
+  "flow_id": 12,
+  "version": 3,
+  "customer_id": 11,
+  "start": "n_vip",
+  "limits": {
+    "max_steps": 200,
+    "max_seconds": 1800
+  },
+  "prompts": [
+    "6aa53095cf463f22a1c46c65d20da7024f8664e35c8071665b7199ea5d5af650"
+  ],
+  "nodes": {
+    "n_vip": {
+      "t": "caller",
+      "mode": "equals",
+      "values": [
+        "+17744045256",
+        "+447911123456"
+      ],
+      "match": "n_vip_x",
+      "nomatch": "n_local"
+    },
+    "n_vip_x": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550101",
+        "product": "rcf"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 30,
+      "on_noanswer": null
+    },
+    "n_local": {
+      "t": "caller",
+      "mode": "prefix",
+      "values": [
+        "+1617",
+        "+1508"
+      ],
+      "match": "n_local_x",
+      "nomatch": "n_anon"
+    },
+    "n_local_x": {
+      "t": "transfer",
+      "dest": {
+        "kind": "own",
+        "did": "+16175550401",
+        "product": "trunk"
+      },
+      "pass_caller_id": true,
+      "ring_timeout": 30,
+      "on_noanswer": null
+    },
+    "n_anon": {
+      "t": "caller",
+      "mode": "anonymous",
+      "values": [],
+      "match": "n_anon_bye",
+      "nomatch": "n_rest"
+    },
+    "n_anon_bye": {
+      "t": "hangup",
+      "prompts": [
+        "6aa53095cf463f22a1c46c65d20da7024f8664e35c8071665b7199ea5d5af650"
+      ]
+    },
+    "n_rest": {
+      "t": "voicemail",
+      "did": "+16175550201"
+    }
+  }
+}
