@@ -191,6 +191,15 @@ services:
       - BANDWIDTH_SIP_PEER_ID=${BANDWIDTH_SIP_PEER_ID:-1162116}
       # Visual IVR: the internal Piper TTS sidecar below (docs/IVR_INTERFACES.md §8.1)
       - IVR_TTS_URL=${IVR_TTS_URL:-http://tts:5000}
+      # Visual IVR Flow assistant (docs/IVR_ASSIST_INTERFACES.md §9): OFF unless
+      # exactly "true". Point TED_BASE_URL at a local / staging TED (http:// is
+      # accepted only for localhost or a single-label container name) and put
+      # the assist token in your local .env.
+      - IVR_ASSIST_ENABLED=${IVR_ASSIST_ENABLED:-false}
+      - TED_BASE_URL=${TED_BASE_URL:-}
+      - TED_IVR_ASSIST_TOKEN=${TED_IVR_ASSIST_TOKEN:-}
+      - IVR_ASSIST_DAILY_PER_CUSTOMER=${IVR_ASSIST_DAILY_PER_CUSTOMER:-40}
+      - IVR_ASSIST_TED_TIMEOUT_SECONDS=${IVR_ASSIST_TED_TIMEOUT_SECONDS:-60}
     ports:
       - "${API_PORT:-8088}:8000"
     networks:
