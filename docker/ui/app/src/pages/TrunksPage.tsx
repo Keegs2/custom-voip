@@ -21,6 +21,12 @@
  * aliased from the RCF console primitives) — paper canvas, quiet breadcrumb
  * header, white panels, ink text, azure accents.
  *
+ * Layout (docker/ui/CLAUDE.md §20): a one-row CompactHeader (Trunks / Active);
+ * one trunk = one panel; several trunks = one expandable card each (the
+ * first open, the rest a one-line summary — a disabled trunk says so on its
+ * row), so the page reads at a glance. Inside a trunk, Plan | Connection and
+ * Authorized IPs | DIDs sit side by side.
+ *
  * React #310: every hook in every component below is called unconditionally at
  * the top of its function, before any early return.
  */
@@ -33,6 +39,7 @@ import { Spinner } from '../components/ui/Spinner';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { fmt } from '../utils/format';
+import { CompactHeader, Disclosure } from '../components/layout/kit';
 import { T, TONE, tMix } from '../styles/theme';
 import '../styles/dl-portal-pages.css';
 
@@ -53,7 +60,6 @@ import {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const INK = T.text;
-const INK_SOFT = T.textSoft;
 const INK_DIM = T.textDim;
 const AZURE_DEEP = T.accentText;
 const RED = T.dangerFg;
@@ -738,7 +744,17 @@ function DidList({ trunkId }: { trunkId: number }) {
    Trunk panel — one full trunk: header + all sections
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function TrunkPanel({ trunk, canManage }: { trunk: Trunk; canManage: boolean }) {
+/** "IP authentication · 23 call paths · 5 CPS" */
+function trunkFacts(trunk: Trunk): string {
+  return `${AUTH_LABEL[trunk.auth_type]} · ${trunk.max_channels} call path${trunk.max_channels === 1 ? '' : 's'} · ${trunk.cps_limit} CPS`;
+}
+
+function TrunkStatusPill({ enabled }: { enabled: boolean }) {
+  return <span className={enabled ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>{enabled ? 'Active' : 'Disabled'}</span>;
+}
+
+/** One trunk's sections (live activity, plan, connection, IPs, DIDs). */
+function TrunkBody({ trunk, canManage }: { trunk: Trunk; canManage: boolean }) {
   // IPs are read once here and shared with the Connection panel to avoid a
   // duplicate request; the AuthIpManager reads the same cached query key.
   const ipsQuery = useQuery<TrunkIp[]>({
@@ -748,31 +764,7 @@ function TrunkPanel({ trunk, canManage }: { trunk: Trunk; canManage: boolean }) 
   });
 
   return (
-    <div className="dl-panel">
-      {/* Header */}
-      <div className="dl-panel-head" style={{ padding: '16px 20px' }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div
-            className="dl-panel-title"
-            style={{
-              fontSize: '0.95rem',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {trunk.trunk_name}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: INK_DIM, marginTop: 4 }}>
-            {AUTH_LABEL[trunk.auth_type]} · {trunk.max_channels} call path
-            {trunk.max_channels === 1 ? '' : 's'} · {trunk.cps_limit} CPS
-          </div>
-        </div>
-        <span className={trunk.enabled ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
-          {trunk.enabled ? 'Active' : 'Disabled'}
-        </span>
-      </div>
-
+    <>
       {/* Suspended notice */}
       {!trunk.enabled && (
         <div className="dl-banner dl-banner-err" style={{ margin: '16px 20px 0' }}>
@@ -798,9 +790,61 @@ function TrunkPanel({ trunk, canManage }: { trunk: Trunk; canManage: boolean }) 
           />
         </div>
 
-        <AuthIpManager trunkId={trunk.id} canManage={canManage} />
-        <DidList trunkId={trunk.id} />
+        {/* Two-column: authorized IPs + DIDs */}
+        <div className="dl-grid2" style={{ gap: 28 }}>
+          <AuthIpManager trunkId={trunk.id} canManage={canManage} />
+          <DidList trunkId={trunk.id} />
+        </div>
       </div>
+    </>
+  );
+}
+
+/** Several trunks: one expandable card each (the first open). */
+function TrunkDisclosure({ trunk, canManage, defaultOpen }: { trunk: Trunk; canManage: boolean; defaultOpen: boolean }) {
+  return (
+    <Disclosure
+      variant="card"
+      className="dlx-trunk-disc"
+      headingLevel={2}
+      title={trunk.trunk_name}
+      badge={<TrunkStatusPill enabled={trunk.enabled} />}
+      summary={
+        <span className={trunk.enabled ? undefined : 'dlx-trunk-off'}>
+          {trunk.enabled ? trunkFacts(trunk) : `Disabled — calls will be rejected · ${trunkFacts(trunk)}`}
+        </span>
+      }
+      defaultOpen={defaultOpen}
+      persistKey={`trunks:${trunk.id}`}
+      lazy
+    >
+      <TrunkBody trunk={trunk} canManage={canManage} />
+    </Disclosure>
+  );
+}
+
+function TrunkPanel({ trunk, canManage }: { trunk: Trunk; canManage: boolean }) {
+  return (
+    <div className="dl-panel">
+      {/* Header */}
+      <div className="dl-panel-head" style={{ padding: '16px 20px' }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            className="dl-panel-title"
+            style={{
+              fontSize: '0.95rem',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {trunk.trunk_name}
+          </div>
+          <div style={{ fontSize: '0.72rem', color: INK_DIM, marginTop: 4 }}>{trunkFacts(trunk)}</div>
+        </div>
+        <TrunkStatusPill enabled={trunk.enabled} />
+      </div>
+      <TrunkBody trunk={trunk} canManage={canManage} />
     </div>
   );
 }
@@ -920,30 +964,27 @@ function TrunksPageHeader({
   loaded: boolean;
 }) {
   return (
-    <header className="dl-header fx-load">
-      <div className="dl-header-id">
-        <div className="dl-crumb">
+    <CompactHeader
+      className="fx-load"
+      crumb={
+        <>
           <span>SIP Trunking</span>
           <span className="dl-crumb-sep" aria-hidden="true">/</span>
           <span>Granite CRAG</span>
-        </div>
-        <h1 className="dl-title">{title}</h1>
-        <p className="dl-sub">{subtitle}</p>
-      </div>
-
-      {loaded && (
-        <div className="dl-metrics">
-          <div className="dl-metric">
-            <div className="dl-metric-value">{total.toLocaleString()}</div>
-            <div className="dl-metric-label">Trunks</div>
-          </div>
-          <div className="dl-metric">
-            <div className="dl-metric-value">{active.toLocaleString()}</div>
-            <div className="dl-metric-label">Active</div>
-          </div>
-        </div>
-      )}
-    </header>
+        </>
+      }
+      title={title}
+      subtitle={subtitle}
+      stats={
+        loaded
+          ? [
+              { label: 'Trunks', value: total.toLocaleString() },
+              { label: 'Active', value: active.toLocaleString() },
+            ]
+          : undefined
+      }
+      statsLabel="Trunk totals"
+    />
   );
 }
 
@@ -992,16 +1033,18 @@ export function TrunksPage() {
     body = <ErrorState onRetry={() => void trunksQuery.refetch()} />;
   } else if (trunks.length === 0) {
     body = <EmptyState />;
-  } else {
+  } else if (trunks.length === 1) {
     body = (
-      <div className="dl-stack fx-load fx-load-d2" style={{ gap: 24 }}>
-        {trunks.length > 1 && (
-          <p style={{ fontSize: '0.8rem', color: INK_DIM, margin: 0 }}>
-            You have <strong style={{ color: INK_SOFT }}>{trunks.length}</strong> trunks.
-          </p>
-        )}
-        {trunks.map((trunk) => (
-          <TrunkPanel key={trunk.id} trunk={trunk} canManage={canManage} />
+      <div className="dl-stack fx-load fx-load-d2">
+        <TrunkPanel trunk={trunks[0]} canManage={canManage} />
+      </div>
+    );
+  } else {
+    // Several trunks: a card each, the first open — the page reads at a glance.
+    body = (
+      <div className="dl-stack dlx-trunk-list fx-load fx-load-d2">
+        {trunks.map((trunk, i) => (
+          <TrunkDisclosure key={trunk.id} trunk={trunk} canManage={canManage} defaultOpen={i === 0} />
         ))}
       </div>
     );
