@@ -5,10 +5,15 @@
    shared negative margin). `.ad-shell` padding is the ONLY gutter.
 
    Composition: compact granite header (the one bold element) → six KPI
-   cards → a 12-column grid of white cards. Content-width container queries
-   (not viewport media queries — the sidebar eats 240px) drive the layout:
-   ≥ 1100px content → 12 columns (8 + 4 spans); < 1100px → 2 columns;
-   < 680px → 1 column. KPI cards go 6 → 3 → 2 across.
+   cards in ONE row → a 12-column grid of white cards whose rows are each
+   ONE height (layout kit, docker/ui/CLAUDE.md §20): a `.ad-col` stacks
+   cards in one cell (Call volume absorbs the slack), `.lk-follow` cards
+   take their row's height and scroll inside, long tables show 8 rows then
+   "Show all" inside a capped scroll. Content-width container queries (not
+   viewport media queries — the sidebar eats 240px) drive the layout:
+   ≥ 1100px content → 12 columns (8 + 4 spans); < 1100px → 2 columns
+   (columns dissolve, followers go natural); < 680px → 1 column. KPI cards
+   go 6 → 3 → 2 across (6 from 980px of content).
 
    Feel: white cards, 14px radius, hairline border, layered cool shadow and a
    1px inner top highlight. Interactive cards (KPI links, quick actions) lift
@@ -527,7 +532,7 @@
 .ad-kpis {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
 }
 
 .ad-kpi-cell { min-width: 0; display: flex; }
@@ -536,10 +541,10 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
   width: 100%;
   min-width: 0;
-  padding: 16px 16px 14px;
+  padding: 14px 14px 12px;
   border-radius: 14px;
   border: 1px solid var(--rcf-line);
   background: var(--ad-kpi-bg);
@@ -621,7 +626,7 @@ button.ad-kpi { cursor: pointer; }
 }
 
 .ad-kpi-value {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
   line-height: 1.05;
   letter-spacing: -0.02em;
@@ -630,12 +635,20 @@ button.ad-kpi { cursor: pointer; }
   min-width: 0;
 }
 
-.ad-kpi-toned { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+/* Sounded good: its tone word leads the context line (word + colour). */
+.ad-kpi-tone {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  color: var(--ad-tone);
+}
 .ad-kpi-na { color: var(--ad-slate); }
 
 .ad-spark {
-  width: 72px;
-  max-width: 45%;
+  width: 64px;
+  max-width: 42%;
   height: auto;
   flex-shrink: 1;
   overflow: visible;
@@ -654,6 +667,7 @@ button.ad-kpi { cursor: pointer; }
 }
 
 .ad-kpi-context .ad-dot { width: 7px; height: 7px; }
+.ad-kpi-context .ad-ellipsis { min-width: 0; }
 .ad-kpi-ok { display: inline-flex; align-items: center; gap: 6px; color: var(--rcf-green); font-weight: 600; }
 
 /* ─── Card grid ─────────────────────────────────────────────────────────── */
@@ -666,7 +680,61 @@ button.ad-kpi { cursor: pointer; }
 
 .ad-span-8 { grid-column: span 8; }
 .ad-span-4 { grid-column: span 4; }
-.ad-card-numbers { grid-row: span 2; }
+
+/* ─── Balanced rows (layout kit — docker/ui/CLAUDE.md §20) ──────────────────
+   Every grid row is one height. `.ad-col` stacks cards in one cell; the
+   Call volume card absorbs any slack (its bars grow). `.lk-follow` cards
+   (Team, Number requests, Paused) take their row's height from the card
+   beside them and scroll inside. Long tables (numbers, customers) show
+   their first rows; "Show all" opens the rest in a scroll capped at the
+   8-row height, so a card never pushes its row taller. */
+.ad-grid {
+  --lk-follow: size;
+  --lk-follow-min: 220px;
+}
+
+.ad-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ad-col > .ad-card-volume { flex: 1 1 auto; }
+.ad-col > .lk-follow { flex: 1 1 0; }
+
+.ad-card.lk-follow > .ad-card-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ad-tablewrap-cap {
+  max-height: var(--ad-rows-cap, 482px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ad-tablewrap-cap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.ad-foot-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+/* Admin: the number requests under the customers — two columns of requests. */
+.ad-card-requests-wide .ad-req-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 36px;
+}
 
 /* ─── Card ──────────────────────────────────────────────────────────────── */
 
@@ -1026,7 +1094,7 @@ button.ad-kpi { cursor: pointer; }
 .ad-card-volume .ad-card-body { display: flex; flex-direction: column; }
 
 /* The bars take whatever height the card row gives them (the row is set by
-   the numbers card beside it), never less than 128px. */
+   the numbers card beside it), never less than 128px nor more than 300px. */
 .ad-bars-fig { flex: 1; display: flex; flex-direction: column; margin: 4px 0 0; }
 
 .ad-bars {
@@ -1034,7 +1102,7 @@ button.ad-kpi { cursor: pointer; }
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   grid-template-rows: minmax(128px, 1fr);
-  max-height: 210px;
+  max-height: 300px;
   gap: 8px;
   min-height: 128px;
   align-items: stretch;
@@ -1151,6 +1219,10 @@ button.ad-kpi { cursor: pointer; }
 }
 
 .ad-facts-stack > div:last-child { border-bottom: none; padding-bottom: 0; }
+
+/* A long fact list beside a short card (Number inventory): tighter rows. */
+.ad-facts-tight { gap: 5px; margin-top: 4px; }
+.ad-facts-tight > div { padding-bottom: 5px; }
 .ad-facts-stack dd { margin: 0; font-size: 13.5px; }
 
 /* ─── Call quality ──────────────────────────────────────────────────────── */
@@ -1433,7 +1505,14 @@ button.ad-kpi { cursor: pointer; }
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
+}
+
+/* A wide slot: two columns of actions. */
+.ad-actions-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
 }
 
 .ad-action {
@@ -1441,7 +1520,7 @@ button.ad-kpi { cursor: pointer; }
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: 11px;
   border: 1px solid var(--rcf-line);
   background: var(--t-surface);
@@ -1473,8 +1552,8 @@ button.ad-kpi { cursor: pointer; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   border-radius: 9px;
   color: var(--rcf-azure-deep);
@@ -1709,21 +1788,32 @@ button.ad-kpi { cursor: pointer; }
 
 /* ─── Responsive (content width) ────────────────────────────────────────── */
 
-@container ad-shell (max-width: 1240px) {
+@container ad-shell (max-width: 980px) {
   .ad-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
+/* Two columns: the stacking cells dissolve into the grid (dense fill keeps
+   it hole-free); followers go back to their natural height, capped. */
 @container ad-shell (max-width: 1100px) {
-  .ad-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ad-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-flow: row dense;
+    --lk-follow: none;
+  }
   .ad-span-8 { grid-column: 1 / -1; }
   .ad-span-4 { grid-column: span 1; }
-  .ad-card-numbers { grid-row: auto; }
+  .ad-col { display: contents; }
+  .ad-card.lk-follow > .ad-card-body { max-height: 420px; }
+  .ad-qa-wide { grid-column: span 1; }
+  .ad-qa-wide .ad-actions-2 { display: flex; }
+  .ad-card-requests-wide .ad-req-list { display: flex; }
 }
 
 @container ad-shell (max-width: 680px) {
   .ad-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .ad-span-8,
-  .ad-span-4 { grid-column: 1 / -1; }
+  .ad-span-4,
+  .ad-qa-wide { grid-column: 1 / -1; }
   .ad-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .ad-kpi { padding: 14px 14px 12px; }
   .ad-kpi-value { font-size: 24px; }

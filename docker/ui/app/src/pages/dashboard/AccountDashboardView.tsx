@@ -2,13 +2,19 @@
  * AccountDashboardView — one customer account's dashboard, as cards:
  *
  *   ┌ Granite header: name · status · since     [ product switcher ] [action] ┐
- *   ┌KPI┐┌KPI┐┌KPI┐┌KPI┐┌KPI┐┌KPI┐   numbers · forwarding · calls · answered · sounded good · team
- *   ┌ Numbers (8) ──────────────────┐ ┌ Call volume (4) ┐
- *   │ every product's numbers;      │ ├ Call quality (4) ┤
- *   │ rcf row → RowEditor,          │
- *   │ voicemail row → /voicemail    │
- *   ┌ Recent calls (8) ─────────────┐ ┌ Team (4) ┐
- *   ┌ Busiest (4) ┐ ┌ Requests (4) ┐ ┌ Quick actions (4) ┐
+ *   ┌KPI┐┌KPI┐┌KPI┐┌KPI┐┌KPI┐┌KPI┐   ONE row at desktop: numbers · forwarding · calls · answered · sounded good · team
+ *   ┌ Numbers (8) ──────────────────┐ ┌ Call volume (4) ┐   one row, one height: the numbers card shows
+ *   │ every product's numbers;      │ │  (absorbs slack) │   8 rows ("Show all" scrolls inside); the
+ *   │ rcf row → RowEditor,          │ ├ Call quality (4) ┤   column's Call volume grows to match
+ *   │ voicemail row → /voicemail    │ └──────────────────┘
+ *   ┌ Recent calls (8) ─────────────┐ ┌ Team (4) ┐            Team follows Recent's height (scrolls inside)
+ *   ┌ Busiest (4) ┐ ┌ Requests (4) ┐ ┌ Quick actions (4) ┐  equal heights
+ *
+ *   admin (seven quick actions):
+ *   ┌ Recent calls (8) ─────────────┐ ┌ Requests ┐ + Team (follows)
+ *   ┌ Busiest (4) ┐ ┌ Quick actions (8, two columns) ──────┐
+ *
+ * Layout rules: docker/ui/CLAUDE.md §20 (layout kit).
  *
  * Three viewers, one layout:
  *   tenant   the customer's own account (self-scoped endpoints)
@@ -266,13 +272,15 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
                 isAdmin={admin}
                 allHref={numbersHref}
               />
-              <VolumeCard
-                activity={activity}
-                onOpen={openActivity}
-                order={8}
-                emptyText={admin ? 'No calls reached this customer’s numbers in the last 7 days.' : undefined}
-              />
-              <QualityCard activity={activity} onOpen={openActivity} order={9} />
+              <div className="ad-span-4 ad-col">
+                <VolumeCard
+                  activity={activity}
+                  onOpen={openActivity}
+                  order={8}
+                  emptyText={admin ? 'No calls reached this customer’s numbers in the last 7 days.' : undefined}
+                />
+                <QualityCard activity={activity} onOpen={openActivity} order={9} />
+              </div>
               <RecentCard
                 calls={recent}
                 nowMs={recent.dataUpdatedAt}
@@ -280,22 +288,39 @@ export function AccountDashboardView({ customer, viewer, scopePicker, onViewAsCu
                 order={10}
                 sub={admin ? 'The newest calls to this customer’s numbers' : undefined}
               />
-              <TeamCard
-                team={team}
-                nowMs={team.dataUpdatedAt}
-                order={11}
-                link={admin ? null : MY_ACCOUNT}
-                emptyText={admin ? 'No one on this account can sign in yet. People are added in TED.' : undefined}
-              />
-              <BusiestCard stats={stats} rows={rows} order={12} />
-              <RequestsCard
-                dids={dids}
-                action={{ label: admin ? 'Manage numbers' : numbersLabel, onClick: openNumbers }}
-                order={13}
-                sub={admin ? 'Open requests on this account' : undefined}
-                emptyText={admin ? 'No open number requests on this account.' : undefined}
-              />
-              <QuickActionsCard actions={quickActions} order={14} />
+              {admin ? (
+                // Admin: seven quick actions — a wide two-column slot beside
+                // Busiest; the open requests (admin to-dos) and the read-only
+                // team share the column beside Recent calls.
+                <>
+                  <div className="ad-span-4 ad-col">
+                    <RequestsCard
+                      dids={dids}
+                      action={null}
+                      order={11}
+                      sub="Open requests on this account"
+                      emptyText="No open number requests on this account."
+                    />
+                    <TeamCard
+                      team={team}
+                      nowMs={team.dataUpdatedAt}
+                      order={12}
+                      follow
+                      link={null}
+                      emptyText="No one on this account can sign in yet. People are added in TED."
+                    />
+                  </div>
+                  <BusiestCard stats={stats} rows={rows} order={13} />
+                  <QuickActionsCard actions={quickActions} order={14} columns={2} className="ad-span-8 ad-qa-wide" />
+                </>
+              ) : (
+                <>
+                  <TeamCard team={team} nowMs={team.dataUpdatedAt} order={11} follow link={MY_ACCOUNT} />
+                  <BusiestCard stats={stats} rows={rows} order={12} />
+                  <RequestsCard dids={dids} action={{ label: numbersLabel, onClick: openNumbers }} order={13} />
+                  <QuickActionsCard actions={quickActions} order={14} />
+                </>
+              )}
             </div>
           </>
         ) : (

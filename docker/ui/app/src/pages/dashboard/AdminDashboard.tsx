@@ -9,6 +9,15 @@
  *                            admin's to-dos), paused numbers, the number pool
  *   one customer             AccountDashboardView with viewer="admin"
  *
+ * All customers layout (docker/ui/CLAUDE.md §20 — every row one height):
+ *
+ *   ┌ Customers (first 5, "Show all") ┐ ┌ Call volume  ┐
+ *   ├ Number requests (follows)       ┤ ├ Call quality ┤
+ *   ┌ Recent calls ───────────────────┐ ┌ Paused (follows) ┐
+ *   ┌ Inventory ┐ ┌ Quick actions (two columns) ─────────┐
+ *
+ * The admin's to-dos (number requests) sit right under the customers.
+ *
  * The scope lives in the URL (`?customer=<id>`, absent = All customers), so
  * a scope can be linked or bookmarked and Back steps through picks. Each
  * scope's view is keyed (`all` / the id): switching remounts instead of
@@ -269,47 +278,59 @@ function AdminOverview({
         />
 
         <div className="ad-grid">
-          <CustomersCard
-            customers={customers}
-            loading={customersLoading}
-            error={customersError}
-            onRetry={onRetryCustomers}
-            numbers={counts}
-            numbersState={numbersState}
-            paused={pausedByCustomer}
-            pausedPartial={pausedPartial}
-            pausedError={!exact && paused.isError}
-            onPick={onPick}
-            order={7}
-          />
-          <VolumeCard
-            activity={activity}
-            onOpen={openActivity}
-            order={8}
-            emptyText="No calls reached any customer’s numbers in the last 7 days."
-          />
-          <QualityCard activity={activity} onOpen={openActivity} order={9} />
+          <div className="ad-span-8 ad-col">
+            <CustomersCard
+              customers={customers}
+              loading={customersLoading}
+              error={customersError}
+              onRetry={onRetryCustomers}
+              numbers={counts}
+              numbersState={numbersState}
+              paused={pausedByCustomer}
+              pausedPartial={pausedPartial}
+              pausedError={!exact && paused.isError}
+              onPick={onPick}
+              order={7}
+              preview={5}
+            />
+            <RequestsCard
+              dids={requests}
+              action={null}
+              order={8}
+              sub="Waiting for approval or release, every customer"
+              emptyText="No open number requests — nothing to approve."
+              customerNames={names}
+              onPickCustomer={onPick}
+              follow
+              className="ad-card-requests-wide"
+            />
+          </div>
+          <div className="ad-span-4 ad-col">
+            <VolumeCard
+              activity={activity}
+              onOpen={openActivity}
+              order={9}
+              emptyText="No calls reached any customer’s numbers in the last 7 days."
+            />
+            <QualityCard activity={activity} onOpen={openActivity} order={10} />
+          </div>
           <RecentCard
             calls={recent}
             nowMs={recent.dataUpdatedAt}
             onOpen={openActivity}
-            order={10}
+            order={11}
             sub="The newest calls, every customer"
             customerNames={names}
             onPickCustomer={onPick}
           />
-          <RequestsCard
-            dids={requests}
-            action={null}
-            order={11}
-            sub="Waiting for approval or release, every customer"
-            emptyText="No open number requests — nothing to approve."
-            customerNames={names}
-            onPickCustomer={onPick}
-          />
-          <PausedCard paused={paused} customerNames={names} onPick={onPick} order={12} />
+          <PausedCard paused={paused} customerNames={names} onPick={onPick} order={12} follow />
           <InventoryCard stats={stats} order={13} />
-          <QuickActionsCard actions={adminPlatformActions({ onActivity: openActivity })} order={14} />
+          <QuickActionsCard
+            actions={adminPlatformActions({ onActivity: openActivity })}
+            order={14}
+            columns={2}
+            className="ad-span-8 ad-qa-wide"
+          />
         </div>
       </div>
 

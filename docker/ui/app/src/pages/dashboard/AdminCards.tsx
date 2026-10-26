@@ -10,8 +10,14 @@
  *
  * Same Card surface, table look and tokens as the customer cards
  * (account-dashboard.css). Status is always a word + colour. No money.
+ *
+ * Layout (docker/ui/CLAUDE.md §20): the customers table shows its first
+ * `preview` rows, "Show all N" opens the rest inside a capped scroll (the
+ * card never grows past its row); PausedCard can `follow` the card beside
+ * it (every number listed, scrolling inside) or show 5 + "Show all N".
  */
 import { useMemo, useState } from 'react';
+import { ShowMoreButton, useShowMore } from '../../components/layout/kit';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { Boxes, Building2, PauseCircle } from 'lucide-react';
 import type { RcfListResponse } from '../../api/rcf';
@@ -60,6 +66,10 @@ export interface CustomersCardProps {
   pausedError: boolean;
   onPick: (customerId: number) => void;
   order: number;
+  /** Rows shown before "Show all". Default 8. */
+  preview?: number;
+  /** Extra classes (layout). */
+  className?: string;
 }
 
 function CountCell({
@@ -100,29 +110,32 @@ export function CustomersCard({
   pausedError,
   onPick,
   order,
+  preview = CUSTOMER_PREVIEW,
+  className,
 }: CustomersCardProps) {
   // ALL hooks unconditionally at the top (React #310).
   const [search, setSearch] = useState('');
-  const [showAll, setShowAll] = useState(false);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return customers;
     return customers.filter((c) => c.name.toLowerCase().includes(q) || String(c.id) === q);
   }, [customers, search]);
+  // A search shows every match (in the capped scroll); otherwise the first rows.
+  const searching = search.trim() !== '';
+  const more = useShowMore(visible, searching ? Number.POSITIVE_INFINITY : preview);
 
-  const rows = showAll || search.trim() ? visible : visible.slice(0, CUSTOMER_PREVIEW);
+  const rows = more.visible;
   const pausedState: 'loading' | 'error' | 'ready' = paused ? 'ready' : pausedError ? 'error' : 'loading';
+  const scrolls = more.expanded || (searching && visible.length > preview);
 
   const footer =
-    customers.length > CUSTOMER_PREVIEW && !search.trim() ? (
+    more.needed ? (
       <div className="ad-foot-split">
         <span className="ad-faint">
           Showing {rows.length} of {customers.length.toLocaleString()}
         </span>
-        <button type="button" className="ad-linkbtn" onClick={() => setShowAll((v) => !v)} aria-expanded={showAll}>
-          {showAll ? 'Show fewer' : `Show all ${customers.length.toLocaleString()}`}
-        </button>
+        <ShowMoreButton {...more.buttonProps} noun="customers" />
       </div>
     ) : undefined;
 
@@ -133,11 +146,11 @@ export function CustomersCard({
       icon={<Building2 size={15} strokeWidth={2.2} />}
       count={customers.length > 0 ? customers.length : null}
       sub="Select a customer to open their dashboard."
-      className="ad-span-8 ad-card-numbers ad-card-customers"
+      className={`ad-span-8 ad-card-numbers ad-card-customers${className ? ` ${className}` : ''}`}
       order={order}
       footer={footer}
     >
-      {customers.length > CUSTOMER_PREVIEW && (
+      {customers.length > preview && (
         <div className="ad-toolbar">
           <label className="ad-search">
             <span className="ad-visually-hidden">Search customers</span>
@@ -171,7 +184,7 @@ export function CustomersCard({
           </button>
         </div>
       ) : (
-        <div className="ad-tablewrap">
+        <div className={`ad-tablewrap${scrolls ? ' ad-tablewrap-cap' : ''}`}>
           <table className="ad-table ad-custtable">
             <thead>
               <tr>
@@ -183,7 +196,7 @@ export function CustomersCard({
                 <th scope="col" className="ad-col-chev"><span className="ad-visually-hidden">Open</span></th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id={more.listId}>
               {rows.map((c) => {
                 const since = fmtMonthYear(c.created_at);
                 const tone = c.status === 'active' ? 'on' : 'off';
@@ -260,10 +273,16 @@ export interface PausedCardProps {
   customerNames: ReadonlyMap<number, string>;
   onPick: (customerId: number) => void;
   order: number;
+  /** Height follows the card beside it; every number listed, scrolling inside. */
+  follow?: boolean;
+  /** Extra classes (grid placement). */
+  className?: string;
 }
 
-export function PausedCard({ paused, customerNames, onPick, order }: PausedCardProps) {
-  const items = paused.data?.items ?? [];
+export function PausedCard({ paused, customerNames, onPick, order, follow = false, className }: PausedCardProps) {
+  // ALL hooks unconditionally at the top (React #310).
+  const items = useMemo(() => paused.data?.items ?? [], [paused.data]);
+  const more = useShowMore(items, follow ? Number.POSITIVE_INFINITY : PAUSED_PREVIEW);
   const capped = items.length >= PAUSED_CAP;
   return (
     <Card
@@ -272,7 +291,7 @@ export function PausedCard({ paused, customerNames, onPick, order }: PausedCardP
       sub="Not forwarding right now, all customers"
       icon={<PauseCircle size={15} strokeWidth={2.2} />}
       count={paused.data ? items.length : null}
-      className="ad-span-4"
+      className={`ad-span-4${follow ? ' lk-follow' : ''}${className ? ` ${className}` : ''}`}
       order={order}
     >
       {paused.data === undefined ? (
@@ -290,8 +309,8 @@ export function PausedCard({ paused, customerNames, onPick, order }: PausedCardP
         </p>
       ) : (
         <>
-          <ul className="ad-req-list">
-            {items.slice(0, PAUSED_PREVIEW).map((r) => (
+          <ul className="ad-req-list" id={more.listId}>
+            {more.visible.map((r) => (
               <li key={r.id}>
                 <span className="ad-stack">
                   <span className="ad-num ad-num-sm">{fmt(r.did)}</span>
@@ -301,11 +320,9 @@ export function PausedCard({ paused, customerNames, onPick, order }: PausedCardP
               </li>
             ))}
           </ul>
-          {items.length > PAUSED_PREVIEW && (
-            <p className="ad-quiet">
-              And {(items.length - PAUSED_PREVIEW).toLocaleString()}
-              {capped ? '+' : ''} more.
-            </p>
+          {more.needed && <ShowMoreButton {...more.buttonProps} noun="paused numbers" />}
+          {capped && (more.expanded || follow) && (
+            <p className="ad-quiet">The first {PAUSED_CAP.toLocaleString()} are listed.</p>
           )}
         </>
       )}
@@ -344,7 +361,7 @@ export function InventoryCard({ stats, order }: InventoryCardProps) {
           <CardState kind="loading">Loading…</CardState>
         )
       ) : (
-        <dl className="ad-facts ad-facts-stack">
+        <dl className="ad-facts ad-facts-stack ad-facts-tight">
           <div>
             <dt>Available to assign</dt>
             <dd>{s.available.toLocaleString()}</dd>

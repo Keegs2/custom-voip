@@ -13,7 +13,9 @@
  * before.
  *
  * Each card: a 3px top edge in the metric's tone, an icon in a soft tinted
- * chip, a label, a big tabular value and one small context line; the three
+ * chip, a label, a big tabular value and one small context line (Sounded
+ * good leads it with its tone word: "● Needs attention · 30 of 40 graded");
+ * the six sit in ONE row on a desktop-width dashboard. The three
  * call metrics add a 7-day sparkline from GET /cdrs/activity's daily points.
  * Cards that lead somewhere (numbers → /rcf, call metrics → Call activity,
  * team → My account) are real links/buttons and lift on hover/focus.
@@ -342,22 +344,30 @@ export function KpiRow({ numbers, activity, people, onOpenActivity, numbersHref,
           label="Sounded good"
           icon={<Volume2 size={16} strokeWidth={2} />}
           tone={shareTone}
-          value={
-            k ? (
-              <span className="ad-kpi-toned">
-                {fmtShareFloor(share)}
-                {word && <span className="ad-tone-word" style={{ '--ad-tone': shareTone } as CSSProperties}>{word}</span>}
-              </span>
-            ) : (
-              activityPlaceholder
-            )
-          }
+          value={k ? fmtShareFloor(share) : activityPlaceholder}
+          // The tone word leads the context line (colour + word together), so
+          // six tiles keep ONE height in a single row.
           context={
-            k
-              ? k.graded > 0
-                ? `${k.good_or_better.toLocaleString()} of ${k.graded.toLocaleString()} graded calls`
-                : 'No graded calls yet'
-              : 'Good or better quality'
+            k ? (
+              k.graded > 0 ? (
+                <>
+                  {word && (
+                    <span className="ad-kpi-tone" style={{ '--ad-tone': shareTone } as CSSProperties}>
+                      <span className="ad-dot" aria-hidden="true" />
+                      {word}
+                    </span>
+                  )}
+                  <span className="ad-ellipsis">
+                    {word ? '· ' : ''}
+                    {k.good_or_better.toLocaleString()} of {k.graded.toLocaleString()} graded{word ? '' : ' calls'}
+                  </span>
+                </>
+              ) : (
+                'No graded calls yet'
+              )
+            ) : (
+              'Good or better quality'
+            )
           }
           title={
             k && k.graded > 0

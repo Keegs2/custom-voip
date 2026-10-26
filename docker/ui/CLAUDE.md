@@ -427,6 +427,19 @@ switch remounts instead of changing hook order.
   `enabled` (`isHolisticNumbers`), the card + KPIs fall back to the `/rcf`
   entries. **Deploy the API first:** an older `/cdrs/activity` reads
   `product_type=all` literally (0 calls).
+- **Layout (§20):** KPIs in ONE row of six (≥ 980px of content); every
+  grid row one height — Numbers (8 rows, "Show all N" scrolls inside a
+  capped table with sticky heads) beside an `.ad-col` of Call volume
+  (absorbs slack) + Call quality; Recent calls beside Team (`follow`);
+  Busiest · Requests · Quick actions. Admin one-customer view (seven
+  quick actions): Recent calls beside Requests + Team (`follow`), then
+  Busiest beside two-column Quick actions (the requests card has no footer
+  button there — the header's "Manage numbers" opens the same overlay).
+  Admin All customers: Customers (first
+  5, "Show all") + Number requests (`follow`, two columns) beside Volume +
+  Quality; Recent calls beside Paused (`follow`); Inventory (tight rows)
+  beside two-column Quick actions. Below 1100px the columns dissolve
+  (`display: contents`, dense flow) and followers go natural.
 - `KpiCards` (`KpiRow`) — six cards. Account scope: Numbers (every product;
   with 2+ products the context line is the mix, "3 forwarding · 2 SIP trunk ·
   2 voicemail") · Forwarding (call forwarding only — "No call forwarding
@@ -519,8 +532,9 @@ switch remounts instead of changing hook order.
   without a backend change: per-customer call counts and a cross-customer
   "busiest numbers" (no cross-customer per-number/per-customer roll-up).
 - Styles `styles/account-dashboard.css` (`ad-`): 12-col card grid (8/4 spans) →
-  2 cols → 1 col by CONTENT width (container queries); one load-in stagger;
-  reduced motion respected. Colour: theme tokens + the `--ad-*` page tokens
+  2 cols → 1 col by CONTENT width (container queries); balanced rows via the
+  kit classes (`.ad-col`, `.lk-follow`, `.ad-tablewrap-cap`); one load-in
+  stagger; reduced motion respected. Colour: theme tokens + the `--ad-*` page tokens
   (§18.5). No money anywhere.
 
 **`RcfPage`** (`/rcf`)
