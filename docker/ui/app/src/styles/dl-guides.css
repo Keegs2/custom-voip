@@ -1,0 +1,539 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   DL-GUIDES — the customer Guides hub (`gd-` prefix)
+
+   Page styles for GuidesPage (/docs/guides/:topic?) and pages/docs/guides/*.
+   Root: `.dl-scope.dlx-docs.gd-scope`. Organisation follows the layout kit
+   (docker/ui/CLAUDE.md §20): one-row CompactHeader, a slim switcher row,
+   then BalancedGrid rows of `dl-panel` cards with Disclosure rows inside.
+   The switcher keeps the docs product card's look (`dlx8-pcard`, dl-docs.css)
+   in a horizontal, one-row form.
+
+   Colour: theme tokens only (§18) — nothing here needs a dark twin except
+   where the dark theme deliberately takes the landing's panel recipe
+   (switcher cards, the same rules dl-docs.css gives `.dlx8-pcard`).
+   Responsive: container queries on the kit's hosts and `gd-switch-host`.
+
+   Specificity: this file loads BEFORE layout-kit.css (App is imported ahead
+   of the global CSS in main.tsx), so overrides of kit rules carry the
+   `.gd-scope` prefix to win.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The page ends at its last card (no extra paper under the guide). */
+.dl-shell.gd-shell { padding-bottom: 40px; }
+
+.gd-crumb-tail { overflow: hidden; text-overflow: ellipsis; }
+
+.gd-body { margin-top: 16px; }
+
+.gd-overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rcf-stack);
+}
+
+/* ═══ Product switcher — one row of four compact cards ═══ */
+
+.gd-switch-host {
+  container-type: inline-size;
+  container-name: gdswitch;
+  min-width: 0;
+}
+
+.gd-switch {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.gd-switch-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--t-surface);
+  border: 1px solid var(--t-line);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--t-text) 4%, transparent);
+  color: var(--t-text);
+  text-decoration: none;
+  transition:
+    border-color var(--rcf-ease),
+    background var(--rcf-ease),
+    box-shadow var(--rcf-ease);
+}
+
+.gd-switch-card:hover {
+  border-color: color-mix(in srgb, var(--t-accent-line) 45%, transparent);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--t-text) 7%, transparent);
+}
+
+.gd-switch-card:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+
+.gd-switch-on,
+.gd-switch-on:hover {
+  background: color-mix(in srgb, var(--t-accent-line) 5%, transparent);
+  border-color: var(--t-accent-line);
+  box-shadow:
+    inset 0 0 0 1px var(--t-accent-line),
+    0 2px 8px color-mix(in srgb, var(--t-accent-line) 12%, transparent);
+}
+
+.gd-switch-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 22%, transparent);
+  color: var(--t-accent-text);
+  transition: background var(--rcf-ease), color var(--rcf-ease), border-color var(--rcf-ease);
+}
+
+.gd-switch-on .gd-switch-icon {
+  background: var(--t-accent);
+  border-color: var(--t-accent);
+  color: var(--t-text-on-accent);
+}
+
+.gd-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gd-switch-name {
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: 0.86rem;
+  letter-spacing: -0.012em;
+  line-height: 1.25;
+  color: var(--t-text);
+}
+
+.gd-switch-blurb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.71rem;
+  line-height: 1.4;
+  color: var(--t-text-dim);
+}
+
+@container gdswitch (max-width: 860px) {
+  .gd-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+}
+
+@container gdswitch (max-width: 520px) {
+  .gd-switch-card { padding: 10px 11px; gap: 10px; }
+  .gd-switch-icon { width: 30px; height: 30px; border-radius: 9px; }
+  .gd-switch-blurb { display: none; }
+}
+
+:root[data-theme='dark'] .gd-switch-card {
+  background: var(--t-panel-bg);
+  box-shadow: var(--t-shadow-card);
+}
+
+:root[data-theme='dark'] .gd-switch-card:hover {
+  border-color: var(--t-accent-border);
+  box-shadow: var(--t-shadow-card-hover);
+}
+
+:root[data-theme='dark'] .gd-switch-on,
+:root[data-theme='dark'] .gd-switch-on:hover {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--t-accent-line) 12%, transparent) 0%, transparent 70%),
+    var(--t-surface);
+  border-color: var(--t-accent-line);
+  box-shadow:
+    inset 0 0 0 1px var(--t-accent-line),
+    var(--t-highlight),
+    var(--t-glow);
+}
+
+:root[data-theme='dark'] .gd-switch-icon {
+  background: var(--t-accent-tint);
+  border-color: var(--t-accent-border);
+}
+
+:root[data-theme='dark'] .gd-switch-on .gd-switch-icon {
+  background: var(--t-accent);
+  border-color: var(--t-accent-line);
+  box-shadow: var(--t-glow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gd-switch-card,
+  .gd-switch-icon { transition: none; }
+}
+
+/* ═══ Cards ═══ */
+
+.gd-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.gd-panel .gd-panel-head { padding: 13px 20px; }
+
+/* dl-panel-title is styled for a span; reset the heading box. */
+.gd-panel-title {
+  margin: 0;
+  line-height: 1.3;
+}
+
+.gd-panel .dl-panel-sub { margin-top: -4px; }
+
+.gd-toggle-all {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--t-accent-text);
+  cursor: pointer;
+}
+
+.gd-toggle-all:hover { color: var(--t-accent-text-hover); background: var(--t-hover); }
+.gd-toggle-all:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 1px; }
+
+.gd-rows { display: flex; flex-direction: column; }
+
+/* "Questions & fixes" follows the tasks panel's height (BalancedGrid sets
+   --lk-follow: size side by side); its rows scroll inside. */
+.gd-faq > .gd-rows { display: block; }
+
+/* Stacked (below the grid's md width): the card is its natural height. The
+   kit's `.lk-col > .lk-follow { flex: 1 1 0 }` would otherwise collapse it
+   in a column whose height is its content. */
+@container lkgrid (max-width: 759.98px) {
+  .gd-scope .lk-col > .gd-faq { flex: none; }
+}
+
+/* ─── Task + question rows (layout-kit Disclosure, variant "row") ─── */
+
+/* Title over its one-line summary; long titles wrap instead of overflowing. */
+.gd-task .lk-disc-titles {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.gd-task .lk-disc-title,
+.gd-q .lk-disc-title {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.gd-task .lk-disc-summary {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.gd-scope .gd-task > .lk-disc-head .lk-disc-toggle { padding: 8px 20px; }
+
+/* A deep-linked task scrolls to the top of the screen — clear of the
+   mobile top bar. */
+.gd-task .lk-disc-toggle { scroll-margin-top: 72px; }
+.gd-scope .gd-q > .lk-disc-head .lk-disc-toggle { padding: 10px 20px; }
+
+.gd-q .lk-disc-title {
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+/* Task content lines up with the title (past the 28px icon chip + 10px gap). */
+.gd-scope .gd-task > .lk-disc-panel .gd-task-body { padding: 2px 22px 18px 58px; }
+.gd-scope .gd-q > .lk-disc-panel .gd-q-body { padding: 0 20px 14px; }
+
+.gd-task.is-open > .lk-disc-head .lk-disc-toggle,
+.gd-q.is-open > .lk-disc-head .lk-disc-toggle { background: var(--t-tint); }
+
+@container lkgrid (max-width: 560px) {
+  .gd-scope .gd-task > .lk-disc-panel .gd-task-body { padding: 2px 16px 16px; }
+  .gd-scope .gd-task > .lk-disc-head .lk-disc-toggle,
+  .gd-scope .gd-q > .lk-disc-head .lk-disc-toggle { padding: 10px 16px; }
+  .gd-scope .gd-q > .lk-disc-panel .gd-q-body { padding: 0 16px 14px; }
+}
+
+/* ═══ Guide copy ═══ */
+
+.gd-p {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--t-text-soft);
+}
+
+.gd-q-body .gd-p:first-child,
+.gd-task-body > .gd-p:first-child { margin-top: 4px; }
+
+/* An on-screen label: exactly what the button / tab / field says. */
+.gd-ui {
+  font-weight: 650;
+  color: var(--t-text);
+}
+
+/* A sidebar route: Products › RCF */
+.gd-path {
+  font-weight: 650;
+  color: var(--t-accent-text);
+}
+
+.gd-path-sep {
+  margin: 0 5px;
+  font-weight: 400;
+  color: var(--t-text-dim);
+}
+
+.gd-strong { font-weight: 650; color: var(--t-text); }
+
+/* Numbered steps — azure-tinted counters */
+.gd-steps {
+  counter-reset: gd-step;
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gd-steps > li {
+  counter-increment: gd-step;
+  position: relative;
+  padding-left: 30px;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--t-text-soft);
+}
+
+.gd-steps > li::before {
+  content: counter(gd-step);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--t-accent-tint);
+  border: 1px solid var(--t-accent-border);
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 0.66rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-accent-text);
+}
+
+/* Bullets — the docs' azure dash markers, guide-sized */
+.gd-bullets {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gd-bullets > li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--t-text-soft);
+}
+
+.gd-bullets > li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.78em;
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--t-accent-line);
+}
+
+.gd-steps .gd-bullets { margin-top: 6px; }
+
+/* Note — a quiet info row under the steps */
+.gd-note {
+  display: flex;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--t-accent-line) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-line) 18%, transparent);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--t-text-soft);
+}
+
+.gd-note-icon { flex-shrink: 0; margin-top: 3px; color: var(--t-accent-text); }
+
+/* Term → explanation (IVR blocks) */
+.gd-terms {
+  margin: 10px 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  border: 1px solid var(--t-line-soft);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.gd-term {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 12px;
+  padding: 7px 12px;
+  font-size: 0.79rem;
+  line-height: 1.5;
+}
+
+.gd-term + .gd-term { border-top: 1px solid var(--t-line-soft); }
+.gd-term dt { font-weight: 650; color: var(--t-text); }
+.gd-term dd { margin: 0; color: var(--t-text-soft); }
+
+@container lkgrid (max-width: 560px) {
+  .gd-term { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}
+
+/* ═══ At a glance / place lists — label column + text ═══ */
+
+.gd-facts { margin: 0; }
+
+.gd-fact {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--t-line-soft);
+}
+
+.gd-fact:last-child { border-bottom: 0; }
+
+.gd-fact dt {
+  padding-top: 2px;
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-text-dim);
+}
+
+.gd-fact dd {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--t-text-soft);
+}
+
+.gd-places .gd-fact { grid-template-columns: 104px minmax(0, 1fr); }
+
+@container lkgrid (max-width: 560px) {
+  .gd-fact,
+  .gd-places .gd-fact { grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 10px 16px; }
+}
+
+/* ═══ Overview product cards ═══ */
+
+.gd-product { padding: 18px 20px 16px; gap: 12px; }
+
+.gd-product-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.gd-product-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--t-accent);
+  color: var(--t-text-on-accent);
+}
+
+:root[data-theme='dark'] .gd-product-icon { box-shadow: var(--t-glow); }
+
+/* Name over its availability tag, so the three card heads match. */
+.gd-product-id {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gd-product-name {
+  margin: 0;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  color: var(--t-text);
+}
+
+.gd-product-what {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--t-text-soft);
+}
+
+.gd-product-can { margin-top: 0; }
+.gd-product-can > li { font-size: 0.8rem; }
+
+.gd-product-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--t-line-soft);
+  font-size: 0.76rem;
+}
+
+.gd-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 650;
+  color: var(--t-accent-text);
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.gd-link:hover { color: var(--t-accent-text-hover); text-decoration: underline; text-underline-offset: 3px; }
+.gd-link:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
