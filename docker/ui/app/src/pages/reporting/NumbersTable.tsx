@@ -1,20 +1,23 @@
 /**
  * "Your numbers" — one row per customer number, every product (server-sorted
- * by calls, max 500, including numbers with no calls). Shows the first 10
- * and expands on request so a 300-number customer doesn't get a wall of rows
- * by default. The "Currently forwards to" column only appears when at least
- * one number is a call-forwarding (rcf) number; a number of any other
- * product names it under the number ("Front desk · Voicemail").
+ * by calls, max 500, including numbers with no calls). Shows the first 8
+ * (docker/ui/CLAUDE.md §20.3) and "Show all N numbers" opens the rest INSIDE
+ * a scroll capped at about the 8-row height (sticky column heads), so a
+ * 300-number customer never gets a wall of rows pushing the call list away.
+ * A new report (period / numbers) remounts the card and collapses it. The
+ * "Currently forwards to" column only appears when at least one number is a
+ * call-forwarding (rcf) number; a number of any other product names it
+ * under the number ("Front desk · Voicemail").
  */
-import { useState } from 'react';
 import { Hash } from 'lucide-react';
+import { ShowMoreButton, useShowMore } from '../../components/layout/kit';
 import type { ReportNumbers } from '../../types/reports';
 import { CardError, GradeBadge, ReportCard, Skeleton } from './ReportBits';
 import { nameWithProduct } from '../../config/products';
 import { fmtCount, fmtMinutes, fmtPct, fmtPhone } from './reportFormat';
 import { T } from '../../styles/theme';
 
-const INITIAL_ROWS = 10;
+const INITIAL_ROWS = 8;
 
 interface NumbersTableProps {
   numbers: {
@@ -25,12 +28,13 @@ interface NumbersTableProps {
   };
 }
 
-export function NumbersTable({ numbers }: NumbersTableProps) {
-  const [showAll, setShowAll] = useState(false);
+const NO_ROWS: ReportNumbers['numbers'] = [];
 
-  const rows = numbers.data?.numbers ?? [];
+export function NumbersTable({ numbers }: NumbersTableProps) {
+  // ALL hooks unconditionally at the top (React #310 prevention).
+  const rows = numbers.data?.numbers ?? NO_ROWS;
+  const more = useShowMore(rows, INITIAL_ROWS);
   const showForward = rows.some((r) => r.product === 'rcf');
-  const visible = showAll ? rows : rows.slice(0, INITIAL_ROWS);
 
   return (
     <ReportCard
@@ -65,7 +69,7 @@ export function NumbersTable({ numbers }: NumbersTableProps) {
       )}
       {numbers.data && rows.length > 0 && (
         <div className="dl-panel" style={{ boxShadow: 'none' }}>
-          <div className="dlx4-tablewrap">
+          <div className={more.expanded ? 'dlx4-tablewrap rpt-tablewrap-cap' : 'dlx4-tablewrap'}>
             <table className="rpt-table" style={{ minWidth: showForward ? 760 : 620 }}>
               <caption className="rpt-sr">Calls per number</caption>
               <thead>
@@ -78,8 +82,8 @@ export function NumbersTable({ numbers }: NumbersTableProps) {
                   <th className="dl-th" scope="col">Quality</th>
                 </tr>
               </thead>
-              <tbody>
-                {visible.map((r) => {
+              <tbody id={more.listId}>
+                {more.visible.map((r) => {
                   const subline = nameWithProduct(r.name, r.product);
                   return (
                   <tr key={r.number} className="dl-row">
@@ -111,13 +115,7 @@ export function NumbersTable({ numbers }: NumbersTableProps) {
               </tbody>
             </table>
           </div>
-          {rows.length > INITIAL_ROWS && (
-            <div className="rpt-table-foot">
-              <button type="button" className="dl-btn dl-btn-ghost" onClick={() => setShowAll((v) => !v)} aria-expanded={showAll}>
-                {showAll ? 'Show fewer' : `Show all ${fmtCount(rows.length)} numbers`}
-              </button>
-            </div>
-          )}
+          {more.needed && <ShowMoreButton {...more.buttonProps} noun="numbers" variant="bar" />}
         </div>
       )}
     </ReportCard>

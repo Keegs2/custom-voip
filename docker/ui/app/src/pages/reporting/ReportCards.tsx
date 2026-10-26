@@ -1,9 +1,14 @@
 /**
  * The Reporting page's metric cards — each one reads a single slice of
  * `/reports/overview` (or `/reports/trend`) and says it in plain English,
- * with a "What does this mean?" explainer underneath.
+ * with a "What does this mean?" explainer (collapsed) at its foot.
+ *
+ * Layout (docker/ui/CLAUDE.md §20): the cards are flex columns (`rpt-card`)
+ * so a row of them is one height with the explainer pinned to the foot;
+ * the page decides the rows. `className` lets the page add kit classes.
  */
-import { AlertCircle, CalendarClock, Headphones, PhoneMissed, TrendingUp } from 'lucide-react';
+import { AlertCircle, BookOpen, CalendarClock, Headphones, PhoneMissed, TrendingUp } from 'lucide-react';
+import { Disclosure } from '../../components/layout/kit';
 import type { ReportOverview, ReportTrend } from '../../types/reports';
 import { CallsTrendChart } from './CallsTrendChart';
 import { CardError, CardSkeleton, Explainer, ReportCard, Skeleton } from './ReportBits';
@@ -38,13 +43,15 @@ interface QueryState<T> {
 export function SummaryHero({
   overview,
   sentence,
+  className,
 }: {
   overview: QueryState<ReportOverview>;
   sentence: SentenceSegment[] | null;
+  className?: string;
 }) {
   const data = overview.data;
   return (
-    <section className="dl-panel" aria-labelledby="rpt-summary-heading">
+    <section className={`dl-panel rpt-card rpt-summary${className ? ` ${className}` : ''}`} aria-labelledby="rpt-summary-heading">
       <div className="dl-panel-body">
         <h2 id="rpt-summary-heading" className="rpt-sr">Summary</h2>
         {overview.isLoading && (
@@ -91,7 +98,7 @@ export function SummaryHero({
               </div>
             )}
 
-            <div style={{ marginTop: 14 }}>
+            <div className="rpt-card-foot">
               <Explainer>
                 <p>
                   <strong>Calls</strong> counts every call to or from your numbers in this period — “in” are
@@ -126,13 +133,14 @@ function Stat({ value, label, hint, tone }: { value: string; label: string; hint
 
 /* ═══ Calls over time ═══════════════════════════════════════════════════ */
 
-export function TrendCard({ trend }: { trend: QueryState<ReportTrend> }) {
+export function TrendCard({ trend, className }: { trend: QueryState<ReportTrend>; className?: string }) {
   const bucket = trend.data?.bucket ?? 'day';
   const per = bucket === 'day' ? 'day' : bucket === 'week' ? 'week (weeks start on Monday)' : 'month';
   return (
     <ReportCard
       title="Calls over time"
       icon={<TrendingUp size={16} />}
+      className={className}
       headExtra={
         <div className="rpt-legend" style={{ marginLeft: 'auto' }} aria-hidden="true">
           <span className="rpt-legend-item">
@@ -155,7 +163,7 @@ export function TrendCard({ trend }: { trend: QueryState<ReportTrend> }) {
     >
       {trend.isLoading && <Skeleton height={250} />}
       {!trend.isLoading && trend.error != null && <CardError error={trend.error} onRetry={trend.refetch} what="the chart" />}
-      {trend.data && <CallsTrendChart bucket={trend.data.bucket} points={trend.data.points} />}
+      {trend.data && <CallsTrendChart bucket={trend.data.bucket} points={trend.data.points} fill />}
     </ReportCard>
   );
 }
@@ -186,7 +194,7 @@ export function BusiestCard({ overview }: { overview: QueryState<ReportOverview>
         data.totals.calls === 0 || (!data.busiest_day && !data.busiest_hour) ? (
           <div className="dl-empty">No calls yet, so there’s no busiest time to show.</div>
         ) : (
-          <>
+          <div className="rpt-busiest">
             <div>
               <div className="rpt-eyebrow">Busiest day</div>
               {data.busiest_day ? (
@@ -212,7 +220,7 @@ export function BusiestCard({ overview }: { overview: QueryState<ReportOverview>
                 <p className="rpt-caption">—</p>
               )}
             </div>
-          </>
+          </div>
         )
       )}
     </ReportCard>
@@ -362,47 +370,54 @@ export function QualityCard({ overview }: { overview: QueryState<ReportOverview>
 
 /* ═══ Glossary ══════════════════════════════════════════════════════════ */
 
+/**
+ * "Words on this page" — collapsed by default (§20.4), remembered per
+ * browser (`reporting:glossary`, a convenience only).
+ */
 export function Glossary() {
   return (
-    <section className="dl-panel" aria-labelledby="rpt-glossary-heading">
-      <div className="dl-panel-head">
-        <h2 id="rpt-glossary-heading" className="dl-panel-title" style={{ margin: 0 }}>Words on this page</h2>
-      </div>
-      <div className="dl-panel-body">
-        <dl className="rpt-glossary">
-          <div>
-            <dt>Answered</dt>
-            <dd>Someone picked up the call.</dd>
-          </div>
-          <div>
-            <dt>Answered by voicemail</dt>
-            <dd>The call reached your voicemail; it counts as answered.</dd>
-          </div>
-          <div>
-            <dt>Missed</dt>
-            <dd>The call ended before anyone picked up — for example nobody was there, the line was busy, or the caller hung up first.</dd>
-          </div>
-          <div>
-            <dt>Minutes</dt>
-            <dd>How long answered calls lasted, rounded to whole minutes. Totals are rounded once at the end, so they can differ slightly from adding up each call.</dd>
-          </div>
-          <div>
-            <dt>Call quality</dt>
-            <dd>
-              How clear the call sounded, graded Great, Good, Fair or Poor from a 1-to-5 sound score. A call where no
-              sound came through from one side counts as Poor. Unanswered calls and calls under 5 seconds aren’t graded.
-            </dd>
-          </div>
-          <div>
-            <dt>Incoming / outgoing</dt>
-            <dd>Incoming calls were made to one of your numbers; outgoing calls were made from one of them.</dd>
-          </div>
-          <div>
-            <dt>Currently forwards to</dt>
-            <dd>Where calls to that number ring today. If you changed it during the period, earlier calls may have gone somewhere else.</dd>
-          </div>
-        </dl>
-      </div>
-    </section>
+    <Disclosure
+      variant="card"
+      headingLevel={2}
+      persistKey="reporting:glossary"
+      className="rpt-glossary-disc"
+      icon={<BookOpen size={15} />}
+      title="Words on this page"
+      summary="Answered, missed, minutes, call quality and the rest — in plain words"
+    >
+      <dl className="rpt-glossary">
+        <div>
+          <dt>Answered</dt>
+          <dd>Someone picked up the call.</dd>
+        </div>
+        <div>
+          <dt>Answered by voicemail</dt>
+          <dd>The call reached your voicemail; it counts as answered.</dd>
+        </div>
+        <div>
+          <dt>Missed</dt>
+          <dd>The call ended before anyone picked up — for example nobody was there, the line was busy, or the caller hung up first.</dd>
+        </div>
+        <div>
+          <dt>Minutes</dt>
+          <dd>How long answered calls lasted, rounded to whole minutes. Totals are rounded once at the end, so they can differ slightly from adding up each call.</dd>
+        </div>
+        <div>
+          <dt>Call quality</dt>
+          <dd>
+            How clear the call sounded, graded Great, Good, Fair or Poor from a 1-to-5 sound score. A call where no
+            sound came through from one side counts as Poor. Unanswered calls and calls under 5 seconds aren’t graded.
+          </dd>
+        </div>
+        <div>
+          <dt>Incoming / outgoing</dt>
+          <dd>Incoming calls were made to one of your numbers; outgoing calls were made from one of them.</dd>
+        </div>
+        <div>
+          <dt>Currently forwards to</dt>
+          <dd>Where calls to that number ring today. If you changed it during the period, earlier calls may have gone somewhere else.</dd>
+        </div>
+      </dl>
+    </Disclosure>
   );
 }

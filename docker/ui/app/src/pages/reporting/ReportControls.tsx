@@ -1,6 +1,12 @@
 /**
- * Report controls slab: period presets (+ custom date pickers), the number
- * picker, and the two downloads. Pure presentation — the page owns state.
+ * Report controls — pure presentation; the page owns state.
+ *
+ *   ReportControls   the slim scope bar (docker/ui/CLAUDE.md §20.1): period
+ *                    presets · number picker · "Oct 1 – Oct 22, 2026 · your
+ *                    time zone" on ONE row at desktop. Custom dates open
+ *                    inline in the same bar (it may wrap to a second line).
+ *   ReportDownloads  the two downloads (CSV + PDF summary) — the page puts
+ *                    them in the header's action slot.
  */
 import { Download, FileText } from 'lucide-react';
 import type { MyNumber } from '../../types/reports';
@@ -25,7 +31,90 @@ interface ReportControlsProps {
   onNumbersChange: (next: string[]) => void;
   numbersLoading: boolean;
   numbersFailed: boolean;
+}
 
+export function ReportControls(props: ReportControlsProps) {
+  const {
+    preset, onPresetChange, range, customStart, customEnd, onCustomChange, customError, today, tz,
+    numberOptions, selectedNumbers, onNumbersChange, numbersLoading, numbersFailed,
+  } = props;
+
+  return (
+    <section className="dl-panel rpt-scopebar" aria-label="Report settings">
+      <div className="rpt-scopebar-group">
+        <span className="dl-flabel" id="rpt-period-label">Period</span>
+        <div className="dlx-seg" role="group" aria-labelledby="rpt-period-label">
+          {PRESET_OPTIONS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              aria-pressed={preset === p.id}
+              className={preset === p.id ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
+              onClick={() => onPresetChange(p.id)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {preset === 'custom' && (
+        <div className="rpt-scopebar-group rpt-custom-dates">
+          <label className="dl-flabel" htmlFor="rpt-start">From</label>
+          <input
+            id="rpt-start"
+            type="date"
+            className="dl-input"
+            value={customStart}
+            max={today}
+            aria-invalid={customError != null}
+            aria-describedby="rpt-custom-help"
+            onChange={(e) => onCustomChange(e.target.value, customEnd)}
+          />
+          <label className="dl-flabel" htmlFor="rpt-end">To</label>
+          <input
+            id="rpt-end"
+            type="date"
+            className="dl-input"
+            value={customEnd}
+            min={customStart || undefined}
+            max={today}
+            aria-invalid={customError != null}
+            aria-describedby="rpt-custom-help"
+            onChange={(e) => onCustomChange(customStart, e.target.value)}
+          />
+          <span id="rpt-custom-help" role={customError ? 'alert' : undefined} className="rpt-custom-help">
+            {customError ? (
+              <span className="dlx4-ferr">{customError}</span>
+            ) : (
+              <span className="dl-help" style={{ margin: 0 }}>Up to {MAX_SPAN_DAYS} days. Both days are included.</span>
+            )}
+          </span>
+        </div>
+      )}
+
+      <NumberPicker
+        options={numberOptions}
+        selected={selectedNumbers}
+        onChange={onNumbersChange}
+        loading={numbersLoading}
+        failed={numbersFailed}
+      />
+
+      <p className="rpt-tzline" title={`Showing ${fmtRange(range.start, range.end)}. Times are in your time zone (${tz.replace(/_/g, ' ')}).`}>
+        <strong>{fmtRange(range.start, range.end)}</strong> · {zoneWords(tz)}
+      </p>
+    </section>
+  );
+}
+
+/** "America/New_York" → "New York time"; "UTC" → "UTC time". The full zone is in the line's tooltip. */
+function zoneWords(tz: string): string {
+  const city = tz.split('/').pop() ?? tz;
+  return `${city.replace(/_/g, ' ')} time`;
+}
+
+interface ReportDownloadsProps {
   canDownload: boolean;
   csvBusy: boolean;
   pdfBusy: boolean;
@@ -33,111 +122,34 @@ interface ReportControlsProps {
   onDownloadPdf: () => void;
 }
 
-export function ReportControls(props: ReportControlsProps) {
-  const {
-    preset, onPresetChange, range, customStart, customEnd, onCustomChange, customError, today, tz,
-    numberOptions, selectedNumbers, onNumbersChange, numbersLoading, numbersFailed,
-    canDownload, csvBusy, pdfBusy, onDownloadCsv, onDownloadPdf,
-  } = props;
-
+/** CSV + PDF summary downloads — the page's primary actions (header, right). */
+export function ReportDownloads({ canDownload, csvBusy, pdfBusy, onDownloadCsv, onDownloadPdf }: ReportDownloadsProps) {
   return (
-    <section className="dl-panel" aria-label="Report settings">
-      <div className="dl-panel-body">
-        <div className="rpt-controls">
-          <div className="rpt-controls-left">
-            <div className="dlx4-field">
-              <span className="dl-flabel" id="rpt-period-label">Period</span>
-              <div className="dlx-seg" role="group" aria-labelledby="rpt-period-label">
-                {PRESET_OPTIONS.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    aria-pressed={preset === p.id}
-                    className={preset === p.id ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
-                    onClick={() => onPresetChange(p.id)}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <NumberPicker
-              options={numberOptions}
-              selected={selectedNumbers}
-              onChange={onNumbersChange}
-              loading={numbersLoading}
-              failed={numbersFailed}
-            />
-          </div>
-
-          <div className="rpt-controls-actions">
-            <button
-              type="button"
-              className="dl-btn dl-btn-ghost"
-              onClick={onDownloadCsv}
-              disabled={!canDownload || csvBusy}
-              aria-busy={csvBusy || undefined}
-            >
-              <Download size={14} aria-hidden="true" />
-              {csvBusy ? 'Preparing spreadsheet…' : 'Download spreadsheet (CSV)'}
-            </button>
-            <button
-              type="button"
-              className="dl-btn dl-btn-primary"
-              onClick={onDownloadPdf}
-              disabled={!canDownload || pdfBusy}
-              aria-busy={pdfBusy || undefined}
-            >
-              <FileText size={14} aria-hidden="true" />
-              {pdfBusy ? 'Making PDF…' : 'Download PDF summary'}
-            </button>
-          </div>
-        </div>
-
-        {preset === 'custom' && (
-          <div className="rpt-custom-dates">
-            <div className="dlx4-field">
-              <label className="dl-flabel" htmlFor="rpt-start">From</label>
-              <input
-                id="rpt-start"
-                type="date"
-                className="dl-input"
-                value={customStart}
-                max={today}
-                aria-invalid={customError != null}
-                aria-describedby="rpt-custom-help"
-                onChange={(e) => onCustomChange(e.target.value, customEnd)}
-              />
-            </div>
-            <div className="dlx4-field">
-              <label className="dl-flabel" htmlFor="rpt-end">To</label>
-              <input
-                id="rpt-end"
-                type="date"
-                className="dl-input"
-                value={customEnd}
-                min={customStart || undefined}
-                max={today}
-                aria-invalid={customError != null}
-                aria-describedby="rpt-custom-help"
-                onChange={(e) => onCustomChange(customStart, e.target.value)}
-              />
-            </div>
-            <div id="rpt-custom-help" role={customError ? 'alert' : undefined} style={{ paddingBottom: 9 }}>
-              {customError ? (
-                <span className="dlx4-ferr">{customError}</span>
-              ) : (
-                <span className="dl-help" style={{ margin: 0 }}>Up to {MAX_SPAN_DAYS} days at a time. Both days are included.</span>
-              )}
-            </div>
-          </div>
-        )}
-
-        <div className="rpt-tzline">
-          Showing <strong>{fmtRange(range.start, range.end)}</strong> · times are in your time zone ({tz.replace(/_/g, ' ')})
-        </div>
-      </div>
-    </section>
+    <>
+      <button
+        type="button"
+        className="dl-btn dl-btn-ghost rpt-dl-btn"
+        onClick={onDownloadCsv}
+        disabled={!canDownload || csvBusy}
+        aria-busy={csvBusy || undefined}
+        aria-label={csvBusy ? undefined : 'Download spreadsheet (CSV)'}
+        title="Every call in this report as a spreadsheet (CSV), with your call list filters"
+      >
+        <Download size={14} aria-hidden="true" />
+        {csvBusy ? 'Preparing spreadsheet…' : 'Spreadsheet (CSV)'}
+      </button>
+      <button
+        type="button"
+        className="dl-btn dl-btn-primary rpt-dl-btn"
+        onClick={onDownloadPdf}
+        disabled={!canDownload || pdfBusy}
+        aria-busy={pdfBusy || undefined}
+        aria-label={pdfBusy ? undefined : 'Download PDF summary'}
+        title="A one-page PDF summary of this report"
+      >
+        <FileText size={14} aria-hidden="true" />
+        {pdfBusy ? 'Making PDF…' : 'PDF summary'}
+      </button>
+    </>
   );
 }
