@@ -4,6 +4,9 @@
  * the selected block's first free exit and connected, or — with nothing
  * selected — beside the flow. Either way the new block is selected, so its
  * settings open at once.
+ *
+ * `rail`: the collapsed left panel — the same buttons (same drag and click
+ * behaviour, same accessible names) as icons only, grouped by hairlines.
  */
 import type { CSSProperties, DragEvent } from 'react';
 import { BLOCKS, PALETTE_GROUPS, outHandles } from '../model/blocks';
@@ -16,11 +19,14 @@ export function Palette({
   disabled,
   previewing,
   previewKind = 'version',
+  rail = false,
 }: {
   disabled: boolean;
   previewing: boolean;
   /** What is on the canvas instead of the draft. */
   previewKind?: 'version' | 'proposal';
+  /** Icons only (the collapsed left panel). */
+  rail?: boolean;
 }) {
   const store = useFlowStoreApi();
 
@@ -43,6 +49,36 @@ export function Palette({
     e.dataTransfer.setData(BLOCK_DND_MIME, type);
     e.dataTransfer.effectAllowed = 'copy';
   };
+
+  if (rail) {
+    return (
+      <div className="ivr-palette ivr-palette--rail">
+        {PALETTE_GROUPS.map((g) => (
+          <ul key={g.id} className="ivr-pal-rail" aria-label={g.label}>
+            {g.types.map((t) => (
+              <li key={t}>
+                <button
+                  type="button"
+                  className="ivr-pal-item ivr-pal-item--icon"
+                  style={{ '--ivr-hue': `var(--ivr-${t})`, '--ivr-ink': `var(--ivr-${t}-ink)` } as CSSProperties}
+                  draggable={!disabled}
+                  disabled={disabled}
+                  onDragStart={(e) => onDragStart(e, t)}
+                  onClick={() => add(t)}
+                  aria-label={`Add ${BLOCKS[t].label}: ${BLOCKS[t].description}`}
+                  title={`${BLOCKS[t].label} — ${BLOCKS[t].hint}`}
+                >
+                  <span className="ivr-pal-icon">
+                    <BlockIcon type={t} size={15} />
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="ivr-palette">

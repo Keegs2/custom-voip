@@ -76,6 +76,22 @@ export function formatFullWhen(iso: string, timeZone: string | undefined): strin
   }).format(d);
 }
 
+/** "Thu, Oct 22, 2026, 2:44 PM EDT" — the reading pane's one-line meta row. */
+export function formatMetaWhen(iso: string, timeZone: string | undefined): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(d);
+}
+
 /** "Jan 18, 2027". */
 export function formatDate(iso: string, timeZone: string | undefined): string {
   const d = new Date(iso);

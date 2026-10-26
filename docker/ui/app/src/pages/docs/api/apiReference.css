@@ -1,0 +1,581 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   API REFERENCE — `dxa-` (pages/docs/api/*, route /docs/api/:product?)
+
+   Organisation only (docker/ui/CLAUDE.md §20): a compact header, a section
+   rail, and a bounded two-pane reference — Contents | the section's topics
+   and endpoint rows. The look is the docs' own (`dlx-` primitives in
+   styles/dl-docs.css: method chips, code blocks, tables, callouts) on the
+   daylight `dl-*` surfaces; every colour is a theme token (§18), so light
+   and dark need nothing extra here. Responsive rules are container queries
+   on the kit hosts (`lkmd`) and on the reference column (`dxadoc`).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* The page ends with the MasterDetail: the shell's bottom padding must equal
+   its bottomGap (24px) or the page scrolls by the difference (§20.8). */
+.dl-shell.dxa-shell {
+  padding-bottom: 24px;
+}
+
+.dxa-crumb-tail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Section rail (links styled as the daylight tabs) ─────────────────── */
+
+.dxa-tabs {
+  margin-bottom: 14px;
+}
+.dxa-tabs .dl-tab {
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.dlx-tag-warn.dxa-tab-tag {
+  padding: 1px 6px;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 0.54rem;
+  letter-spacing: 0.06em;
+}
+
+/* ─── Master–detail panes ───────────────────────────────────────────────── */
+
+/* Stacked (narrow): keep the contents list short so the reference follows. */
+.dxa-md {
+  --lk-md-list-max: min(36vh, 300px);
+}
+
+/* ─── Contents (list pane) ─────────────────────────────────────────────── */
+
+.dxa-nav-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px 11px;
+  border-bottom: 1px solid var(--t-line);
+  background: var(--t-tint);
+}
+
+.dxa-nav-title {
+  font-family: 'Archivo', 'IBM Plex Sans', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--t-text);
+}
+
+.dxa-nav-count {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-text-dim);
+}
+
+.dxa-nav-scroll {
+  padding: 6px 8px 14px;
+}
+
+.dxa-nav-group + .dxa-nav-group {
+  margin-top: 8px;
+}
+
+.dxa-nav-group-title {
+  margin: 8px 8px 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t-text-dim);
+}
+
+.dxa-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dxa-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  color: var(--t-text-soft);
+  text-decoration: none;
+  transition:
+    background-color var(--lk-fast),
+    color var(--lk-fast),
+    box-shadow var(--lk-fast);
+}
+
+.dxa-nav-item:hover {
+  background: var(--t-tint-hover);
+  color: var(--t-text);
+}
+.dxa-nav-item:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: -2px;
+}
+
+.dxa-nav-item.is-current {
+  background: var(--t-accent-wash);
+  box-shadow: inset 2px 0 0 var(--t-accent-line);
+  color: var(--t-text);
+  font-weight: 600;
+}
+
+.dxa-nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Compact method chip in the list; a quiet tick for prose topics. */
+.dlx-method.dxa-method-sm {
+  min-width: 46px;
+  padding: 2px 0;
+  border-radius: 5px;
+  font-size: 0.55rem;
+  letter-spacing: 0.05em;
+}
+
+.dxa-nav-topic {
+  display: inline-flex;
+  justify-content: center;
+  width: 46px;
+  flex-shrink: 0;
+}
+
+.dxa-nav-topic::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--t-accent-line);
+}
+
+/* ─── Reference (detail pane) ──────────────────────────────────────────── */
+
+.dxa-pane-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 13px 20px 12px;
+  border-bottom: 1px solid var(--t-line);
+}
+
+.dxa-pane-id {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.dxa-pane-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0;
+  font-family: 'Archivo', 'IBM Plex Sans', sans-serif;
+  font-size: 0.98rem;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  line-height: 1.25;
+  color: var(--t-text);
+}
+
+.dxa-pane-intro {
+  margin: 3px 0 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--t-text-dim);
+}
+
+.dxa-allbtn {
+  appearance: none;
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border: 1px solid var(--t-line-strong);
+  border-radius: 8px;
+  background: var(--t-surface);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--t-text-soft);
+  cursor: pointer;
+  transition:
+    border-color var(--lk-fast),
+    color var(--lk-fast),
+    background-color var(--lk-fast);
+}
+
+.dxa-allbtn:hover {
+  border-color: var(--t-accent-border);
+  color: var(--t-accent-text);
+}
+.dxa-allbtn:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 2px;
+}
+
+.dxa-doc-scroll {
+  container-type: inline-size;
+  container-name: dxadoc;
+  padding: 16px 20px 24px;
+}
+
+.dxa-authline {
+  margin: 0 0 18px;
+  padding: 9px 12px;
+  border: 1px solid var(--t-line-soft);
+  border-radius: 9px;
+  background: var(--t-tint);
+  font-size: 0.76rem;
+  line-height: 1.65;
+  color: var(--t-text-soft);
+  overflow-wrap: anywhere;
+}
+
+.dxa-authline a {
+  color: var(--t-accent-text);
+  font-weight: 600;
+}
+.dxa-authline a:hover {
+  color: var(--t-accent-text-hover);
+}
+
+/* Groups */
+.dxa-group + .dxa-group {
+  margin-top: 22px;
+}
+
+.dxa-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin: 0 0 10px;
+}
+
+.dxa-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-family: 'Archivo', 'IBM Plex Sans', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--t-text);
+}
+
+.dxa-group-title::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 1px;
+  background: var(--t-accent-line);
+}
+
+.dxa-group-intro {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--t-text-dim);
+}
+
+/* Endpoint rows: hairline-divided Disclosure rows in one bordered list. */
+.dxa-eplist {
+  border: 1px solid var(--t-line);
+  border-radius: 10px;
+  background: var(--t-surface);
+  overflow: hidden;
+}
+
+.dxa-ep,
+.dxa-topic {
+  scroll-margin-top: 10px;
+}
+
+/* Kit tuning (equal specificity, loaded later): a long path wraps inside the
+   row instead of widening it; the summary takes what's left of the line. */
+.dxa-ep > .lk-disc-head .lk-disc-toggle {
+  padding: 10px 14px;
+  border-radius: 0;
+}
+.dxa-ep.is-open > .lk-disc-head .lk-disc-toggle {
+  background: var(--t-tint);
+}
+.dxa-ep .lk-disc-title {
+  flex-shrink: 1;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.dxa-ep .lk-disc-summary {
+  flex-basis: 240px;
+}
+/* Open, the row shows its whole summary (closed it is one line). */
+.dxa-ep.is-open > .lk-disc-head .lk-disc-summary {
+  white-space: normal;
+}
+.dxa-ep > .lk-disc-panel .lk-disc-content.dxa-ep-body {
+  padding: 12px 16px 18px;
+}
+.dxa-ep.is-open > .lk-disc-panel {
+  border-top: 1px solid var(--t-line-soft);
+}
+
+.dxa-ep-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dxa-ep-path {
+  min-width: 0;
+  font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--t-text);
+  overflow-wrap: anywhere;
+}
+
+/* Endpoint body */
+.dxa-p {
+  margin: 0 0 10px;
+  font-size: 0.84rem;
+  line-height: 1.7;
+}
+
+.dxa-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 2px 0 6px;
+}
+
+.dxa-facts dt {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--t-text-dim);
+}
+
+.dxa-facts dd {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+}
+
+.dxa-role {
+  padding: 1px 7px;
+  border: 1px solid var(--t-accent-border);
+  border-radius: 5px;
+  background: var(--t-accent-tint);
+  font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--t-accent-text);
+}
+
+.dxa-h5 {
+  margin: 16px 0 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t-text-dim);
+}
+
+.dxa-returns {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--t-text-soft);
+}
+
+/* Two-column reference tables: name (+ type / where / required) | text. */
+.dlx-table-wrap.dxa-table-wrap {
+  margin-bottom: 8px;
+}
+.dxa-table td {
+  padding: 8px 12px;
+  font-size: 0.8rem;
+}
+.dxa-table .dl-th {
+  padding: 8px 12px;
+}
+
+.dxa-td-name {
+  width: 34%;
+}
+.dxa-td-term {
+  width: 26%;
+}
+
+.dxa-td-name .dlx-td-code {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.dxa-td-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 6px;
+  margin-top: 3px;
+  font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.68rem;
+  color: var(--t-text-dim);
+}
+
+.dxa-req {
+  padding: 0 5px;
+  border: 1px solid var(--t-accent-border);
+  border-radius: 4px;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-accent-text);
+}
+
+.dxa-table-status .dxa-td-name {
+  width: 84px;
+}
+
+.dxa-status {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid var(--dxa-st-border);
+  border-radius: 5px;
+  background: var(--dxa-st-bg);
+  font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--dxa-st-fg);
+}
+
+.dxa-status-2xx {
+  --dxa-st-fg: var(--t-ok-fg);
+  --dxa-st-bg: var(--t-ok-bg);
+  --dxa-st-border: var(--t-ok-border);
+}
+.dxa-status-4xx {
+  --dxa-st-fg: var(--t-warn-fg);
+  --dxa-st-bg: var(--t-warn-bg);
+  --dxa-st-border: var(--t-warn-border);
+}
+.dxa-status-5xx {
+  --dxa-st-fg: var(--t-danger-fg);
+  --dxa-st-bg: var(--t-danger-bg);
+  --dxa-st-border: var(--t-danger-border);
+}
+
+.dxa-more {
+  display: flex;
+  margin: 0 0 8px;
+}
+
+/* The example: a quiet toggle; request above response until there's room. */
+.dxa-example {
+  margin-top: 12px;
+}
+.dlx-reqres.dxa-reqres {
+  grid-template-columns: minmax(0, 1fr);
+  margin-bottom: 4px;
+}
+
+@container dxadoc (min-width: 900px) {
+  .dlx-reqres.dxa-reqres {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+/* Getting started topics */
+.dxa-topic + .dxa-topic {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--t-line-soft);
+}
+
+.dxa-topic-title {
+  margin: 0 0 8px;
+  font-family: 'Archivo', 'IBM Plex Sans', sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--t-text);
+}
+
+.dxa-topic-title:focus {
+  outline: none;
+}
+.dxa-topic-title:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.dxa-topic .dlx-code,
+.dxa-topic .dlx-callout {
+  margin-bottom: 12px;
+}
+
+.dlx8-ul.dxa-ul {
+  margin-bottom: 12px;
+}
+.dlx8-ul.dxa-ul li {
+  font-size: 0.82rem;
+}
+
+/* ─── Narrow: the panes stack (contents first, capped) ─────────────────── */
+
+@container lkmd (max-width: 719.98px) {
+  .dxa-pane-head {
+    padding: 12px 14px;
+  }
+  .dxa-doc-scroll {
+    padding: 14px 14px 20px;
+  }
+  .dxa-ep > .lk-disc-head .lk-disc-toggle {
+    padding: 10px 12px;
+  }
+  .dxa-ep > .lk-disc-panel .lk-disc-content.dxa-ep-body {
+    padding: 12px 12px 16px;
+  }
+  .dxa-td-name {
+    width: 40%;
+  }
+  .dxa-td-term {
+    width: 32%;
+  }
+  /* Narrow rows wrap their summary instead of cutting it off. */
+  .dxa-ep .lk-disc-summary {
+    white-space: normal;
+  }
+}
+
+/* Phones: the app's fixed mobile topbar (≈ 56px, the sidebar's <768px
+   viewport mode) sits over the page, so an entry scrolled into view clears it. */
+@media (max-width: 767px) {
+  .dxa-ep,
+  .dxa-topic {
+    scroll-margin-top: 72px;
+  }
+}

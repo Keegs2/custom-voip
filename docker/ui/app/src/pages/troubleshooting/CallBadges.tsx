@@ -57,7 +57,10 @@ export function AttemptsBadge({ attempts }: { attempts: ReadonlyArray<LegAttempt
       title={`${attempts.length} B-leg bridge attempts (failover)\n${detail}`}
       aria-label={`${attempts.length} bridge attempts: ${trail}`}
     >
-      {attempts.length} att · {trail}
+      {/* The count drops on the narrowest results panels (the trail and the
+          accessible name stay whole). */}
+      <span className="dlx5-attempts-count">{attempts.length} att · </span>
+      {trail}
     </span>
   );
 }

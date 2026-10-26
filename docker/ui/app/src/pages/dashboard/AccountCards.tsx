@@ -11,8 +11,14 @@
  * Staff variants: the Team card is read-only (no My account link), and the
  * requests card can list every customer's requests with the customer's name
  * as a way into that customer's dashboard.
+ *
+ * Layout (docker/ui/CLAUDE.md §20): `follow` makes Team / Number requests a
+ * kit follower — its height comes from the card beside it and its list
+ * scrolls inside (every item listed); otherwise the first few items show
+ * with "Show all N". QuickActionsCard can lay its actions in two columns
+ * (`columns={2}`) when it sits in a wide slot.
  */
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { ArrowRight, Inbox, Users, Zap } from 'lucide-react';
@@ -23,6 +29,7 @@ import { Card, CardState } from './Card';
 import { CustomerName } from './CallCards';
 import type { QuickAction } from './quickActions';
 import { fmtRelative, initials } from './accountData';
+import { ShowMoreButton, useShowMore } from '../../components/layout/kit';
 
 // ─── Team ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +49,10 @@ export interface TeamCardProps {
   link?: { to: string; label: string } | null;
   /** Shown when nobody has access. */
   emptyText?: string;
+  /** Height follows the card beside it; every member listed, scrolling inside. */
+  follow?: boolean;
+  /** Extra classes (grid placement). */
+  className?: string;
 }
 
 const MY_ACCOUNT_LINK = { to: '/my-account', label: 'My account' };
@@ -52,15 +63,16 @@ export function TeamCard({
   order,
   link = MY_ACCOUNT_LINK,
   emptyText = 'No one has access yet. Ask Granite support to add a teammate.',
+  follow = false,
+  className,
 }: TeamCardProps) {
   // ALL hooks unconditionally at the top (React #310).
-  const [showAll, setShowAll] = useState(false);
   const members = useMemo(() => {
     const list = team.data ?? [];
     // You first, then everyone else in the API's order.
     return [...list.filter((m) => m.is_self), ...list.filter((m) => !m.is_self)];
   }, [team.data]);
-  const shown = showAll ? members : members.slice(0, TEAM_PREVIEW);
+  const more = useShowMore(members, follow ? Number.POSITIVE_INFINITY : TEAM_PREVIEW);
 
   return (
     <Card
@@ -69,15 +81,9 @@ export function TeamCard({
       icon={<Users size={15} strokeWidth={2.2} />}
       count={team.data ? team.data.length : null}
       action={link ? <Link to={link.to} className="ad-linkbtn">{link.label}</Link> : undefined}
-      className="ad-span-4"
+      className={`ad-span-4${follow ? ' lk-follow' : ''}${className ? ` ${className}` : ''}`}
       order={order}
-      footer={
-        members.length > TEAM_PREVIEW ? (
-          <button type="button" className="ad-linkbtn" onClick={() => setShowAll((v) => !v)} aria-expanded={showAll}>
-            {showAll ? 'Show fewer' : `Show all ${members.length}`}
-          </button>
-        ) : undefined
-      }
+      footer={more.needed ? <ShowMoreButton {...more.buttonProps} noun="people" /> : undefined}
     >
       {team.data === undefined ? (
         team.isError ? (
@@ -88,8 +94,8 @@ export function TeamCard({
       ) : members.length === 0 ? (
         <p className="ad-quiet">{emptyText}</p>
       ) : (
-        <ul className="ad-team">
-          {shown.map((m) => {
+        <ul className="ad-team" id={more.listId}>
+          {more.visible.map((m) => {
             const seen = fmtRelative(m.last_login, nowMs);
             const inactive = m.status !== 'active';
             return (
@@ -128,6 +134,10 @@ export interface RequestsCardProps {
   /** Customer id → name: each request shows whose it is. */
   customerNames?: ReadonlyMap<number, string>;
   onPickCustomer?: (customerId: number) => void;
+  /** Height follows the card beside it; every request listed, scrolling inside. */
+  follow?: boolean;
+  /** Extra classes (grid placement). */
+  className?: string;
 }
 
 export function RequestsCard({
@@ -138,11 +148,15 @@ export function RequestsCard({
   emptyText = 'Nothing waiting on Granite. Need more numbers? Request them any time.',
   customerNames,
   onPickCustomer,
+  follow = false,
+  className,
 }: RequestsCardProps) {
+  // ALL hooks unconditionally at the top (React #310).
   const open = useMemo(
     () => (dids.data ?? []).filter((d) => d.status === 'reserved' || d.status === 'release_requested'),
     [dids.data],
   );
+  const more = useShowMore(open, follow ? Number.POSITIVE_INFINITY : REQUEST_PREVIEW);
   const pending = open.filter((d) => d.status === 'reserved').length;
   const releasing = open.length - pending;
 
@@ -153,7 +167,7 @@ export function RequestsCard({
       sub={sub}
       icon={<Inbox size={15} strokeWidth={2.2} />}
       count={dids.data ? open.length : null}
-      className="ad-span-4"
+      className={`ad-span-4${follow ? ' lk-follow' : ''}${className ? ` ${className}` : ''}`}
       order={order}
       footer={
         action ? (
@@ -177,8 +191,8 @@ export function RequestsCard({
             <span><strong>{pending}</strong> waiting for approval</span>
             <span><strong>{releasing}</strong> {releasing === 1 ? 'release' : 'releases'} pending</span>
           </div>
-          <ul className="ad-req-list">
-            {open.slice(0, REQUEST_PREVIEW).map((d) => (
+          <ul className="ad-req-list" id={more.listId}>
+            {more.visible.map((d) => (
               <li key={d.id}>
                 {customerNames ? (
                   <span className="ad-stack">
@@ -195,7 +209,7 @@ export function RequestsCard({
               </li>
             ))}
           </ul>
-          {open.length > REQUEST_PREVIEW && <p className="ad-quiet">And {open.length - REQUEST_PREVIEW} more.</p>}
+          {more.needed && <ShowMoreButton {...more.buttonProps} noun="requests" />}
         </>
       )}
     </Card>
@@ -209,19 +223,30 @@ export interface QuickActionsCardProps {
   order: number;
   title?: string;
   sub?: string;
+  /** Two columns of actions (a wide slot). Default 1. */
+  columns?: 1 | 2;
+  /** Grid placement classes (default "ad-span-4"). */
+  className?: string;
 }
 
-export function QuickActionsCard({ actions, order, title = 'Quick actions', sub }: QuickActionsCardProps) {
+export function QuickActionsCard({
+  actions,
+  order,
+  title = 'Quick actions',
+  sub,
+  columns = 1,
+  className = 'ad-span-4',
+}: QuickActionsCardProps) {
   return (
     <Card
       id="ad-actions"
       title={title}
       sub={sub}
       icon={<Zap size={15} strokeWidth={2.2} />}
-      className="ad-span-4"
+      className={className}
       order={order}
     >
-      <ul className="ad-actions">
+      <ul className={`ad-actions${columns === 2 ? ' ad-actions-2' : ''}`}>
         {actions.map((a) => {
           const inner = (
             <>

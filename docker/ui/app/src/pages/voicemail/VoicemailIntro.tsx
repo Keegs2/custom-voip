@@ -1,7 +1,8 @@
 /**
  * VoicemailIntro — what a tenant sees when Visual Voicemail isn't switched
  * on for their account. Copy is trimmed to what ships (build plan D3/D5/D7):
- * web inbox, greetings, encryption at rest, 90-day retention. Transcription
+ * web inbox, greetings, encryption at rest, retention (per mailbox
+ * `retention_days`, 90 by default — no mailbox exists yet here). Transcription
  * (v1.1) is mentioned only while it is live on the platform
  * (`summary.transcription_available`), and as optional — it is off per
  * mailbox until Granite turns it on (owner decisions O1/O2). No search, no
@@ -44,7 +45,7 @@ const POINTS: readonly Point[] = [
   {
     icon: <Lock size={17} strokeWidth={1.8} />,
     title: 'Encrypted at rest',
-    line: 'Messages are encrypted with a key that belongs only to your account, and deleted automatically after 90 days.',
+    line: 'Messages are encrypted with a key that belongs only to your account, and deleted automatically when the mailbox’s retention period ends (90 days by default).',
   },
 ];
 

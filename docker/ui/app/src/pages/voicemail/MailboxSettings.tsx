@@ -1,13 +1,20 @@
 /**
- * MailboxSettings — the "Greeting & settings" tab for one mailbox:
+ * MailboxSettings — the "Greeting & settings" tab for one mailbox, laid out
+ * with the layout kit (docker/ui/CLAUDE.md §20):
  *
- *   Greeting (GreetingsPanel, full width)
- *   Details: name + timezone            Transcription (v1.1, see below)
- *   PIN: set / change (masked)          Storage: messages / space / retention
- *   Administration (staff only): suspend / resume, delete mailbox (typed)
+ *   ┌ Greeting (GreetingsPanel) ─────┐ ┌ Details: name · timezone ──────┐
+ *   │ standard / custom, recordings  │ ├ Transcription (v1.1, see below) ┤
+ *   └────────────────────────────────┘ └────────────────────────────────┘   one row, equal height
+ *   ┌ PIN            Not set · for phone access, coming later          ⌄ ┐
+ *   ├ Storage        12 of 100 messages · 1.2 MB of 50 MB              ⌄ ┤   expandable rows
+ *   └ Administration [Staff]  Active — suspend or delete this mailbox  ⌄ ┘   (staff only)
  *
  * Mount KEYED by mailbox id so the forms start from that mailbox's values.
- * Readonly tenants see values, not inputs. No prices anywhere (D5).
+ * The expandable rows keep their forms mounted while closed (typed values
+ * survive a close / re-open); their open state is remembered per section
+ * (`vm:pin`, `vm:storage`, `vm:admin`). Deleting a mailbox still needs the
+ * typed number in its confirmation dialog. Readonly tenants see values, not
+ * inputs. No prices anywhere (D5).
  *
  * Transcription — owner decision O2: ONLY a platform admin (`canManage`,
  * incl. "View as Customer") may switch it on/off, change its language or
@@ -21,6 +28,7 @@ import type { Mailbox, MailboxUpdate, TranscriptionLanguage } from '../../types/
 import { TRANSCRIPTION_LANGUAGES } from '../../types/voicemail';
 import { backfillTranscripts, deleteMailbox, setMailboxPin, updateMailbox } from '../../api/voicemail';
 import { useToast } from '../../components/ui/ToastContext';
+import { BalancedGrid, Disclosure } from '../../components/layout/kit';
 import { invalidateVoicemail, transcriptErrorText, vmErrorText, type VoicemailScope } from './voicemailData';
 import { invalidateAccountNumbers } from '../dashboard/accountData';
 import { GreetingsPanel } from './GreetingsPanel';
@@ -37,6 +45,11 @@ export interface MailboxSettingsProps {
   onDeleted: () => void;
 }
 
+/** Messages or space at the limit — callers can't leave new messages. */
+function isFull(mailbox: Mailbox): boolean {
+  return mailbox.message_count >= mailbox.max_messages || mailbox.bytes_used >= mailbox.max_bytes;
+}
+
 export function MailboxSettings({
   scope,
   mailbox,
@@ -49,23 +62,80 @@ export function MailboxSettings({
   // it on. O2: tenants only while it is on (read-only).
   const transcriptionOn = mailbox.transcription_enabled === true;
   const showTranscription = canManage ? transcriptionAvailable || transcriptionOn : transcriptionOn;
+  const full = isFull(mailbox);
+  const suspended = mailbox.status === 'suspended';
+
+  const rows = (
+    <section className="dl-panel vm-settings-rows" aria-label="More mailbox settings">
+      <Disclosure
+        variant="row"
+        headingLevel={2}
+        persistKey="vm:pin"
+        title="PIN"
+        badge={<span className={`dl-tag${mailbox.has_pin ? '' : ' dl-tag-slate'}`}>{mailbox.has_pin ? 'Set' : 'Not set'}</span>}
+        summary="For phone access to this mailbox, coming later"
+      >
+        <PinBody mailbox={mailbox} canEdit={canEdit} />
+      </Disclosure>
+      <Disclosure
+        variant="row"
+        headingLevel={2}
+        persistKey="vm:storage"
+        title="Storage"
+        badge={full ? <span className="dl-pill dl-pill-off">Full</span> : undefined}
+        summary={
+          full ? (
+            <span className="vm-summary-bad">Full — callers can’t leave new messages until some are deleted</span>
+          ) : (
+            `${mailbox.message_count} of ${mailbox.max_messages} messages · ${formatBytes(mailbox.bytes_used)} of ${formatBytes(mailbox.max_bytes)}`
+          )
+        }
+      >
+        <StorageBody mailbox={mailbox} />
+      </Disclosure>
+      {canManage && (
+        <Disclosure
+          variant="row"
+          headingLevel={2}
+          persistKey="vm:admin"
+          className="vm-admin-disc"
+          title="Administration"
+          badge={<span className="vm-staff-tag">Staff</span>}
+          summary={suspended ? 'Suspended — callers are turned away' : 'Active — suspend or delete'}
+        >
+          <AdminBody mailbox={mailbox} onDeleted={onDeleted} />
+        </Disclosure>
+      )}
+    </section>
+  );
+
+  // Balance the row: the expandable rows go under whichever side is shorter
+  // — the greeting while the Transcription card fills the right column,
+  // otherwise under Details.
+  const rowsLeft = showTranscription;
+
   return (
     <div className="vm-settings">
-      <GreetingsPanel scope={scope} mailbox={mailbox} canEdit={canEdit} />
-      <DetailsPanel mailbox={mailbox} canEdit={canEdit} />
-      {showTranscription && (
-        <TranscriptionPanel mailbox={mailbox} canManage={canManage} available={transcriptionAvailable} />
-      )}
-      <PinPanel mailbox={mailbox} canEdit={canEdit} />
-      <StoragePanel mailbox={mailbox} />
-      {canManage && <AdminPanel mailbox={mailbox} onDeleted={onDeleted} />}
+      <BalancedGrid columns="minmax(0, 1.1fr) minmax(0, 1fr)" stackBelow="md" gap="var(--rcf-stack)">
+        <div className="lk-col">
+          <GreetingsPanel scope={scope} mailbox={mailbox} canEdit={canEdit} className="lk-grow" />
+          {rowsLeft && rows}
+        </div>
+        <div className="lk-col">
+          <DetailsPanel mailbox={mailbox} canEdit={canEdit} className={showTranscription ? undefined : 'lk-grow'} />
+          {showTranscription && (
+            <TranscriptionPanel mailbox={mailbox} canManage={canManage} available={transcriptionAvailable} className="lk-grow" />
+          )}
+          {!rowsLeft && rows}
+        </div>
+      </BalancedGrid>
     </div>
   );
 }
 
 /* ─── Details ─────────────────────────────────────────────── */
 
-function DetailsPanel({ mailbox, canEdit }: { mailbox: Mailbox; canEdit: boolean }) {
+function DetailsPanel({ mailbox, canEdit, className }: { mailbox: Mailbox; canEdit: boolean; className?: string }) {
   const queryClient = useQueryClient();
   const { toastOk } = useToast();
   const [label, setLabel] = useState(mailbox.label);
@@ -99,7 +169,7 @@ function DetailsPanel({ mailbox, canEdit }: { mailbox: Mailbox; canEdit: boolean
   };
 
   return (
-    <section className="dl-panel vm-settings-panel" aria-labelledby={`vm-details-${mailbox.id}`}>
+    <section className={`dl-panel vm-settings-panel${className ? ` ${className}` : ''}`} aria-labelledby={`vm-details-${mailbox.id}`}>
       <div className="dl-panel-head">
         <span id={`vm-details-${mailbox.id}`} className="dl-panel-title">
           Details
@@ -108,40 +178,40 @@ function DetailsPanel({ mailbox, canEdit }: { mailbox: Mailbox; canEdit: boolean
       </div>
       {canEdit ? (
         <form className="dl-panel-body vm-form" onSubmit={submit}>
-          <div className="vm-field">
-            <label className="dl-flabel" htmlFor={labelId}>
-              Name
-            </label>
-            <input
-              id={labelId}
-              className="dl-input vm-input-full"
-              value={label}
-              maxLength={120}
-              onChange={(e) => setLabel(e.target.value)}
-            />
-          </div>
-          <div className="vm-field">
-            <label className="dl-flabel" htmlFor={tzId}>
-              Timezone
-            </label>
-            <select id={tzId} className="dl-input vm-input-full" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-              {zones.map((z) => (
-                <option key={z.id} value={z.id}>
-                  {z.label}
-                </option>
-              ))}
-            </select>
+          <div className="vm-field-row vm-field-row-action">
+            <div className="vm-field">
+              <label className="dl-flabel" htmlFor={labelId}>
+                Name
+              </label>
+              <input
+                id={labelId}
+                className="dl-input vm-input-full"
+                value={label}
+                maxLength={120}
+                onChange={(e) => setLabel(e.target.value)}
+              />
+            </div>
+            <div className="vm-field">
+              <label className="dl-flabel" htmlFor={tzId}>
+                Timezone
+              </label>
+              <select id={tzId} className="dl-input vm-input-full" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+                {zones.map((z) => (
+                  <option key={z.id} value={z.id}>
+                    {z.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button type="submit" className="dl-btn dl-btn-primary vm-btn-sm vm-field-action" disabled={!dirty || trimmed.length === 0 || save.isPending}>
+              {save.isPending ? 'Saving…' : 'Save'}
+            </button>
           </div>
           {save.isError && (
             <div className="dl-banner dl-banner-err" role="alert">
               {vmErrorText(save.error, 'The details couldn’t be saved.')}
             </div>
           )}
-          <div className="vm-form-actions">
-            <button type="submit" className="dl-btn dl-btn-primary vm-btn-sm" disabled={!dirty || trimmed.length === 0 || save.isPending}>
-              {save.isPending ? 'Saving…' : 'Save details'}
-            </button>
-          </div>
         </form>
       ) : (
         <div className="dl-panel-body">
@@ -169,7 +239,17 @@ function languageName(id: string | null | undefined): string {
   return TRANSCRIPTION_LANGUAGES.find((l) => l.id === id)?.label ?? id ?? TRANSCRIPTION_LANGUAGES[0].label;
 }
 
-function TranscriptionPanel({ mailbox, canManage, available }: { mailbox: Mailbox; canManage: boolean; available: boolean }) {
+function TranscriptionPanel({
+  mailbox,
+  canManage,
+  available,
+  className,
+}: {
+  mailbox: Mailbox;
+  canManage: boolean;
+  available: boolean;
+  className?: string;
+}) {
   // ── ALL hooks unconditionally at the top (React #310) ──
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
@@ -219,7 +299,7 @@ function TranscriptionPanel({ mailbox, canManage, available }: { mailbox: Mailbo
   };
 
   return (
-    <section className="dl-panel vm-settings-panel vm-tx-settings" aria-labelledby={headId}>
+    <section className={`dl-panel vm-settings-panel vm-tx-settings${className ? ` ${className}` : ''}`} aria-labelledby={headId}>
       <div className="dl-panel-head">
         <span id={headId} className="dl-panel-title">
           Transcription
@@ -235,62 +315,63 @@ function TranscriptionPanel({ mailbox, canManage, available }: { mailbox: Mailbo
               Transcription is paused.
             </div>
           )}
-          <div className="vm-field">
-            <span className="dl-flabel" id={`${headId}-switch`}>
-              Transcribe new messages
-            </span>
-            <div className="vm-seg" role="group" aria-labelledby={`${headId}-switch`}>
-              <button
-                type="button"
-                aria-pressed={!on}
-                className={`vm-seg-opt${!on ? ' vm-seg-on' : ''}`}
-                onClick={() => setOn(false)}
+          <div className="vm-field-row vm-field-row-action">
+            <div className="vm-field">
+              <span className="dl-flabel" id={`${headId}-switch`}>
+                Transcribe new messages
+              </span>
+              <div className="vm-seg" role="group" aria-labelledby={`${headId}-switch`}>
+                <button
+                  type="button"
+                  aria-pressed={!on}
+                  className={`vm-seg-opt${!on ? ' vm-seg-on' : ''}`}
+                  onClick={() => setOn(false)}
+                  disabled={save.isPending}
+                >
+                  Off
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={on}
+                  className={`vm-seg-opt${on ? ' vm-seg-on' : ''}`}
+                  onClick={() => setOn(true)}
+                  // Switching on needs transcription live (the API answers 409 otherwise).
+                  disabled={save.isPending || (!available && !savedOn)}
+                >
+                  On
+                </button>
+              </div>
+            </div>
+            <div className="vm-field">
+              <label className="dl-flabel" htmlFor={langId}>
+                Language
+              </label>
+              <select
+                id={langId}
+                className="dl-input vm-input-full"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value as TranscriptionLanguage)}
                 disabled={save.isPending}
               >
-                Off
-              </button>
-              <button
-                type="button"
-                aria-pressed={on}
-                className={`vm-seg-opt${on ? ' vm-seg-on' : ''}`}
-                onClick={() => setOn(true)}
-                // Switching on needs transcription live (the API answers 409 otherwise).
-                disabled={save.isPending || (!available && !savedOn)}
-              >
-                On
-              </button>
+                {languages.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
             </div>
+            <button type="submit" className="dl-btn dl-btn-primary vm-btn-sm vm-field-action" disabled={!dirty || save.isPending}>
+              {save.isPending ? 'Saving…' : 'Save'}
+            </button>
           </div>
-          <div className="vm-field">
-            <label className="dl-flabel" htmlFor={langId}>
-              Language
-            </label>
-            <select
-              id={langId}
-              className="dl-input vm-input-full"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value as TranscriptionLanguage)}
-              disabled={save.isPending}
-            >
-              {languages.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <p className="dl-help">{TRANSCRIPTION_DISCLOSURE}</p>
-          <p className="dl-help">Only Granite staff can change this setting.</p>
           {save.isError && (
             <div className="dl-banner dl-banner-err" role="alert">
               {transcriptErrorText(save.error, 'The transcription setting couldn’t be saved.')}
             </div>
           )}
-          <div className="vm-form-actions">
-            <button type="submit" className="dl-btn dl-btn-primary vm-btn-sm" disabled={!dirty || save.isPending}>
-              {save.isPending ? 'Saving…' : 'Save'}
-            </button>
-          </div>
+          <p className="dl-help vm-help-flush">
+            {TRANSCRIPTION_DISCLOSURE} Only Granite staff can change this setting.
+          </p>
           {savedOn && available && (
             <div className="vm-tx-backfill">
               <div>
@@ -332,7 +413,8 @@ function TranscriptionPanel({ mailbox, canManage, available }: { mailbox: Mailbo
 
 /* ─── PIN ─────────────────────────────────────────────────── */
 
-function PinPanel({ mailbox, canEdit }: { mailbox: Mailbox; canEdit: boolean }) {
+/** The PIN form (inside the "PIN" disclosure row). */
+function PinBody({ mailbox, canEdit }: { mailbox: Mailbox; canEdit: boolean }) {
   const { toastOk } = useToast();
   const queryClient = useQueryClient();
   const [pin, setPin] = useState('');
@@ -360,72 +442,60 @@ function PinPanel({ mailbox, canEdit }: { mailbox: Mailbox; canEdit: boolean }) 
     if (valid && matches) save.mutate(pin);
   };
 
+  if (!canEdit) {
+    return <p className="dl-help">{mailbox.has_pin ? 'A PIN is set for this mailbox.' : 'No PIN is set.'}</p>;
+  }
+
   return (
-    <section className="dl-panel vm-settings-panel" aria-labelledby={`vm-pin-${mailbox.id}`}>
-      <div className="dl-panel-head">
-        <span id={`vm-pin-${mailbox.id}`} className="dl-panel-title">
-          PIN
-        </span>
-        <span className={`dl-tag${mailbox.has_pin ? '' : ' dl-tag-slate'}`}>{mailbox.has_pin ? 'Set' : 'Not set'}</span>
-        <p className="dl-panel-sub">
-          Reserved for phone access to this mailbox, which is coming later. You don’t need it to use this page.
-        </p>
+    <form className="vm-form vm-form-narrow" onSubmit={submit} autoComplete="off">
+      <p className="dl-help">You don’t need a PIN to use this page.</p>
+      <div className="vm-field-row">
+        <div className="vm-field">
+          <label className="dl-flabel" htmlFor={pinId}>
+            {mailbox.has_pin ? 'New PIN' : 'PIN'}
+          </label>
+          <input
+            id={pinId}
+            className="dl-input dl-input-mono vm-input-full"
+            type="password"
+            inputMode="numeric"
+            autoComplete="new-password"
+            maxLength={10}
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+            aria-invalid={pin.length > 0 && !valid}
+          />
+        </div>
+        <div className="vm-field">
+          <label className="dl-flabel" htmlFor={confirmId}>
+            Confirm
+          </label>
+          <input
+            id={confirmId}
+            className="dl-input dl-input-mono vm-input-full"
+            type="password"
+            inputMode="numeric"
+            autoComplete="new-password"
+            maxLength={10}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value.replace(/\D/g, ''))}
+            aria-invalid={confirm.length > 0 && !matches}
+          />
+        </div>
       </div>
-      {canEdit ? (
-        <form className="dl-panel-body vm-form" onSubmit={submit} autoComplete="off">
-          <div className="vm-field-row">
-            <div className="vm-field">
-              <label className="dl-flabel" htmlFor={pinId}>
-                {mailbox.has_pin ? 'New PIN' : 'PIN'}
-              </label>
-              <input
-                id={pinId}
-                className="dl-input dl-input-mono vm-input-full"
-                type="password"
-                inputMode="numeric"
-                autoComplete="new-password"
-                maxLength={10}
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                aria-invalid={pin.length > 0 && !valid}
-              />
-            </div>
-            <div className="vm-field">
-              <label className="dl-flabel" htmlFor={confirmId}>
-                Confirm
-              </label>
-              <input
-                id={confirmId}
-                className="dl-input dl-input-mono vm-input-full"
-                type="password"
-                inputMode="numeric"
-                autoComplete="new-password"
-                maxLength={10}
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value.replace(/\D/g, ''))}
-                aria-invalid={confirm.length > 0 && !matches}
-              />
-            </div>
-          </div>
-          <p className={`dl-help${problem ? ' vm-help-err' : ''}`}>{problem ?? '4 to 10 digits. Stored hashed — nobody can read it back.'}</p>
-          {save.isError && (
-            <div className="dl-banner dl-banner-err" role="alert">
-              {vmErrorText(save.error, 'The PIN couldn’t be saved.')}
-            </div>
-          )}
-          <div className="vm-form-actions">
-            <button type="submit" className="dl-btn dl-btn-primary vm-btn-sm" disabled={!valid || !matches || save.isPending}>
-              <KeyRound size={14} aria-hidden="true" />
-              {save.isPending ? 'Saving…' : mailbox.has_pin ? 'Change PIN' : 'Set PIN'}
-            </button>
-          </div>
-        </form>
-      ) : (
-        <div className="dl-panel-body">
-          <p className="dl-help">{mailbox.has_pin ? 'A PIN is set for this mailbox.' : 'No PIN is set.'}</p>
+      {save.isError && (
+        <div className="dl-banner dl-banner-err" role="alert">
+          {vmErrorText(save.error, 'The PIN couldn’t be saved.')}
         </div>
       )}
-    </section>
+      <div className="vm-form-actions vm-form-actions-split">
+        <p className={`dl-help${problem ? ' vm-help-err' : ''}`}>{problem ?? '4 to 10 digits. Stored hashed — nobody can read it back.'}</p>
+        <button type="submit" className="dl-btn dl-btn-primary vm-btn-sm" disabled={!valid || !matches || save.isPending}>
+          <KeyRound size={14} aria-hidden="true" />
+          {save.isPending ? 'Saving…' : mailbox.has_pin ? 'Change PIN' : 'Set PIN'}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -441,38 +511,29 @@ function Meter({ value, max, label }: { value: number; max: number; label: strin
   );
 }
 
-function StoragePanel({ mailbox }: { mailbox: Mailbox }) {
-  const full = mailbox.message_count >= mailbox.max_messages || mailbox.bytes_used >= mailbox.max_bytes;
+/** Limits and use (inside the "Storage" disclosure row). */
+function StorageBody({ mailbox }: { mailbox: Mailbox }) {
   return (
-    <section className="dl-panel vm-settings-panel" aria-labelledby={`vm-storage-${mailbox.id}`}>
-      <div className="dl-panel-head">
-        <span id={`vm-storage-${mailbox.id}`} className="dl-panel-title">
-          Storage
-        </span>
-        {full && <span className="dl-pill dl-pill-off">Full</span>}
-        <p className="dl-panel-sub">
-          {full ? 'This mailbox is full — callers can’t leave new messages until some are deleted.' : 'Limits for this mailbox.'}
-        </p>
+    <div className="vm-storage">
+      <div className="vm-storage-row">
+        <div className="vm-storage-top">
+          <span>Messages</span>
+          <strong>
+            {mailbox.message_count} of {mailbox.max_messages}
+          </strong>
+        </div>
+        <Meter value={mailbox.message_count} max={mailbox.max_messages} label="Messages stored" />
       </div>
-      <div className="dl-panel-body vm-storage">
-        <div className="vm-storage-row">
-          <div className="vm-storage-top">
-            <span>Messages</span>
-            <strong>
-              {mailbox.message_count} of {mailbox.max_messages}
-            </strong>
-          </div>
-          <Meter value={mailbox.message_count} max={mailbox.max_messages} label="Messages stored" />
+      <div className="vm-storage-row">
+        <div className="vm-storage-top">
+          <span>Space (includes Trash)</span>
+          <strong>
+            {formatBytes(mailbox.bytes_used)} of {formatBytes(mailbox.max_bytes)}
+          </strong>
         </div>
-        <div className="vm-storage-row">
-          <div className="vm-storage-top">
-            <span>Space (includes Trash)</span>
-            <strong>
-              {formatBytes(mailbox.bytes_used)} of {formatBytes(mailbox.max_bytes)}
-            </strong>
-          </div>
-          <Meter value={mailbox.bytes_used} max={mailbox.max_bytes} label="Space used" />
-        </div>
+        <Meter value={mailbox.bytes_used} max={mailbox.max_bytes} label="Space used" />
+      </div>
+      <div className="vm-storage-facts">
         <div className="dl-kv">
           <span className="dl-kv-label">Messages are kept for</span>
           <span className="dl-kv-value">{mailbox.retention_days} days</span>
@@ -482,13 +543,14 @@ function StoragePanel({ mailbox }: { mailbox: Mailbox }) {
           <span className="dl-kv-value">{Math.round(mailbox.max_message_seconds / 60)} minutes</span>
         </div>
       </div>
-    </section>
+    </div>
   );
 }
 
 /* ─── Administration (staff) ──────────────────────────────── */
 
-function AdminPanel({ mailbox, onDeleted }: { mailbox: Mailbox; onDeleted: () => void }) {
+/** Suspend / resume and delete (inside the staff "Administration" disclosure row). */
+function AdminBody({ mailbox, onDeleted }: { mailbox: Mailbox; onDeleted: () => void }) {
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -520,15 +582,9 @@ function AdminPanel({ mailbox, onDeleted }: { mailbox: Mailbox; onDeleted: () =>
   const digits = nationalDigits(mailbox.did);
 
   return (
-    <section className="dl-panel vm-settings-panel vm-admin-panel" aria-labelledby={`vm-admin-${mailbox.id}`}>
-      <div className="dl-panel-head">
-        <span id={`vm-admin-${mailbox.id}`} className="dl-panel-title">
-          Administration
-        </span>
-        <span className="vm-staff-tag">Staff</span>
-        <p className="dl-panel-sub">Only Granite staff see this section.</p>
-      </div>
-      <div className="dl-panel-body vm-admin">
+    <div className="vm-admin-body">
+      <p className="dl-help">Only Granite staff see this section.</p>
+      <div className="vm-admin">
         <div className="vm-admin-row">
           <div>
             <strong>{suspended ? 'Suspended' : 'Active'}</strong>
@@ -604,6 +660,6 @@ function AdminPanel({ mailbox, onDeleted }: { mailbox: Mailbox; onDeleted: () =>
           onCancel={() => setConfirmDelete(false)}
         />
       )}
-    </section>
+    </div>
   );
 }

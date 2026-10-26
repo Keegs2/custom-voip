@@ -8,6 +8,11 @@
  * `docked` sits at the top of the desktop canvas column (the canvas shrinks
  * below it; the details collapse — and do so by themselves when a test call
  * opens, so its steps stay in view); `inline` sits above the phone diagram.
+ *
+ * Layout (docker/ui/CLAUDE.md §20): where the banner is wide enough the
+ * details sit in two balanced columns — what the flow does (summary,
+ * assumptions, anything to fix) beside the new messages — so it stays short
+ * and the canvas keeps its room; the four choices stay pinned underneath.
  */
 import { useId, useMemo, useState } from 'react';
 import {
@@ -123,22 +128,37 @@ export function ProposalBanner({ variant, changes, onRefine, onTestCall }: Propo
       </div>
 
       {(open || variant === 'inline') && (
-        <div className="ivr-prop-body" id={bodyId}>
-          {result.summary && <p className="ivr-prop-summary">{result.summary}</p>}
+        <div className={`ivr-prop-body${messages.length > 0 ? ' ivr-prop-body--split' : ''}`} id={bodyId}>
+          <div className="ivr-prop-col">
+            {result.summary && <p className="ivr-prop-summary">{result.summary}</p>}
 
-          {result.assumptions.length > 0 && (
-            <div className="ivr-prop-part">
-              <h3 className="ivr-prop-h">What it assumed</h3>
-              <ul className="ivr-prop-assume">
-                {result.assumptions.map((t, i) => (
-                  <li key={i}>{t}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+            {result.assumptions.length > 0 && (
+              <div className="ivr-prop-part">
+                <h3 className="ivr-prop-h">What it assumed</h3>
+                <ul className="ivr-prop-assume">
+                  {result.assumptions.map((t, i) => (
+                    <li key={i}>{t}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {result.issues.length > 0 && (
+              <div className="ivr-prop-part">
+                <h3 className="ivr-prop-h">Still to fix after you accept</h3>
+                {issueList(result.issues, 'error')}
+              </div>
+            )}
+            {result.warnings.length > 0 && (
+              <div className="ivr-prop-part">
+                <h3 className="ivr-prop-h">Worth a look</h3>
+                {issueList(result.warnings, 'warning')}
+              </div>
+            )}
+          </div>
 
           {messages.length > 0 && (
-            <div className="ivr-prop-part">
+            <div className="ivr-prop-col ivr-prop-part">
               <div className="ivr-prop-h-row">
                 <h3 className="ivr-prop-h">New messages</h3>
                 <VoicePicker compact />
@@ -181,19 +201,6 @@ export function ProposalBanner({ variant, changes, onRefine, onTestCall }: Propo
                 })}
               </ul>
               <p className="dl-help">These are made as new messages when you accept.</p>
-            </div>
-          )}
-
-          {result.issues.length > 0 && (
-            <div className="ivr-prop-part">
-              <h3 className="ivr-prop-h">Still to fix after you accept</h3>
-              {issueList(result.issues, 'error')}
-            </div>
-          )}
-          {result.warnings.length > 0 && (
-            <div className="ivr-prop-part">
-              <h3 className="ivr-prop-h">Worth a look</h3>
-              {issueList(result.warnings, 'warning')}
             </div>
           )}
         </div>

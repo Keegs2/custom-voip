@@ -1,0 +1,528 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   LAYOUT KIT — `lk-` (src/components/layout/kit/*)
+   Rulebook: docker/ui/CLAUDE.md §20 "Layout — balanced, compact, expandable".
+
+   STRUCTURE ONLY. The kit decides how things sit (rows, heights, scrolling,
+   disclosure); the page keeps its own surfaces (`.dl-panel`, the dashboard
+   `.ad-card`, `components/ui` Card). Colour = theme tokens (§18), so every
+   rule reads right in light and dark with nothing to add. Responsive rules
+   are CONTAINER queries on the kit's own hosts, so they follow the space
+   beside the sidebar, not the window. Motion: one height transition on
+   disclosures + chevrons, off under prefers-reduced-motion.
+   Loaded once, globally (main.tsx), after index.css / theme.css. main.tsx
+   imports App first, so the CSS of EAGERLY imported pages is injected BEFORE
+   this file and loses equal-specificity ties to it: those pages tune kit
+   rules with one more class (e.g. `.gd-scope .lk-…`). Lazy pages load after
+   and may tune at equal specificity.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --lk-gap: 16px;
+  --lk-ease: 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+  --lk-fast: 0.15s ease;
+  --lk-card-cap: 440px;      /* default .lk-cap height */
+  --lk-follow-min: 200px;    /* floor of a .lk-follow card */
+  --lk-display: "Archivo", "IBM Plex Sans", sans-serif;
+}
+
+/* ─── Disclosure ────────────────────────────────────────────────────────── */
+
+.lk-disc { min-width: 0; }
+
+.lk-disc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.lk-disc-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+}
+
+.lk-disc-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--t-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--lk-fast), color var(--lk-fast);
+}
+
+.lk-disc-toggle:hover { background: var(--t-hover); }
+.lk-disc-toggle:focus-visible { outline: 2px solid var(--t-focus); outline-offset: -2px; }
+
+.lk-disc-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  color: var(--t-accent-text);
+  background: var(--t-accent-tint);
+}
+
+.lk-disc-titles {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
+  min-width: 0;
+}
+
+.lk-disc-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-family: var(--lk-display);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  color: var(--t-text);
+}
+
+.lk-disc-count {
+  font-family: inherit;
+  font-size: 0.66rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-text-soft);
+  background: color-mix(in srgb, var(--t-neutral-fg) 10%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.lk-disc-summary {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.76rem;
+  color: var(--t-text-dim);
+}
+
+.lk-disc-chev {
+  flex-shrink: 0;
+  color: var(--t-text-dim);
+  transition: transform var(--lk-ease), color var(--lk-fast);
+}
+
+.lk-disc-toggle:hover .lk-disc-chev { color: var(--t-accent-text); }
+.lk-disc.is-open > .lk-disc-head .lk-disc-chev { transform: rotate(180deg); }
+
+.lk-disc-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+}
+
+/* Height animates 0 → content via grid rows; hidden content can't take focus. */
+.lk-disc-panel {
+  display: grid;
+  /* An explicit 0-min column: an implicit `auto` column would size to the
+     content's min-content (a nested auto-fit grid reports its widest
+     layout) and push it past the row. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition: grid-template-rows var(--lk-ease), visibility 0s linear 0.22s;
+}
+
+.lk-disc-panel[data-open='true'] {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition: grid-template-rows var(--lk-ease), visibility 0s linear 0s;
+}
+
+.lk-disc-inner {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Let focus rings breathe once open (clip margin where supported). */
+.lk-disc-panel[data-open='true'] > .lk-disc-inner {
+  overflow: clip;
+  overflow-clip-margin: 6px;
+}
+
+.lk-disc-content { padding: 2px 16px 16px; }
+
+/* card: a raised panel of its own */
+.lk-disc--card {
+  background: var(--t-panel-bg);
+  border: 1px solid var(--t-line);
+  border-radius: 12px;
+  box-shadow: var(--t-shadow-card);
+}
+
+.lk-disc--card > .lk-disc-head .lk-disc-toggle { padding: 13px 18px; border-radius: 11px; }
+.lk-disc--card > .lk-disc-panel .lk-disc-content { padding: 4px 18px 18px; }
+.lk-disc--card.is-open > .lk-disc-head { border-bottom: 1px solid var(--t-line-soft); }
+.lk-disc--card.is-open > .lk-disc-head .lk-disc-toggle { border-radius: 11px 11px 0 0; }
+.lk-disc--card.is-open > .lk-disc-panel .lk-disc-content { padding-top: 16px; }
+
+/* row: hairline-divided rows inside a panel the page already has */
+.lk-disc--row + .lk-disc--row { border-top: 1px solid var(--t-line-soft); }
+.lk-disc--row > .lk-disc-head .lk-disc-toggle { padding: 12px 18px; border-radius: 0; }
+.lk-disc--row > .lk-disc-panel .lk-disc-content { padding: 2px 18px 18px; }
+
+/* bare: a quiet text toggle, no chrome */
+.lk-disc--bare > .lk-disc-head .lk-disc-toggle {
+  width: auto;
+  padding: 4px 0;
+  border-radius: 4px;
+  color: var(--t-accent-text);
+}
+
+.lk-disc--bare > .lk-disc-head .lk-disc-toggle:hover { background: none; color: var(--t-accent-text-hover); }
+.lk-disc--bare > .lk-disc-head .lk-disc-toggle:focus-visible { outline-offset: 2px; }
+.lk-disc--bare .lk-disc-title { font-family: inherit; font-size: 0.76rem; color: inherit; }
+.lk-disc--bare .lk-disc-chev { color: inherit; }
+.lk-disc--bare > .lk-disc-panel .lk-disc-content { padding: 6px 0 2px; }
+
+/* ─── Show more ─────────────────────────────────────────────────────────── */
+
+.lk-more {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--t-accent-text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lk-more:hover { color: var(--t-accent-text-hover); text-decoration: underline; text-underline-offset: 3px; }
+.lk-more:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
+.lk-more-chev { flex-shrink: 0; transition: transform var(--lk-ease); }
+.lk-more.is-open .lk-more-chev { transform: rotate(180deg); }
+
+.lk-more--bar {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 10px 16px;
+  border-top: 1px solid var(--t-line-soft);
+  border-radius: 0;
+}
+
+.lk-more--bar:hover { background: var(--t-tint-hover); text-decoration: none; }
+.lk-more--bar:focus-visible { outline-offset: -2px; }
+
+/* ─── Clamped text ──────────────────────────────────────────────────────── */
+
+.lk-clamp { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.lk-clamp-text { align-self: stretch; min-width: 0; }
+
+.lk-clamp-text[data-clamped='true'] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--lk-lines, 4);
+  line-clamp: var(--lk-lines, 4);
+  overflow: hidden;
+}
+
+/* ─── Balanced grid · columns · followers · caps · scroll areas ────────── */
+
+.lk-grid-host {
+  container-type: inline-size;
+  container-name: lkgrid;
+  min-width: 0;
+}
+
+.lk-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--lk-gap);
+}
+
+@container lkgrid (min-width: 560px) {
+  .lk-stack-sm > .lk-grid { grid-template-columns: var(--lk-cols, repeat(2, minmax(0, 1fr))); --lk-follow: size; --lk-follow-flex: 1 1 0; }
+}
+
+@container lkgrid (min-width: 760px) {
+  .lk-stack-md > .lk-grid { grid-template-columns: var(--lk-cols, repeat(2, minmax(0, 1fr))); --lk-follow: size; --lk-follow-flex: 1 1 0; }
+}
+
+@container lkgrid (min-width: 960px) {
+  .lk-stack-lg > .lk-grid { grid-template-columns: var(--lk-cols, repeat(2, minmax(0, 1fr))); --lk-follow: size; --lk-follow-flex: 1 1 0; }
+}
+
+/* A cell holding several cards, stacked; the row height is shared out. */
+.lk-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lk-gap);
+  min-width: 0;
+  min-height: 0;
+}
+
+.lk-col > .lk-grow { flex: 1 1 auto; }
+
+/* A card whose height follows its row. `--lk-follow` is `size` (and
+   `--lk-follow-flex` is `1 1 0`) only where a layout is side by side
+   (BalancedGrid sets both; a page grid sets them in its own multi-column
+   query) — stacked, the card is its natural height. */
+.lk-follow {
+  contain: var(--lk-follow, none);
+  contain-intrinsic-block-size: var(--lk-follow-min);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Shares out the row's height only side by side; stacked, a `1 1 0` basis
+   would collapse the card in a column whose height is its content. */
+.lk-col > .lk-follow { flex: var(--lk-follow-flex, 0 0 auto); }
+
+/* The scrolling part of a bounded pane / follower card. */
+.lk-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: var(--lk-scroll-max, none);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.lk-scroll:focus-visible { outline: 2px solid var(--t-focus); outline-offset: -2px; }
+
+/* A capped body: scrolls past --lk-cap. */
+.lk-cap {
+  max-height: var(--lk-cap, var(--lk-card-cap));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ─── Master–detail ─────────────────────────────────────────────────────── */
+
+.lk-md-host {
+  container-type: inline-size;
+  container-name: lkmd;
+  min-width: 0;
+}
+
+.lk-md {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--lk-gap);
+}
+
+.lk-md-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+@container lkmd (min-width: 720px) {
+  .lk-md {
+    grid-template-columns: var(--lk-md-list, minmax(280px, 360px)) minmax(0, 1fr);
+    height: max(var(--lk-md-min, 460px), calc(100vh - var(--lk-md-top, 240px) - var(--lk-md-bottom, 24px)));
+    height: max(var(--lk-md-min, 460px), calc(100dvh - var(--lk-md-top, 240px) - var(--lk-md-bottom, 24px)));
+  }
+}
+
+@container lkmd (max-width: 719.98px) {
+  .lk-md-list .lk-scroll { max-height: var(--lk-md-list-max, min(50vh, 440px)); }
+}
+
+/* ─── Compact page header ───────────────────────────────────────────────── */
+
+.lk-head-host {
+  container-type: inline-size;
+  container-name: lkhead;
+  min-width: 0;
+}
+
+.lk-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 32px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--t-line);
+}
+
+.lk-head-id { flex: 1 1 340px; min-width: 0; }
+
+.lk-head-crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 6px;
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t-text-dim);
+  white-space: nowrap;
+}
+
+.lk-head-crumb::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 1px;
+  background: var(--t-accent-line);
+}
+
+.lk-head-titlerow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+}
+
+.lk-head-title {
+  margin: 0;
+  font-family: var(--lk-display);
+  font-size: clamp(1.22rem, 1.7vw, 1.42rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.022em;
+  color: var(--t-text);
+}
+
+/* At most two lines (clamped; the full text stays in the DOM). */
+.lk-head-sub {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  margin: 4px 0 0;
+  max-width: 72ch;
+  overflow: hidden;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--t-text-soft);
+}
+
+.lk-head-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px 22px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.lk-head-tools,
+.lk-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+}
+
+.lk-stats {
+  display: flex;
+  align-items: stretch;
+  margin: 0;
+}
+
+.lk-stat {
+  display: flex;
+  flex-direction: column-reverse;   /* figure over label; read "Label value" */
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 0 16px;
+}
+
+.lk-stat:first-child { padding-left: 0; }
+.lk-stat:last-child { padding-right: 0; }
+.lk-stat + .lk-stat { border-left: 1px solid var(--t-line); }
+
+.lk-stat dt {
+  font-size: 0.57rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t-text-dim);
+  white-space: nowrap;
+}
+
+.lk-stat dd {
+  margin: 0;
+  font-family: var(--lk-display);
+  font-size: 1.12rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-text);
+  white-space: nowrap;
+}
+
+@container lkhead (max-width: 760px) {
+  .lk-head { gap: 12px 20px; }
+  .lk-head-side { justify-content: flex-start; width: 100%; }
+  .lk-stat { align-items: flex-start; }
+}
+
+@container lkhead (max-width: 420px) {
+  .lk-head-tools,
+  .lk-head-actions { width: 100%; }
+  .lk-stats { width: 100%; justify-content: space-between; }
+  .lk-stat { flex: 1 1 0; padding: 0 10px; }
+  .lk-stat:first-child { padding-left: 0; }
+  .lk-stat dt { white-space: normal; }
+
+  /* Four or more figures: two per row instead of one row wider than a phone. */
+  .lk-stats:has(> .lk-stat:nth-child(4)) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+  .lk-stats:has(> .lk-stat:nth-child(4)) > .lk-stat:nth-child(odd) {
+    padding-left: 0;
+    border-left: none;
+  }
+}
+
+/* ─── Reduced motion ────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .lk-disc-panel,
+  .lk-disc-panel[data-open='true'],
+  .lk-disc-chev,
+  .lk-disc-toggle,
+  .lk-more-chev {
+    transition: none;
+  }
+}

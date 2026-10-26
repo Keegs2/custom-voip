@@ -12,10 +12,18 @@
  * the granite DashboardHeader with the "Viewing" scope dropdown in it,
  * card-styled panels, the dashboard numbers table, the brand blue family.
  *
- *   ┌ Granite header: Administrative Call Forwarding Console   [Viewing ▾] [Open dashboard] ┐
- *   │ Remote call forwarding · Staff        42 forwards · 40 forwarding · 2 paused           │
- *   [ Numbers | Call activity | DID management ]                 (segmented tab rail)
- *   ┌ Numbers card: search · area code · table (sortable) · rows → RowEditor · paging ┐
+ *   ┌ Granite header (one row): Remote call forwarding [Staff]                       ┐
+ *   │ Administrative Call Forwarding Console              [Viewing ▾] [Open dashboard] │
+ *   │ Viewing All customers                                                            │
+ *   [ Numbers | Call activity | DID management ]          42 FORWARDS | 40 | 2 PAUSED
+ *     (segmented tab rail; the view's figures on the same row, right)
+ *   ┌ Numbers card: title · search · area code (one row) · table (sortable, heads sticky,
+ *   │ rows → RowEditor) · paging pinned in the footer — ends at the bottom of the screen ┐
+ *
+ * Layout (docker/ui/CLAUDE.md §20): the Numbers card is bounded to the first
+ * screen (useViewportFit) and scrolls inside, so search, sort, paging and an
+ * open editor stay on screen at 100 rows; Call activity caps its call log and
+ * DID management its tables (each "Show all" opens inside a capped scroll).
  *
  * Scope (admins) lives in the URL: `?customer=all` or `?customer=<id>`;
  * absent = nothing chosen yet (nothing loads). The dashboard and its links
@@ -25,6 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LayoutDashboard } from 'lucide-react';
+import { useViewportFit } from '../components/layout/kit';
 import { listRcf } from '../api/rcf';
 import type { RcfEntry } from '../types/rcf';
 import { useAuth } from '../contexts/AuthContext';
@@ -127,7 +136,7 @@ function RcfConsole() {
     [setParams],
   );
 
-  // Figures for the header come from the Numbers body (it owns the query).
+  // Figures beside the tab rail come from the Numbers body (it owns the query).
   const [figures, setFigures] = useState<ConsoleFigures | null>(null);
 
   // ── Derived (after all hooks) ──
@@ -178,17 +187,20 @@ function RcfConsole() {
             ) : undefined
           }
           secondary={secondary}
-        >
-          {scopeReady && <HeaderFigures figures={figures} />}
-        </DashboardHeader>
+        />
 
         {!scopeReady ? (
           <ScopePrompt message="Select a customer to view their call forwarding numbers" />
         ) : (
           <>
-            <ConsoleTabs active={activeTab} onChange={setActiveTab} />
+            {/* The tab rail and the view's figures share one row, so the
+                granite band above stays one row (identity | picker). */}
+            <div className="rcfc-railrow">
+              <ConsoleTabs active={activeTab} onChange={setActiveTab} />
+              <HeaderFigures figures={figures} />
+            </div>
 
-            {/* Numbers stays mounted (hidden) so its figures feed the header
+            {/* Numbers stays mounted (hidden) so its figures feed the rail
                 on every tab; keyed per scope so search/sort/paging reset. */}
             <div hidden={activeTab !== 'numbers'} role="tabpanel" id="rcfc-panel-numbers" aria-labelledby="rcfc-tab-numbers">
               <NumbersPanel
@@ -231,7 +243,7 @@ function RcfConsole() {
   );
 }
 
-// ─── Header figures ───────────────────────────────────────────────────────────
+// ─── View figures (beside the tab rail) ───────────────────────────────────────
 
 interface ConsoleFigures {
   total: number;
@@ -241,16 +253,21 @@ interface ConsoleFigures {
   capped: boolean;
 }
 
+/** Figure over label, hairline-divided — the kit's header-stats look, beside the tab rail. */
 function HeaderFigures({ figures }: { figures: ConsoleFigures | null }) {
-  const items: { label: string; value: string }[] = [
-    { label: figures?.capped ? 'Forwards (first 100)' : 'Forwards', value: figures ? figures.total.toLocaleString() : '—' },
+  const items: { label: string; value: string; title?: string }[] = [
+    {
+      label: 'Forwards',
+      value: figures ? `${figures.total.toLocaleString()}${figures.capped ? '+' : ''}` : '—',
+      title: figures?.capped ? 'The list shows the first 100' : undefined,
+    },
     { label: 'Forwarding', value: figures ? figures.forwarding.toLocaleString() : '—' },
     { label: 'Paused', value: figures ? figures.paused.toLocaleString() : '—' },
   ];
   return (
     <dl className="rcfc-figures" aria-label="Numbers in this view">
       {items.map((f) => (
-        <div key={f.label}>
+        <div key={f.label} title={f.title}>
           <dt>{f.label}</dt>
           <dd>{f.value}</dd>
         </div>
@@ -376,6 +393,11 @@ function NumbersPanel({ customerId, showCustomer, isAdmin, canEdit, onFigures }:
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [npaFilter, setNpaFilter] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  // The card ends at the bottom of the first screen (--lk-md-top on the
+  // wrapper, rcf-dashboard.css `.rcfc-fit`); its table scrolls inside.
+  const fitRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useViewportFit(fitRef);
 
   // GET /rcf ignores limit/offset and returns at most 100 rows, so the list
   // is fetched once per scope and paged here in the browser.
@@ -433,6 +455,11 @@ function NumbersPanel({ customerId, showCustomer, isAdmin, canEdit, onFigures }:
   const filtersActive = searchQuery !== '' || npaFilter.length === 3;
   const colCount = showCustomer ? 6 : 5; // incl. the chevron column
 
+  /** A new page / filter starts at the top of the list. */
+  function toTop() {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }
+
   function handleSearchInput(value: string) {
     setSearchInput(value);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
@@ -440,6 +467,7 @@ function NumbersPanel({ customerId, showCustomer, isAdmin, canEdit, onFigures }:
       setSearchQuery(value.trim());
       setPage(1);
       setExpandedId(null);
+      toTop();
     }, 250);
   }
 
@@ -448,6 +476,7 @@ function NumbersPanel({ customerId, showCustomer, isAdmin, canEdit, onFigures }:
     setSearchQuery('');
     setNpaFilter('');
     setPage(1);
+    toTop();
   }
 
   function handleSort(field: SortField) {
@@ -478,113 +507,120 @@ function NumbersPanel({ customerId, showCustomer, isAdmin, canEdit, onFigures }:
             onPageChange={(p) => {
               setPage(p);
               setExpandedId(null);
+              toTop();
             }}
             onPageSizeChange={(size) => {
               setPageSize(size);
               setPage(1);
               setExpandedId(null);
+              toTop();
             }}
           />
         ) : null}
       </div>
     ) : undefined;
 
-  return (
-    <Card
-      id="rcfc-numbers"
-      title="Numbers"
-      count={data ? rawEntries.length : null}
-      sub={canEdit ? 'Select a number to change where it rings.' : 'Select a number to see its settings.'}
-      className="rcfc-card"
-      order={2}
-      footer={footer}
-    >
-      {data && rawEntries.length > 0 && (
-        <div className="ad-toolbar">
-          <label className="ad-search">
-            <span className="ad-visually-hidden">Search numbers</span>
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-              <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <input
-              type="search"
-              value={searchInput}
-              onChange={(e) => handleSearchInput(e.target.value)}
-              placeholder={showCustomer ? 'Search number, label, destination or customer' : 'Search number, label or destination'}
-            />
-          </label>
-          <label className="rcfc-npa">
-            <span>Area code</span>
-            <input
-              type="text"
-              value={npaFilter}
-              onChange={(e) => {
-                setNpaFilter(e.target.value.replace(/\D/g, '').slice(0, 3));
-                setPage(1);
-                setExpandedId(null);
-              }}
-              placeholder="617"
-              maxLength={3}
-              inputMode="numeric"
-              className={npaFilter.length === 3 ? 'rcfc-npa-on' : undefined}
-            />
-          </label>
-          {filtersActive && (
-            <button type="button" className="ad-linkbtn" onClick={clearFilters}>
-              Clear filters
-            </button>
-          )}
-        </div>
-      )}
-
-      {isLoading ? (
-        <CardState kind="loading">Loading numbers…</CardState>
-      ) : isError ? (
-        <CardState kind="error" onRetry={() => void refetch()}>We couldn’t load the numbers.</CardState>
-      ) : rawEntries.length === 0 ? (
-        <div className="ad-empty">
-          <p className="ad-empty-title">No call forwarding numbers here yet</p>
-          <p className="ad-empty-sub">Numbers appear once they’re assigned to the account in the number inventory.</p>
-        </div>
-      ) : sortedEntries.length === 0 ? (
-        <div className="ad-empty">
-          <p className="ad-empty-title">{searchQuery ? `No numbers match “${searchQuery}”` : 'No numbers in this area code'}</p>
-          <button type="button" className="ad-btn ad-btn-quiet" onClick={clearFilters}>
-            Clear search and filters
+  const toolbar =
+    data && rawEntries.length > 0 ? (
+      <div className="rcfc-toolbar">
+        <label className="ad-search">
+          <span className="ad-visually-hidden">Search numbers</span>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <path d="m19 19-4.35-4.35M15 9A6 6 0 1 1 3 9a6 6 0 0 1 12 0Z" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => handleSearchInput(e.target.value)}
+            placeholder={showCustomer ? 'Search number, label, destination or customer' : 'Search number, label or destination'}
+          />
+        </label>
+        <label className="rcfc-npa">
+          <span>Area code</span>
+          <input
+            type="text"
+            value={npaFilter}
+            onChange={(e) => {
+              setNpaFilter(e.target.value.replace(/\D/g, '').slice(0, 3));
+              setPage(1);
+              setExpandedId(null);
+              toTop();
+            }}
+            placeholder="617"
+            maxLength={3}
+            inputMode="numeric"
+            className={npaFilter.length === 3 ? 'rcfc-npa-on' : undefined}
+          />
+        </label>
+        {filtersActive && (
+          <button type="button" className="ad-linkbtn" onClick={clearFilters}>
+            Clear filters
           </button>
-        </div>
-      ) : (
-        <div className="ad-tablewrap">
-          <table className={`ad-table rcfc-table${showCustomer ? ' rcfc-table-cust' : ''}`}>
-            <thead>
-              <tr>
-                <SortHeader label="Number" field="did" {...sortProps} />
-                <SortHeader label="Forwards to" field="forward_to" {...sortProps} />
-                <SortHeader label="Label" field="name" className="rcfc-col-label" {...sortProps} />
-                <SortHeader label="Status" field="status" {...sortProps} />
-                {showCustomer && <SortHeader label="Customer" field="customer" {...sortProps} />}
-                <th scope="col" className="ad-col-chev"><span className="ad-visually-hidden">Details</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageRows.map((entry) => (
-                <NumberRow
-                  key={entry.id}
-                  entry={entry}
-                  showCustomer={showCustomer}
-                  isAdmin={isAdmin}
-                  canEdit={canEdit}
-                  colCount={colCount}
-                  expanded={expandedId === entry.id}
-                  onToggle={() => setExpandedId((cur) => (cur === entry.id ? null : entry.id))}
-                  onCollapse={() => setExpandedId(null)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Card>
+        )}
+      </div>
+    ) : undefined;
+
+  return (
+    <div ref={fitRef} className="rcfc-fit">
+      <Card
+        id="rcfc-numbers"
+        title="Numbers"
+        count={data ? rawEntries.length : null}
+        sub={canEdit ? 'Select a number to change where it rings.' : 'Select a number to see its settings.'}
+        className="rcfc-card"
+        order={2}
+        action={toolbar}
+        footer={footer}
+      >
+        {isLoading ? (
+          <CardState kind="loading">Loading numbers…</CardState>
+        ) : isError ? (
+          <CardState kind="error" onRetry={() => void refetch()}>We couldn’t load the numbers.</CardState>
+        ) : rawEntries.length === 0 ? (
+          <div className="ad-empty">
+            <p className="ad-empty-title">No call forwarding numbers here yet</p>
+            <p className="ad-empty-sub">Numbers appear once they’re assigned to the account in the number inventory.</p>
+          </div>
+        ) : sortedEntries.length === 0 ? (
+          <div className="ad-empty">
+            <p className="ad-empty-title">{searchQuery ? `No numbers match “${searchQuery}”` : 'No numbers in this area code'}</p>
+            <button type="button" className="ad-btn ad-btn-quiet" onClick={clearFilters}>
+              Clear search and filters
+            </button>
+          </div>
+        ) : (
+          <div ref={scrollRef} className="ad-tablewrap rcfc-tablewrap">
+            <table className={`ad-table rcfc-table${showCustomer ? ' rcfc-table-cust' : ''}`}>
+              <thead>
+                <tr>
+                  <SortHeader label="Number" field="did" {...sortProps} />
+                  <SortHeader label="Forwards to" field="forward_to" {...sortProps} />
+                  <SortHeader label="Label" field="name" className="rcfc-col-label" {...sortProps} />
+                  <SortHeader label="Status" field="status" {...sortProps} />
+                  {showCustomer && <SortHeader label="Customer" field="customer" {...sortProps} />}
+                  <th scope="col" className="ad-col-chev"><span className="ad-visually-hidden">Details</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((entry) => (
+                  <NumberRow
+                    key={entry.id}
+                    entry={entry}
+                    showCustomer={showCustomer}
+                    isAdmin={isAdmin}
+                    canEdit={canEdit}
+                    colCount={colCount}
+                    expanded={expandedId === entry.id}
+                    onToggle={() => setExpandedId((cur) => (cur === entry.id ? null : entry.id))}
+                    onCollapse={() => setExpandedId(null)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 
@@ -631,6 +667,13 @@ interface NumberRowProps {
 }
 
 function NumberRow({ entry, showCustomer, isAdmin, canEdit, colCount, expanded, onToggle, onCollapse }: NumberRowProps) {
+  // ALL hooks unconditionally at the top (React #310).
+  const editorRef = useRef<HTMLTableRowElement>(null);
+  // An opened editor brings itself into view inside the card's scroll.
+  useEffect(() => {
+    if (expanded) editorRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [expanded]);
+
   const editorId = `rcfc-editor-${entry.id}`;
   return (
     <>
@@ -661,7 +704,7 @@ function NumberRow({ entry, showCustomer, isAdmin, canEdit, colCount, expanded, 
           <span className="ad-stack">
             <span className="ad-num ad-num-dest">{fmt(entry.forward_to)}</span>
             <span className="ad-faint">
-              {entry.failover_to ? `Failover ${fmt(entry.failover_to)}` : `Rings ${entry.ring_timeout}s`}
+              {`Rings ${entry.ring_timeout}s`}
             </span>
           </span>
         </td>
@@ -686,7 +729,7 @@ function NumberRow({ entry, showCustomer, isAdmin, canEdit, colCount, expanded, 
         </td>
       </tr>
       {expanded && (
-        <tr className="ad-editor-row">
+        <tr ref={editorRef} className="ad-editor-row">
           <td colSpan={colCount} id={editorId}>
             <div className="ad-editor rcf-xwrap">
               <div>

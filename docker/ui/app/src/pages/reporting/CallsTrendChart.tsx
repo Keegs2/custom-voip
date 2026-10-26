@@ -12,6 +12,13 @@
  *     dl-trend-chart.css), painted through `style` — never the fill=/stroke=
  *     attributes, which don't reliably resolve `var()`.
  *
+ * Height: fixed (250px) by default. With `fill` the chart takes the height
+ * its flex-column parent gives it (min 230px) — the Reporting page sets the
+ * summary card beside it as the row's leader and the chart follows, so the
+ * two cards end level (docker/ui/CLAUDE.md §20.3). The frame is absolutely
+ * positioned in that box, so the drawn SVG never feeds back into the row's
+ * height (no ratchet on resize).
+ *
  * Accessibility: the plot is one focusable element — Left/Right (and
  * Home/End) walk the buckets and the tooltip text is mirrored into a polite
  * live region; a visually-hidden table carries every value for screen
@@ -36,8 +43,10 @@ const PAD_L = 40;
 const PAD_R = 10;
 const PAD_T = 12;
 const PAD_B = 28;
+/** Default plot height (SVG 250px). */
 const PLOT_H = 210;
-const SVG_H = PAD_T + PLOT_H + PAD_B;
+/** `fill` mode never draws a plot shorter than this. */
+const MIN_PLOT_H = 150;
 const MIN_RENDER_WIDTH = 120;
 
 function niceIntStep(rough: number): number {
@@ -80,12 +89,15 @@ function bucketLabels(bucket: TrendBucket, multiYear: boolean): Labels {
 interface CallsTrendChartProps {
   bucket: TrendBucket;
   points: ReportTrendPoint[];
+  /** Take the parent's height (a flex column) instead of the fixed 250px. */
+  fill?: boolean;
 }
 
-export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
+export function CallsTrendChart({ bucket, points, fill = false }: CallsTrendChartProps) {
   // ALL hooks unconditionally at the top (React #310 prevention).
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
+  const [boxHeight, setBoxHeight] = useState(0);
   const [active, setActive] = useState<number | null>(null);
 
   useEffect(() => {
@@ -93,13 +105,20 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const next = Math.round(entry.contentRect.width);
-        setWidth((prev) => (prev === next ? prev : next));
+        const nextW = Math.round(entry.contentRect.width);
+        const nextH = Math.round(entry.contentRect.height);
+        setWidth((prev) => (prev === nextW ? prev : nextW));
+        setBoxHeight((prev) => (prev === nextH ? prev : nextH));
       }
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  // Plot height: fixed, or whatever the box was given (fill mode).
+  const plotH = fill && boxHeight > 0 ? Math.max(MIN_PLOT_H, boxHeight - PAD_T - PAD_B) : PLOT_H;
+  const svgH = PAD_T + plotH + PAD_B;
+  const boxClass = fill ? 'rpt-chart-box rpt-chart-box-fill' : 'rpt-chart-box';
 
   const n = points.length;
   const multiYear = n > 1 && points[0].date.slice(0, 4) !== points[n - 1].date.slice(0, 4);
@@ -114,14 +133,14 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
     for (let t = 0; t <= top; t += step) ticks.push(t);
     const slot = n > 0 ? plotW / n : plotW;
     const barW = clamp(slot * 0.68, 2, 40);
-    const yFor = (v: number) => PAD_T + PLOT_H - (v / top) * PLOT_H;
+    const yFor = (v: number) => PAD_T + plotH - (v / top) * plotH;
     const xCenter = (i: number) => PAD_L + slot * (i + 0.5);
     const maxLabels = clamp(Math.floor(plotW / 78), 2, 7);
     const every = Math.max(1, Math.ceil(n / maxLabels));
     const labelIdx: number[] = [];
     for (let i = 0; i < n; i += every) labelIdx.push(i);
     return { plotW, top, ticks, slot, barW, yFor, xCenter, labelIdx };
-  }, [points, width, n]);
+  }, [points, width, n, plotH]);
 
   const hasCalls = points.some((p) => p.calls > 0);
   const measured = width >= MIN_RENDER_WIDTH;
@@ -161,8 +180,8 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
 
   if (n === 0 || !hasCalls) {
     return (
-      <div ref={boxRef}>
-        <div className="dl-qtc-empty" style={{ height: 180 }}>
+      <div ref={boxRef} className={boxClass}>
+        <div className="dl-qtc-empty" style={{ height: fill ? '100%' : 180 }}>
           No calls in this period yet — this chart fills in as calls come in.
         </div>
       </div>
@@ -175,13 +194,13 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
   const tipBelow = tipTop < PAD_T + 96;
 
   return (
-    <div ref={boxRef}>
-      <div className="dl-qtc-frame" style={{ height: SVG_H }}>
+    <div ref={boxRef} className={boxClass}>
+      <div className="dl-qtc-frame" style={{ height: svgH }}>
         {measured && (
           <svg
             className="dl-qtc-svg rpt-chart-svg"
             width={width}
-            height={SVG_H}
+            height={svgH}
             role="group"
             tabIndex={0}
             aria-label={`Calls per ${bucketNoun}, answered and missed. Use the left and right arrow keys to read each ${bucketNoun}.`}
@@ -207,7 +226,7 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
                 x={PAD_L + geom.slot * active}
                 y={PAD_T}
                 width={geom.slot}
-                height={PLOT_H}
+                height={plotH}
                 style={{ fill: HOVER_BAND }}
                 rx={4}
               />
@@ -218,7 +237,7 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
               const x = geom.xCenter(i) - geom.barW / 2;
               const answeredTop = geom.yFor(p.answered);
               const totalTop = geom.yFor(p.answered + p.missed);
-              const base = PAD_T + PLOT_H;
+              const base = PAD_T + plotH;
               const radius = Math.min(3, geom.barW / 3);
               return (
                 <g key={p.date} aria-hidden="true">
@@ -240,7 +259,7 @@ export function CallsTrendChart({ bucket, points }: CallsTrendChartProps) {
                 <text
                   key={points[i].date}
                   x={nearRight ? width - 2 : x}
-                  y={SVG_H - 8}
+                  y={svgH - 8}
                   textAnchor={nearRight ? 'end' : nearLeft ? 'start' : 'middle'}
                   fontSize={11}
                   style={{ fill: INK_TICK }}

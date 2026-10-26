@@ -3,23 +3,33 @@
  * Components only (react-refresh friendly) — formatting lives in reportFormat.ts.
  */
 import type { ReactNode } from 'react';
-import { Check, ChevronDown, HelpCircle, X } from 'lucide-react';
+import { Check, HelpCircle, X } from 'lucide-react';
+import { Disclosure } from '../../components/layout/kit';
 import { ApiError } from '../../api/client';
 import type { CallOutcome, QualityGrade } from '../../types/reports';
 import { GRADE_TONE, GRADE_WORD } from './reportFormat';
 import { T } from '../../styles/theme';
 
-/** "What does this mean?" — a native <details>, so Enter/Space toggle it for free. */
+/**
+ * "What does this mean?" — the kit's quiet text disclosure (docker/ui/CLAUDE.md
+ * §20.4: explainers collapse by default). A real button in a heading under the
+ * card's h2, aria-expanded/-controls; closed content is hidden from focus and
+ * screen readers until opened.
+ */
 export function Explainer({ children, label = 'What does this mean?' }: { children: ReactNode; label?: string }) {
   return (
-    <details className="rpt-explain">
-      <summary>
-        <HelpCircle size={13} aria-hidden="true" />
-        {label}
-        <ChevronDown size={13} className="rpt-explain-chev" aria-hidden="true" />
-      </summary>
+    <Disclosure
+      variant="bare"
+      className="rpt-explain"
+      title={
+        <>
+          <HelpCircle size={13} aria-hidden="true" />
+          {label}
+        </>
+      }
+    >
       <div className="rpt-explain-body">{children}</div>
-    </details>
+    </Disclosure>
   );
 }
 

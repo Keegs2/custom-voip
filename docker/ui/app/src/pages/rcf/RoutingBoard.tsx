@@ -3,7 +3,7 @@
  * how busy it was this week, and whether it's forwarding.
  *
  *   +1 (217) 352-8498 ━━━━━━━━━━━━━━━━━━━━━ +1 (949) 614-7510   24 calls   ● Forwarding  ⌄
- *   Boston office                            Failover +1 (949)…  96% answered
+ *   Boston office                            Rings for 30s       96% answered
  *
  * Clicking (or Enter/Space on) a row opens the shared RowEditor inline under
  * it — the same editor, mutations and readonly gating the console has
@@ -13,11 +13,20 @@
  * client-side over the full list (GET /rcf returns the whole account in one
  * response). The connector "filament" is azure and faintly lit when the
  * number forwards, dashed slate when paused — status is always also a word.
+ *
+ * Layout (docker/ui/CLAUDE.md §20): ONE toolbar row (search · chips · sort)
+ * and the "first 100" notice on top, the pager pinned at the bottom, and the
+ * rows scrolling between them (column heads sticky). On a wide enough board
+ * the panel ends 24px above the bottom of the first screen
+ * (`useViewportFit`), so search, filters, paging and an open editor are
+ * always on screen at 100+ numbers; on a phone the board is its natural
+ * height. An opened row scrolls itself into view; paging returns to the top.
  */
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { RcfEntry } from '../../types/rcf';
 import { fmt } from '../../utils/format';
 import { Spinner } from '../../components/ui/Spinner';
+import { useViewportFit } from '../../components/layout/kit';
 import { RowEditor } from './RowEditor';
 import { PaginationControls } from './PaginationControls';
 import { DEFAULT_PAGE_SIZE } from './theme';
@@ -134,10 +143,19 @@ function WeekFigures({ stats, did }: { stats: NumberStats; did: string }) {
 }
 
 function RouteRow({ entry, index, stats, open, canEdit, onToggle, onClose }: RouteRowProps) {
+  // ALL hooks unconditionally at the top (React #310).
+  const rowRef = useRef<HTMLLIElement>(null);
+  // An opened row brings its editor into view inside the board's scroll
+  // (the editor may open below the fold of a bounded list).
+  useEffect(() => {
+    if (open) rowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [open]);
+
   const state = entry.enabled ? 'on' : 'off';
   const editorId = `rcfd-editor-${entry.id}`;
   return (
     <li
+      ref={rowRef}
       className={`rcfd-route rcfd-route-${state}${open ? ' rcfd-route-open' : ''}`}
       style={{ '--i': Math.min(index, 14) } as CSSProperties}
     >
@@ -179,7 +197,8 @@ function RouteRow({ entry, index, stats, open, canEdit, onToggle, onClose }: Rou
         <span className="rcfd-route-to">
           <span className="rcfd-num rcfd-num-dest">{fmt(entry.forward_to)}</span>
           <span className="rcfd-route-label">
-            {entry.failover_to ? `Failover ${fmt(entry.failover_to)}` : `Rings for ${entry.ring_timeout}s`}
+            {/* Never the failover number: routing doesn't use failover_to yet (RowEditor says so). */}
+            {`Rings for ${entry.ring_timeout}s`}
           </span>
         </span>
 
@@ -226,6 +245,11 @@ export function RoutingBoard({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [openId, setOpenId] = useState<number | null>(null);
+  const boardRef = useRef<HTMLElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Writes --lk-md-top on the board, so CSS can end it at the bottom of the
+  // first screen (rcf-dashboard.css, `.rcfd-board-host`).
+  useViewportFit(boardRef);
   // The filaments "light up" once, on the first render that has rows. Rows
   // that mount later (paging, filtering) appear already lit.
   const [intro, setIntro] = useState<'pending' | 'playing' | 'done'>('pending');
@@ -255,10 +279,17 @@ export function RoutingBoard({
   const safePage = Math.min(page, totalPages);
   const pageRows = visible.slice((safePage - 1) * pageSize, safePage * pageSize);
   const filtersActive = search.trim() !== '' || filter !== 'all';
+  const showRows = !loading && !error && entries.length > 0 && visible.length > 0;
+
+  /** A new page / filter starts at the top of the list. */
+  function toTop(): void {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }
 
   function resetPaging(): void {
     setPage(1);
     setOpenId(null);
+    toTop();
   }
 
   function clearFilters(): void {
@@ -274,16 +305,14 @@ export function RoutingBoard({
   ];
 
   return (
-    <section className="rcfd-panel rcfd-board" aria-labelledby="rcfd-board-title">
-      <header className="rcfd-board-head">
-        <div className="rcfd-board-titles">
-          <h2 id="rcfd-board-title" className="rcfd-panel-title">Your numbers</h2>
-          <p className="rcfd-panel-sub">
-            {canEdit ? 'Select a number to change where it rings.' : 'Select a number to see its settings.'}
-          </p>
-        </div>
+    <div className="rcfd-board-host">
+      <section ref={boardRef} className="rcfd-panel rcfd-board" aria-labelledby="rcfd-board-title">
+        <h2 id="rcfd-board-title" className="rcfd-visually-hidden">
+          Your numbers
+        </h2>
 
-        <div className="rcfd-board-tools">
+        {/* One toolbar row: search · show · sort. */}
+        <div className="rcfd-board-bar">
           <label className="rcfd-search">
             <span className="rcfd-visually-hidden">Search numbers</span>
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
@@ -335,71 +364,84 @@ export function RoutingBoard({
             </select>
           </label>
         </div>
-      </header>
 
-      {loading ? (
-        <div className="rcfd-state">
-          <Spinner size="sm" />
-          <span>Loading your numbers…</span>
-        </div>
-      ) : error ? (
-        <div className="rcfd-state rcfd-state-error" role="alert">
-          <span>We couldn’t load your numbers.</span>
-          <button type="button" className="rcfd-btn rcfd-btn-quiet" onClick={onRetry}>
-            Try again
-          </button>
-        </div>
-      ) : entries.length === 0 ? (
-        <div className="rcfd-empty">
-          <p className="rcfd-empty-title">No numbers on this account yet</p>
-          <p className="rcfd-empty-sub">
-            {requestLabel
-              ? 'Request numbers and they’ll appear here once Granite assigns them.'
-              : 'Numbers appear here once Granite assigns them to your account.'}
+        {/* Never collapsed: the list is incomplete (GET /rcf returns 100 rows). */}
+        {partialOf !== null && !loading && !error && entries.length > 0 && (
+          <p className="rcfd-board-note" role="note">
+            Showing the first {entries.length} of {partialOf.toLocaleString()} numbers on your account. Contact Granite
+            support to change a number that isn’t listed here.
           </p>
-          {requestLabel && (
-            <button type="button" className="rcfd-btn rcfd-btn-primary" onClick={onRequest}>
-              {requestLabel}
-            </button>
-          )}
-        </div>
-      ) : visible.length === 0 ? (
-        <div className="rcfd-empty">
-          <p className="rcfd-empty-title">
-            {search.trim() ? `No numbers match “${search.trim()}”` : 'No numbers in this view'}
-          </p>
-          <p className="rcfd-empty-sub">Try a different search or show all numbers.</p>
-          {filtersActive && (
-            <button type="button" className="rcfd-btn rcfd-btn-quiet" onClick={clearFilters}>
-              Clear search and filters
-            </button>
-          )}
-        </div>
-      ) : (
-        <>
-          <div className="rcfd-routes-cols" aria-hidden="true">
-            <span>Number</span>
-            <span />
-            <span>Forwards to</span>
-            <span>Last 7 days</span>
-            <span>Status</span>
-            <span />
+        )}
+
+        {loading ? (
+          <div className="rcfd-state">
+            <Spinner size="sm" />
+            <span>Loading your numbers…</span>
           </div>
-          <ul className={`rcfd-routes${intro === 'playing' ? ' rcfd-routes-intro' : ''}`}>
-            {pageRows.map((entry, i) => (
-              <RouteRow
-                key={entry.id}
-                entry={entry}
-                index={i}
-                stats={stats}
-                open={openId === entry.id}
-                canEdit={canEdit}
-                onToggle={() => setOpenId((cur) => (cur === entry.id ? null : entry.id))}
-                onClose={() => setOpenId(null)}
-              />
-            ))}
-          </ul>
-          {visible.length > 10 && (
+        ) : error ? (
+          <div className="rcfd-state rcfd-state-error" role="alert">
+            <span>We couldn’t load your numbers.</span>
+            <button type="button" className="rcfd-btn rcfd-btn-quiet" onClick={onRetry}>
+              Try again
+            </button>
+          </div>
+        ) : entries.length === 0 ? (
+          <div className="rcfd-empty">
+            <p className="rcfd-empty-title">No numbers on this account yet</p>
+            <p className="rcfd-empty-sub">
+              {requestLabel
+                ? 'Request numbers and they’ll appear here once Granite assigns them.'
+                : 'Numbers appear here once Granite assigns them to your account.'}
+            </p>
+            {requestLabel && (
+              <button type="button" className="rcfd-btn rcfd-btn-primary" onClick={onRequest}>
+                {requestLabel}
+              </button>
+            )}
+          </div>
+        ) : visible.length === 0 ? (
+          <div className="rcfd-empty">
+            <p className="rcfd-empty-title">
+              {search.trim() ? `No numbers match “${search.trim()}”` : 'No numbers in this view'}
+            </p>
+            <p className="rcfd-empty-sub">Try a different search or show all numbers.</p>
+            {filtersActive && (
+              <button type="button" className="rcfd-btn rcfd-btn-quiet" onClick={clearFilters}>
+                Clear search and filters
+              </button>
+            )}
+          </div>
+        ) : null}
+
+        {showRows && (
+          <div ref={scrollRef} className="rcfd-board-scroll">
+            <div className="rcfd-routes-cols" aria-hidden="true">
+              <span>Number</span>
+              <span />
+              <span>Forwards to</span>
+              <span>Last 7 days</span>
+              <span>Status</span>
+              <span />
+            </div>
+            <ul className={`rcfd-routes${intro === 'playing' ? ' rcfd-routes-intro' : ''}`}>
+              {pageRows.map((entry, i) => (
+                <RouteRow
+                  key={entry.id}
+                  entry={entry}
+                  index={i}
+                  stats={stats}
+                  open={openId === entry.id}
+                  canEdit={canEdit}
+                  onToggle={() => setOpenId((cur) => (cur === entry.id ? null : entry.id))}
+                  onClose={() => setOpenId(null)}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {showRows && visible.length > 10 && (
+          <div className="rcfd-board-pager">
             <PaginationControls
               currentPage={safePage}
               totalPages={totalPages}
@@ -408,21 +450,16 @@ export function RoutingBoard({
               onPageChange={(p) => {
                 setPage(p);
                 setOpenId(null);
+                toTop();
               }}
               onPageSizeChange={(size) => {
                 setPageSize(size);
                 resetPaging();
               }}
             />
-          )}
-          {partialOf !== null && (
-            <p className="rcfd-board-foot">
-              Showing the first {entries.length} of {partialOf.toLocaleString()} numbers on your account. Contact Granite
-              support to change a number that isn’t listed here.
-            </p>
-          )}
-        </>
-      )}
-    </section>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

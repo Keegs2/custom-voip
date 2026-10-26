@@ -7,7 +7,7 @@
  *   Number              Forwards to /           Last 7 days     Status
  *                       Where calls go
  *   +1 (217) 352-8498   +1 (949) 614-7510       24 calls        ● Forwarding        ⌄   rcf: RowEditor
- *   Boston office       Failover …              96% answered
+ *   Boston office       Rings 30s               96% answered
  *   +1 (508) 555-0100   Voicemail               3 calls         ● Taking messages   →   voicemail: link
  *   Voicemail           Callers leave a message
  *   +1 (617) 555-0202   Your phone system       —               ● Active                trunk: static
@@ -30,6 +30,11 @@
  * Staff (the admin dashboard's one-customer view) get the admin RowEditor
  * fields (e.g. max channels) via `isAdmin`, and the footer link goes to the
  * admin console scoped to the customer via `allHref`.
+ *
+ * Layout (docker/ui/CLAUDE.md §20): the first 8 matching rows; "Show all N"
+ * opens the rest INSIDE a scroll capped at the 8-row height (sticky column
+ * heads), so the card keeps the height of the Call volume + Call quality
+ * column beside it. A new filter or search collapses it again.
  */
 import { Fragment, useMemo, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -37,6 +42,7 @@ import { ArrowRight, Hash } from 'lucide-react';
 import { compareProducts, productInfo } from '../../config/products';
 import { fmt } from '../../utils/format';
 import { RowEditor } from '../rcf/RowEditor';
+import { ShowMoreButton, useShowMore } from '../../components/layout/kit';
 import { Card, CardState } from './Card';
 import { numberKey, type NumberRow, type NumberStats } from './accountData';
 
@@ -202,9 +208,10 @@ export function NumbersCard({
       .filter((r) => passes(r, filter) && matches(r, q, qDigits))
       .sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }));
   }, [allRows, search, filter]);
+  const more = useShowMore(visible, PREVIEW_ROWS, `${filter}|${search.trim()}`);
 
   // ── Derived (after all hooks) ──
-  const rows = visible.slice(0, PREVIEW_ROWS);
+  const rows = more.visible;
   const allCount = total ?? allRows.length;
   const filtersActive = search.trim() !== '' || filter !== 'all';
   const hasRcf = allRows.some((r) => r.product === 'rcf');
@@ -229,10 +236,13 @@ export function NumbersCard({
   const footer =
     allRows.length > 0 ? (
       <div className="ad-foot-split">
-        <span className="ad-faint">
-          {filtersActive
-            ? `${Math.min(rows.length, visible.length)} of ${visible.length.toLocaleString()} matching`
-            : `Showing ${rows.length} of ${allCount.toLocaleString()}`}
+        <span className="ad-foot-group">
+          <span className="ad-faint">
+            {filtersActive
+              ? `${Math.min(rows.length, visible.length)} of ${visible.length.toLocaleString()} matching`
+              : `Showing ${rows.length} of ${allCount.toLocaleString()}`}
+          </span>
+          {more.needed && <ShowMoreButton {...more.buttonProps} moreLabel={`Show all ${visible.length.toLocaleString()}`} />}
         </span>
         {footerLink}
       </div>
@@ -292,7 +302,7 @@ export function NumbersCard({
             <span className="ad-stack">
               <span className="ad-num ad-num-dest">{fmt(entry.forward_to)}</span>
               <span className="ad-faint">
-                {entry.failover_to ? `Failover ${fmt(entry.failover_to)}` : `Rings ${entry.ring_timeout}s`}
+                {`Rings ${entry.ring_timeout}s`}
               </span>
             </span>
           </td>
@@ -438,7 +448,7 @@ export function NumbersCard({
           </button>
         </div>
       ) : (
-        <div className="ad-tablewrap">
+        <div className={`ad-tablewrap${more.expanded ? ' ad-tablewrap-cap' : ''}`}>
           <table className="ad-table ad-numtable">
             <thead>
               <tr>
@@ -449,7 +459,7 @@ export function NumbersCard({
                 <th scope="col" className="ad-col-chev"><span className="ad-visually-hidden">Details</span></th>
               </tr>
             </thead>
-            <tbody>{rows.map((row) => (row.product === 'rcf' ? renderRcfRow(row) : renderOtherRow(row)))}</tbody>
+            <tbody id={more.listId}>{rows.map((row) => (row.product === 'rcf' ? renderRcfRow(row) : renderOtherRow(row)))}</tbody>
           </table>
         </div>
       )}

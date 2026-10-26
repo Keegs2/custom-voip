@@ -93,9 +93,28 @@ export interface ResolvedStirBadge {
   mode: string | null;
 }
 
-/** Tooltip phrasing shared by every badge site. */
+/** Tooltip phrasing shared by every badge site. STAFF wording — it names the
+ *  component that reported the outcome (fine for admin/support screens). */
 export const INTENT_ONLY_NOTE = 'intent, not confirmed on wire';
 export const ACTUAL_NOTE = 'confirmed on wire (Kamailio outcome)';
+
+/** Customer wording for the same two states. Tenants see the call-detail
+ *  modal, and customer copy never names internal components (public copy
+ *  rules), so these say what happened without saying which box did it. */
+export const CUSTOMER_ACTUAL_NOTE = 'Confirmed by our network';
+export const CUSTOMER_INTENT_NOTE = 'Requested by our network; not yet confirmed';
+
+/**
+ * The badge's confidence note for an audience. Staff keep the resolver's note
+ * as-is; customers get the generic wording. A badge with no source keeps the
+ * resolver's neutral "No attestation on record".
+ */
+export function badgeNoteFor(badge: ResolvedStirBadge, isStaff: boolean): string {
+  if (isStaff) return badge.note;
+  if (badge.source === 'actual') return CUSTOMER_ACTUAL_NOTE;
+  if (badge.source === 'intent') return CUSTOMER_INTENT_NOTE;
+  return badge.note;
+}
 
 /** `k=v;k=v` -> value of `key`, or null. Tolerates garbage. */
 export function outcomeToken(outcome: string | null | undefined, key: string): string | null {

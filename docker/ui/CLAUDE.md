@@ -427,6 +427,19 @@ switch remounts instead of changing hook order.
   `enabled` (`isHolisticNumbers`), the card + KPIs fall back to the `/rcf`
   entries. **Deploy the API first:** an older `/cdrs/activity` reads
   `product_type=all` literally (0 calls).
+- **Layout (§20):** KPIs in ONE row of six (≥ 980px of content); every
+  grid row one height — Numbers (8 rows, "Show all N" scrolls inside a
+  capped table with sticky heads) beside an `.ad-col` of Call volume
+  (absorbs slack) + Call quality; Recent calls beside Team (`follow`);
+  Busiest · Requests · Quick actions. Admin one-customer view (seven
+  quick actions): Recent calls beside Requests + Team (`follow`), then
+  Busiest beside two-column Quick actions (the requests card has no footer
+  button there — the header's "Manage numbers" opens the same overlay).
+  Admin All customers: Customers (first
+  5, "Show all") + Number requests (`follow`, two columns) beside Volume +
+  Quality; Recent calls beside Paused (`follow`); Inventory (tight rows)
+  beside two-column Quick actions. Below 1100px the columns dissolve
+  (`display: contents`, dense flow) and followers go natural.
 - `KpiCards` (`KpiRow`) — six cards. Account scope: Numbers (every product;
   with 2+ products the context line is the mix, "3 forwarding · 2 SIP trunk ·
   2 voicemail") · Forwarding (call forwarding only — "No call forwarding
@@ -519,30 +532,49 @@ switch remounts instead of changing hook order.
   without a backend change: per-customer call counts and a cross-customer
   "busiest numbers" (no cross-customer per-number/per-customer roll-up).
 - Styles `styles/account-dashboard.css` (`ad-`): 12-col card grid (8/4 spans) →
-  2 cols → 1 col by CONTENT width (container queries); one load-in stagger;
-  reduced motion respected. Colour: theme tokens + the `--ad-*` page tokens
+  2 cols → 1 col by CONTENT width (container queries); balanced rows via the
+  kit classes (`.ad-col`, `.lk-follow`, `.ad-tablewrap-cap`); one load-in
+  stagger; reduced motion respected. Colour: theme tokens + the `--ad-*` page tokens
   (§18.5). No money anywhere.
 
 **`RcfPage`** (`/rcf`)
 Picks one of three views (separate components, so toggling customer view or
 the preview can't break hook order):
 - **Customer** (`effectiveCustomer` set and not admin — tenant or admin
-  preview): `pages/rcf/CustomerNumbersPage.tsx`, keyed by customer id — quiet
-  header "Call forwarding numbers" (breadcrumb back to Dashboard) + Request /
-  Manage numbers (opens `DidManagement` in `DashboardOverlay`) + the full
-  `RoutingBoard` (search, chips, sort, paging, rows open `RowEditor`). Same
-  `accountData.ts` hooks as the dashboard. Styles `styles/rcf-dashboard.css`
-  (`rcfd-`/`rcfn-`).
+  preview): `pages/rcf/CustomerNumbersPage.tsx`, keyed by customer id. Layout
+  (§20): a one-row kit `CompactHeader` (crumb "Dashboard / <account>" + an
+  amber "Staff preview" tag for the admin preview · "Call forwarding numbers"
+  · subtitle incl. "Select a number to change where it rings." (readonly:
+  "…see its settings.") · Numbers / Forwarding / Paused figures (Numbers is
+  the ACCOUNT total past the 100-row cap; the others are of the rows listed,
+  said in their `title`) · Request / Manage / View numbers → `DidManagement`
+  in `DashboardOverlay`) over the `RoutingBoard`: ONE toolbar row (search ·
+  All/Forwarding/Paused chips · sort), the "first 100 of N" notice as a slim
+  info line under it (never hidden), sticky column heads, the rows, the pager
+  pinned at the bottom. Wider than 480px the board ends 24px above the bottom
+  of the first screen (`useViewportFit` → `--lk-md-top`, `.rcfd-board-host`
+  container query) and the rows scroll inside, so search, chips, sort,
+  paging and an open `RowEditor` stay on screen at 100+ numbers; the shell's
+  bottom padding is 24px, so the page itself does not scroll. An opened row
+  scrolls itself into view; paging / filtering return to the top. Phones:
+  natural height, routes two lines each (destination + week figures share
+  line 2). Same `accountData.ts` hooks as the dashboard. Styles
+  `styles/rcf-dashboard.css` (`rcfd-`/`rcfn-`).
 - **Admin in customer view, no preview picked**: `PreviewPrompt`.
 - **Admin / support**: the Administrative Call Forwarding Console (`RcfConsole`),
-  in the dashboard's look: `.rcf-scope.ad-scope.rcfc` + `.ad-shell`, granite
-  `DashboardHeader` (Staff/Support tag, "Viewing X", Forwards / Forwarding /
-  Paused figures, the `AdminScopeSelect` dropdown incl. All customers, "Open
-  dashboard" → `/dashboard?customer=…`), a segmented tab rail (Numbers / Call
-  activity / DID management; WAI-ARIA tabs, arrow keys), Numbers as a dashboard
-  `Card` with the `.ad-table` look (search incl. customer, area-code filter,
-  sortable header BUTTONS, Forwarding/Paused words + dot, Customer column on
-  All customers, rows → `RowEditor` with admin fields, browser paging).
+  in the dashboard's look: `.rcf-scope.ad-scope.rcfc` + `.ad-shell`. The granite
+  `DashboardHeader` is ONE row: kicker + Staff/Support tag, title, "Viewing X"
+  on the left; the `AdminScopeSelect` dropdown (incl. All customers) and "Open
+  dashboard" (→ `/dashboard?customer=…`) on the right. The segmented tab rail
+  (Numbers / Call activity / DID management; WAI-ARIA tabs, arrow keys) shares
+  its row with the view's figures (Forwards — "100+" at the cap — /
+  Forwarding / Paused, figure over label, `.rcfc-railrow` / `.rcfc-figures`).
+  Numbers is a dashboard `Card` whose header row carries the toolbar (search
+  incl. customer, area-code filter, Clear filters), with the `.ad-table` look
+  (sortable header BUTTONS, sticky, Forwarding/Paused words + dot, Customer
+  column on All customers, rows → `RowEditor` with admin fields, browser
+  paging in the pinned footer); wider than 480px the card is bounded to the
+  first screen like the board (`.rcfc-fit`) and its table scrolls inside.
   Scope is in the URL: `?customer=all|<id>`; absent = nothing chosen (prompt,
   nothing loads). Numbers / Activity / DID state is keyed per scope. DID
   management on All customers asks for one customer. `.rcfc .rcf-panel`
@@ -551,7 +583,9 @@ the preview can't break hook order):
   `styles/rcf-dashboard.css`.
 `GET /rcf` is capped at 100 rows server-side and ignores limit/offset; both
 the board and the console fetch once and page in the browser, and say so at
-100.
+100. Harness slugs (scratch): `rcf`, `rcf-all`, `rcf-customer`,
+`rcf-console-prompt`, `state-rcf-*`; the 100+-number case is the `big`
+persona (an RCF-only account with 130 numbers) where the harness has it.
 
 **`ReportingPage`** (`/reporting`, lazy)
 Staff pick a customer; an admin in customer view reports on the sidebar's
@@ -561,20 +595,88 @@ and the number picker list EVERY product's numbers (`/reports/my-numbers`,
 list spans more than one; the table / PDF sub-line adds the product for
 non-forwarding numbers ("Front desk · Voicemail"); the call list shows the
 server's `outcome_label` ("Answered by voicemail"); the glossary explains it.
+- **Layout (§20, 2026-10):** `CompactHeader` in one row — crumb (the
+  preview customer's name + amber "Staff preview" / "Staff" tag), title,
+  subtitle; staff **Customer** picker as `tools` (not while previewing);
+  the downloads **Spreadsheet (CSV)** + **PDF summary** as `actions`
+  (accessible names "Download …"; shown once a customer is in scope). Then
+  ONE slim scope bar (`ReportControls`): Period presets · Numbers picker
+  (label inline) · "Oct 1 – Oct 22, 2026 · New York time" (full zone in
+  the tooltip); Custom dates open From/To inline in the same bar (it wraps
+  to a second line). Body rows: **Summary | Calls over time** (one
+  `BalancedGrid` row, 1 : 1.6 — the summary leads; the chart's `fill` mode
+  takes the row's height, min 190px, its frame absolutely placed so the
+  SVG never feeds back into the row height); **Busiest · Missed · Quality**
+  (three equal columns, one height; Busiest shares its height between day
+  and hour); **Your numbers** (8 rows, "Show all N numbers" opens the rest
+  inside a scroll capped at ~8 rows with sticky heads — `useShowMore`,
+  `.rpt-tablewrap-cap`); **Every call** (filters, the page's rows in a
+  capped scroll ~440px with sticky heads, ONE pager under it; paging, page
+  size, filters and the CSV filters unchanged; a page change scrolls the
+  box to its first row); **Words on this page** (`Disclosure` card,
+  collapsed, `reporting:glossary`). Every card's "What does this mean?" is
+  a kit `Disclosure variant="bare"` (`Explainer` in `ReportBits.tsx`).
+  Both grids stack below 960px of content; the bar's range line drops
+  under the pickers below 900px; everything is full width below 560px
+  (container queries on `.rpt-body`). 1440 × 900: header, bar, summary,
+  chart and the three insight cards' figures are on the first screen
+  (≈2,500px page, was ≈5,500px). The PDF (`ReportPdfDocument`) is
+  untouched — it renders from data, not the page.
 
 **`CallActivityTab`** (`pages/rcf/`) — `scope` prop: `'rcf'` (default, the
 /rcf console — GET /rcf picker, `product_type=rcf` + `destination`,
 unchanged) or `'account'` (the dashboard overlay — `numbers` prop picker, any
 product, `ad-prodtag` on non-forwarding options; `product_type=all` + `number`
 on the activity feed, no product + `number` on the table; GET /rcf disabled
-via `enabled:`). Keys carry the scope.
+via `enabled:`). Keys carry the scope. Its call log (`RecentCallsTable`)
+scrolls inside a ~9-row cap with sticky heads (`.rcf-act-tablecap`), the
+pager under it. **`DIDManagementTab`** (`pages/rcf/DidManagement.tsx`, the
+console tab and the dashboard / customer overlays): My Numbers and Available
+Numbers show 8 rows, then "Show all N numbers" (`useShowMore`) opens the rest
+inside a capped scroll with sticky heads (`.rcf-didwrap-cap`); a new filter
+collapses it. Request (Available Numbers) AND Request Release / Cancel
+Request (My Numbers) render only for the tenant `user` role — readonly
+tenants and staff (incl. an admin in customer view) never see them; the API
+403s anyone else. Both components are shared — keep their props and
+behaviour compatible with the dashboard's use. `RowEditor` validates ring
+timeout 5–120 s, the API's own bounds (`routers/rcf.py`).
 
-**`MyAccountPage`** — with `counts.numbers` (holistic API): one tile + header
-metric per product (`by_product`, catalog order) plus the SIP trunks tile, and
-a Voicemail section on Products when the account has mailbox numbers (same
-`['account-numbers', id, 'self']` list). Without it: the old tiles. At
-phone widths its tab rail and header metrics opt into `.dl-tabs-scroll` /
-`.dl-metrics-wrap` (§18.6) — before that the page scrolled sideways at 390px.
+**`MyAccountPage`** (`/my-account`) — route entry, header and tab rail in
+`pages/MyAccountPage.tsx`; the tabs in `pages/my-account/` (`OverviewTab`,
+`TeamTab`, `ProductsTab`, `SecurityTab`, shared `parts.tsx` + `format.ts`,
+data `myAccountData.ts`); styles `styles/my-account.css` (`ma-`) on the
+daylight `dl-*` primitives.
+- **Whose account:** a tenant's own (self-scoped endpoints, the keys it always
+  used: `['my-customer']`, `['my-billing']`, `['my-team']`,
+  `['my-account-rcf']`, `['my-account-trunks']`). An admin in "View as
+  Customer" with a preview picked sees THAT customer (staff endpoints: `GET
+  /customers/{id}` identity fields only + counts from `/reports/my-numbers?
+  customer_id` and `/trunks?customer_id`, `/customers/{id}/billing`, the
+  dashboard's `['dash-team', id]` team, `/rcf?customer_id`; keys suffixed
+  with the customer) and an amber "Staff preview" tag; Your Account is still
+  the admin's own profile. Staff with no customer (admin normal view,
+  support) get "No customer account" with an "Open Your Account" button.
+- **Layout (§20):** one-row `CompactHeader` (crumb, account name, one figure
+  per product with `counts.numbers` — catalog order — plus SIP trunks; two
+  per row on a phone) · `dl-tabs` rail (WAI-ARIA tabs, arrow keys;
+  `.dl-tabs-scroll` below 1024px) · **Overview** = ONE balanced row: Account
+  (identity + tags, Account type · Member since · Account ID in one row,
+  "Products on this account" — a line per product with numbers, call
+  forwarding always listed, SIP trunks on the SIP trunk line, links to
+  `/rcf` and `/voicemail`) beside the Estimated Monthly Bill (one line per
+  product; the trunk breakdown behind "Line details", `account:bill-details`;
+  total + the server disclaimer pinned to the card's foot, never collapsed).
+  The old "Your Numbers" tile row is folded into the Account card.
+  **Users & Access** = active users (8, then "Show all N" in a capped scroll)
+  with an "Inactive users N" expandable row (`account:inactive-users`).
+  **Products** = Remote Call Forwarding table (Number · Forwards to + ring /
+  caller ID / channels · Status; 6 rows beside other products, 8 alone, then
+  "Show all"; "Manage call forwarding →" `/rcf`, "first 100 of N" past the
+  cap) beside SIP Trunks + Voicemail (stacked, the last grows); API (retired,
+  `API_CALLING_ENABLED`, tenant only) and UCaaS (never `rcf`) unchanged.
+  **Your Account** = Profile (facts in one row, display name + Save inline)
+  and "Change Password" as an expandable card (closed every visit; fields +
+  submit in one row). Same PUT /auth/me calls and validation as before.
 
 **`TrunksPage`** (`/trunks`)
 The customer **SIP Trunking portal** — read + self-serve; trunk creation and
@@ -602,10 +704,112 @@ redirects to the user's product home while `API_CALLING_ENABLED` is false.
 
 **`IvrPage`** (`/ivr`, `/ivr/flows/:id`, lazy) — Visual IVR: see §19.
 
-**`RcfDocsPage`** (`/docs/rcf`) and **`ApiDocsPage`** (`/docs/api`)
-Static inline documentation pages. No API calls. `/documentation` redirects to
-`/docs/rcf`; `/docs/integration` redirects to `/docs/api`. Shared layout helpers
-live in `pages/docs/shared.tsx`. There is no single `DocsPage`.
+**`GuidesPage`** (`/docs/guides/:product?`, content in `pages/docs/guides/`) — Guides
+The CUSTOMER help hub (2026-10 rewrite). Staff/admin guides live elsewhere;
+nothing here may describe staff tools. No API calls; reads the same for
+every persona.
+- **Routes:** no slug = the overview; `rcf` · `voicemail` · `ivr` = a
+  product guide; any other slug (incl. the old `trunking` / `calling`)
+  redirects to `/docs/guides`. `/docs/rcf` → `/docs/guides/rcf`.
+  `#<task id>` deep-links (opens + scrolls to) one task. Slugs + content
+  types: `guides/guideTopics.ts` (the page doesn't read `GUIDE_PRODUCTS`
+  from `docProducts.ts`).
+- **Layout (§20):** `CompactHeader` · `GuideSwitcher` (one row of four
+  link cards — Overview, RCF, Visual Voicemail, IVR — `aria-current`,
+  2 × 2 below ~860px of content) · then the guide. A product guide is ONE
+  `BalancedGrid` row (`GuideKit.ProductGuide`): "How to" (tasks as
+  `Disclosure` rows + Expand all) leads; "At a glance" + "Questions &
+  fixes" stack beside it, the FAQ a `.lk-follow` that scrolls inside. The
+  overview is two rows: three product cards, then "Find your way around
+  the sidebar" + "Access & help". All three guides fit 1440 × 900 closed.
+- **Content = files of data** (`RcfGuide.tsx`, `VoicemailGuide.tsx`,
+  `IvrGuide.tsx`, `OverviewGuide.tsx`): each exports one component over a
+  `ProductGuideContent` constant. Helpers in `GuideKit.tsx`: `<Ui>` (an
+  on-screen label, spelled EXACTLY as the app spells it), `<Path>`
+  (`Products › RCF`), `<Steps>`, `<Bullets>`, `<Para>`, `<Note>`,
+  `<Terms>`. Styles `styles/dl-guides.css` (`gd-`, tokens only).
+- **Copy rules (owner):** describe only what a tenant `user` / `readonly`
+  can see and do today, verified against the code (each guide's header
+  comment lists its sources). Never: carrier / cloud / vendor names,
+  regions, IPs, internal components, prices, CPS or other limits not shown
+  to customers, staff pages (troubleshooting, admin console, View as
+  Customer, mailbox suspend / delete / crypto-erase), key or algorithm
+  names (voicemail = "encrypted at rest"; the in-app Transcription card
+  carries the processing disclosure — the guide points to it), env flags,
+  migrations, error codes. API Calling is not documented (switched off; if
+  ever mentioned: "on our roadmap"). Reliability: "redundant regions with
+  automatic failover" only.
+- **Deliberately not documented** (re-check before adding): the RCF
+  editor's "Failover destination" (stored, but call routing does not use
+  it), the IVR Flow assistant (off unless enabled per account), SIP
+  Trunking (early access, not in the owner's scope for this hub).
+- **Gotchas:** this page is imported statically by `App.tsx`, so its CSS
+  loads BEFORE `layout-kit.css` — overrides of kit rules carry the
+  `.gd-scope` prefix.
+- Harness slugs: `docs-guides`, `docs-guides-{rcf,voicemail,ivr}`,
+  `state-guides-{task,expand-all,deeplink,ivr-open}`.
+
+**Docs routes.** Two static pages, no API calls: `GuidesPage`
+(`/docs/guides/:product?`) and `ApiDocsPage` (`/docs/api/:product?`).
+Redirects: `/documentation` → `/docs/guides`, `/docs/rcf` →
+`/docs/guides/rcf`, `/docs/integration` → `/docs/api`. Shared helpers
+(`Callout`, `CodeBlock`) live in `pages/docs/shared.tsx`. There is no single
+`DocsPage` (the old `RcfDocsPage` is gone).
+
+**`ApiDocsPage`** (`/docs/api/:product?`) — the customer API Reference
+(`pages/docs/ApiDocsPage.tsx` = route entry; body + content in `pages/docs/api/`).
+Rewritten 2026-10-26: the owner's rule is "customers only, accurate to our
+current status, nothing we don't want customers to know".
+- **Sections** (`docProducts.ts` `API_SECTIONS`, `apiSectionHref`): Getting
+  started at the bare `/docs/api` (base URL, sign-in, roles, errors,
+  conventions + the account endpoints), then `numbers` (numbers & call
+  forwarding), `calls` (CDRs + Reporting), `voicemail` (Visual Voicemail),
+  `trunking` (SIP Trunking, "Early access"). Old slugs still land
+  (`apiSectionForLegacySlug`: `rcf` → numbers, `telemetry` → calls); any other
+  slug, `calling` included, → `/docs/api`. `#<entry-id>` deep-links an entry
+  (opened + scrolled into view on arrival; a Contents click writes it).
+  The old product-card rail (`ProductSelector`) and its `ApiProduct` /
+  `API_PRODUCTS` / `isApiProduct` types were removed 2026-10-26 (unused).
+- **Truth contract** (header of `api/types.ts`): document ONLY routes a tenant
+  `user` / `readonly` can call today, with the fields a tenant actually gets
+  (CDRs: the `services/tenant_redaction.py` allowlist — whole minutes,
+  answer/end to the minute, no money, rating, fraud or routing fields; examples
+  show documented fields only and the page says unlisted fields may appear).
+  Never: admin/staff-only routes or fields, ingest / FreeSWITCH / carrier /
+  Homer / SBC / rates / tiers / onboarding / inventory-admin routes, vendor,
+  cloud, region, host, IP or component names, env flags, migration numbers,
+  signing details, or rate limits that aren't enforced for tenants. API
+  Calling (`/v1/calls`) is switched off: mentioned once, as "on our roadmap".
+  No IVR section (the `/v1/ivr` routes serve the builder; the product is
+  still rolling out). Base URL is the placeholder `https://<your portal
+  host>/api/v1`; paths are relative to it; curl examples use `$BASE` and
+  `$TOKEN` (defined in Getting started). Writes a `readonly` user may not
+  make carry `roles: WRITE_ROLES` → an "Edit access" tag. When an API
+  changes, re-verify the affected `api/sections/*.ts` entry against its router.
+- **Content is data**: `api/sections/{start,numbers,calls,voicemail,trunking}.ts`
+  export a `SectionDoc` (groups → `TopicDoc` prose blocks | `EndpointDoc`:
+  method, path, title, summary, roles, params, returns + fields, statuses,
+  example), registered in `api/sections/index.ts` (exhaustive over
+  `ApiSection`). Text is plain; a `` `code` `` span renders as inline code
+  (`RichText`). Shared status lines / `BASE_URL` / the auth header: `api/common.ts`.
+- **Layout (§20)** — `api/ApiReference.tsx`: `CompactHeader` (crumb Docs / API
+  Reference, stats Endpoints · Token life · Format) · section rail (links in
+  `dl-tabs dl-tabs-scroll`; the current tab scrolls into view on phones) ·
+  `MasterDetail` Contents | reference, bounded to the first screen (the shell
+  ends with it: `.dl-shell.dxa-shell { padding-bottom: 24px }`). Contents =
+  groups → entries (method chip + task name), a click opens the entry, scrolls
+  it to the top of its pane and focuses its toggle. Endpoints are `Disclosure`
+  rows (`api/EndpointCard.tsx`), collapsed by default; open = description,
+  "Who can call it", parameters, response fields (first 8 + "Show all N" when
+  a table has more than 10 rows), status codes, then a collapsed, lazily
+  mounted "Example request and response". "Expand all / Collapse all" in the
+  pane head. Getting started topics (`api/TopicSection.tsx`) are always open.
+  Below 720px of content the panes stack (Contents capped at
+  `min(36vh, 300px)`). Styles `api/apiReference.css` (`dxa-`) over the docs
+  `dlx-` primitives — theme tokens only.
+- Static: no API calls, so tenant, readonly, admin and admin "View as
+  Customer" see the same page; the view is keyed by section (fresh state on a
+  switch). Harness: `docs-api*` routes and `state-docs-api-{endpoint,fields,expanded}`.
 
 **`CallsPage`** (`/call-quality` and `/cdrs`, `pages/calls/`) — Calls & Quality
 The merged CDR search + voice-quality page. Top composition (2026-10 rework):
@@ -623,16 +827,58 @@ The merged CDR search + voice-quality page. Top composition (2026-10 rework):
 - **No charts.** The Quality Trends section (`QualityTrendsSection`,
   `components/charts/QualityTrendChart`) was removed 2026-10 at the owner's
   request — do not re-add graphs to this page.
-- Records/Summary tabs (Summary = staff, tabular), paginated `CallsTable`,
-  `CdrDetailModal` on row click. Page CSS: `cq-`/`cqf-`/`cqk-` classes in
-  `styles/dl-platform-b.css`. Grades: see §16.
+- **Header** — `CompactHeader`, one row (crumb Support/Voice, title,
+  role-aware subtitle).
+- **Records row** — ONE slim row: the Records/Summary switch (staff;
+  Summary = tabular, staff-only) with the top pager beside it
+  (`.cq-recordsbar`); tenants get the pager alone. The pager repeats under
+  the table. The results block is the pagination scroll target.
+- **`CallsTable` fits the content column at 1440 × 900** (staff and
+  tenant; 11px cell sides, `.cq-table`). Columns: Time ("10-22 15:16:00";
+  the year only when not the current one — full stamp in the tooltip) ·
+  Leg (staff, All/Carrier legs only) · Customer (staff, clipped + title) ·
+  **Call** (phone-in / phone-out icon — inbound azure, outbound slate, the
+  word for screen readers and in the tooltip — + the product tag) · From ·
+  To (NANP without "+1 "; full number in the tooltip and the modal) ·
+  **Duration** (a red "N/A" pill when not answered — the old Status
+  column) · Quality (pill; packet loss in its tooltip) · **Loss %** only
+  where the panel has room (container query on `.cq-records`: tenants
+  from 860px, staff from 1200px of panel) · Carrier (staff) · Trunk
+  (clipped + title) · Cost Est. (staff). Everything moved out of the row
+  is in `CdrDetailModal` (status, per-direction loss, full timestamps).
+  Narrower (820 / 390, or the Leg column), the table pans INSIDE its panel
+  (`.dlx4-tablewrap`) with a soft edge shade where there is more
+  (`.cq-panwrap.is-left/.is-right`, set by `usePanEdges`); the page never
+  scrolls sideways. Rows stay `tr.dl-row`; row click opens
+  `CdrDetailModal`. Page CSS: `cq-`/`cqf-`/`cqk-` classes in
+  `styles/dl-platform-b.css` (+ `--cq-pan-shade`). Grades: see §16.
 
 **`TroubleshootingPage`** (`/troubleshooting`)
 Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
 **native React SIP-trace search page** — there is no Homer iframe any more.
 
-- A search form (From, To, Call-ID, date range) calls `searchSipTraces()`
-  (`POST /api/homer/search` via `api/homer.ts`) using a React Query `useMutation`.
+- **Layout (§20):** a one-row `CompactHeader` (crumb · SIP Trace Search ·
+  "Open SIP Dashboard"), then the search form as ONE row at desktop —
+  omnibox · time-range presets · Search / Clear (all 40px) — with the live
+  hint under the omnibox and the resolved window ("Oct 21, 3:21 PM → Oct 22,
+  3:21 PM (local)") under the presets. Start / End appear only for
+  **Custom** (one slim row, labels inline). Advanced (From · To · Call-ID)
+  is a kit `Disclosure` (bare) whose row shows "N active" — the criteria
+  apply while it is closed. The form restacks by the PANEL's width
+  (container `tssearch`: presets + buttons under the omnibox below 980px,
+  one column below 640px). The **results panel is bounded to the first
+  screen** (`useViewportFit` → `--ts-res-top`, container `tsres` ≥ 480px):
+  head on one line (Results · what was searched · count), the table
+  scrolls inside under sticky column heads, the pager is pinned under it,
+  and `.dl-shell.dlx5-shell` ends 24px under it, so the page itself does
+  not scroll. Columns drop out by priority as the panel narrows (`dlx5-c-*`):
+  the "Ladder" word < 1080px, Orig/Term < 960px, Attestation/Zone < 760px
+  (parties stack, the date sits over the clock), Duration + the open column
+  < 520px (the row itself opens the call) — the call panel always has all
+  of them. No sideways page scroll at 390px.
+- A search form (number or Call-ID, time range, optional From / To / Call-ID)
+  calls `searchSipTraces()` (`POST /api/homer/search` via `api/homer.ts`)
+  using a React Query `useMutation`.
 - The returned `data` (flat `HomerSearchResult[]`) plus the `correlations` map
   (Call-ID → related Call-IDs) are grouped into per-call rows via an in-component
   **union-find** (`groupMessagesByCall`) so A-leg and B-leg messages merge into one
@@ -659,10 +905,9 @@ Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
   expanded row any more. Shared pills/banners: `CallBadges.tsx`.
 - The header has an "Open SIP Dashboard" link to `/grafana/`.
 
-**`AccountPage`** (`/account`)
-Profile page. Lets users update their display name and password via
-`PATCH /api/auth/me` (calls `apiRequest('PATCH', '/auth/me', ...)`).
-Calls `refreshUser()` from `AuthContext` on success.
+**`/account`** redirects to `/my-account`. The profile (display name +
+password) is My Account's "Your Account" tab (`pages/my-account/SecurityTab.tsx`),
+via `PUT /api/auth/me`; it calls `refreshUser()` from `AuthContext` on success.
 
 ### Admin pages
 
@@ -732,6 +977,11 @@ a "View as Customer" toggle above the user footer.
 **`PageHeader`**
 Standardised page title block: title (h1), optional subtitle, optional right-side
 actions slot. Used as the first child of most page components.
+
+**Layout kit (`kit/`)** — `CompactHeader`, `Disclosure`, `useShowMore` +
+`ShowMoreButton`, `ClampText`, `BalancedGrid` (+ `.lk-col` / `.lk-grow` /
+`.lk-follow` / `.lk-cap`), `ScrollArea`, `MasterDetail`. Balanced, compact,
+expandable pages — the rulebook is §20.
 
 ### Auth (`src/components/auth/`)
 
@@ -945,7 +1195,10 @@ This is the RCF-V1 production architecture. Know what is and is not available:
   (currently `false`; mirrors the backend/FreeSWITCH env var of the same name — flip
   BOTH to restore): the `/api-dids` route (redirects to product home), the Sidebar
   "Coming Soon" item, My Account's API DID section/tiles,
-  the Guides + `/docs/api` "calling" sections (slug redirects to the hub default),
+  (the Guides have no API Calling or SIP Trunking guide since 2026-10-26 —
+  `/docs/guides/{calling,trunking}` land on the overview; the API Reference
+  has no calling section at all — it names programmable voice only as "on
+  our roadmap", and `/docs/api/calling` lands on Getting started),
   the Calls "API" product filter and the onboarding API product option. (The
   landing page no longer has any API Calling copy, flag or not.) With the flag
   off nothing calls `/api-dids`. `productHome`
@@ -1187,15 +1440,23 @@ dial-in).
   controls (`PreviewPrompt` until one is picked); admin normal view →
   `AdminVoicemailConsole` (`?customer=<id>`, absent = All customers, a
   "Viewing" select); support → productHome. Views are keyed by scope.
-- **Body** `pages/voicemail/VoicemailWorkspace.tsx`: page header (Unread /
-  Messages / Mailboxes, `EncryptionBadge`, New mailbox for staff), mailbox
-  switcher (grouped by customer on All customers), suspended banner, tabs
-  **Messages** (`InboxView`: Inbox/Saved/Trash with counts, `MessageList`,
-  `ReadingPane` + `Player`) and **Greeting & settings** (`MailboxSettings`:
-  `GreetingsPanel`, details, PIN, storage, staff Administration = suspend /
-  resume / delete with typed number). States: loading, 503 → "temporarily
-  unavailable", tenant not enabled → `VoicemailIntro`, no mailboxes (staff
-  get the create CTA). Times render in the MAILBOX timezone (`format.ts`).
+- **Body** `pages/voicemail/VoicemailWorkspace.tsx` (layout kit, §20):
+  `CompactHeader` in one row (crumb · Voicemail + `EncryptionBadge` ·
+  admin "Viewing" picker · Unread / Messages / Mailboxes · New mailbox for
+  staff), a slim one-row mailbox bar (grouped by customer on All
+  customers), suspended banner, tabs **Messages** (`InboxView` =
+  `MasterDetail`: Inbox/Saved/Trash with counts over the scrolling
+  `MessageList` | `ReadingPane` — caller + Played/New badge, ONE inline
+  meta row Received · Length · Mailbox, a one-row `Player`, the transcript
+  clamped to 4 lines with "Show full transcript", actions + retention line
+  pinned in the pane footer; both panes end at the bottom of the first
+  screen) and **Greeting & settings** (`MailboxSettings`: `BalancedGrid`
+  Greeting | Details + Transcription in one equal-height row, then
+  expandable rows PIN · Storage · staff Administration (suspend / resume /
+  delete — still typed-number confirmation), placed under the shorter
+  column; open state remembered as `vm:pin` / `vm:storage` / `vm:admin`).
+  States: loading, 503 → "temporarily unavailable", tenant not enabled →
+  `VoicemailIntro`, no mailboxes (staff get the create CTA). Times render in the MAILBOX timezone (`format.ts`).
 - **Scope + cache** (`voicemailData.ts`): tenant key `self:<own id>` with no
   customer_id; staff `c:<id>` with `customer_id`; console All = `all`. Every
   mutation invalidates `['voicemail']`. The sidebar shares the summary key.
@@ -1705,7 +1966,7 @@ validation and the "what callers hear" preview, never sent (plan D2).
 | `pages/IvrPage.tsx` | Route entry (lazy, full-bleed OUTSIDE AppLayout with its own `Sidebar` + `SidebarCollapseTab`, like Troubleshooting; `.dl-scope.ivr-canvas`). Picks the persona and provides `IvrWorkspaceContext`; inner routes `/ivr` and `/ivr/flows/:id` (the builder is a second lazy chunk, `flow/FlowBuilderRoute`). **Focus mode:** inside the builder the app sidebar starts collapsed — session-only state, the saved `sidebar_collapsed` preference is never touched. |
 | `pages/ivr/IvrContext.ts` | `{ scope, viewer: tenant\|preview\|admin, staff, canEdit, customerName, href() }` — no IVR component reads `user` / `effectiveCustomer` itself. `href()` keeps the admin console's `?customer=`. |
 | `pages/ivr/ivrData.ts` | Scope (tenant `self:<id>` / staff `c:<id>`, like voicemail), query keys `['ivr', key, …]`, hooks, and `readIvrError` / `ivrErrorText` (flattens `stale_revision` + `current_revision`, `invalid_flow` + `errors`, `prompt_in_use` + `flows`, `flow_in_use`, `ivr_not_enabled`, whether FastAPI puts them top-level or under `detail`). |
-| `pages/ivr/IvrHome.tsx`, `IvrIntro.tsx`, `IvrDialogs.tsx`, `format.ts` | `/ivr`: not entitled → `IvrIntro`; entitled, no numbers → build now + "ask for a number"; else numbers (flow, live/not published, last publish; choose flow / rename), flows (status, used by, open, rename, delete → `flow_in_use`), messages. |
+| `pages/ivr/IvrHome.tsx`, `IvrIntro.tsx`, `IvrDialogs.tsx`, `format.ts` | `/ivr`: not entitled → `IvrIntro`; entitled, no numbers → build now + "ask for a number"; else numbers (flow, live/not published, last publish; choose flow / rename), flows (status, used by, open, rename, delete → `flow_in_use`), messages. Layout below ("The /ivr page"). |
 | `pages/ivr/prompts/` | `PromptManager` (play via a minted URL, rename, delete → `prompt_in_use` names the flows) and `PromptDialog` (Type text → voice + Preview (`tts-preview`, not stored) → save; Record / Upload through the SHARED voicemail capture `useAudioCapture` + `AudioCapturePanel` at **8 kHz** mono PCM16 → multipart upload with an additive `kind` field). |
 | `flow/model/` (pure) | `blocks.ts` catalog + exits (§2 handles: `next`, `d:<key>`, `noInput`, `noMatch`, `open`, `closed`, `match`, `noAnswer`); `graph.ts` §2 ⇄ working graph (unknown fields kept in `keep*` and re-emitted; a Start is guaranteed and undeletable); `history.ts` undo; `layout.ts` Tidy up; `summary.ts` the wording. |
 | `flow/compile/` (pure) | `ivr.ts` the compile mirror + `describePlan` (the transcript); `policy.ts` the US-only outside-number rule (mirror of the server's `services/ivr/policy.py`). |
@@ -1725,6 +1986,30 @@ Admin in normal view gets a console with a customer picker (`?customer=ID`)
 — there is no "all customers" IVR view, because every §8.2 route needs a
 customer (the API answers 400 `customer_id required`). Support → product home.
 
+### The /ivr page (layout, §20)
+
+- `CompactHeader` in one row: crumb (customer / IVR + amber Staff tag) ·
+  IVR · the admin console's **Customer** picker inline (`.lk-head
+  .ivr-scope-pick`) · stats IVR numbers | Flows | Live · **New flow**
+  (writers; the page's primary action — the Flows card no longer has its
+  own button).
+- **Your IVR numbers | Flows** — ONE row of equal-height cards
+  (`BalancedGrid`, stacks below 960px of content). Each row is two lines:
+  number + name (or flow name + "Edited …") with the actions on the right,
+  then the status word and the facts (answers with / used by, published,
+  "Draft has unpublished changes"), wrapping when narrow. 6 rows, then
+  "Show all N" opens the rest inside a capped scroll (`.lk-cap`, 400px).
+  The numbers card's foot (`.ivr-card-foot`) says who assigns numbers and
+  sits on the card's bottom edge.
+- **Messages** (`PromptManager`) full width: one compact row per message
+  (name; kind · length · date; the spoken text on ONE clamped line, full
+  text in the tooltip/DOM) with the one-row player and actions on the
+  right; the first 4, then "Show all N messages". Below 720px of content
+  the player drops under the text.
+- Breakpoints are container queries on `.ivr-sections` (`ivrpage`) and
+  `.ivr-intro-host` (`ivrintro`), not the window. The shell ends 24px under
+  the last card (`.dl-shell.ivr-shell`).
+
 ### The builder
 
 - **Layout:** top bar (← IVR, name, live version, save state, undo / redo /
@@ -1733,6 +2018,21 @@ customer (the API answers 400 `customer_id required`). Support → product home.
   Flow canvas · right settings panel or a sheet (Publish / Test call /
   History). Opens at a readable zoom anchored at Start when the whole flow
   wouldn't fit legibly (the MiniMap shows the rest); a saved viewport wins.
+- **Panels (§20 — the canvas gets the room):** widths are
+  `--ivr-left-w` / `--ivr-right-w` on `.ivr-work`. The LEFT panel folds
+  (button beside the Blocks | Outline tabs) into a 56px rail of block icons
+  — the SAME palette buttons (`Palette rail`: same drag / click-to-add,
+  same accessible names, hint in the tooltip). The RIGHT panel can be made
+  wider (`clamp(344px, 33vw, 480px)`) from any panel's head, and while it
+  only shows the checklist it folds into a rail whose button carries the
+  status (✓ or the error count). Selecting a block or opening a sheet
+  always brings the panel back — "selecting a block opens its panel" is
+  unchanged. The head controls are `PanelChromeButtons`
+  (`flow/panels/panelChrome.ts` context, provided by `BuilderShell` on the
+  desktop only — phone sheets have none), rendered in the `SideSheet` head
+  and both Inspector heads. Choices are remembered in localStorage
+  (`crag_open:ivr:blocks-panel`, `ivr:checklist`, `ivr:panel-wide` via the
+  kit's `useOpenState`; a convenience only).
 - **Keyboard:** blocks are focusable (Tab), Enter/Space selects — selecting
   a block opens its panel (click, keyboard, Outline or an issue link alike).
   Every exit has a "Where each choice goes" `<select>` (existing block,
@@ -1804,6 +2104,13 @@ assistant" and never names a model or vendor.
   account's number names, the limits, three examples — a click fills the
   box), the transcript, the §6 disclosure verbatim above the message box
   (1–2000 chars, ⌘/Ctrl+Enter sends). Sending folds the guide away.
+- **Proposal banner layout:** docked, it is capped at 48% of the canvas
+  column (details scroll inside; Accept · Refine · Discard · Try a test call
+  stay pinned underneath) and, from 680px of banner width (container
+  `ivrprop`), the details sit in two balanced columns: what the flow does
+  (summary, assumptions, still to fix, worth a look) beside the new
+  messages with Listen. Layout only — the buttons, their order and their
+  behaviour are unchanged.
 - **Proposal on the canvas:** `store.showProposal()` — the store's
   `proposal` overlay (never the draft): Tidy-up positions, blocks revealed
   one at a time in calling order (`layout.callingOrder` = Tidy up's own walk;
@@ -1860,4 +2167,197 @@ palette (§18.5). `--literals` over `pages/ivr`, `flow`, `ivr*.css`: 0.
   banner rendered to strings).
 
 Visual: the theme harness with the §8.2 mock (2 IVR numbers, 3 flows incl.
-one with errors and one that always 409s).
+one with errors and one that always 409s). The layout harness copy adds the
+Flow assistant §5 mock (scripted provider) and the slugs `ivr*`,
+`state-ivr-assist` / `-assist-proposal` / `-panels-folded` /
+`-panel-wide` / `-menu-panel` / `-publish-errors` / … .
+
+---
+
+## 20. Layout — balanced, compact, expandable
+
+Owner direction (2026-10): every signed-in page is **even and compact** —
+a user sees everything that matters at a glance, and opens expandable areas
+for more detail. This section governs **organisation only**: colours, type,
+surfaces, radii and shadows stay exactly as §15/§18 define them. The kit is
+structure; the page keeps its own surfaces (`.dl-panel`, the dashboard
+`Card`, `components/ui` Card).
+
+Pilots that follow it: Visual Voicemail (§17) and the dashboards (§7).
+Screens: the visual harness (scratch) — `voicemail`, `state-vm-*`,
+`dashboard*` slugs.
+
+### 20.1 Page skeleton
+
+```
+.dl-scope (canvas) › shell
+ 1. Header ............ ONE row at desktop: <CompactHeader> (or the dashboard's granite band)
+ 2. Scope bar ......... optional, ONE slim row (≤ 56px): pickers + key facts (e.g. voicemail's mailbox bar)
+ 3. Tabs .............. optional rail (`dl-tabs`), margin-bottom 14px
+ 4. Body .............. rows of cards, each row ONE height (BalancedGrid / a page grid with kit classes)
+                        OR a <MasterDetail> (list | open item), bounded to the first screen
+ 5. Secondary ......... expandable rows (<Disclosure>): rarely-changed settings, glossaries, staff blocks
+```
+
+Importance runs top to bottom. Nothing a user needs for the page's main task
+sits below the fold.
+
+### 20.2 Above the fold at 1440 × 900
+
+- Header ≤ 110px tall (crumb, title + inline badges, ≤ 2-line subtitle on
+  the left; tools · stats · primary action on the right, all one row).
+  Scope bar ≤ 56px. Tabs ≤ 48px. A KPI row is ONE row (≤ 140px).
+- The page's primary content must be visible without scrolling: the list
+  and the open item (master–detail), the KPIs and the first card row
+  (dashboards), the first rows of the main table.
+- Primary actions must be visible without scrolling: the page's primary
+  button, the open item's actions (pin them in the pane's footer), the Save
+  of the main form.
+- A MasterDetail page fits the screen exactly: the panes end 24px above the
+  bottom edge and the page does not scroll (§20.8).
+
+### 20.3 How tall a card may run
+
+- Cards side by side are **one height** (grid stretch). Never a short card
+  beside a tall one — if their natural heights differ by more than ~25 %,
+  give the row a leader and make the others grow or follow:
+  - **leader** — the card whose content sets the row height (usually the
+    widest / most important: a table, the greeting card);
+  - **`.lk-grow`** — absorbs spare height (a chart whose bars can grow; the
+    last card of a stacked column);
+  - **`.lk-follow`** — takes the row's height and scrolls inside (lists:
+    team, requests, paused numbers). Never make every card of a row a
+    follower — followers need a leader.
+- A card body runs at most ~440px (`--lk-card-cap`) or **8 table rows**
+  before it caps (`.lk-cap`, scroll inside) or collapses behind
+  "Show all N" (`useShowMore`). Short lists: 4–6 items, then "Show all N".
+  Inside a follower: every item, scrolling.
+- "Show all" on a card beside other cards expands **inside a capped scroll**
+  (sticky column heads), so the card never pushes its row taller
+  (dashboard numbers / customers tables: `.ad-tablewrap-cap`).
+- Put the Save button on the same line as short forms (fields + submit in
+  one row, `align-items: flex-end`) rather than on a row of its own.
+
+### 20.4 What collapses by default
+
+| Content | How |
+|---|---|
+| Glossaries, "What does this mean?", "How is this worked out?" | `<Disclosure variant="bare">` (or `row`) |
+| Tables beyond ~8 rows, lists beyond 4–6 items | `useShowMore` + `<ShowMoreButton>` ("Show all N …" / "Show less") |
+| Long text (transcripts, notes, descriptions) | `<ClampText lines={4}>` ("Show full transcript") |
+| Secondary metadata (ids, extra timestamps, technical fields) | a one-line inline meta row; the rest in `title` tooltips or a Disclosure |
+| Rarely-changed settings (PIN, storage limits) | `<Disclosure variant="row">` with the current value as `summary` |
+| Admin-only blocks (staff tools, suspend / delete) | `<Disclosure variant="row">` + the amber Staff tag as `badge`; destructive actions KEEP their typed confirmation dialog |
+
+**Never collapse:** the page's primary content and action; errors, warnings
+and "full" / "paused" states (show them in the row's `summary`, toned);
+privacy or legal copy a contract or plan says to show (e.g. the
+transcription disclosure, §17 / plan §11.4).
+
+### 20.5 The kit — `src/components/layout/kit` (import from the barrel)
+
+CSS: `src/styles/layout-kit.css` (`lk-`), loaded once in `main.tsx`. Every
+colour is a `--t-*` token; nothing to add for dark mode.
+
+| Primitive | Use | API |
+|---|---|---|
+| `<CompactHeader>` | The page header, one row at desktop | `crumb?`, `title`, `titleAside?` (badges inline with the h1), `subtitle?` (≤ 2 lines, clamped), `tools?` (scope pickers / filters), `stats?: {label, value, title?}[]` (a `<dl>`, figure over label, hairline dividers), `statsLabel?`, `actions?` (primary, last), `className?` |
+| `<Disclosure>` | An expandable section: summary row → content | `title`, `summary?` (one line, open or closed), `count?`, `badge?`, `icon?`, `actions?` (on the row, OUTSIDE the toggle), `headingLevel?` (default 3), `variant?: 'card' \| 'row' \| 'bare'`, `defaultOpen?` / `open?` + `onOpenChange?`, `persistKey?` (`<page>:<section>`), `lazy?` (mount on first open), `className?`, `contentClassName?` |
+| `useShowMore(items, limit, resetKey?)` + `<ShowMoreButton>` | First N rows, then expand | hook → `{ visible, expanded, needed, total, hiddenCount, toggle, setExpanded, listId, buttonProps }`; put `id={listId}` on the `<tbody>`/`<ul>`, render `<ShowMoreButton {...buttonProps} noun="numbers" />` only when `needed`. Button: `noun?`, `moreLabel?`, `lessLabel?`, `variant?: 'link' \| 'bar'`. A new `resetKey` (filter / search) collapses |
+| `<ClampText>` | First lines of a long text | `lines?` (4), `moreLabel?`, `lessLabel?`, `className?` (the text), `wrapperClassName?` (the box — put padding/tint HERE, not on the clamped text). Toggle appears only when the text is really cut |
+| `<BalancedGrid>` | Side-by-side cards, one height per row | `columns?` (grid-template-columns, default 2 equal), `stackBelow?: 'sm' \| 'md' \| 'lg'` (container 560 / 760 / 960px), `gap?`, `followMin?`, `label?`. Children are the cells: a card (stretches) or a `<div className="lk-col">` stacking cards |
+| `.lk-col` · `.lk-grow` · `.lk-follow` · `.lk-cap` | Structure classes for any grid (page grids too) | `.lk-col` = a cell stacking cards (flex column, `--lk-gap`); `.lk-grow` = absorbs slack inside a `.lk-col`; `.lk-follow` = height follows the row (CSS `contain: var(--lk-follow)`, active only where a grid sets `--lk-follow: size`; floor `--lk-follow-min`), must be a flex column whose scrolling part has `min-height: 0`; `.lk-cap` = body capped at `--lk-cap` |
+| `<ScrollArea>` (`.lk-scroll`) | The scrolling part of a bounded pane / follower | `label?` (→ region), `focusable?` (tab stop when it holds no focusable children), `maxHeight?` (`--lk-scroll-max`, for stacked layouts), `className?`, `id?` |
+| `<MasterDetail>` | A list and the open item, equal-height panes bounded to the first screen | `list`, `detail`, `listLabel`, `detailLabel`, `listWidth?` (default `minmax(280px, 360px)`), `listClassName?` / `detailClassName?` (surfaces, e.g. `dl-panel`), `minHeight?` (460), `bottomGap?` (24). Each pane is a flex column: wrap the scrolling part in `<ScrollArea>`, keep tabs / toolbars / an action footer outside it |
+| `useViewportFit(ref)` | Writes `--lk-md-top` (document offset, layout position — ignores entry-animation transforms) | used by MasterDetail; re-measures on resize and when anything above changes size |
+| `useOpenState` / `readOpen` / `writeOpen` | Disclosure state + its optional memory | localStorage key `crag_open:<persistKey>`, every access try/catch'd; storage is a convenience only — the page renders the same without it |
+
+Page grids that are not a `BalancedGrid` (the dashboard's 12-column
+`.ad-grid`) opt in with the classes: set `--lk-follow: size` on the grid
+where it is multi-column and `none` where it stacks (§20.6). A `.lk-col`
+follower shares out the row height only where the grid also sets
+`--lk-follow-flex: 1 1 0` (BalancedGrid does, side by side); unset, it is
+its natural height, so a stacked column never collapses it.
+
+### 20.6 Responsive (1440 / 820 / 390)
+
+All layout breakpoints are **container** queries on the kit's hosts (or the
+page's own container), so they follow the space beside the 240px sidebar —
+never viewport media queries, never Tailwind `md:*`.
+
+| Width | Content column | Behaviour |
+|---|---|---|
+| 1440 × 900 | ~1100px | Multi-column rows, followers active, MasterDetail side by side and bounded to the screen, header one row, KPI rows of 6 |
+| 820 × 1180 | ~520px (sidebar still shown) | `BalancedGrid` (md) stacks; MasterDetail stacks (list first, its ScrollArea capped at `min(50vh, 440px)`, detail at natural height, actions under it); CompactHeader's right side wraps under the title; the dashboard drops to 2 → 1 columns, `.ad-col` dissolves (`display: contents`, dense flow), followers go natural with a 420px cap |
+| 390 × 844 | ~340px | One column everywhere; header tools / actions full width, stats spread across (four or more figures go two per row, labels may wrap); KPIs 2-up; no horizontal page scroll (the harness's "layout warnings" must be empty) |
+
+### 20.7 Accessibility
+
+- **Disclosure** — a real `<button>` inside a heading (`headingLevel` keeps
+  the outline right), `aria-expanded` + `aria-controls`; the content is a
+  `role="region"` labelled by the button; closed content is
+  `visibility: hidden` (not focusable, not read). Never put buttons or
+  links inside the toggle — use `actions`.
+- **ShowMoreButton** — `aria-expanded` + `aria-controls` = the list's id;
+  "Show less" scrolls the button back into view.
+- **ClampText** — the full text is always in the DOM (find, copy, screen
+  readers); the toggle has `aria-expanded` / `aria-controls`.
+- **ScrollArea** — a meaningful region gets `label`; one that may hold only
+  text gets `focusable` (keyboard scrolling, WCAG 2.1.1).
+- **MasterDetail** — two labelled sections, list before detail in the DOM;
+  pinned action footers stay inside the detail section.
+- **CompactHeader** — one `h1`; stats are a `<dl>` (read "Unread 5").
+- Motion: only the disclosure height and chevrons animate, never under
+  `prefers-reduced-motion`. Focus rings follow §18.3 rule 9.
+
+### 20.8 Gotchas (learned in the pilots)
+
+- **A MasterDetail page must end with it**, and the shell's bottom padding
+  must equal `bottomGap` (voicemail: `.dl-shell.vm-shell { padding-bottom:
+  24px }`). Otherwise the page scrolls by the difference — and the harness's
+  full-page capture grows the viewport to the document height, which grows
+  the panes with it (a screenshot taller than 900px means this).
+- **Followers need a leader.** `contain: size` gives a follower no height of
+  its own (only `--lk-follow-min`); a row of followers collapses to the
+  floor. Turn followers off where the layout stacks (`--lk-follow: none`).
+- **Nested auto-fit grids inside a Disclosure** used to overflow the row
+  (an implicit `auto` grid column sizes to the content's min-content); the
+  kit pins the disclosure's column to `minmax(0, 1fr)` — keep it.
+- **Clamp padding:** padding on a `-webkit-line-clamp` element lets the next
+  line peek out; pad the wrapper (`ClampText wrapperClassName`).
+- **Class names:** kit classes are `lk-*`; page classes keep their page
+  prefix. Check for an existing class before naming a new one (voicemail
+  already had `.vm-more` for "Load more").
+- Spans (`ad-span-*`) are ignored inside a flex `.lk-col` / `.ad-col` —
+  put the span on the column, not on the cards in it.
+- `useShowMore(items, Number.POSITIVE_INFINITY)` = "show everything" (a
+  follower lists every item); `needed` is then false.
+- **CSS order:** `main.tsx` imports `App` before the global sheets, so the
+  CSS of pages `App.tsx` imports EAGERLY (dashboard, RCF, My Account,
+  Guides…) is injected BEFORE `index.css` / `layout-kit.css` and loses
+  every equal-specificity tie to `dl-*` / `lk-*` rules. Tune a kit or
+  `dl-*` rule from such a page with one more class (`.gd-scope .lk-…`,
+  `.ma-head .lk-stats`). Lazy pages load later and win ties.
+- **A stacked `.lk-col` follower** keeps its natural height: the kit only
+  gives it `flex: 1 1 0` through `--lk-follow-flex`, which BalancedGrid sets
+  side by side. A page grid that wants `.lk-col` followers to share the row
+  sets both `--lk-follow: size` and `--lk-follow-flex: 1 1 0` in its
+  multi-column query.
+
+### 20.9 Roll-out checklist (per page)
+
+1. Shoot the BEFORE (harness, 1440 dark + light) and note: header rows,
+   short-beside-tall cards, columns that run long, page height.
+2. Header → `<CompactHeader>` (or confirm the existing band is one row).
+3. Scope / filter bars → one slim row.
+4. Each row of cards: pick the leader; others `.lk-grow` / `.lk-follow`;
+   cap bodies at 8 rows / ~440px; "Show all N" on long lists.
+5. A list + item page → `<MasterDetail>`; pin the item's actions in its
+   footer; end the page with it (§20.8).
+6. Glossaries, rarely-changed settings, staff blocks → `<Disclosure>` with
+   a `summary` of the current value; persist with `<page>:<section>` keys.
+7. Every persona (tenant, readonly, admin console, admin `?customer=`,
+   admin View as Customer) and every empty / loading / error state.
+8. Harness at 1440×900, 820×1180, 390×844, dark + light: no layout
+   warnings, no new console errors; `npm run build`, `npx eslint <files>`,
+   `node scripts/check-theme-tokens.mjs`.

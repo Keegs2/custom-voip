@@ -1,7 +1,9 @@
 /**
  * InboxView — one mailbox's messages: folder switch (Inbox / Saved / Trash
- * with counts), the message list and the reading pane. Two columns when the
- * view is wide enough (container query in dl-voicemail.css), stacked below.
+ * with counts), the message list and the reading pane — a kit MasterDetail
+ * (docker/ui/CLAUDE.md §20): two panes of equal height that end at the
+ * bottom of the first screen, each scrolling inside itself (the folder tabs
+ * and the message actions stay put); stacked when the column is narrow.
  *
  * All three folders load their first page (≤ 50 rows) up front: that gives
  * the counts and makes switching instant. Mailboxes hold at most 100 stored
@@ -43,6 +45,7 @@ import { ReadingPane, type MessageActionKind, type ReadingPaneProps } from './Re
 import { ConfirmDialog } from './VmDialog';
 import { callerTitle, safeTimeZone } from './format';
 import { useNow } from './useNow';
+import { MasterDetail, ScrollArea } from '../../components/layout/kit';
 
 const FOLDERS: ReadonlyArray<{ id: VoicemailFolder; label: string; empty: string }> = [
   { id: 'inbox', label: 'Inbox', empty: 'No messages in the inbox. New voicemail shows up here.' },
@@ -261,44 +264,55 @@ export function InboxView({ scope, mailbox, canEdit, canManage, transcriptionAva
     );
   }
 
+  const folderTabs = (
+    <div className="vm-folders" role="tablist" aria-label="Folders">
+      {FOLDERS.map((f) => {
+        const active = f.id === folder;
+        return (
+          <button
+            key={f.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            className={`vm-folder${active ? ' vm-folder-on' : ''}`}
+            onClick={() => {
+              setFolder(f.id);
+              setSelectedSel(null);
+            }}
+          >
+            {f.label}
+            {counts[f.id] !== null && <span className="vm-folder-count">{counts[f.id]}</span>}
+            {f.id === 'inbox' && inboxUnread > 0 && (
+              <span className="vm-folder-new" aria-label={`${inboxUnread} unread`}>
+                {inboxUnread} new
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="vm-inbox">
-      <div className="vm-inbox-grid">
-        <section className="dl-panel vm-listpanel" aria-label="Messages">
-          <div className="vm-folders" role="tablist" aria-label="Folders">
-            {FOLDERS.map((f) => {
-              const active = f.id === folder;
-              return (
-                <button
-                  key={f.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  className={`vm-folder${active ? ' vm-folder-on' : ''}`}
-                  onClick={() => {
-                    setFolder(f.id);
-                    setSelectedSel(null);
-                  }}
-                >
-                  {f.label}
-                  {counts[f.id] !== null && <span className="vm-folder-count">{counts[f.id]}</span>}
-                  {f.id === 'inbox' && inboxUnread > 0 && (
-                    <span className="vm-folder-new" aria-label={`${inboxUnread} unread`}>
-                      {inboxUnread} new
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          {folder === 'trash' && items.length > 0 && (
-            <p className="vm-folder-note">Messages in Trash are deleted for good after 30 days.</p>
-          )}
-          <div className="vm-listbody">{listBody}</div>
-        </section>
-
-        <section className="dl-panel vm-pane" aria-label="Message">
-          {selected ? (
+      <MasterDetail
+        className="vm-md"
+        listLabel="Messages"
+        detailLabel="Message"
+        listWidth="minmax(280px, 340px)"
+        listClassName="dl-panel vm-listpanel"
+        detailClassName="dl-panel vm-pane"
+        list={
+          <>
+            {folderTabs}
+            {folder === 'trash' && items.length > 0 && (
+              <p className="vm-folder-note">Messages in Trash are deleted for good after 30 days.</p>
+            )}
+            <ScrollArea className="vm-listbody">{listBody}</ScrollArea>
+          </>
+        }
+        detail={
+          selected ? (
             <ReadingPane
               key={selected.id}
               scope={scope}
@@ -322,9 +336,9 @@ export function InboxView({ scope, mailbox, canEdit, canManage, transcriptionAva
               </span>
               <p>{current.isLoading ? 'Loading…' : items.length === 0 ? 'Nothing to play here yet.' : 'Pick a message to play it.'}</p>
             </div>
-          )}
-        </section>
-      </div>
+          )
+        }
+      />
 
       {purgeTarget && (
         <ConfirmDialog

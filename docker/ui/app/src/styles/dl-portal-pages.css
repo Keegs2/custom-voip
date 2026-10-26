@@ -55,3 +55,16 @@
 /* Authorized-IP remove (×): dim at rest, danger on hover. */
 .dlx-ip-remove { color: var(--t-text-dim); }
 .dlx-ip-remove:hover:not(:disabled) { color: var(--t-danger-fg); }
+
+/* ─── Several trunks: one expandable card each (layout kit Disclosure,
+   docker/ui/CLAUDE.md §20). The card keeps the panel look; the trunk's own
+   sections carry their padding, so the kit's content padding is dropped.
+   A disabled trunk says so on its collapsed row (never hidden). ─── */
+.dlx-trunk-list { gap: 16px; }
+
+.dlx-trunk-disc .lk-disc-title { font-size: 0.95rem; }
+.dlx-trunk-disc .lk-disc-title .dl-pill { font-family: "Public Sans", "IBM Plex Sans", sans-serif; }
+.dlx-trunk-off { color: var(--t-danger-fg); font-weight: 600; }
+
+.lk-disc--card.dlx-trunk-disc > .lk-disc-panel .lk-disc-content,
+.lk-disc--card.dlx-trunk-disc.is-open > .lk-disc-panel .lk-disc-content { padding: 0; }

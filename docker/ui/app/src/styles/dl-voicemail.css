@@ -116,6 +116,10 @@
   container-name: vm;
 }
 
+/* The inbox's panes end 24px above the first screen's bottom edge
+   (MasterDetail bottomGap); the page ends there too, so nothing scrolls. */
+.dl-shell.vm-shell { padding-bottom: 24px; }
+
 .vm-sr {
   position: absolute !important;
   width: 1px;
@@ -137,24 +141,7 @@
 .vm-gap-top { margin-top: 12px; }
 .vm-gap-bottom { margin-bottom: 16px; }
 
-/* ─── Header ─────────────────────────────────────────────────────────────── */
-.vm-header { align-items: flex-end; }
-
-.vm-header-side {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: flex-end;
-  gap: 16px 28px;
-}
-
-.vm-header-badges {
-  margin-top: 12px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
+/* ─── Header — the kit's CompactHeader: one row at desktop ──────────────── */
 .vm-crumb-tail {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -177,14 +164,23 @@
   white-space: nowrap;
 }
 
+/* Admin "Viewing" picker: label inline, one control-height row. */
 .vm-scope-pick {
   display: flex;
-  flex-direction: column;
-  min-width: 220px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
-.vm-scope-pick .dl-flabel { margin-bottom: 5px; }
-.vm-scope-select { min-width: 220px; }
+.vm-scope-pick .dl-flabel { margin: 0; flex-shrink: 0; }
+
+.vm-scope-select {
+  min-width: 190px;
+  max-width: 260px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-weight: 600;
+}
 
 /* ─── Encryption badge ───────────────────────────────────────────────────── */
 .vm-enc {
@@ -243,39 +239,47 @@
 }
 
 /* ─── Mailbox bar ────────────────────────────────────────────────────────── */
+/* One slim row: [MAILBOX  Front desk · (617) 555-0134 ▾]        (617) 555-0134 · Active */
 .vm-mbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 14px 24px;
-  padding: 14px 20px;
-  margin-bottom: 16px;
+  gap: 8px 20px;
+  padding: 8px 12px 8px 16px;
+  margin-bottom: 12px;
   overflow: visible;
 }
 
 .vm-mbar-pick {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
-  flex: 1 1 320px;
+  flex: 1 1 340px;
 }
 
-.vm-mbar-pick .dl-flabel { margin-bottom: 5px; }
+.vm-mbar-pick .dl-flabel { margin: 0; flex-shrink: 0; }
 
 .vm-mbar-select {
   width: 100%;
-  max-width: 460px;
+  min-width: 0;
+  max-width: 420px;
+  padding-top: 7px;
+  padding-bottom: 7px;
   font-weight: 600;
 }
 
 .vm-mbar-single {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--vm-display);
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 0.95rem;
   letter-spacing: -0.01em;
   color: var(--t-text);
-  padding: 4px 0;
 }
 
 .vm-mbar-facts {
@@ -294,32 +298,15 @@
 .vm-tabs {
   justify-content: flex-start;
   gap: clamp(8px, 2vw, 20px);
+  margin-bottom: 14px;
 }
 
 .vm-tabs .dl-count { margin-left: 2px; }
 
-/* ─── Inbox: folders · list · reading pane ───────────────────────────────── */
-.vm-inbox-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
-}
-
-@container vm (min-width: 700px) {
-  .vm-inbox-grid {
-    grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
-    align-items: start;
-  }
-  .vm-listbody {
-    max-height: min(620px, 68vh);
-    overflow-y: auto;
-  }
-  .vm-pane {
-    position: sticky;
-    top: 16px;
-  }
-}
-
+/* ─── Inbox: the kit's MasterDetail (list | reading pane) ──────────────────
+   Both panes end at the bottom of the first screen and scroll inside
+   themselves: the folder tabs stay on top of the list, the actions stay
+   pinned under the message (layout kit — docker/ui/CLAUDE.md §20). */
 .vm-listpanel,
 .vm-pane { overflow: hidden; }
 
@@ -586,14 +573,24 @@
 .vm-linkbtn:hover { color: var(--t-accent-text-hover); }
 .vm-linkbtn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ─── Reading pane ───────────────────────────────────────────────────────── */
+/* ─── Reading pane ─────────────────────────────────────────────────────────
+   A flex column filling the pane: the scrolling body (caller, meta row,
+   player, transcript) over a pinned footer (actions + retention). */
+.vm-read {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .vm-pane-body {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 22px 24px 20px;
+  gap: 14px;
+  padding: 18px 22px 18px;
 }
 
+/* Caller on one line: name, then the number beside it (wraps under). */
 .vm-msg-head {
   display: flex;
   align-items: flex-start;
@@ -601,13 +598,19 @@
   gap: 16px;
 }
 
-.vm-msg-id { min-width: 0; }
+.vm-msg-id {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  min-width: 0;
+}
 
 .vm-msg-title {
   margin: 0;
   font-family: var(--vm-display);
   font-weight: 700;
-  font-size: 1.22rem;
+  font-size: 1.14rem;
   letter-spacing: -0.02em;
   line-height: 1.2;
   color: var(--t-text-strong);
@@ -615,9 +618,9 @@
 }
 
 .vm-msg-number {
-  margin: 4px 0 0;
+  margin: 0;
   font-family: var(--vm-mono);
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: var(--t-text-soft);
 }
 
@@ -643,36 +646,60 @@
   border: 1px solid color-mix(in srgb, var(--t-neutral-fg) 22%, transparent);
 }
 
-.vm-facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px 24px;
-  margin: 0;
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: var(--t-tint);
-  border: 1px solid var(--t-line-soft);
+/* Received · Length · Mailbox on ONE inline row (wraps when narrow). Every
+   item carries a leading hairline; the dl is pulled 13px left inside a
+   clipping box, so the hairline that starts each line is cut off. */
+.vm-meta-clip {
+  overflow: hidden;
+  margin-top: -4px;
 }
 
-.vm-facts > div { min-width: 0; }
-.vm-facts > .vm-fact-wide { grid-column: 1 / -1; }
-.vm-nowrap { white-space: nowrap; }
+.vm-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  row-gap: 4px;
+  margin: 0 0 0 -13px;
+  padding: 0;
+}
 
-.vm-facts dt {
+.vm-meta > div {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  margin-right: 12px;
+  padding-left: 12px;
+  border-left: 1px solid var(--t-line);
+}
+
+.vm-meta dt {
   font-size: 0.58rem;
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--vm-label);
-  margin-bottom: 3px;
 }
 
-.vm-facts dd {
+.vm-meta dd {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--t-text-soft);
   font-variant-numeric: tabular-nums;
+}
+
+.vm-nowrap { white-space: nowrap; }
+
+/* Pinned footer: the message actions + the retention line. */
+.vm-read-foot {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 22px 12px;
+  border-top: 1px solid var(--t-line);
+  background: var(--t-tint);
 }
 
 .vm-actions {
@@ -707,9 +734,7 @@
   align-items: flex-start;
   gap: 8px;
   margin: 0;
-  padding-top: 14px;
-  border-top: 1px solid var(--t-line-soft);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   line-height: 1.5;
   color: var(--t-text-dim);
 }
@@ -717,6 +742,7 @@
 .vm-retention svg { flex-shrink: 0; margin-top: 2px; color: var(--t-accent-text); }
 
 .vm-pane-empty {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -745,12 +771,12 @@
 
 /* ─── Transcript (v1.1) ──────────────────────────────────────────────────── */
 /* Reading-pane panel between the player and the actions. Same card language
-   as .vm-facts / .vm-player: tint, hairline, 12px radius. */
+   as .vm-player: tint, hairline, 12px radius. */
 .vm-tx {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
+  gap: 8px;
+  padding: 12px 14px;
   border-radius: 12px;
   background: var(--t-surface);
   border: 1px solid var(--t-line);
@@ -785,16 +811,20 @@
   flex-shrink: 0;
 }
 
-/* The text itself: selectable, keeps the API's line breaks, scrolls inside
-   the card past ~14 lines so the message actions stay in reach. */
-.vm-tx-text {
-  margin: 0;
-  max-height: 22rem;
-  overflow-y: auto;
-  padding: 10px 12px;
+/* The text box (the kit's ClampText wrapper): the first 4 lines, then
+   "Show full transcript" inside the box. Padding sits on the box, not on
+   the clamped text, so no fifth line peeks out under the clamp. */
+.vm-tx-box {
+  gap: 4px;
+  padding: 9px 12px 8px;
   border-radius: 8px;
   background: var(--t-tint);
   border: 1px solid var(--t-line-soft);
+}
+
+/* The text itself: selectable, keeps the API's line breaks. */
+.vm-tx-text {
+  margin: 0;
   font-size: 0.86rem;
   line-height: 1.6;
   color: var(--t-text);
@@ -804,7 +834,7 @@
   cursor: text;
 }
 
-.vm-tx-text:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
+.vm-tx-box .lk-clamp-toggle { font-size: 0.74rem; }
 
 .vm-tx-note {
   display: flex;
@@ -861,8 +891,8 @@
 .vm-player {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
+  gap: 6px;
+  padding: 12px 14px;
   border-radius: 12px;
   background: var(--vm-player-bg);
   border: 1px solid var(--vm-player-line);
@@ -876,10 +906,12 @@
   min-width: 0;
 }
 
+/* One row: play · timeline · time · speed (speed wraps under when narrow). */
 .vm-player-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 8px 14px;
 }
 
 .vm-player-compact .vm-player-row { gap: 10px; }
@@ -912,7 +944,7 @@
 }
 
 .vm-track-wrap {
-  flex: 1;
+  flex: 1 1 160px;
   min-width: 60px;
   display: flex;
   align-items: center;
@@ -973,18 +1005,10 @@
 
 .vm-player-compact .vm-time { min-width: 0; font-size: 0.68rem; }
 
-.vm-player-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-left: 58px;
-}
-
 .vm-speed {
   display: inline-flex;
   gap: 4px;
+  margin-left: auto;
 }
 
 .vm-speed-opt {
@@ -1016,6 +1040,7 @@
 }
 
 .vm-player-err {
+  padding-left: 58px;
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--t-danger-fg);
@@ -1038,19 +1063,36 @@
   border-top-color: var(--t-text-on-accent);
 }
 
-/* ─── Settings ───────────────────────────────────────────────────────────── */
+/* ─── Settings ─────────────────────────────────────────────────────────────
+   Kit BalancedGrid: Greeting | Details + Transcription in one equal-height
+   row, then one panel of expandable rows (PIN · Storage · Administration). */
 .vm-settings {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: var(--rcf-stack);
 }
 
-@container vm (min-width: 760px) {
-  .vm-settings { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
-  .vm-span-2 { grid-column: 1 / -1; }
+.vm-settings-panel { overflow: visible; }
+
+/* The greeting card is its own container (its rows reflow by ITS width). */
+.vm-greet-panel {
+  container-type: inline-size;
+  container-name: vmgreet;
 }
 
-.vm-settings-panel { overflow: visible; }
+.vm-greetings-more { margin-top: 8px; }
+
+/* The expandable rows' panel (PIN · Storage · Administration). The staff
+   row carries an amber leading edge. */
+.vm-settings-rows { overflow: visible; flex-shrink: 0; }
+.vm-settings-rows > .lk-disc:first-child .lk-disc-toggle { border-radius: 11px 11px 0 0; }
+.vm-settings-rows > .lk-disc:last-child:not(.is-open) .lk-disc-toggle { border-radius: 0 0 11px 11px; }
+.vm-settings-rows > .lk-disc:only-child:not(.is-open) .lk-disc-toggle { border-radius: 11px; }
+.vm-admin-disc { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--vm-staff) 55%, transparent); }
+.vm-admin-disc .lk-disc-toggle { padding-left: 21px; }
+.vm-admin-disc .lk-disc-content { padding-left: 21px; }
+.vm-summary-bad { color: var(--t-danger-fg); font-weight: 600; }
+.vm-form-narrow { max-width: 600px; }
 .vm-head-action { margin-left: auto; }
 
 .vm-modes {
@@ -1149,7 +1191,7 @@
   gap: 8px;
 }
 
-@container vm (max-width: 560px) {
+@container vmgreet (max-width: 520px) {
   .vm-greeting { grid-template-columns: minmax(0, 1fr) auto; }
   .vm-greeting .vm-player { grid-column: 1 / -1; grid-row: 2; }
 }
@@ -1204,6 +1246,18 @@
   gap: 14px;
 }
 
+/* Fields + their submit on one line (the button sits on the inputs' baseline). */
+.vm-field-row-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.vm-field-row-action > .vm-field { flex: 1 1 150px; }
+.vm-field-action { flex: none; height: 37px; }
+.vm-help-flush { margin-top: 0; }
+
 .vm-input-full { width: 100%; }
 
 .vm-form-actions {
@@ -1212,13 +1266,32 @@
   gap: 10px;
 }
 
+/* A help line on the left, the submit on the right — one row. */
+.vm-form-actions-split {
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vm-form-actions-split .dl-help { margin: 0; flex: 1 1 220px; }
+
 .vm-help-err { color: var(--t-danger-fg); }
 
 .vm-storage {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 32px;
+  max-width: 760px;
 }
+
+.vm-storage-facts {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  column-gap: 32px;
+}
+
+.vm-storage-facts .dl-kv { border-bottom: none; padding: 2px 0; }
 
 .vm-storage-row {
   display: flex;
@@ -1243,7 +1316,8 @@
 .vm-meter-warn { background: var(--t-warn-solid); }
 .vm-meter-bad { background: var(--t-danger-solid); }
 
-.vm-admin-panel { border-color: color-mix(in srgb, var(--vm-staff) 32%, transparent); }
+.vm-admin-body { max-width: 760px; }
+.vm-admin-body > .dl-help { margin: 0 0 6px; }
 
 .vm-admin {
   display: flex;
@@ -1737,8 +1811,7 @@
     0 0 10px color-mix(in srgb, var(--t-accent-line) 55%, transparent);
 }
 
-:root[data-theme='dark'] .vm-facts,
-:root[data-theme='dark'] .vm-tx-text {
+:root[data-theme='dark'] .vm-tx-box {
   background: var(--t-surface-sunken);
   border-color: var(--t-line);
 }
