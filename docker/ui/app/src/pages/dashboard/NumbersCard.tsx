@@ -7,7 +7,7 @@
  *   Number              Forwards to /           Last 7 days     Status
  *                       Where calls go
  *   +1 (217) 352-8498   +1 (949) 614-7510       24 calls        ● Forwarding        ⌄   rcf: RowEditor
- *   Boston office       Failover …              96% answered
+ *   Boston office       Rings 30s               96% answered
  *   +1 (508) 555-0100   Voicemail               3 calls         ● Taking messages   →   voicemail: link
  *   Voicemail           Callers leave a message
  *   +1 (617) 555-0202   Your phone system       —               ● Active                trunk: static
@@ -302,7 +302,7 @@ export function NumbersCard({
             <span className="ad-stack">
               <span className="ad-num ad-num-dest">{fmt(entry.forward_to)}</span>
               <span className="ad-faint">
-                {entry.failover_to ? `Failover ${fmt(entry.failover_to)}` : `Rings ${entry.ring_timeout}s`}
+                {`Rings ${entry.ring_timeout}s`}
               </span>
             </span>
           </td>

@@ -704,7 +704,7 @@ function NumberRow({ entry, showCustomer, isAdmin, canEdit, colCount, expanded, 
           <span className="ad-stack">
             <span className="ad-num ad-num-dest">{fmt(entry.forward_to)}</span>
             <span className="ad-faint">
-              {entry.failover_to ? `Failover ${fmt(entry.failover_to)}` : `Rings ${entry.ring_timeout}s`}
+              {`Rings ${entry.ring_timeout}s`}
             </span>
           </span>
         </td>

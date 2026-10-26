@@ -3,7 +3,7 @@
  * how busy it was this week, and whether it's forwarding.
  *
  *   +1 (217) 352-8498 ━━━━━━━━━━━━━━━━━━━━━ +1 (949) 614-7510   24 calls   ● Forwarding  ⌄
- *   Boston office                            Failover +1 (949)…  96% answered
+ *   Boston office                            Rings for 30s       96% answered
  *
  * Clicking (or Enter/Space on) a row opens the shared RowEditor inline under
  * it — the same editor, mutations and readonly gating the console has
@@ -197,7 +197,8 @@ function RouteRow({ entry, index, stats, open, canEdit, onToggle, onClose }: Rou
         <span className="rcfd-route-to">
           <span className="rcfd-num rcfd-num-dest">{fmt(entry.forward_to)}</span>
           <span className="rcfd-route-label">
-            {entry.failover_to ? `Failover ${fmt(entry.failover_to)}` : `Rings for ${entry.ring_timeout}s`}
+            {/* Never the failover number: routing doesn't use failover_to yet (RowEditor says so). */}
+            {`Rings for ${entry.ring_timeout}s`}
           </span>
         </span>
 
