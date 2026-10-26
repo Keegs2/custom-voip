@@ -685,9 +685,7 @@ every persona.
   Trunking (early access, not in the owner's scope for this hub).
 - **Gotchas:** this page is imported statically by `App.tsx`, so its CSS
   loads BEFORE `layout-kit.css` — overrides of kit rules carry the
-  `.gd-scope` prefix. The kit's `.lk-col > .lk-follow { flex: 1 1 0 }`
-  collapses a follower when the grid STACKS (content-height column) —
-  `dl-guides.css` resets it to `flex: none` below the grid's md width.
+  `.gd-scope` prefix.
 - Harness slugs: `docs-guides`, `docs-guides-{rcf,voicemail,ivr}`,
   `state-guides-{task,expand-all,deeplink,ivr-open}`.
 
@@ -2214,7 +2212,10 @@ colour is a `--t-*` token; nothing to add for dark mode.
 
 Page grids that are not a `BalancedGrid` (the dashboard's 12-column
 `.ad-grid`) opt in with the classes: set `--lk-follow: size` on the grid
-where it is multi-column and `none` where it stacks (§20.6).
+where it is multi-column and `none` where it stacks (§20.6). A `.lk-col`
+follower shares out the row height only where the grid also sets
+`--lk-follow-flex: 1 1 0` (BalancedGrid does, side by side); unset, it is
+its natural height, so a stacked column never collapses it.
 
 ### 20.6 Responsive (1440 / 820 / 390)
 

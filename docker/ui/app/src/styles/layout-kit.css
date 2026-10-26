@@ -262,15 +262,15 @@
 }
 
 @container lkgrid (min-width: 560px) {
-  .lk-stack-sm > .lk-grid { grid-template-columns: var(--lk-cols, repeat(2, minmax(0, 1fr))); --lk-follow: size; }
+  .lk-stack-sm > .lk-grid { grid-template-columns: var(--lk-cols, repeat(2, minmax(0, 1fr))); --lk-follow: size; --lk-follow-flex: 1 1 0; }
 }
 
 @container lkgrid (min-width: 760px) {
-  .lk-stack-md > .lk-grid { grid-template-columns: var(--lk-cols, repeat(2, minmax(0, 1fr))); --lk-follow: size; }
+  .lk-stack-md > .lk-grid { grid-template-columns: var(--lk-cols, repeat(2, minmax(0, 1fr))); --lk-follow: size; --lk-follow-flex: 1 1 0; }
 }
 
 @container lkgrid (min-width: 960px) {
-  .lk-stack-lg > .lk-grid { grid-template-columns: var(--lk-cols, repeat(2, minmax(0, 1fr))); --lk-follow: size; }
+  .lk-stack-lg > .lk-grid { grid-template-columns: var(--lk-cols, repeat(2, minmax(0, 1fr))); --lk-follow: size; --lk-follow-flex: 1 1 0; }
 }
 
 /* A cell holding several cards, stacked; the row height is shared out. */
@@ -284,9 +284,10 @@
 
 .lk-col > .lk-grow { flex: 1 1 auto; }
 
-/* A card whose height follows its row. `--lk-follow` is `size` only where a
-   layout is side by side (BalancedGrid sets it; a page grid sets it in its
-   own multi-column query) — stacked, the card is its natural height. */
+/* A card whose height follows its row. `--lk-follow` is `size` (and
+   `--lk-follow-flex` is `1 1 0`) only where a layout is side by side
+   (BalancedGrid sets both; a page grid sets them in its own multi-column
+   query) — stacked, the card is its natural height. */
 .lk-follow {
   contain: var(--lk-follow, none);
   contain-intrinsic-block-size: var(--lk-follow-min);
@@ -295,7 +296,9 @@
   min-height: 0;
 }
 
-.lk-col > .lk-follow { flex: 1 1 0; }
+/* Shares out the row's height only side by side; stacked, a `1 1 0` basis
+   would collapse the card in a column whose height is its content. */
+.lk-col > .lk-follow { flex: var(--lk-follow-flex, 0 0 auto); }
 
 /* The scrolling part of a bounded pane / follower card. */
 .lk-scroll {

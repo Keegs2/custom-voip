@@ -220,13 +220,6 @@
    --lk-follow: size side by side); its rows scroll inside. */
 .gd-faq > .gd-rows { display: block; }
 
-/* Stacked (below the grid's md width): the card is its natural height. The
-   kit's `.lk-col > .lk-follow { flex: 1 1 0 }` would otherwise collapse it
-   in a column whose height is its content. */
-@container lkgrid (max-width: 759.98px) {
-  .gd-scope .lk-col > .gd-faq { flex: none; }
-}
-
 /* ─── Task + question rows (layout-kit Disclosure, variant "row") ─── */
 
 /* Title over its one-line summary; long titles wrap instead of overflowing. */

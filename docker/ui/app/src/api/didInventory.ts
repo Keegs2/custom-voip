@@ -58,15 +58,17 @@ export async function listCustomerInventory(customerId: number): Promise<DidInve
 /**
  * POST /numbers/{did}/request
  * Customer endpoint — customer requests a specific available DID.
+ * `product_type` is sent explicitly: older APIs require it (422 without it).
  */
 export async function requestDid(
   did: string,
   notes?: string,
+  productType: 'rcf' | 'trunk' = 'rcf',
 ): Promise<DidInventoryItem> {
   return apiRequest<DidInventoryItem>(
     'POST',
     `/numbers/${encodeURIComponent(did)}/request`,
-    notes !== undefined ? { notes } : undefined,
+    notes !== undefined ? { product_type: productType, notes } : { product_type: productType },
   );
 }
 
