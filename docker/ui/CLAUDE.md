@@ -645,8 +645,28 @@ The merged CDR search + voice-quality page. Top composition (2026-10 rework):
 Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
 **native React SIP-trace search page** — there is no Homer iframe any more.
 
-- A search form (From, To, Call-ID, date range) calls `searchSipTraces()`
-  (`POST /api/homer/search` via `api/homer.ts`) using a React Query `useMutation`.
+- **Layout (§20):** a one-row `CompactHeader` (crumb · SIP Trace Search ·
+  "Open SIP Dashboard"), then the search form as ONE row at desktop —
+  omnibox · time-range presets · Search / Clear (all 40px) — with the live
+  hint under the omnibox and the resolved window ("Oct 21, 3:21 PM → Oct 22,
+  3:21 PM (local)") under the presets. Start / End appear only for
+  **Custom** (one slim row, labels inline). Advanced (From · To · Call-ID)
+  is a kit `Disclosure` (bare) whose row shows "N active" — the criteria
+  apply while it is closed. The form restacks by the PANEL's width
+  (container `tssearch`: presets + buttons under the omnibox below 980px,
+  one column below 640px). The **results panel is bounded to the first
+  screen** (`useViewportFit` → `--ts-res-top`, container `tsres` ≥ 480px):
+  head on one line (Results · what was searched · count), the table
+  scrolls inside under sticky column heads, the pager is pinned under it,
+  and `.dl-shell.dlx5-shell` ends 24px under it, so the page itself does
+  not scroll. Columns drop out by priority as the panel narrows (`dlx5-c-*`):
+  the "Ladder" word < 1080px, Orig/Term < 960px, Attestation/Zone < 760px
+  (parties stack, the date sits over the clock), Duration + the open column
+  < 520px (the row itself opens the call) — the call panel always has all
+  of them. No sideways page scroll at 390px.
+- A search form (number or Call-ID, time range, optional From / To / Call-ID)
+  calls `searchSipTraces()` (`POST /api/homer/search` via `api/homer.ts`)
+  using a React Query `useMutation`.
 - The returned `data` (flat `HomerSearchResult[]`) plus the `correlations` map
   (Call-ID → related Call-IDs) are grouped into per-call rows via an in-component
   **union-find** (`groupMessagesByCall`) so A-leg and B-leg messages merge into one
@@ -1732,7 +1752,7 @@ validation and the "what callers hear" preview, never sent (plan D2).
 | `pages/IvrPage.tsx` | Route entry (lazy, full-bleed OUTSIDE AppLayout with its own `Sidebar` + `SidebarCollapseTab`, like Troubleshooting; `.dl-scope.ivr-canvas`). Picks the persona and provides `IvrWorkspaceContext`; inner routes `/ivr` and `/ivr/flows/:id` (the builder is a second lazy chunk, `flow/FlowBuilderRoute`). **Focus mode:** inside the builder the app sidebar starts collapsed — session-only state, the saved `sidebar_collapsed` preference is never touched. |
 | `pages/ivr/IvrContext.ts` | `{ scope, viewer: tenant\|preview\|admin, staff, canEdit, customerName, href() }` — no IVR component reads `user` / `effectiveCustomer` itself. `href()` keeps the admin console's `?customer=`. |
 | `pages/ivr/ivrData.ts` | Scope (tenant `self:<id>` / staff `c:<id>`, like voicemail), query keys `['ivr', key, …]`, hooks, and `readIvrError` / `ivrErrorText` (flattens `stale_revision` + `current_revision`, `invalid_flow` + `errors`, `prompt_in_use` + `flows`, `flow_in_use`, `ivr_not_enabled`, whether FastAPI puts them top-level or under `detail`). |
-| `pages/ivr/IvrHome.tsx`, `IvrIntro.tsx`, `IvrDialogs.tsx`, `format.ts` | `/ivr`: not entitled → `IvrIntro`; entitled, no numbers → build now + "ask for a number"; else numbers (flow, live/not published, last publish; choose flow / rename), flows (status, used by, open, rename, delete → `flow_in_use`), messages. |
+| `pages/ivr/IvrHome.tsx`, `IvrIntro.tsx`, `IvrDialogs.tsx`, `format.ts` | `/ivr`: not entitled → `IvrIntro`; entitled, no numbers → build now + "ask for a number"; else numbers (flow, live/not published, last publish; choose flow / rename), flows (status, used by, open, rename, delete → `flow_in_use`), messages. Layout below ("The /ivr page"). |
 | `pages/ivr/prompts/` | `PromptManager` (play via a minted URL, rename, delete → `prompt_in_use` names the flows) and `PromptDialog` (Type text → voice + Preview (`tts-preview`, not stored) → save; Record / Upload through the SHARED voicemail capture `useAudioCapture` + `AudioCapturePanel` at **8 kHz** mono PCM16 → multipart upload with an additive `kind` field). |
 | `flow/model/` (pure) | `blocks.ts` catalog + exits (§2 handles: `next`, `d:<key>`, `noInput`, `noMatch`, `open`, `closed`, `match`, `noAnswer`); `graph.ts` §2 ⇄ working graph (unknown fields kept in `keep*` and re-emitted; a Start is guaranteed and undeletable); `history.ts` undo; `layout.ts` Tidy up; `summary.ts` the wording. |
 | `flow/compile/` (pure) | `ivr.ts` the compile mirror + `describePlan` (the transcript); `policy.ts` the US-only outside-number rule (mirror of the server's `services/ivr/policy.py`). |
@@ -1752,6 +1772,30 @@ Admin in normal view gets a console with a customer picker (`?customer=ID`)
 — there is no "all customers" IVR view, because every §8.2 route needs a
 customer (the API answers 400 `customer_id required`). Support → product home.
 
+### The /ivr page (layout, §20)
+
+- `CompactHeader` in one row: crumb (customer / IVR + amber Staff tag) ·
+  IVR · the admin console's **Customer** picker inline (`.lk-head
+  .ivr-scope-pick`) · stats IVR numbers | Flows | Live · **New flow**
+  (writers; the page's primary action — the Flows card no longer has its
+  own button).
+- **Your IVR numbers | Flows** — ONE row of equal-height cards
+  (`BalancedGrid`, stacks below 960px of content). Each row is two lines:
+  number + name (or flow name + "Edited …") with the actions on the right,
+  then the status word and the facts (answers with / used by, published,
+  "Draft has unpublished changes"), wrapping when narrow. 6 rows, then
+  "Show all N" opens the rest inside a capped scroll (`.lk-cap`, 400px).
+  The numbers card's foot (`.ivr-card-foot`) says who assigns numbers and
+  sits on the card's bottom edge.
+- **Messages** (`PromptManager`) full width: one compact row per message
+  (name; kind · length · date; the spoken text on ONE clamped line, full
+  text in the tooltip/DOM) with the one-row player and actions on the
+  right; the first 4, then "Show all N messages". Below 720px of content
+  the player drops under the text.
+- Breakpoints are container queries on `.ivr-sections` (`ivrpage`) and
+  `.ivr-intro-host` (`ivrintro`), not the window. The shell ends 24px under
+  the last card (`.dl-shell.ivr-shell`).
+
 ### The builder
 
 - **Layout:** top bar (← IVR, name, live version, save state, undo / redo /
@@ -1760,6 +1804,21 @@ customer (the API answers 400 `customer_id required`). Support → product home.
   Flow canvas · right settings panel or a sheet (Publish / Test call /
   History). Opens at a readable zoom anchored at Start when the whole flow
   wouldn't fit legibly (the MiniMap shows the rest); a saved viewport wins.
+- **Panels (§20 — the canvas gets the room):** widths are
+  `--ivr-left-w` / `--ivr-right-w` on `.ivr-work`. The LEFT panel folds
+  (button beside the Blocks | Outline tabs) into a 56px rail of block icons
+  — the SAME palette buttons (`Palette rail`: same drag / click-to-add,
+  same accessible names, hint in the tooltip). The RIGHT panel can be made
+  wider (`clamp(344px, 33vw, 480px)`) from any panel's head, and while it
+  only shows the checklist it folds into a rail whose button carries the
+  status (✓ or the error count). Selecting a block or opening a sheet
+  always brings the panel back — "selecting a block opens its panel" is
+  unchanged. The head controls are `PanelChromeButtons`
+  (`flow/panels/panelChrome.ts` context, provided by `BuilderShell` on the
+  desktop only — phone sheets have none), rendered in the `SideSheet` head
+  and both Inspector heads. Choices are remembered in localStorage
+  (`crag_open:ivr:blocks-panel`, `ivr:checklist`, `ivr:panel-wide` via the
+  kit's `useOpenState`; a convenience only).
 - **Keyboard:** blocks are focusable (Tab), Enter/Space selects — selecting
   a block opens its panel (click, keyboard, Outline or an issue link alike).
   Every exit has a "Where each choice goes" `<select>` (existing block,
@@ -1831,6 +1890,13 @@ assistant" and never names a model or vendor.
   account's number names, the limits, three examples — a click fills the
   box), the transcript, the §6 disclosure verbatim above the message box
   (1–2000 chars, ⌘/Ctrl+Enter sends). Sending folds the guide away.
+- **Proposal banner layout:** docked, it is capped at 48% of the canvas
+  column (details scroll inside; Accept · Refine · Discard · Try a test call
+  stay pinned underneath) and, from 680px of banner width (container
+  `ivrprop`), the details sit in two balanced columns: what the flow does
+  (summary, assumptions, still to fix, worth a look) beside the new
+  messages with Listen. Layout only — the buttons, their order and their
+  behaviour are unchanged.
 - **Proposal on the canvas:** `store.showProposal()` — the store's
   `proposal` overlay (never the draft): Tidy-up positions, blocks revealed
   one at a time in calling order (`layout.callingOrder` = Tidy up's own walk;
@@ -1887,7 +1953,10 @@ palette (§18.5). `--literals` over `pages/ivr`, `flow`, `ivr*.css`: 0.
   banner rendered to strings).
 
 Visual: the theme harness with the §8.2 mock (2 IVR numbers, 3 flows incl.
-one with errors and one that always 409s).
+one with errors and one that always 409s). The layout harness copy adds the
+Flow assistant §5 mock (scripted provider) and the slugs `ivr*`,
+`state-ivr-assist` / `-assist-proposal` / `-panels-folded` /
+`-panel-wide` / `-menu-panel` / `-publish-errors` / … .
 
 ---
 
