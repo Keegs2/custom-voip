@@ -10,13 +10,17 @@ Multi-tenant contract (mirrors routers/trunks.py):
     number_inventory, itself admin-only). Customers never create or delete
     RCF rows directly — number release goes through /numbers/{did}/unassign.
   - Update (PUT/PATCH) is customer self-service, tenant-scoped, with
-    max_channels (a provisioning/capacity decision) admin-only.
+    max_channels (a provisioning/capacity decision) admin-only. Writers only
+    (require_writer): `readonly` and `support` get 403. A tenant's forward_to
+    must be a phone number: a 3-6 digit local extension (FreeSWITCH dials it
+    in the internal directory, `user/<ext>@domain`) is a 422 for tenants and
+    stays allowed for admins.
 """
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, field_validator
 from typing import Optional
-from auth.dependencies import get_current_user, get_customer_filter, require_admin
+from auth.dependencies import get_customer_filter, require_admin, require_writer
 from db import database as db
 from db import redis_client as cache
 from services import tenant_redaction as tr
@@ -31,6 +35,9 @@ logger = logging.getLogger(__name__)
 # digit local PBX extension. See utils/phone.py for the canonical rule + vectors.
 validate_e164 = phone.normalize_e164
 validate_forward_destination = phone.normalize_forward_destination
+
+#: 422 for a tenant forward_to that is a local extension (staff may still set one).
+MSG_TENANT_EXTENSION = "Use a 10-digit US number or E.164."
 
 
 class RCFCreate(BaseModel):
@@ -206,13 +213,15 @@ async def get_rcf(did: str, customer_filter: int | None = Depends(get_customer_f
 
 @router.put("/{identifier}")
 async def update_rcf(
-    identifier: str, rcf: RCFUpdate, user: dict = Depends(get_current_user)
+    identifier: str, rcf: RCFUpdate, user: dict = Depends(require_writer)
 ) -> RCFResponse:
     """Update RCF settings by ID (numeric) or DID (E.164 string).
 
-    Non-admin users are tenant-scoped (their own entries only — anything else
-    404s without leaking existence) and may NOT change max_channels: the
-    concurrent-call cap is a provisioning decision, admin-only.
+    Writers only (``require_writer``: admin + user; ``readonly`` / ``support``
+    → 403 before any DB access). Non-admin users are tenant-scoped (their own
+    entries only — anything else 404s without leaking existence) and may NOT
+    change max_channels: the concurrent-call cap is a provisioning decision,
+    admin-only.
     """
     is_admin = user.get("role") == "admin"
     updates = []
@@ -229,6 +238,13 @@ async def update_rcf(
             status_code=403,
             detail="Admin access required to change max concurrent calls",
         )
+
+    # A local extension routes into the platform's internal directory
+    # (inbound_router.lua: user/<ext>@domain): staff-only. Existing rows are
+    # untouched — this only refuses a tenant SETTING one.
+    if (not is_admin and "forward_to" in update_data
+            and phone.is_local_extension(update_data["forward_to"])):
+        raise HTTPException(status_code=422, detail=MSG_TENANT_EXTENSION)
 
     for field, value in update_data.items():
         updates.append(f"{field} = ${idx}")
@@ -284,7 +300,7 @@ async def update_rcf(
 
 @router.patch("/{identifier}")
 async def patch_rcf(
-    identifier: str, rcf: RCFUpdate, user: dict = Depends(get_current_user)
+    identifier: str, rcf: RCFUpdate, user: dict = Depends(require_writer)
 ) -> RCFResponse:
     """Partial update for RCF settings (alias for PUT)."""
     return await update_rcf(identifier, rcf, user)

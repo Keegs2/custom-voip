@@ -286,12 +286,28 @@ async def _open_full(msg: Any, row: Any) -> bytes:
     return await asyncio.shield(job.task)
 
 
+#: ``Transcript`` keys only an ADMIN receives. ``model`` is the speech-model
+#: name (e.g. ``telephony`` / ``chirp_3``), which hints at the STT vendor —
+#: an internal detail, never shown to a tenant (user/readonly).
+STAFF_ONLY_TRANSCRIPT_KEYS: tuple[str, ...] = ("model",)
+
+
 async def read_transcript(msg: Any, *, writer: bool, admin: bool, source: str,
                           info: audit.RequestInfo | None) -> dict:
     """The ``Transcript`` JSON of an already-SCOPED message row (the router's
     ``_scoped_message``: id, mailbox_id, customer_id, msg_uuid, deleted_at,
     transcription_enabled). Text only for ``done``, after its audit row
-    committed. Raises HTTPException 404 / 500 / 503."""
+    committed. Raises HTTPException 404 / 500 / 503. A non-admin (tenant)
+    response omits ``STAFF_ONLY_TRANSCRIPT_KEYS``."""
+    out = await _read_transcript(msg, writer=writer, admin=admin, source=source, info=info)
+    if not admin:
+        for key in STAFF_ONLY_TRANSCRIPT_KEYS:
+            out.pop(key, None)
+    return out
+
+
+async def _read_transcript(msg: Any, *, writer: bool, admin: bool, source: str,
+                           info: audit.RequestInfo | None) -> dict:
     message_id = msg["id"]
     pool = await _pool()
     async with pool.acquire() as conn:

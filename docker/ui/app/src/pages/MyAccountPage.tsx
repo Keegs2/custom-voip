@@ -416,7 +416,16 @@ function numberTiles(customer: MyCustomer): ProductCount[] | null {
 
 /* ═════════════════ 1. Account Overview tab ═════════════════ */
 
-function OverviewTab({ customer }: { customer: MyCustomer }) {
+/**
+ * UCaaS add-on flag. `GET /customers/me` returns `ucaas_enabled` to staff
+ * only; for a customer it comes from the signed-in user (`/auth/me`), which
+ * carries the same customer's flag.
+ */
+function ucaasOn(customer: MyCustomer, sessionUcaas: boolean | null | undefined): boolean {
+  return (customer.ucaas_enabled ?? sessionUcaas) === true;
+}
+
+function OverviewTab({ customer, ucaasEnabled }: { customer: MyCustomer; ucaasEnabled: boolean }) {
   const tiles = numberTiles(customer);
   return (
     <div className="dl-stack">
@@ -458,7 +467,7 @@ function OverviewTab({ customer }: { customer: MyCustomer }) {
                 #{customer.id}
               </span>
             </DefRow>
-            {customer.ucaas_enabled && (
+            {ucaasEnabled && (
               <div
                 style={{
                   display: 'flex',
@@ -930,7 +939,7 @@ function VoicemailProductSection({ customerId }: { customerId: number }) {
   );
 }
 
-function ProductsTab({ customer }: { customer: MyCustomer }) {
+function ProductsTab({ customer, ucaasEnabled }: { customer: MyCustomer; ucaasEnabled: boolean }) {
   const type = customer.account_type;
   const showRcf = type === 'rcf' || type === 'hybrid';
   const showTrunk = type === 'trunk' || type === 'hybrid';
@@ -942,7 +951,7 @@ function ProductsTab({ customer }: { customer: MyCustomer }) {
   // Trunking, so hybrid never shows the API section.
   const showApi = API_CALLING_ENABLED && type === 'api';
   // RCF customers must NEVER see UCaaS — gate strictly on the flag and never for rcf.
-  const showUcaas = customer.ucaas_enabled === true && type !== 'rcf';
+  const showUcaas = ucaasEnabled && type !== 'rcf';
 
   return (
     <div className="dl-stack">
@@ -1353,7 +1362,7 @@ export function MyAccountPage() {
               {/* Overview / Team / Products depend on the customer record. */}
               {activeTab === 'overview' &&
                 (customer ? (
-                  <OverviewTab customer={customer} />
+                  <OverviewTab customer={customer} ucaasEnabled={ucaasOn(customer, user.ucaas_enabled)} />
                 ) : (
                   <NoCustomerNotice noCustomer={noCustomer} />
                 ))}
@@ -1362,7 +1371,7 @@ export function MyAccountPage() {
 
               {activeTab === 'products' &&
                 (customer ? (
-                  <ProductsTab customer={customer} />
+                  <ProductsTab customer={customer} ucaasEnabled={ucaasOn(customer, user.ucaas_enabled)} />
                 ) : (
                   <NoCustomerNotice noCustomer={noCustomer} />
                 ))}

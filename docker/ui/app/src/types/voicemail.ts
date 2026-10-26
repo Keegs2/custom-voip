@@ -53,14 +53,16 @@ export interface TranscriptSegment {
 
 /**
  * GET /messages/{id}/transcript. For any status other than 'done': `text`
- * null, `segments` [] and `confidence` null; `model` and `language` are set
- * once known.
+ * null, `segments` [] and `confidence` null; `language` (and, for staff,
+ * `model`) are set once known.
  */
 export interface Transcript {
   message_id: number;
   status: TranscriptStatus;
   language: string | null;
-  model: string | null;
+  /** Speech-model name — returned to admins only; absent for a customer
+   *  (it hints at the vendor). Not rendered by the UI. */
+  model?: string | null;
   confidence: number | null;
   text: string | null;
   segments: TranscriptSegment[];

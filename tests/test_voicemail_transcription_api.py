@@ -41,6 +41,9 @@ PORT = 55490  # distinct from every other test module (backend-A range 55490-554
 TEXT = "Hi, this is Dana from Granite. Please call me back about the outage on Elm Street."
 TRANSCRIPT_KEYS = {"message_id", "status", "language", "model", "confidence", "text",
                    "segments", "completed_at", "can_retry"}
+#: What a TENANT (user / readonly) gets: no `model` (the speech-model name
+#: hints at the STT vendor — transcripts.STAFF_ONLY_TRANSCRIPT_KEYS).
+TENANT_TRANSCRIPT_KEYS = TRANSCRIPT_KEYS - {"model"}
 STATUS_KEYS = {"available", "platform_enabled", "provider", "location", "model", "counts",
                "oldest_pending_age_s", "failed_by_code", "billed_minutes_24h",
                "daily_cap_minutes", "budget_exhausted", "config_problems"}
@@ -391,9 +394,9 @@ def test_get_transcript_done(h, on):
         assert r.status_code == 200, r.text
         assert r.headers["cache-control"] == "no-store"
         t = r.json()
-        assert set(t) == TRANSCRIPT_KEYS
+        assert set(t) == TENANT_TRANSCRIPT_KEYS and "telephony" not in r.text
         assert t["message_id"] == mid and t["status"] == "done"
-        assert t["language"] == "en-US" and t["model"] == "telephony"
+        assert t["language"] == "en-US"
         assert t["confidence"] == 0.912 and t["text"] == TEXT
         assert t["segments"] == [
             {"start_ms": 300, "end_ms": 5120, "text": "Hi, this is Dana from Granite.",
@@ -413,8 +416,11 @@ def test_get_transcript_done(h, on):
         r = await c.get(tx_url(mid), headers=h.auth("ro_a"))       # readonly reads
         assert r.status_code == 200 and r.json()["text"] == TEXT
         assert r.json()["can_retry"] is False
+        assert set(r.json()) == TENANT_TRANSCRIPT_KEYS              # no model for readonly
         r = await c.get(tx_url(mid), headers=h.auth("admin"))
         assert r.status_code == 200 and r.json()["can_retry"] is True   # admin force
+        assert set(r.json()) == TRANSCRIPT_KEYS                     # staff keep the model
+        assert r.json()["model"] == "telephony"
         assert [a["source"] for a in await audits(h, "transcript_view", message_id=mid)] == \
             ["ui", "ui", "admin"]
         r = await c.get(f"/voicemail/messages/{mid}/transcript", headers=h.auth("user_a"))
@@ -445,17 +451,19 @@ def test_get_transcript_other_states_and_can_retry(h, monkeypatch, on):
             assert r.status_code == 200, (s, r.text)
             assert r.headers["cache-control"] == "no-store"
             t = r.json()
-            assert set(t) == TRANSCRIPT_KEYS
+            assert set(t) == TENANT_TRANSCRIPT_KEYS
             assert t["status"] == s and t["text"] is None and t["segments"] == []
             assert t["confidence"] is None and t["language"] == "es-US"
-            assert t["model"] == ("telephony" if s == "empty" else None)
+            r = await c.get(tx_url(mid), headers=h.auth("admin"))
+            assert set(r.json()) == TRANSCRIPT_KEYS
+            assert r.json()["model"] == ("telephony" if s == "empty" else None)
             assert (t["completed_at"] is not None) == (s == "empty")
             assert t["can_retry"] is expect_retry[s], s
             r = await c.get(tx_url(mid), headers=h.auth("ro_a"))
             assert r.json()["can_retry"] is False
         r = await c.get(tx_url(none_id), headers=h.auth("user_a"))
         t = r.json()
-        assert t["status"] == "pending" and t["language"] is None and t["model"] is None
+        assert t["status"] == "pending" and t["language"] is None and "model" not in t
         assert t["completed_at"] is None and t["can_retry"] is False
         assert await audits(h, "transcript_view", mailbox_id=box["id"]) == []  # no text shown
 

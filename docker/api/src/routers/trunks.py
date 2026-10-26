@@ -12,15 +12,19 @@ Multi-tenant contract (mirrors routers/number_inventory.py):
     delete, call-path assignment, DID assignment/removal) are admin-only
     (require_admin).
   - Auth-IP management (add/remove IPs) is documented customer self-service, so
-    trunk OWNERS (and admins) may do it, scoped to their own trunk.
+    trunk OWNERS (and admins) may do it, scoped to their own trunk. Writers
+    only (require_writer): `readonly` and `support` get 403.
 """
+import ipaddress
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from db import database as db
 from db import redis_client as cache
-from auth.dependencies import get_customer_filter, get_support_read_filter, require_admin
+from auth.dependencies import (
+    get_customer_filter, get_support_read_filter, require_admin, require_writer,
+)
 from services import tenant_redaction as tr
 from utils import phone
 
@@ -73,9 +77,54 @@ class TrunkUpdate(BaseModel):
     enabled: Optional[bool] = None
 
 
+#: trunk_auth_ips.description is VARCHAR(100) (02_schema_core.sql).
+TRUNK_IP_DESCRIPTION_MAX = 100
+
+
 class TrunkIP(BaseModel):
+    """Body of POST /{trunk_id}/ips — validated here so a bad value is a 422,
+    never the ::inet cast / VARCHAR(100) error surfacing as a 500.
+
+    ``ip_address`` is ONE host address (IPv4 or IPv6), stored in canonical
+    form. The INET column would also take a CIDR, but nothing matches on one:
+    Kamailio authenticates with ``ip_address = '$si'`` (inet equality, which
+    compares the netmask too) and FreeSWITCH routes to ``host(ip_address)``,
+    so a range would silently never authenticate and would route calls to
+    the network address. Ranges are therefore refused.
+    """
     ip_address: str
     description: Optional[str] = None
+
+    @field_validator("ip_address")
+    @classmethod
+    def validate_ip_address(cls, v: str) -> str:
+        text = v.strip() if isinstance(v, str) else v
+        if not text:
+            raise ValueError("Enter an IP address, for example 203.0.113.10.")
+        if "/" in text:
+            raise ValueError(
+                "Enter a single IP address, not a range: each PBX or SBC address "
+                "is added on its own."
+            )
+        try:
+            ip = ipaddress.ip_address(text)
+        except ValueError:
+            raise ValueError(
+                "That is not a valid IP address. Use an IPv4 address such as "
+                "203.0.113.10 or an IPv6 address such as 2001:db8::10."
+            ) from None
+        if getattr(ip, "scope_id", None):
+            raise ValueError("Enter the IPv6 address without a %zone suffix.")
+        return str(ip)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > TRUNK_IP_DESCRIPTION_MAX:
+            raise ValueError(
+                f"Description must be {TRUNK_IP_DESCRIPTION_MAX} characters or fewer."
+            )
+        return v
 
 
 class TrunkDID(BaseModel):
@@ -398,10 +447,15 @@ async def assign_call_path_package(
 
 @router.post("/{trunk_id}/ips")
 async def add_trunk_ip(
-    trunk_id: int, ip: TrunkIP, customer_filter: int | None = Depends(get_customer_filter)
+    trunk_id: int,
+    ip: TrunkIP,
+    _writer: dict = Depends(require_writer),
+    customer_filter: int | None = Depends(get_customer_filter),
 ):
     """Add an authorized IP to a trunk. Customer self-service: trunk OWNERS (and
     admins) may manage their own trunk's auth IPs; ownership-gated (404 cross-tenant).
+    Writers only (readonly / support -> 403). The body is validated by
+    ``TrunkIP`` (one host address, description <= 100 chars -> else 422).
     """
     # Ownership gate also verifies the trunk exists (404 if missing/cross-tenant).
     await _get_owned_trunk(trunk_id, customer_filter)
@@ -410,7 +464,7 @@ async def add_trunk_ip(
         result = await db.fetch_one(
             """
             INSERT INTO trunk_auth_ips (trunk_id, ip_address, description)
-            VALUES ($1, $2::inet, $3)
+            VALUES ($1::int, $2::inet, $3::varchar)
             RETURNING id, ip_address::text, description
             """,
             trunk_id, ip.ip_address, ip.description
@@ -437,10 +491,14 @@ async def list_trunk_ips(
 
 @router.delete("/{trunk_id}/ips/{ip_id}")
 async def delete_trunk_ip(
-    trunk_id: int, ip_id: int, customer_filter: int | None = Depends(get_customer_filter)
+    trunk_id: int,
+    ip_id: int,
+    _writer: dict = Depends(require_writer),
+    customer_filter: int | None = Depends(get_customer_filter),
 ):
     """Remove an IP from a trunk. Customer self-service: trunk OWNERS (and admins)
     may manage their own trunk's auth IPs; ownership-gated (404 cross-tenant).
+    Writers only (readonly / support -> 403).
     """
     await _get_owned_trunk(trunk_id, customer_filter)
     # Get IP before delete for cache invalidation

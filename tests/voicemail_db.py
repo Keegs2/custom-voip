@@ -17,6 +17,9 @@ Prerequisite chain (all REAL files, in init order):
   24 grafana_ro                — its ALTER DEFAULT PRIVILEGES is what 54 must undo
   31 E.164 CHECKs              — must survive 54
   34 did_inventory status CHECK (named, other column) — must survive 54
+  39 users role CHECK + support — so harnesses can seed the support user
+                                  their support JWT names (the JWT middleware
+                                  checks users.status, auth/user_status.py)
 
 Then the voicemail chain itself, in order (``VOICEMAIL_MIGRATIONS``):
   54 encrypted voicemail v1
@@ -50,6 +53,7 @@ PREREQ_SCRIPTS = (
     "24_grafana_ro.sql",
     "31_did_canonicalize.sql",
     "34_release_requested_status.sql",
+    "39_users_support_role.sql",
 )
 
 ROLES_SQL = """
@@ -107,6 +111,23 @@ async def apply_prerequisites(conn) -> None:
     await conn.execute(ROLES_SQL)
     for name in PREREQ_SCRIPTS:
         await conn.execute((INIT / name).read_text())
+
+
+async def seed_token_users(conn, users) -> None:
+    """INSERT one ``users`` row per minted test JWT: ``users`` is an iterable
+    of ``(id, role, customer_id)``. The JWT middleware refuses a token whose
+    user is missing or not active (auth/user_status.py), so every ``sub`` a
+    module mints must exist. Existing ids are left alone; the id sequence is
+    kept past every seeded id."""
+    for uid, role, customer_id in users:
+        await conn.execute(
+            "INSERT INTO users (id, email, password_hash, customer_id, role, name) "
+            "VALUES ($1::int, $2::varchar, 'x', $3::int, $4::varchar, $5::varchar) "
+            "ON CONFLICT DO NOTHING",
+            uid, f"token-user-{uid}@test.local", customer_id, role, f"Token user {uid}")
+    await conn.execute(
+        "SELECT setval('users_id_seq', GREATEST((SELECT COALESCE(max(id), 1) FROM users), "
+        "(SELECT last_value FROM users_id_seq)))")
 
 
 async def apply_54(conn) -> None:

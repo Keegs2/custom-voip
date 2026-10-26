@@ -160,7 +160,9 @@ httpx = pytest.importorskip("httpx", reason="httpx required for integration test
 
 from cdr_schema import apply_cdr_column_migrations  # noqa: E402
 from test_tenant_redaction import _CDR_SCHEMA, _EphemeralPG, _find_pg_bin  # noqa: E402
-from voicemail_db import INIT, apply_prerequisites, apply_voicemail_schema  # noqa: E402
+from voicemail_db import (  # noqa: E402
+    INIT, apply_prerequisites, apply_voicemail_schema, seed_token_users,
+)
 
 MIG_57 = INIT / "57_trunk_dids_trunk_index.sql"
 
@@ -284,6 +286,9 @@ def reports_db():
             await conn.execute(
                 "INSERT INTO customers (id, name, account_type, voicemail_enabled) VALUES "
                 "($1, 'Tenant A', 'hybrid', true), ($2, 'Tenant B', 'rcf', false)", CID_A, CID_B)
+            # The users the `tokens` fixture mints (admin 1 is 09's seed).
+            await seed_token_users(conn, ((2, "support", None), (3, "user", CID_A),
+                                          (4, "readonly", CID_A), (5, "user", CID_B)))
             await conn.execute(
                 "INSERT INTO rcf_numbers (customer_id, did, name, forward_to) VALUES "
                 "($1, $2, 'Main line', '+17745550000'), ($1, $3, 'Spare', '+17745550001'), "

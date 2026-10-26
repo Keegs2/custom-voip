@@ -36,13 +36,15 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from config import API_CALLING_RETIRED_MESSAGE, api_calling_enabled
 from db import database as db
 from db import redis_client as cache
-from auth.dependencies import require_admin, get_current_user, get_customer_filter
+from auth.dependencies import (
+    require_admin, get_current_user, get_customer_filter, require_writer,
+)
 from services import customer_numbers as cn
 from services.bandwidth_client import get_all_tns, _credentials_configured
 from services.ivr import store as ivr_store
@@ -140,7 +142,11 @@ class ReleaseRequest(BaseModel):
 
 
 class NumberRequest(BaseModel):
-    product_type: str
+    """Body of POST /{did}/request. The whole body is optional (the deployed
+    portal sends none, or only ``{notes}``); ``product_type`` defaults to
+    ``rcf``. A SUPPLIED value is still validated (``api`` -> 422 while API
+    Calling is retired)."""
+    product_type: str = "rcf"
     notes: Optional[str] = None
 
     @field_validator("product_type")
@@ -1242,6 +1248,15 @@ async def get_available(
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
+#: The keys of one TENANT row of GET /my (allowlist). ``notes`` is the
+#: free-text audit trail (staff-written assign/unassign notes, release audit
+#: lines) and is staff-only; it is not even selected for a tenant.
+TENANT_MY_NUMBER_KEYS: tuple[str, ...] = (
+    "did", "product_type", "status", "city", "state", "assigned_at",
+    "customer_id", "customer_name",
+)
+
+
 @router.get("/my")
 async def get_my_numbers(
     user: dict = Depends(get_current_user),
@@ -1252,10 +1267,14 @@ async def get_my_numbers(
     did_inventory rows (assigned / reserved / release_requested — the
     lifecycle record) UNION one fallback arm over the number_routing view
     (services/customer_numbers.py), so customers still see every number they
-    own in ANY product (rcf, api, trunk, voicemail, future arms) even if
+    own in ANY product (rcf, trunk, voicemail, ivr, future arms) even if
     did_inventory hasn't been reconciled yet. Fallback-only rows carry
-    assigned_at null (number_routing has no assignment time). api is still
-    listed here (admin cleanup). Admins see every customer (capped at 500).
+    assigned_at null (number_routing has no assignment time).
+
+    Tenants: ``customer_numbers.HIDDEN_PRODUCTS`` (api — retired) are hidden
+    in BOTH arms, like every other customer list, and rows carry only
+    ``TENANT_MY_NUMBER_KEYS`` (no ``notes``). Admins (staff shape unchanged)
+    see every customer incl. api rows and notes (cleanup tool; capped at 500).
     """
     customer_id = customer_filter
     if customer_id is None:
@@ -1288,35 +1307,42 @@ async def get_my_numbers(
             """
         )
     else:
+        # Tenant: hidden products (api) out of BOTH arms; a did_inventory row
+        # that is hidden does not shadow the number_routing arm either (the
+        # NOT IN subquery applies the same predicate). No notes column.
         rows = await db.fetch_all(
-            """
+            f"""
             SELECT did, product_type, status, city, state,
-                   assigned_at, notes, customer_id, customer_name
+                   assigned_at, customer_id, customer_name
               FROM (
                 SELECT d.did, d.product_type, d.status, d.city, d.state,
-                       d.assigned_at, d.notes, d.customer_id,
+                       d.assigned_at, d.customer_id,
                        c.name AS customer_name
                   FROM did_inventory d
                   LEFT JOIN customers c ON d.customer_id = c.id
                  WHERE d.customer_id = $1::int
                    AND d.status IN ('assigned', 'reserved', 'release_requested')
+                   AND {cn.not_hidden_sql("d.product_type")}
                 UNION
                 SELECT nr.did, nr.product_type, 'assigned' AS status,
                        NULL AS city, NULL AS state,
-                       NULL::timestamptz AS assigned_at, NULL AS notes,
+                       NULL::timestamptz AS assigned_at,
                        nr.customer_id,
                        c.name AS customer_name
                   FROM number_routing nr
                   JOIN customers c ON c.id = nr.customer_id
                  WHERE nr.customer_id = $1::int
+                   AND {cn.not_hidden_sql("nr.product_type")}
                    AND nr.did NOT IN (
                        SELECT di.did FROM did_inventory di
-                        WHERE di.customer_id = $1::int)
+                        WHERE di.customer_id = $1::int
+                          AND {cn.not_hidden_sql("di.product_type")})
               ) combined
              ORDER BY did
             """,
             customer_id,
         )
+        return [{k: r[k] for k in TENANT_MY_NUMBER_KEYS} for r in rows]
 
     return [dict(r) for r in rows]
 
@@ -1324,12 +1350,14 @@ async def get_my_numbers(
 @router.post("/{did}/request")
 async def request_number(
     did: str,
-    body: NumberRequest,
+    body: Optional[NumberRequest] = Body(None),
     user: dict = Depends(get_current_user),
 ):
     """Customer requests a number. Changes status to 'reserved'.
 
     Admin reviews and approves (via /assign) or the system auto-approves.
+    The body is optional: none, ``{}`` or ``{notes}`` request an ``rcf``
+    number (the deployed portal sends no body or only ``{notes}``).
     """
     # Allow-list: only the customer `user` role may reserve a DID. Staff never
     # request numbers — admins assign them directly via /{did}/assign
@@ -1348,6 +1376,8 @@ async def request_number(
             detail = "Only customer users can request numbers"
         raise HTTPException(status_code=403, detail=detail)
 
+    if body is None:
+        body = NumberRequest()
     e164 = _canonical_did(did)
     user_id = int(user["sub"])
     customer_id = user.get("customer_id")
@@ -1411,10 +1441,11 @@ async def request_number(
 async def request_release(
     did: str,
     body: ReleaseRequest = ReleaseRequest(),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_writer),
     customer_filter: int | None = Depends(get_customer_filter),
 ):
     """Request release of an assigned DID. Customer self-service (admin also allowed).
+    Writers only (``require_writer``): ``readonly`` / ``support`` -> 403.
 
     Sets status 'assigned' -> 'release_requested'. An admin then APPROVES via
     POST /{did}/unassign (which accepts 'release_requested') or DENIES via
@@ -1485,10 +1516,11 @@ async def request_release(
 async def cancel_release(
     did: str,
     body: ReleaseRequest = ReleaseRequest(),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_writer),
     customer_filter: int | None = Depends(get_customer_filter),
 ):
     """Cancel a pending release request. Customer self-service (admin also allowed).
+    Writers only (``require_writer``): ``readonly`` / ``support`` -> 403.
 
     Sets status 'release_requested' -> 'assigned'. This is also the admin DENY
     action for a customer release request. Same 404-no-leak tenant guard as

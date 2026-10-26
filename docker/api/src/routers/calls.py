@@ -24,7 +24,7 @@ import logging
 from config import require_api_calling_enabled
 from db import database as db
 from db import redis_client as cache
-from auth.dependencies import get_customer_filter
+from auth.dependencies import get_customer_filter, require_writer
 from services.esl_client import (
     originate_call, get_call_status, hangup_call, transfer_call, send_dtmf,
 )
@@ -77,6 +77,7 @@ async def _get_owned_active_call(call_id: str, customer_filter: int | None) -> d
 async def create_call(
     call: CallCreate,
     background_tasks: BackgroundTasks,
+    _writer: dict = Depends(require_writer),
     customer_filter: int | None = Depends(get_customer_filter),
 ):
     """Initiate an outbound call via API.
@@ -337,6 +338,7 @@ async def get_call(
 async def update_call(
     call_id: str,
     update: CallUpdate,
+    _writer: dict = Depends(require_writer),
     customer_filter: int | None = Depends(get_customer_filter),
 ):
     """Modify a live call (hangup, transfer, dtmf).

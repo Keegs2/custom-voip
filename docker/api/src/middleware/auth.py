@@ -11,6 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from jose import JWTError
 
+from auth import user_status
 from auth.security import decode_access_token
 
 logger = logging.getLogger(__name__)
@@ -142,10 +143,17 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:]  # Strip "Bearer " prefix
             try:
-                request.state.user = decode_access_token(token)
-                return await call_next(request)
+                claims = decode_access_token(token)
             except JWTError as exc:
                 logger.debug("JWT decode failed: %s", exc)
+            else:
+                # The token is genuine and unexpired; is its user still
+                # active? A disabled / deleted user is refused within
+                # user_status.STATUS_TTL_S (per-process cache). DB down ->
+                # fail open for this check only (logged), see auth/user_status.py.
+                if await user_status.session_user_active(claims):
+                    request.state.user = claims
+                    return await call_next(request)
 
         return JSONResponse(
             status_code=401,

@@ -27,7 +27,8 @@ Covers:
       - GET /v1/numbers/owned: exact body, admin only (user/readonly/support
         -> 403).
       - GET /v1/numbers/my: one number_routing fallback arm (fallback rows
-        carry assigned_at null; voicemail + api present; deleted box absent).
+        carry assigned_at null; voicemail present; deleted box absent). Tenant
+        rows: no `notes`, api hidden in both arms; staff keep both.
       - GET /v1/search/did: rcf/api/trunk `details` + `status` golden-compared
         against the OLD per-table query text on the same DB; voicemail rows
         with {label, mailbox_id, enabled}.
@@ -192,6 +193,7 @@ from voicemail_db import (  # noqa: E402
     apply_prerequisites,
     apply_voicemail_schema,
     find_pg_bin,
+    seed_token_users,
 )
 
 PG_BIN = find_pg_bin()
@@ -344,6 +346,10 @@ def numbers_db():
             state["idx_57"] = await owner.fetch(
                 "SELECT indexname, indexdef FROM pg_indexes WHERE indexname = 'idx_trunk_dids_trunk'")
             await owner.execute(SEED_SQL)
+            # The users the `tokens` fixture mints (admin 1 is 09's seed).
+            await seed_token_users(owner, ((2, "support", None), (3, "user", C1),
+                                           (4, "readonly", C1), (5, "user", C2),
+                                           (6, "admin", C1)))
             await owner.execute("ANALYZE")
         finally:
             await owner.close()
@@ -399,6 +405,8 @@ def tokens(numbers_db):
         "user_c1": mint("3", "user", C1),
         "readonly_c1": mint("4", "readonly", C1),
         "user_c2": mint("5", "user", C2),
+        # admin in "View as Customer" mode (role=admin + customer_id): staff
+        "admin_c1": mint("6", "admin", C1),
     }
 
 
@@ -606,9 +614,10 @@ def test_numbers_my_tenant_fallback_from_number_routing(client, tokens):
     by = {r["did"]: r for r in rows}
     dids = [r["did"] for r in rows]
     assert dids == sorted(dids)                                      # ORDER BY did
-    # every product incl. api (admin cleanup tool); never the deleted box
-    assert set(by) == set(C1_OWNED) | {API1}
-    assert VM3 not in by
+    # every product the customer owns — api (retired) hidden like every other
+    # customer list (customer_numbers.HIDDEN_PRODUCTS); never the deleted box
+    assert set(by) == set(C1_OWNED)
+    assert API1 not in by and VM3 not in by
     # the did_inventory row wins for R1 (lifecycle record, assigned_at kept)
     assert by[R1]["status"] == "assigned" and by[R1]["city"] == "Boston"
     assert datetime.fromisoformat(by[R1]["assigned_at"]) == R1_AT
@@ -617,18 +626,65 @@ def test_numbers_my_tenant_fallback_from_number_routing(client, tokens):
         assert by[did]["status"] == "assigned" and by[did]["assigned_at"] is None, by[did]
         assert by[did]["customer_id"] == C1 and by[did]["customer_name"] == "Granite Test"
     assert by[VM1]["product_type"] == "voicemail" and by[VM2]["product_type"] == "voicemail"
-    assert by[TD2]["product_type"] == "trunk" and by[API1]["product_type"] == "api"
+    assert by[TD2]["product_type"] == "trunk"
     assert by[DUP]["product_type"] in ("rcf", "trunk")       # UNION keeps both arms' rows
-    assert set(rows[0]) == {"did", "product_type", "status", "city", "state", "assigned_at",
-                            "notes", "customer_id", "customer_name"}
+    # tenant shape: no `notes` (staff audit trail)
+    for row in rows:
+        assert set(row) == set(TENANT_MY_KEYS), row
+    assert all(r["product_type"] != "api" for r in rows)
+
+
+#: GET /numbers/my tenant row keys (number_inventory.TENANT_MY_NUMBER_KEYS).
+TENANT_MY_KEYS = ("did", "product_type", "status", "city", "state", "assigned_at",
+                  "customer_id", "customer_name")
 
 
 def test_numbers_my_admin_all_customers(client, tokens):
     rows = _ok(_get(client, tokens, "admin", "/v1/numbers/my"))
     dids = {r["did"] for r in rows}
-    assert {R1, VM1, VM2, C2_VM, C2_RCF, C3_TD, API1} <= dids
+    assert {R1, VM1, VM2, C2_VM, C2_RCF, C3_TD, API1} <= dids    # staff: api kept (cleanup)
     assert VM3 not in dids
+    assert set(rows[0]) == set(TENANT_MY_KEYS) | {"notes"}        # staff shape unchanged
     assert _get(client, tokens, "support", "/v1/numbers/my").status_code == 403
+
+
+def test_numbers_my_tenant_hides_notes_and_api_inventory_rows(numbers_db, client, tokens):
+    """A did_inventory row is the lifecycle record: its free-text `notes`
+    (staff-written assign notes, release audit lines) and a retired-api row
+    never reach the tenant; staff see both. A hidden inventory row does not
+    shadow a visible number_routing arm either."""
+    from routers.number_inventory import TENANT_MY_NUMBER_KEYS
+    assert TENANT_MY_NUMBER_KEYS == TENANT_MY_KEYS
+
+    async def setup():
+        async with numbers_db["db"].pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE did_inventory SET notes = 'staff: credit hold, call before porting' "
+                "WHERE did = $1::varchar", R1)
+            await conn.execute(
+                "INSERT INTO did_inventory (did, customer_id, product_type, status, notes) "
+                "VALUES ($1::varchar, $2::int, 'api', 'assigned', 'staff: retired api line')",
+                API1, C1)
+
+    async def teardown():
+        async with numbers_db["db"].pool.acquire() as conn:
+            await conn.execute("UPDATE did_inventory SET notes = NULL WHERE did = $1::varchar", R1)
+            await conn.execute("DELETE FROM did_inventory WHERE did = $1::varchar", API1)
+
+    _run(setup())
+    try:
+        for who in ("user_c1", "readonly_c1"):
+            r = _get(client, tokens, who, "/v1/numbers/my")
+            rows = _ok(r)
+            assert "staff:" not in r.text and "notes" not in r.text
+            assert {row["did"] for row in rows} == set(C1_OWNED)
+            assert all(set(row) == set(TENANT_MY_KEYS) for row in rows)
+        staff = {row["did"]: row for row in _ok(_get(client, tokens, "admin", "/v1/numbers/my"))}
+        assert staff[R1]["notes"] == "staff: credit hold, call before porting"
+        assert staff[API1]["product_type"] == "api"
+        assert staff[API1]["notes"] == "staff: retired api line"
+    finally:
+        _run(teardown())
 
 
 def test_numbers_my_other_tenant(client, tokens):
@@ -789,7 +845,12 @@ def test_customers_me_counts_numbers(client, tokens):
 
 def test_customers_me_api_hidden_even_when_flag_on(client, tokens, monkeypatch):
     monkeypatch.setenv("API_CALLING_ENABLED", "true")
-    me = _ok(_get(client, tokens, "user_c1", "/v1/customers/me"))
-    assert me["counts"]["api_dids"] == 1                     # legacy key, flag on
+    for who in ("user_c1", "readonly_c1"):
+        me = _ok(_get(client, tokens, who, "/v1/customers/me"))
+        assert me["counts"]["api_dids"] == 0          # legacy key kept; never a real value
+        assert "api" not in me["counts"]["numbers"]["by_product"]
+        assert me["counts"]["numbers"]["total"] == 7
+    # Staff (admin "View as Customer") shape unchanged: the real count, flag on.
+    me = _ok(_get(client, tokens, "admin_c1", "/v1/customers/me"))
+    assert me["counts"]["api_dids"] == 1
     assert "api" not in me["counts"]["numbers"]["by_product"]
-    assert me["counts"]["numbers"]["total"] == 7
