@@ -614,12 +614,42 @@ tenants and staff (incl. an admin in customer view) never see them; the API
 behaviour compatible with the dashboard's use. `RowEditor` validates ring
 timeout 5–120 s, the API's own bounds (`routers/rcf.py`).
 
-**`MyAccountPage`** — with `counts.numbers` (holistic API): one tile + header
-metric per product (`by_product`, catalog order) plus the SIP trunks tile, and
-a Voicemail section on Products when the account has mailbox numbers (same
-`['account-numbers', id, 'self']` list). Without it: the old tiles. At
-phone widths its tab rail and header metrics opt into `.dl-tabs-scroll` /
-`.dl-metrics-wrap` (§18.6) — before that the page scrolled sideways at 390px.
+**`MyAccountPage`** (`/my-account`) — route entry, header and tab rail in
+`pages/MyAccountPage.tsx`; the tabs in `pages/my-account/` (`OverviewTab`,
+`TeamTab`, `ProductsTab`, `SecurityTab`, shared `parts.tsx` + `format.ts`,
+data `myAccountData.ts`); styles `styles/my-account.css` (`ma-`) on the
+daylight `dl-*` primitives.
+- **Whose account:** a tenant's own (self-scoped endpoints, the keys it always
+  used: `['my-customer']`, `['my-billing']`, `['my-team']`,
+  `['my-account-rcf']`, `['my-account-trunks']`). An admin in "View as
+  Customer" with a preview picked sees THAT customer (staff endpoints: `GET
+  /customers/{id}` identity fields only + counts from `/reports/my-numbers?
+  customer_id` and `/trunks?customer_id`, `/customers/{id}/billing`, the
+  dashboard's `['dash-team', id]` team, `/rcf?customer_id`; keys suffixed
+  with the customer) and an amber "Staff preview" tag; Your Account is still
+  the admin's own profile. Staff with no customer (admin normal view,
+  support) get "No customer account" with an "Open Your Account" button.
+- **Layout (§20):** one-row `CompactHeader` (crumb, account name, one figure
+  per product with `counts.numbers` — catalog order — plus SIP trunks; two
+  per row on a phone) · `dl-tabs` rail (WAI-ARIA tabs, arrow keys;
+  `.dl-tabs-scroll` below 1024px) · **Overview** = ONE balanced row: Account
+  (identity + tags, Account type · Member since · Account ID in one row,
+  "Products on this account" — a line per product with numbers, call
+  forwarding always listed, SIP trunks on the SIP trunk line, links to
+  `/rcf` and `/voicemail`) beside the Estimated Monthly Bill (one line per
+  product; the trunk breakdown behind "Line details", `account:bill-details`;
+  total + the server disclaimer pinned to the card's foot, never collapsed).
+  The old "Your Numbers" tile row is folded into the Account card.
+  **Users & Access** = active users (8, then "Show all N" in a capped scroll)
+  with an "Inactive users N" expandable row (`account:inactive-users`).
+  **Products** = Remote Call Forwarding table (Number · Forwards to + ring /
+  caller ID / channels · Status; 6 rows beside other products, 8 alone, then
+  "Show all"; "Manage call forwarding →" `/rcf`, "first 100 of N" past the
+  cap) beside SIP Trunks + Voicemail (stacked, the last grows); API (retired,
+  `API_CALLING_ENABLED`, tenant only) and UCaaS (never `rcf`) unchanged.
+  **Your Account** = Profile (facts in one row, display name + Save inline)
+  and "Change Password" as an expandable card (closed every visit; fields +
+  submit in one row). Same PUT /auth/me calls and validation as before.
 
 **`TrunksPage`** (`/trunks`)
 The customer **SIP Trunking portal** — read + self-serve; trunk creation and
