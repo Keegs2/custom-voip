@@ -93,7 +93,7 @@ const PLACES: readonly { name: string; text: ReactNode }[] = [
     name: 'Insights',
     text: (
       <>
-        <Ui>Reporting</Ui>: call reports for any period, as a spreadsheet (CSV) or a PDF summary.
+        <Ui>Reporting</Ui>: call reports for any period, as a spreadsheet (CSV) or PDF summary.
       </>
     ),
   },
@@ -101,7 +101,7 @@ const PLACES: readonly { name: string; text: ReactNode }[] = [
     name: 'Support',
     text: (
       <>
-        Read-only users only: <Ui>Call Quality</Ui>, your call records and how each call sounded.
+        Read-only users: <Ui>Call Quality</Ui>, your calls and how each one sounded.
       </>
     ),
   },
@@ -111,7 +111,7 @@ const PLACES: readonly { name: string; text: ReactNode }[] = [
   },
   {
     name: 'Coming Soon',
-    text: <>Features on the way. Visual Voicemail and IVR move up to Products when they’re turned on for your account.</>,
+    text: <>On the way. Visual Voicemail and IVR move up to Products when turned on.</>,
   },
 ];
 
