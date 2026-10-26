@@ -57,6 +57,8 @@ from db import database as db
 from services import customer_numbers as cn
 from services.ivr import audio as ivr_audio
 from services.ivr import compiler, limits, simulator, store, tts
+from services.ivr.assist import jobs as assist_jobs
+from services.ivr.assist import pipeline as assist_pipeline
 from utils.phone import normalize_e164
 
 logger = logging.getLogger(__name__)
@@ -223,9 +225,13 @@ async def _next_version(conn: Any, flow_id: int) -> int:
 
 
 async def _compile(conn: Any, scope: IvrScope, flow_id: int, graph: Any,
-                   version: int) -> compiler.CompileResult:
+                   version: int, new_prompts: Optional[list] = None) -> compiler.CompileResult:
     ctx = await store.load_context(conn, customer_id=scope.customer_id, flow_id=flow_id,
                                    version=version)
+    if new_prompts:
+        # A Flow assistant proposal: its new messages (negative placeholder
+        # ids) stand in as prompts by name. Simulate only — never published.
+        return assist_pipeline.compile_proposal(graph, ctx, new_prompts)
     return compiler.compile_flow(graph, ctx)
 
 
@@ -240,20 +246,22 @@ def _stale(current_revision: int) -> IvrApiError:
 async def summary(scope: IvrScope = Depends(ivr_scope)):
     pool = await _pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT ivr_enabled FROM customers WHERE id = $1::int",
-                                  scope.customer_id)
-        if row is None:
+        flags = await assist_jobs.customer_flags(conn, scope.customer_id)
+        if flags is None:
             if scope.is_admin:
                 raise HTTPException(status_code=404, detail=store.MSG_CUSTOMER_NOT_FOUND)
             return {"enabled": False, "numbers": [], "flows": [],
-                    "limits": limits.public_limits()}
-        enabled = bool(row["ivr_enabled"])
+                    "limits": limits.public_limits(), "assist": {"available": False}}
+        enabled = flags["ivr_enabled"]
+        # Flow assistant (docs/IVR_ASSIST_INTERFACES.md §5). Why it is
+        # unavailable (flag, opt-in, TED, IVR off) is never shown.
+        assist = {"available": assist_jobs.available(flags)}
         if not enabled and not scope.is_admin:
             return {"enabled": False, "numbers": [], "flows": [],
-                    "limits": limits.public_limits()}
+                    "limits": limits.public_limits(), "assist": assist}
         return {"enabled": enabled, "numbers": await store.list_numbers(conn, scope.customer_id),
                 "flows": await store.list_flows(conn, scope.customer_id),
-                "limits": limits.public_limits()}
+                "limits": limits.public_limits(), "assist": assist}
 
 
 # ===========================================================================
@@ -283,6 +291,9 @@ class SimulateBody(BaseModel):
     caller: str
     at: datetime
     digits: list[str] = Field(default_factory=list, max_length=50)
+    #: Flow assistant (IVR_ASSIST_INTERFACES §5): simulate that job's proposal
+    #: instead of draft_graph, its new messages standing in as prompts.
+    assist_job_id: Optional[str] = None
 
 
 @router.get("/flows")
@@ -511,10 +522,21 @@ async def simulate_flow(flow_id: int, body: SimulateBody, scope: IvrScope = Depe
     async with pool.acquire() as conn:
         await _require_entitled(conn, scope)
         flow = await _scoped_flow(conn, scope, flow_id)
-        graph = body.draft_graph if body.draft_graph is not None \
-            else store.loads(flow["draft_graph"])
+        new_prompts: list = []
+        if body.assist_job_id is not None:
+            try:
+                proposal = await assist_jobs.proposal(conn, scope.customer_id, flow_id,
+                                                      body.assist_job_id)
+            except assist_jobs.AssistRejected as exc:
+                raise IvrApiError(exc.status, exc.detail, headers=exc.headers, **exc.extra)
+            graph = proposal.get("draft_graph")
+            new_prompts = list(proposal.get("new_prompts") or [])
+        else:
+            graph = body.draft_graph if body.draft_graph is not None \
+                else store.loads(flow["draft_graph"])
         _graph_bytes_ok(graph)
-        result = await _compile(conn, scope, flow_id, graph, await _next_version(conn, flow_id))
+        result = await _compile(conn, scope, flow_id, graph, await _next_version(conn, flow_id),
+                                new_prompts)
     if not result.ok:
         raise _invalid_flow(result.errors, result.warnings)
     return simulator.simulate(result.plan, caller=caller, at=at, digits=body.digits,
@@ -982,7 +1004,11 @@ async def voices(scope: IvrScope = Depends(ivr_scope)):
 # Admin (TED, §8.3) — require_admin
 # ===========================================================================
 class EntitlementBody(BaseModel):
-    enabled: bool
+    """At least one of ``enabled`` (IVR, §8.3) and ``assist_enabled`` (the
+    Flow assistant opt-in, IVR_ASSIST_INTERFACES §8). A body with only
+    ``enabled`` is exactly the pre-assistant request."""
+    enabled: Optional[bool] = None
+    assist_enabled: Optional[bool] = None
 
 
 class AdminNumberUpdate(BaseModel):
@@ -995,13 +1021,16 @@ class AdminNumberUpdate(BaseModel):
 async def admin_customer(customer_id: int, admin: dict = Depends(require_admin)):
     pool = await _pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT ivr_enabled FROM customers WHERE id = $1::int",
-                                  _admin_customer_id(customer_id))
-        if row is None:
+        flags = await assist_jobs.customer_flags(conn, _admin_customer_id(customer_id))
+        if flags is None:
             raise HTTPException(status_code=404, detail=store.MSG_CUSTOMER_NOT_FOUND)
-        return {"ivr_enabled": bool(row["ivr_enabled"]),
-                "numbers": await store.list_numbers(conn, customer_id),
-                "flows": await store.list_flows(conn, customer_id)}
+        out = {"ivr_enabled": flags["ivr_enabled"],
+               "numbers": await store.list_numbers(conn, customer_id),
+               "flows": await store.list_flows(conn, customer_id)}
+        # Before migration 61 the key is absent, so TED hides its switch (§8).
+        if flags["ivr_assist_enabled"] is not None:
+            out["ivr_assist_enabled"] = flags["ivr_assist_enabled"]
+        return out
 
 
 def _admin_customer_id(customer_id: int) -> int:
@@ -1013,16 +1042,41 @@ def _admin_customer_id(customer_id: int) -> int:
 @router.put("/admin/customers/{customer_id}/entitlement")
 async def admin_entitlement(customer_id: int, body: EntitlementBody,
                             admin: dict = Depends(require_admin)):
+    """``{enabled?, assist_enabled?}`` -> ``{ivr_enabled, ivr_assist_enabled}``.
+    Turning IVR off leaves the assistant opt-in as it is (the assistant also
+    needs IVR, so it is unavailable either way)."""
+    fields = body.model_fields_set
+    if "enabled" in fields and body.enabled is None:
+        raise HTTPException(status_code=422, detail="enabled must be true or false.")
+    if "assist_enabled" in fields and body.assist_enabled is None:
+        raise HTTPException(status_code=422, detail="assist_enabled must be true or false.")
+    if body.enabled is None and body.assist_enabled is None:
+        raise HTTPException(status_code=422, detail="Send enabled and/or assist_enabled.")
+    cid = _admin_customer_id(customer_id)
     pool = await _pool()
     async with pool.acquire() as conn:
-        value = await conn.fetchval(
-            "UPDATE customers SET ivr_enabled = $1::boolean WHERE id = $2::int "
-            "RETURNING ivr_enabled", body.enabled, _admin_customer_id(customer_id))
-    if value is None:
+        async with conn.transaction():
+            if body.assist_enabled is not None:
+                try:
+                    updated = await assist_jobs.set_assist_enabled(conn, cid,
+                                                                   body.assist_enabled)
+                except assist_jobs.AssistRejected as exc:
+                    raise HTTPException(status_code=exc.status, detail=exc.detail)
+                if updated is None:
+                    raise HTTPException(status_code=404, detail=store.MSG_CUSTOMER_NOT_FOUND)
+            if body.enabled is not None and await conn.fetchval(
+                    "UPDATE customers SET ivr_enabled = $1::boolean WHERE id = $2::int "
+                    "RETURNING ivr_enabled", body.enabled, cid) is None:
+                raise HTTPException(status_code=404, detail=store.MSG_CUSTOMER_NOT_FOUND)
+            flags = await assist_jobs.customer_flags(conn, cid)
+    if flags is None:
         raise HTTPException(status_code=404, detail=store.MSG_CUSTOMER_NOT_FOUND)
-    logger.info("ivr: customer %s entitlement set to %s by admin %s", customer_id, value,
-                admin.get("sub"))
-    return {"ivr_enabled": bool(value)}
+    logger.info("ivr: customer %s entitlement set to ivr=%s assist=%s by admin %s", customer_id,
+                flags["ivr_enabled"], flags["ivr_assist_enabled"], admin.get("sub"))
+    out = {"ivr_enabled": flags["ivr_enabled"]}
+    if flags["ivr_assist_enabled"] is not None:
+        out["ivr_assist_enabled"] = flags["ivr_assist_enabled"]
+    return out
 
 
 @router.put("/admin/numbers/{number_id}")

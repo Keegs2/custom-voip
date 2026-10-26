@@ -7,4 +7,6 @@
   tts.py       Piper sidecar client (§8.1), render cache, preview rate limit
   store.py     shared SQL / shapes / number-inventory assign (routers/ivr.py, number_inventory.py)
   limits.py    every bound the API enforces
+  assist/      the Flow assistant, CRAG side (docs/IVR_ASSIST_INTERFACES.md): aliasing,
+               the TED client, the propose/repair job, the eval runner
 """

@@ -98,6 +98,19 @@ services:
       # Prompt playback tokens reuse VOICEMAIL_PLAYBACK_SECRET (kind ivr_prompt).
       - IVR_TTS_URL=${IVR_TTS_URL:-http://tts:5000}
       - IVR_TTS_TIMEOUT_S=${IVR_TTS_TIMEOUT_S:-30}
+      # Visual IVR Flow assistant (docs/IVR_ASSIST_INTERFACES.md §9): CRAG asks
+      # TED for a proposed call flow (TED runs the one AI step; CRAG never
+      # talks to a model) and validates it with its own compiler. OFF unless
+      # exactly "true". TED_BASE_URL = TED's public https URL (from the TED
+      # runbook); TED_IVR_ASSIST_TOKEN = the dedicated assist Trigger token, a
+      # secret that lives in .env only. URL or token unset => the assistant is
+      # unavailable and nothing is ever sent. Each customer must also be opted
+      # in from TED (customers.ivr_assist_enabled, migration 61).
+      - IVR_ASSIST_ENABLED=${IVR_ASSIST_ENABLED:-false}
+      - TED_BASE_URL=${TED_BASE_URL:-}
+      - TED_IVR_ASSIST_TOKEN=${TED_IVR_ASSIST_TOKEN:-}
+      - IVR_ASSIST_DAILY_PER_CUSTOMER=${IVR_ASSIST_DAILY_PER_CUSTOMER:-40}
+      - IVR_ASSIST_TED_TIMEOUT_SECONDS=${IVR_ASSIST_TED_TIMEOUT_SECONDS:-60}
     # Plaintext voicemail audio is RAM-only (build plan D8 / §3.2): anything
     # that does spool to /tmp stays in RAM, and the API never core-dumps
     # decrypted audio to disk.

@@ -20,9 +20,10 @@ from routers import (
     auth, search, number_inventory,
     carriers, rates, tiers, sipp, sbc, homer,
     onboarding, freeswitch, carrier_status, live_trunk_stats,
-    stir, billing, carrier_trunks, reports, voicemail, ivr,
+    stir, billing, carrier_trunks, reports, voicemail, ivr, ivr_assist,
 )
 from middleware.auth import JWTAuthMiddleware
+from services.ivr.assist import jobs as ivr_assist_jobs
 from services.voicemail import retention as voicemail_retention
 from services.voicemail.transcription import worker as transcription_worker
 from utils.access_log import install_access_log_redaction
@@ -80,6 +81,9 @@ async def lifespan(app: FastAPI):
 
     # Cleanup
     logger.info("Shutting down...")
+    # Flow assistant jobs in flight (docs/IVR_ASSIST_INTERFACES.md §5.1): each
+    # cancelled job marks itself failed, so the builder's poll ends cleanly.
+    await ivr_assist_jobs.shutdown()
     for task in (transcription_task, retention_task):
         if task is None:
             continue
@@ -200,6 +204,10 @@ app.include_router(voicemail.router, prefix="/voicemail", tags=["Voicemail"])
 # errors, flows, numbers).
 app.include_router(ivr.router, prefix="/v1/ivr", tags=["IVR"])
 app.include_router(ivr.router, prefix="/ivr", tags=["IVR"])
+# Visual IVR Flow assistant (docs/IVR_ASSIST_INTERFACES.md §5): same prefix,
+# scope and errors; CRAG calls TED for the one AI step, never a model.
+app.include_router(ivr_assist.router, prefix="/v1/ivr", tags=["IVR"])
+app.include_router(ivr_assist.router, prefix="/ivr", tags=["IVR"])
 app.add_exception_handler(ivr.IvrApiError, ivr.ivr_error_handler)
 
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in

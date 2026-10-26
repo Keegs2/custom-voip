@@ -221,6 +221,12 @@ Plan `docs/IVR_PRODUCT_PLAN.md`, contract `docs/IVR_INTERFACES.md`. Its own prod
 - **Call (every zone, local only):** `number_routing` `ivr` arm → `terminate_ivr` → `lib/ivr_engine.lua` reads the published plan from the zone replica (`ivr_fs_number`) and caches prompt audio on the `ivr_prompts` volume, so an IVR call never needs the East API. Menus use `play_and_get_digits` (barge-in, retries); the per-leg RTP timer + jitter buffer come from `lib/media_leg.lua`. Transfers reuse the RCF egress/on-net chain (`run_onnet_chain()`), so failover, STIR, Diversion and B-leg CDRs behave exactly like RCF. No customer text ever reaches a FreeSWITCH app argument.
 - **Gate:** `IVR_ENABLED` on the media VMs, off unless exactly `true`; off ⇒ IVR DIDs 603. Entitlement + numbers + kill switch are TED operations (`/v1/ivr/admin/*`, `numbers.assign` `product_type=ivr`).
 - **Billing:** `rate_cdr()` rates `ivr` to $0 for now (pricing pending); CDRs carry `ivr_flow_id/version/exit/path/transfer_to/seconds` (migration 60).
+- **Flow assistant (built 2026-10-25, off by default):** a customer describes a flow in plain English and the builder draws a proposal to accept, refine or discard. Contract `docs/IVR_ASSIST_INTERFACES.md`; runbook `docs/runbooks/IVR_ASSIST_DEPLOY_RUNBOOK.md`.
+  - **TED owns the single AI step; CRAG never calls a model.** This is the first CRAG → TED call: the API (`services/ivr/assist/`) posts to TED's token-gated Trigger path with a base64url body (TED's edge WAF scans JSON bodies).
+  - **No phone number or customer identity leaves CRAG.** Every number becomes an alias token (`[D1]` own number, `[N1]` other number); destinations, messages and the draft are sent as aliases.
+  - **CRAG stays the judge.** The proposal is compiled with CRAG's own compiler (≤ 2 repair rounds). Nothing is saved until Accept (new messages are created as TTS prompts then) and nothing goes live until the customer publishes.
+  - **Gates:** `IVR_ASSIST_ENABLED=true` on the services VM, `TED_BASE_URL` + `TED_IVR_ASSIST_TOKEN` set, and the customer opted in from TED Customer 360 (`customers.ivr_assist_enabled`, migration 61). Jobs live in `ivr_assist_jobs` (90-day retention).
+  - **Public repo:** never name TED's hostnames or secrets, or the model vendor, in this repo. The UI calls it "Flow assistant".
 
 ## Testing
 
@@ -528,6 +534,11 @@ Voicemail on media VMs needs no env var. It needs the ingest header file `/opt/r
 | `VOICEMAIL_PLAYBACK_SECRET` | (secret) | 120 s playback-URL key; ≥ 32 chars, ≠ `JWT_SECRET_KEY` |
 | `VOICEMAIL_SPOOL_PRIVATE_KEY_B64` | (secret) | Opens voicemail sealed on a media VM during an East outage (`/v1/voicemail/fs/deposit-sealed`); unset ⇒ 503 and the forwarders keep retrying. Runbook `docs/runbooks/VOICEMAIL_OUTAGE_RESILIENCE_DEPLOY.md` |
 | `IVR_TTS_URL` | `http://tts:5000` (default) | Visual IVR Piper text-to-speech sidecar (services-network only; never on the call path) |
+| `IVR_ASSIST_ENABLED` | `false` (default) | Visual IVR Flow assistant; only exactly `true` enables it (the customer must also be opted in from TED) |
+| `TED_BASE_URL` | (unset) | TED's public https URL, from the TED runbook. Plain http only for loopback or a single-label host (local tests) |
+| `TED_IVR_ASSIST_TOKEN` | (secret) | Dedicated token for TED's Flow assistant Trigger; `.env` only, entered with `read -rsp`, never logged |
+| `IVR_ASSIST_DAILY_PER_CUSTOMER` | `40` (default) | Flow assistant jobs per customer per UTC day |
+| `IVR_ASSIST_TED_TIMEOUT_SECONDS` | `60` (default) | Per TED call (clamped 5–90); TED itself answers within 55 s |
 | `INGEST_SHARED_SECRET` | (secret) | `X-Ingest-Secret` FS sends on `/v1/voicemail/fs/*` (same value as `/opt/revup/secrets/fs-voicemail/vm_ingest.header` on every FS node); ≥ 32 chars, unset ⇒ 503 |
 
 ## GCP Production Topology (3 zones — East / West / Central, all LIVE 2026-07-23)
