@@ -621,6 +621,61 @@ Static inline documentation pages. No API calls. `/documentation` redirects to
 `/docs/rcf`; `/docs/integration` redirects to `/docs/api`. Shared layout helpers
 live in `pages/docs/shared.tsx`. There is no single `DocsPage`.
 
+**`ApiDocsPage`** (`/docs/api/:product?`) — the customer API Reference
+(`pages/docs/ApiDocsPage.tsx` = route entry; body + content in `pages/docs/api/`).
+Rewritten 2026-10-26: the owner's rule is "customers only, accurate to our
+current status, nothing we don't want customers to know".
+- **Sections** (`docProducts.ts` `API_SECTIONS`, `apiSectionHref`): Getting
+  started at the bare `/docs/api` (base URL, sign-in, roles, errors,
+  conventions + the account endpoints), then `numbers` (numbers & call
+  forwarding), `calls` (CDRs + Reporting), `voicemail` (Visual Voicemail),
+  `trunking` (SIP Trunking, "Early access"). Old slugs still land
+  (`apiSectionForLegacySlug`: `rcf` → numbers, `telemetry` → calls); any other
+  slug, `calling` included, → `/docs/api`. `#<entry-id>` deep-links an entry
+  (opened + scrolled into view on arrival; a Contents click writes it).
+  `ApiProduct` / `API_PRODUCTS` / `isApiProduct` are deprecated leftovers kept
+  only because `ProductSelector`'s card map is typed over them.
+- **Truth contract** (header of `api/types.ts`): document ONLY routes a tenant
+  `user` / `readonly` can call today, with the fields a tenant actually gets
+  (CDRs: the `services/tenant_redaction.py` allowlist — whole minutes,
+  answer/end to the minute, no money, rating, fraud or routing fields; examples
+  show documented fields only and the page says unlisted fields may appear).
+  Never: admin/staff-only routes or fields, ingest / FreeSWITCH / carrier /
+  Homer / SBC / rates / tiers / onboarding / inventory-admin routes, vendor,
+  cloud, region, host, IP or component names, env flags, migration numbers,
+  signing details, or rate limits that aren't enforced for tenants. API
+  Calling (`/v1/calls`) is switched off: mentioned once, as "on our roadmap".
+  No IVR section (the `/v1/ivr` routes serve the builder; the product is
+  still rolling out). Base URL is the placeholder `https://<your portal
+  host>/api/v1`; paths are relative to it; curl examples use `$BASE` and
+  `$TOKEN` (defined in Getting started). Writes a `readonly` user may not
+  make carry `roles: WRITE_ROLES` → an "Edit access" tag. When an API
+  changes, re-verify the affected `api/sections/*.ts` entry against its router.
+- **Content is data**: `api/sections/{start,numbers,calls,voicemail,trunking}.ts`
+  export a `SectionDoc` (groups → `TopicDoc` prose blocks | `EndpointDoc`:
+  method, path, title, summary, roles, params, returns + fields, statuses,
+  example), registered in `api/sections/index.ts` (exhaustive over
+  `ApiSection`). Text is plain; a `` `code` `` span renders as inline code
+  (`RichText`). Shared status lines / `BASE_URL` / the auth header: `api/common.ts`.
+- **Layout (§20)** — `api/ApiReference.tsx`: `CompactHeader` (crumb Docs / API
+  Reference, stats Endpoints · Token life · Format) · section rail (links in
+  `dl-tabs dl-tabs-scroll`; the current tab scrolls into view on phones) ·
+  `MasterDetail` Contents | reference, bounded to the first screen (the shell
+  ends with it: `.dl-shell.dxa-shell { padding-bottom: 24px }`). Contents =
+  groups → entries (method chip + task name), a click opens the entry, scrolls
+  it to the top of its pane and focuses its toggle. Endpoints are `Disclosure`
+  rows (`api/EndpointCard.tsx`), collapsed by default; open = description,
+  "Who can call it", parameters, response fields (first 8 + "Show all N" when
+  a table has more than 10 rows), status codes, then a collapsed, lazily
+  mounted "Example request and response". "Expand all / Collapse all" in the
+  pane head. Getting started topics (`api/TopicSection.tsx`) are always open.
+  Below 720px of content the panes stack (Contents capped at
+  `min(36vh, 300px)`). Styles `api/apiReference.css` (`dxa-`) over the docs
+  `dlx-` primitives — theme tokens only.
+- Static: no API calls, so tenant, readonly, admin and admin "View as
+  Customer" see the same page; the view is keyed by section (fresh state on a
+  switch). Harness: `docs-api*` routes and `state-docs-api-{endpoint,fields,expanded}`.
+
 **`CallsPage`** (`/call-quality` and `/cdrs`, `pages/calls/`) — Calls & Quality
 The merged CDR search + voice-quality page. Top composition (2026-10 rework):
 - **Search row** (`CallsFilterBar`) — ONE centred row at ≥1366px: Customer
@@ -964,7 +1019,9 @@ This is the RCF-V1 production architecture. Know what is and is not available:
   (currently `false`; mirrors the backend/FreeSWITCH env var of the same name — flip
   BOTH to restore): the `/api-dids` route (redirects to product home), the Sidebar
   "Coming Soon" item, My Account's API DID section/tiles,
-  the Guides + `/docs/api` "calling" sections (slug redirects to the hub default),
+  the Guides "calling" section (slug redirects to the hub default; the API
+  Reference has no calling section at all — it names programmable voice only
+  as "on our roadmap", and `/docs/api/calling` lands on Getting started),
   the Calls "API" product filter and the onboarding API product option. (The
   landing page no longer has any API Calling copy, flag or not.) With the flag
   off nothing calls `/api-dids`. `productHome`
