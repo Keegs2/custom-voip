@@ -114,7 +114,7 @@ export const TRUNKING: SectionDoc = {
           method: 'GET',
           path: '/trunks/{trunk_id}/stats',
           title: 'Live trunk usage',
-          summary: 'Approximately how many calls are on the trunk right now, plus the last hour’s totals.',
+          summary: 'Approximate live call count, plus the last hour’s totals.',
           description: ['`current_channels` is an approximate live count, and `channel_utilization` is worked out from it.'],
           roles: READ_ROLES,
           params: [TRUNK_ID],
