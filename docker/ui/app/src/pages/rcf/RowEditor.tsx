@@ -163,7 +163,8 @@ export function RowEditor({ entry, isAdmin, canEdit, onClose }: RowEditorProps) 
     if (fo !== (entry.failover_to ?? null)) patch.failover_to = fo;
 
     const rt = parseInt(draft.ring_timeout, 10);
-    if (isNaN(rt) || rt < 5 || rt > 600) { toastErr('Ring timeout must be between 5 and 600 seconds'); return; }
+    // Same bounds as the API (routers/rcf.py validate_ring_timeout: 5–120 s).
+    if (isNaN(rt) || rt < 5 || rt > 120) { toastErr('Ring timeout must be between 5 and 120 seconds'); return; }
     if (rt !== entry.ring_timeout) patch.ring_timeout = rt;
 
     // Admin-only field — the API rejects max_channels from non-admins (403),
@@ -336,21 +337,24 @@ export function RowEditor({ entry, isAdmin, canEdit, onClose }: RowEditorProps) 
               <div style={{ flex: '1 1 140px', minWidth: 120 }}>
                 <label className="rcf-flabel" htmlFor={`ring-${entry.id}`}>Ring timeout</label>
                 {canEdit ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <input
-                      id={`ring-${entry.id}`}
-                      type="number"
-                      min={5}
-                      max={600}
-                      className="rcf-input rcf-input-mono"
-                      style={{ width: 88, textAlign: 'center' }}
-                      value={draft.ring_timeout}
-                      disabled={saving}
-                      onChange={(e) => set('ring_timeout')(e.target.value)}
-                      onKeyDown={onEnterSave}
-                    />
-                    <span style={{ fontSize: '0.76rem', fontWeight: 600, color: INK_DIM }}>seconds</span>
-                  </div>
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        id={`ring-${entry.id}`}
+                        type="number"
+                        min={5}
+                        max={120}
+                        className="rcf-input rcf-input-mono"
+                        style={{ width: 88, textAlign: 'center' }}
+                        value={draft.ring_timeout}
+                        disabled={saving}
+                        onChange={(e) => set('ring_timeout')(e.target.value)}
+                        onKeyDown={onEnterSave}
+                      />
+                      <span style={{ fontSize: '0.76rem', fontWeight: 600, color: INK_DIM }}>seconds</span>
+                    </div>
+                    <div className="rcf-help">5–120 seconds</div>
+                  </>
                 ) : (
                   <div className="rcf-static">{entry.ring_timeout}s</div>
                 )}

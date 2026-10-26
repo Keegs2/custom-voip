@@ -443,7 +443,7 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
         >
           <span style={{ color: AZURE_DEEP, fontWeight: 700 }}>Note: </span>
           <span style={{ color: INK_SOFT }}>
-            This number will be marked as pending until an administrator approves the request. You will be notified once it is assigned.
+            Granite reviews requests — you’ll see this number under Pending Requests until it’s approved.
           </span>
         </div>
 
@@ -612,6 +612,12 @@ interface MyNumbersSectionProps {
   items: DidInventoryItem[];
   isLoading: boolean;
   isError: boolean;
+  /**
+   * Request Release / Cancel Request are shown only to the tenant `user` role
+   * (like Request on Available Numbers) — readonly tenants and staff never
+   * see them; the API answers 403 to anyone else.
+   */
+  canRelease: boolean;
   onRequestRelease: (item: DidInventoryItem) => void;
   onCancelRelease: (item: DidInventoryItem) => void;
   cancelingDid: string | null;
@@ -622,6 +628,7 @@ function MyNumbersSection({
   items,
   isLoading,
   isError,
+  canRelease,
   onRequestRelease,
   onCancelRelease,
   cancelingDid,
@@ -750,7 +757,7 @@ function MyNumbersSection({
                     <DidTh>Product</DidTh>
                     <DidTh>Status</DidTh>
                     <DidTh>Assigned</DidTh>
-                    <th className="rcf-th" aria-label="Actions" />
+                    {canRelease && <th className="rcf-th" aria-label="Actions" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -812,7 +819,8 @@ function MyNumbersSection({
                             </span>
                           </td>
 
-                          {/* Release action — request flow (pending state shows Cancel) */}
+                          {/* Release action — request flow (pending state shows Cancel); tenant `user` role only */}
+                          {canRelease && (
                           <td style={{ padding: '11px 18px 11px 16px', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                             {pendingRelease ? (
                               <button
@@ -850,13 +858,14 @@ function MyNumbersSection({
                               </button>
                             )}
                           </td>
+                          )}
                         </tr>
 
                         {/* Expanded detail panel */}
                         {isExpanded && (
                           <tr>
                             <td
-                              colSpan={7}
+                              colSpan={canRelease ? 7 : 6}
                               style={{
                                 padding: '0 20px 20px 20px',
                                 background: DL.well,
@@ -1277,10 +1286,11 @@ export function DIDManagementTab({ customerId, filterToCustomer, onShowNumbers }
   // ALL hooks unconditionally at top — React rules-of-hooks
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
-  // Only the tenant `user` role may request numbers — the API 403s everyone
-  // else. Staff assign numbers in the inventory tool; readonly tenants are
-  // view-only. Keyed on the REAL role (user.role, as canEdit is), so an
-  // admin in customer-view mode — still role 'admin' — never sees Request.
+  // Only the tenant `user` role may request numbers, or request / cancel a
+  // release — the API 403s everyone else. Staff assign numbers in the
+  // inventory tool; readonly tenants are view-only. Keyed on the REAL role
+  // (user.role, as canEdit is), so an admin in customer-view mode — still
+  // role 'admin' — never sees Request or Request Release.
   const { user, isActualAdmin, isSupport } = useAuth();
   const canRequest = user?.role === 'user';
 
@@ -1412,6 +1422,7 @@ export function DIDManagementTab({ customerId, filterToCustomer, onShowNumbers }
           items={assignedItems}
           isLoading={myLoading}
           isError={myError}
+          canRelease={canRequest}
           onRequestRelease={handleRequestReleaseClick}
           onCancelRelease={handleCancelRelease}
           cancelingDid={cancelReleaseMutation.isPending ? (cancelReleaseMutation.variables ?? null) : null}
