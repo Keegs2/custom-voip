@@ -25,7 +25,8 @@
  *      this call" action (staff only — the parent passes `onShowAllLegs`)
  *      that sets the list to Rows=All legs + call_id=<call_id ?? uuid>.
  *   4. STIR / SHAKEN — the shared <AttestationChain/> (handles its own
- *      404-for-old-rows case).
+ *      404-for-old-rows case). `isStaff` picks its wording: tenants get
+ *      generic copy with no mode= / raw outcome / component names.
  *   5. RTP Detail — STAFF ONLY, collapsible (default closed): packet/byte
  *      counters both directions, and a "FreeSWITCH raw" block with FS's own
  *      values kept for traceability (do_mos MOS, quality %, legacy peak
@@ -582,7 +583,7 @@ export function CdrDetailModal({ cdr, onClose, isStaff, isAdmin, onShowAllLegs }
             {/* Attestation is keyed by the CALL (A-leg uuid): a carrier B row
                 resolves through its call_id; A / legacy / tenant rows fall
                 back to their own uuid (== call_id on A rows). */}
-            <AttestationChain callId={d.call_id ?? d.uuid} />
+            <AttestationChain callId={d.call_id ?? d.uuid} isStaff={isStaff} />
           </div>
 
           {/* RTP Detail — collapsible */}

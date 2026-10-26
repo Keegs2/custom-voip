@@ -10,6 +10,10 @@
  * `GET /cdrs/{callId}/attestation` (tenant-scoped server-side). On 404 — an
  * older, unsigned, or on-net call with no attestation record — it renders a
  * subtle "Not signed / n/a" note, never an error.
+ *
+ * Audience: tenants see this in the call-detail modal, so `isStaff=false`
+ * renders generic wording ("Confirmed by our network") and hides the parsed
+ * `mode=` and the raw `stir_outcome` string. Staff keep the full detail.
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -26,11 +30,16 @@ import {
   verstatVerdict,
   verstatSourceColor,
   resolveStirBadge,
+  badgeNoteFor,
+  CUSTOMER_INTENT_NOTE,
   type ColorToken,
 } from './attestationColors';
 
 interface AttestationChainProps {
   callId: string;
+  /** Admin or support. False = customer wording: no internal component
+      names, no `mode=`, no raw outcome string. */
+  isStaff: boolean;
   /** Skip the fetch (e.g. while a parent drawer is animating closed). */
   enabled?: boolean;
 }
@@ -118,7 +127,7 @@ function VerstatGlyph({ verstat }: { verstat: string | null | undefined }) {
 
 // ── The chain body (given a resolved record) ──────────────────────────────────
 
-function ChainBody({ att }: { att: CallAttestation }) {
+function ChainBody({ att, isStaff }: { att: CallAttestation; isStaff: boolean }) {
   const inboundToken = attestColor(att.inbound_attest);
   // The "Signed" node shows the ACTUAL wire outcome when Kamailio reported one
   // (stir_badge_source='actual'), else the INTENT we asked for — marked as
@@ -131,6 +140,25 @@ function ChainBody({ att }: { att: CallAttestation }) {
   // When actual and intent disagree, say so (e.g. asked for div, wire got C).
   const intentLevel = att.stir_attestation ?? att.signed_attestation ?? null;
   const diverged = badge.source === 'actual' && !!intentLevel && intentLevel !== badge.level;
+
+  // Copy by audience. Staff: today's detail (mode=, raw outcome, component
+  // names). Customers: the same facts in generic words, nothing internal.
+  const note = badgeNoteFor(badge, isStaff);
+  const intentText = isStaff ? 'intent, not confirmed on wire' : 'requested, not yet confirmed';
+  const signedTitle = !isStaff
+    ? `${attestDescription(badge.level)} — ${note}`
+    : badge.source === 'actual'
+      ? `On wire: ${attestDescription(badge.level)}${badge.mode ? ` · mode=${badge.mode}` : ''} — ${note}`
+      : `We asked to sign: ${attestDescription(badge.level)} — ${note}`;
+  const intentTitle = isStaff
+    ? 'The signing intent FreeSWITCH set; Kamailio has not reported the wire outcome for this call (pre-outcome call, or the outcome hand-off is not deployed).'
+    : `${CUSTOMER_INTENT_NOTE}.`;
+  const divergedTitle = isStaff
+    ? `Asked for ${attestLabel(intentLevel)} but the wire result was ${attestLabel(badge.level)}${att.stir_outcome ? ` (${att.stir_outcome})` : ''}`
+    : `Requested ${attestLabel(intentLevel)}; our network confirmed ${attestLabel(badge.level)}`;
+  const divergedText = isStaff
+    ? `intent ${attestLabel(intentLevel)} → wire ${attestLabel(badge.level)}`
+    : `requested ${attestLabel(intentLevel)} → confirmed ${attestLabel(badge.level)}`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -150,18 +178,11 @@ function ChainBody({ att }: { att: CallAttestation }) {
         {/* Signed (outbound) node — actual wire outcome, or intent (marked) */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <NodeLabel>{badge.source === 'actual' ? 'On wire' : 'Signed'}</NodeLabel>
-          <Pill
-            token={signedToken}
-            title={
-              badge.source === 'actual'
-                ? `On wire: ${attestDescription(badge.level)}${badge.mode ? ` · mode=${badge.mode}` : ''} — ${badge.note}`
-                : `We asked to sign: ${attestDescription(badge.level)} — ${badge.note}`
-            }
-          >
+          <Pill token={signedToken} title={signedTitle}>
             {attestLabel(badge.level)}
             {isIntent && (
               <span
-                aria-label="intent, not confirmed on wire"
+                aria-label={intentText}
                 style={{ color: T.textFaint, fontSize: '0.62rem', fontWeight: 600, lineHeight: 1 }}
               >
                 ◌
@@ -189,16 +210,13 @@ function ChainBody({ att }: { att: CallAttestation }) {
           </span>
         </span>
         {isIntent && (
-          <span title="The signing intent FreeSWITCH set; Kamailio has not reported the wire outcome for this call (pre-outcome call, or the outcome hand-off is not deployed).">
-            Outcome: <span style={{ fontWeight: 600 }}>intent, not confirmed on wire</span>
+          <span title={intentTitle}>
+            Outcome: <span style={{ fontWeight: 600 }}>{intentText}</span>
           </span>
         )}
         {diverged && (
-          <span
-            title={`Asked for ${attestLabel(intentLevel)} but the wire result was ${attestLabel(badge.level)}${att.stir_outcome ? ` (${att.stir_outcome})` : ''}`}
-            style={{ color: T.warnFg, fontWeight: 600 }}
-          >
-            intent {attestLabel(intentLevel)} → wire {attestLabel(badge.level)}
+          <span title={divergedTitle} style={{ color: T.warnFg, fontWeight: 600 }}>
+            {divergedText}
           </span>
         )}
         {att.verstat_source && (
@@ -233,7 +251,7 @@ function ChainBody({ att }: { att: CallAttestation }) {
 
 // ── Public component ──────────────────────────────────────────────────────────
 
-export function AttestationChain({ callId, enabled = true }: AttestationChainProps) {
+export function AttestationChain({ callId, isStaff, enabled = true }: AttestationChainProps) {
   // ALL hooks unconditionally at top (rules-of-hooks — this codebase has been
   // bitten by React #310; never place hooks below early returns).
   const { data, isLoading, error, isError } = useQuery({
@@ -296,5 +314,5 @@ export function AttestationChain({ callId, enabled = true }: AttestationChainPro
     );
   }
 
-  return <ChainBody att={data} />;
+  return <ChainBody att={data} isStaff={isStaff} />;
 }
