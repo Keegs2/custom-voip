@@ -733,6 +733,11 @@ a "View as Customer" toggle above the user footer.
 Standardised page title block: title (h1), optional subtitle, optional right-side
 actions slot. Used as the first child of most page components.
 
+**Layout kit (`kit/`)** — `CompactHeader`, `Disclosure`, `useShowMore` +
+`ShowMoreButton`, `ClampText`, `BalancedGrid` (+ `.lk-col` / `.lk-grow` /
+`.lk-follow` / `.lk-cap`), `ScrollArea`, `MasterDetail`. Balanced, compact,
+expandable pages — the rulebook is §20.
+
 ### Auth (`src/components/auth/`)
 
 See section 4 above.
@@ -1861,3 +1866,179 @@ palette (§18.5). `--literals` over `pages/ivr`, `flow`, `ivr*.css`: 0.
 
 Visual: the theme harness with the §8.2 mock (2 IVR numbers, 3 flows incl.
 one with errors and one that always 409s).
+
+---
+
+## 20. Layout — balanced, compact, expandable
+
+Owner direction (2026-10): every signed-in page is **even and compact** —
+a user sees everything that matters at a glance, and opens expandable areas
+for more detail. This section governs **organisation only**: colours, type,
+surfaces, radii and shadows stay exactly as §15/§18 define them. The kit is
+structure; the page keeps its own surfaces (`.dl-panel`, the dashboard
+`Card`, `components/ui` Card).
+
+Pilots that follow it: Visual Voicemail (§17) and the dashboards (§7).
+Screens: the visual harness (scratch) — `voicemail`, `state-vm-*`,
+`dashboard*` slugs.
+
+### 20.1 Page skeleton
+
+```
+.dl-scope (canvas) › shell
+ 1. Header ............ ONE row at desktop: <CompactHeader> (or the dashboard's granite band)
+ 2. Scope bar ......... optional, ONE slim row (≤ 56px): pickers + key facts (e.g. voicemail's mailbox bar)
+ 3. Tabs .............. optional rail (`dl-tabs`), margin-bottom 14px
+ 4. Body .............. rows of cards, each row ONE height (BalancedGrid / a page grid with kit classes)
+                        OR a <MasterDetail> (list | open item), bounded to the first screen
+ 5. Secondary ......... expandable rows (<Disclosure>): rarely-changed settings, glossaries, staff blocks
+```
+
+Importance runs top to bottom. Nothing a user needs for the page's main task
+sits below the fold.
+
+### 20.2 Above the fold at 1440 × 900
+
+- Header ≤ 110px tall (crumb, title + inline badges, ≤ 2-line subtitle on
+  the left; tools · stats · primary action on the right, all one row).
+  Scope bar ≤ 56px. Tabs ≤ 48px. A KPI row is ONE row (≤ 140px).
+- The page's primary content must be visible without scrolling: the list
+  and the open item (master–detail), the KPIs and the first card row
+  (dashboards), the first rows of the main table.
+- Primary actions must be visible without scrolling: the page's primary
+  button, the open item's actions (pin them in the pane's footer), the Save
+  of the main form.
+- A MasterDetail page fits the screen exactly: the panes end 24px above the
+  bottom edge and the page does not scroll (§20.8).
+
+### 20.3 How tall a card may run
+
+- Cards side by side are **one height** (grid stretch). Never a short card
+  beside a tall one — if their natural heights differ by more than ~25 %,
+  give the row a leader and make the others grow or follow:
+  - **leader** — the card whose content sets the row height (usually the
+    widest / most important: a table, the greeting card);
+  - **`.lk-grow`** — absorbs spare height (a chart whose bars can grow; the
+    last card of a stacked column);
+  - **`.lk-follow`** — takes the row's height and scrolls inside (lists:
+    team, requests, paused numbers). Never make every card of a row a
+    follower — followers need a leader.
+- A card body runs at most ~440px (`--lk-card-cap`) or **8 table rows**
+  before it caps (`.lk-cap`, scroll inside) or collapses behind
+  "Show all N" (`useShowMore`). Short lists: 4–6 items, then "Show all N".
+  Inside a follower: every item, scrolling.
+- "Show all" on a card beside other cards expands **inside a capped scroll**
+  (sticky column heads), so the card never pushes its row taller
+  (dashboard numbers / customers tables: `.ad-tablewrap-cap`).
+- Put the Save button on the same line as short forms (fields + submit in
+  one row, `align-items: flex-end`) rather than on a row of its own.
+
+### 20.4 What collapses by default
+
+| Content | How |
+|---|---|
+| Glossaries, "What does this mean?", "How is this worked out?" | `<Disclosure variant="bare">` (or `row`) |
+| Tables beyond ~8 rows, lists beyond 4–6 items | `useShowMore` + `<ShowMoreButton>` ("Show all N …" / "Show less") |
+| Long text (transcripts, notes, descriptions) | `<ClampText lines={4}>` ("Show full transcript") |
+| Secondary metadata (ids, extra timestamps, technical fields) | a one-line inline meta row; the rest in `title` tooltips or a Disclosure |
+| Rarely-changed settings (PIN, storage limits) | `<Disclosure variant="row">` with the current value as `summary` |
+| Admin-only blocks (staff tools, suspend / delete) | `<Disclosure variant="row">` + the amber Staff tag as `badge`; destructive actions KEEP their typed confirmation dialog |
+
+**Never collapse:** the page's primary content and action; errors, warnings
+and "full" / "paused" states (show them in the row's `summary`, toned);
+privacy or legal copy a contract or plan says to show (e.g. the
+transcription disclosure, §17 / plan §11.4).
+
+### 20.5 The kit — `src/components/layout/kit` (import from the barrel)
+
+CSS: `src/styles/layout-kit.css` (`lk-`), loaded once in `main.tsx`. Every
+colour is a `--t-*` token; nothing to add for dark mode.
+
+| Primitive | Use | API |
+|---|---|---|
+| `<CompactHeader>` | The page header, one row at desktop | `crumb?`, `title`, `titleAside?` (badges inline with the h1), `subtitle?` (≤ 2 lines, clamped), `tools?` (scope pickers / filters), `stats?: {label, value, title?}[]` (a `<dl>`, figure over label, hairline dividers), `statsLabel?`, `actions?` (primary, last), `className?` |
+| `<Disclosure>` | An expandable section: summary row → content | `title`, `summary?` (one line, open or closed), `count?`, `badge?`, `icon?`, `actions?` (on the row, OUTSIDE the toggle), `headingLevel?` (default 3), `variant?: 'card' \| 'row' \| 'bare'`, `defaultOpen?` / `open?` + `onOpenChange?`, `persistKey?` (`<page>:<section>`), `lazy?` (mount on first open), `className?`, `contentClassName?` |
+| `useShowMore(items, limit, resetKey?)` + `<ShowMoreButton>` | First N rows, then expand | hook → `{ visible, expanded, needed, total, hiddenCount, toggle, setExpanded, listId, buttonProps }`; put `id={listId}` on the `<tbody>`/`<ul>`, render `<ShowMoreButton {...buttonProps} noun="numbers" />` only when `needed`. Button: `noun?`, `moreLabel?`, `lessLabel?`, `variant?: 'link' \| 'bar'`. A new `resetKey` (filter / search) collapses |
+| `<ClampText>` | First lines of a long text | `lines?` (4), `moreLabel?`, `lessLabel?`, `className?` (the text), `wrapperClassName?` (the box — put padding/tint HERE, not on the clamped text). Toggle appears only when the text is really cut |
+| `<BalancedGrid>` | Side-by-side cards, one height per row | `columns?` (grid-template-columns, default 2 equal), `stackBelow?: 'sm' \| 'md' \| 'lg'` (container 560 / 760 / 960px), `gap?`, `followMin?`, `label?`. Children are the cells: a card (stretches) or a `<div className="lk-col">` stacking cards |
+| `.lk-col` · `.lk-grow` · `.lk-follow` · `.lk-cap` | Structure classes for any grid (page grids too) | `.lk-col` = a cell stacking cards (flex column, `--lk-gap`); `.lk-grow` = absorbs slack inside a `.lk-col`; `.lk-follow` = height follows the row (CSS `contain: var(--lk-follow)`, active only where a grid sets `--lk-follow: size`; floor `--lk-follow-min`), must be a flex column whose scrolling part has `min-height: 0`; `.lk-cap` = body capped at `--lk-cap` |
+| `<ScrollArea>` (`.lk-scroll`) | The scrolling part of a bounded pane / follower | `label?` (→ region), `focusable?` (tab stop when it holds no focusable children), `maxHeight?` (`--lk-scroll-max`, for stacked layouts), `className?`, `id?` |
+| `<MasterDetail>` | A list and the open item, equal-height panes bounded to the first screen | `list`, `detail`, `listLabel`, `detailLabel`, `listWidth?` (default `minmax(280px, 360px)`), `listClassName?` / `detailClassName?` (surfaces, e.g. `dl-panel`), `minHeight?` (460), `bottomGap?` (24). Each pane is a flex column: wrap the scrolling part in `<ScrollArea>`, keep tabs / toolbars / an action footer outside it |
+| `useViewportFit(ref)` | Writes `--lk-md-top` (document offset, layout position — ignores entry-animation transforms) | used by MasterDetail; re-measures on resize and when anything above changes size |
+| `useOpenState` / `readOpen` / `writeOpen` | Disclosure state + its optional memory | localStorage key `crag_open:<persistKey>`, every access try/catch'd; storage is a convenience only — the page renders the same without it |
+
+Page grids that are not a `BalancedGrid` (the dashboard's 12-column
+`.ad-grid`) opt in with the classes: set `--lk-follow: size` on the grid
+where it is multi-column and `none` where it stacks (§20.6).
+
+### 20.6 Responsive (1440 / 820 / 390)
+
+All layout breakpoints are **container** queries on the kit's hosts (or the
+page's own container), so they follow the space beside the 240px sidebar —
+never viewport media queries, never Tailwind `md:*`.
+
+| Width | Content column | Behaviour |
+|---|---|---|
+| 1440 × 900 | ~1100px | Multi-column rows, followers active, MasterDetail side by side and bounded to the screen, header one row, KPI rows of 6 |
+| 820 × 1180 | ~520px (sidebar still shown) | `BalancedGrid` (md) stacks; MasterDetail stacks (list first, its ScrollArea capped at `min(50vh, 440px)`, detail at natural height, actions under it); CompactHeader's right side wraps under the title; the dashboard drops to 2 → 1 columns, `.ad-col` dissolves (`display: contents`, dense flow), followers go natural with a 420px cap |
+| 390 × 844 | ~340px | One column everywhere; header tools / actions full width, stats spread across; KPIs 2-up; no horizontal page scroll (the harness's "layout warnings" must be empty) |
+
+### 20.7 Accessibility
+
+- **Disclosure** — a real `<button>` inside a heading (`headingLevel` keeps
+  the outline right), `aria-expanded` + `aria-controls`; the content is a
+  `role="region"` labelled by the button; closed content is
+  `visibility: hidden` (not focusable, not read). Never put buttons or
+  links inside the toggle — use `actions`.
+- **ShowMoreButton** — `aria-expanded` + `aria-controls` = the list's id;
+  "Show less" scrolls the button back into view.
+- **ClampText** — the full text is always in the DOM (find, copy, screen
+  readers); the toggle has `aria-expanded` / `aria-controls`.
+- **ScrollArea** — a meaningful region gets `label`; one that may hold only
+  text gets `focusable` (keyboard scrolling, WCAG 2.1.1).
+- **MasterDetail** — two labelled sections, list before detail in the DOM;
+  pinned action footers stay inside the detail section.
+- **CompactHeader** — one `h1`; stats are a `<dl>` (read "Unread 5").
+- Motion: only the disclosure height and chevrons animate, never under
+  `prefers-reduced-motion`. Focus rings follow §18.3 rule 9.
+
+### 20.8 Gotchas (learned in the pilots)
+
+- **A MasterDetail page must end with it**, and the shell's bottom padding
+  must equal `bottomGap` (voicemail: `.dl-shell.vm-shell { padding-bottom:
+  24px }`). Otherwise the page scrolls by the difference — and the harness's
+  full-page capture grows the viewport to the document height, which grows
+  the panes with it (a screenshot taller than 900px means this).
+- **Followers need a leader.** `contain: size` gives a follower no height of
+  its own (only `--lk-follow-min`); a row of followers collapses to the
+  floor. Turn followers off where the layout stacks (`--lk-follow: none`).
+- **Nested auto-fit grids inside a Disclosure** used to overflow the row
+  (an implicit `auto` grid column sizes to the content's min-content); the
+  kit pins the disclosure's column to `minmax(0, 1fr)` — keep it.
+- **Clamp padding:** padding on a `-webkit-line-clamp` element lets the next
+  line peek out; pad the wrapper (`ClampText wrapperClassName`).
+- **Class names:** kit classes are `lk-*`; page classes keep their page
+  prefix. Check for an existing class before naming a new one (voicemail
+  already had `.vm-more` for "Load more").
+- Spans (`ad-span-*`) are ignored inside a flex `.lk-col` / `.ad-col` —
+  put the span on the column, not on the cards in it.
+- `useShowMore(items, Number.POSITIVE_INFINITY)` = "show everything" (a
+  follower lists every item); `needed` is then false.
+
+### 20.9 Roll-out checklist (per page)
+
+1. Shoot the BEFORE (harness, 1440 dark + light) and note: header rows,
+   short-beside-tall cards, columns that run long, page height.
+2. Header → `<CompactHeader>` (or confirm the existing band is one row).
+3. Scope / filter bars → one slim row.
+4. Each row of cards: pick the leader; others `.lk-grow` / `.lk-follow`;
+   cap bodies at 8 rows / ~440px; "Show all N" on long lists.
+5. A list + item page → `<MasterDetail>`; pin the item's actions in its
+   footer; end the page with it (§20.8).
+6. Glossaries, rarely-changed settings, staff blocks → `<Disclosure>` with
+   a `summary` of the current value; persist with `<page>:<section>` keys.
+7. Every persona (tenant, readonly, admin console, admin `?customer=`,
+   admin View as Customer) and every empty / loading / error state.
+8. Harness at 1440×900, 820×1180, 390×844, dark + light: no layout
+   warnings, no new console errors; `npm run build`, `npx eslint <files>`,
+   `node scripts/check-theme-tokens.mjs`.

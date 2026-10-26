@@ -9,6 +9,8 @@ import './index.css';
 import './styles/theme.css';
 // App shell chrome: sidebar, canvas, collapse tab, theme toggle.
 import './styles/app-shell.css';
+// Layout kit (components/layout/kit) — see docker/ui/CLAUDE.md "Layout".
+import './styles/layout-kit.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
