@@ -750,10 +750,12 @@ every persona.
 - Harness slugs: `docs-guides`, `docs-guides-{rcf,voicemail,ivr}`,
   `state-guides-{task,expand-all,deeplink,ivr-open}`.
 
-**`RcfDocsPage`** (`/docs/rcf`) and **`ApiDocsPage`** (`/docs/api`)
-Static inline documentation pages. No API calls. `/documentation` redirects to
-`/docs/rcf`; `/docs/integration` redirects to `/docs/api`. Shared layout helpers
-live in `pages/docs/shared.tsx`. There is no single `DocsPage`.
+**Docs routes.** Two static pages, no API calls: `GuidesPage`
+(`/docs/guides/:product?`) and `ApiDocsPage` (`/docs/api/:product?`).
+Redirects: `/documentation` → `/docs/guides`, `/docs/rcf` →
+`/docs/guides/rcf`, `/docs/integration` → `/docs/api`. Shared helpers
+(`Callout`, `CodeBlock`) live in `pages/docs/shared.tsx`. There is no single
+`DocsPage` (the old `RcfDocsPage` is gone).
 
 **`ApiDocsPage`** (`/docs/api/:product?`) — the customer API Reference
 (`pages/docs/ApiDocsPage.tsx` = route entry; body + content in `pages/docs/api/`).
@@ -904,10 +906,9 @@ Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
   expanded row any more. Shared pills/banners: `CallBadges.tsx`.
 - The header has an "Open SIP Dashboard" link to `/grafana/`.
 
-**`AccountPage`** (`/account`)
-Profile page. Lets users update their display name and password via
-`PATCH /api/auth/me` (calls `apiRequest('PATCH', '/auth/me', ...)`).
-Calls `refreshUser()` from `AuthContext` on success.
+**`/account`** redirects to `/my-account`. The profile (display name +
+password) is My Account's "Your Account" tab (`pages/my-account/SecurityTab.tsx`),
+via `PUT /api/auth/me`; it calls `refreshUser()` from `AuthContext` on success.
 
 ### Admin pages
 
@@ -1195,9 +1196,10 @@ This is the RCF-V1 production architecture. Know what is and is not available:
   (currently `false`; mirrors the backend/FreeSWITCH env var of the same name — flip
   BOTH to restore): the `/api-dids` route (redirects to product home), the Sidebar
   "Coming Soon" item, My Account's API DID section/tiles,
-  the Guides "calling" section (slug redirects to the hub default; the API
-  Reference has no calling section at all — it names programmable voice only
-  as "on our roadmap", and `/docs/api/calling` lands on Getting started),
+  (the Guides have no API Calling or SIP Trunking guide since 2026-10-26 —
+  `/docs/guides/{calling,trunking}` land on the overview; the API Reference
+  has no calling section at all — it names programmable voice only as "on
+  our roadmap", and `/docs/api/calling` lands on Getting started),
   the Calls "API" product filter and the onboarding API product option. (The
   landing page no longer has any API Calling copy, flag or not.) With the flag
   off nothing calls `/api-dids`. `productHome`
