@@ -616,6 +616,54 @@ redirects to the user's product home while `API_CALLING_ENABLED` is false.
 
 **`IvrPage`** (`/ivr`, `/ivr/flows/:id`, lazy) — Visual IVR: see §19.
 
+**`GuidesPage`** (`/docs/guides/:product?`, content in `pages/docs/guides/`) — Guides
+The CUSTOMER help hub (2026-10 rewrite). Staff/admin guides live elsewhere;
+nothing here may describe staff tools. No API calls; reads the same for
+every persona.
+- **Routes:** no slug = the overview; `rcf` · `voicemail` · `ivr` = a
+  product guide; any other slug (incl. the old `trunking` / `calling`)
+  redirects to `/docs/guides`. `/docs/rcf` → `/docs/guides/rcf`.
+  `#<task id>` deep-links (opens + scrolls to) one task. Slugs + content
+  types: `guides/guideTopics.ts` (the page no longer reads
+  `GUIDE_PRODUCTS` from `docProducts.ts`; that type only feeds the shared
+  `ProductSelector`).
+- **Layout (§20):** `CompactHeader` · `GuideSwitcher` (one row of four
+  link cards — Overview, RCF, Visual Voicemail, IVR — `aria-current`,
+  2 × 2 below ~860px of content) · then the guide. A product guide is ONE
+  `BalancedGrid` row (`GuideKit.ProductGuide`): "How to" (tasks as
+  `Disclosure` rows + Expand all) leads; "At a glance" + "Questions &
+  fixes" stack beside it, the FAQ a `.lk-follow` that scrolls inside. The
+  overview is two rows: three product cards, then "Find your way around
+  the sidebar" + "Access & help". All three guides fit 1440 × 900 closed.
+- **Content = files of data** (`RcfGuide.tsx`, `VoicemailGuide.tsx`,
+  `IvrGuide.tsx`, `OverviewGuide.tsx`): each exports one component over a
+  `ProductGuideContent` constant. Helpers in `GuideKit.tsx`: `<Ui>` (an
+  on-screen label, spelled EXACTLY as the app spells it), `<Path>`
+  (`Products › RCF`), `<Steps>`, `<Bullets>`, `<Para>`, `<Note>`,
+  `<Terms>`. Styles `styles/dl-guides.css` (`gd-`, tokens only).
+- **Copy rules (owner):** describe only what a tenant `user` / `readonly`
+  can see and do today, verified against the code (each guide's header
+  comment lists its sources). Never: carrier / cloud / vendor names,
+  regions, IPs, internal components, prices, CPS or other limits not shown
+  to customers, staff pages (troubleshooting, admin console, View as
+  Customer, mailbox suspend / delete / crypto-erase), key or algorithm
+  names (voicemail = "encrypted at rest"; the in-app Transcription card
+  carries the processing disclosure — the guide points to it), env flags,
+  migrations, error codes. API Calling is not documented (switched off; if
+  ever mentioned: "on our roadmap"). Reliability: "redundant regions with
+  automatic failover" only.
+- **Deliberately not documented** (re-check before adding): the RCF
+  editor's "Failover destination" (stored, but call routing does not use
+  it), the IVR Flow assistant (off unless enabled per account), SIP
+  Trunking (early access, not in the owner's scope for this hub).
+- **Gotchas:** this page is imported statically by `App.tsx`, so its CSS
+  loads BEFORE `layout-kit.css` — overrides of kit rules carry the
+  `.gd-scope` prefix. The kit's `.lk-col > .lk-follow { flex: 1 1 0 }`
+  collapses a follower when the grid STACKS (content-height column) —
+  `dl-guides.css` resets it to `flex: none` below the grid's md width.
+- Harness slugs: `docs-guides`, `docs-guides-{rcf,voicemail,ivr}`,
+  `state-guides-{task,expand-all,deeplink,ivr-open}`.
+
 **`RcfDocsPage`** (`/docs/rcf`) and **`ApiDocsPage`** (`/docs/api`)
 Static inline documentation pages. No API calls. `/documentation` redirects to
 `/docs/rcf`; `/docs/integration` redirects to `/docs/api`. Shared layout helpers
