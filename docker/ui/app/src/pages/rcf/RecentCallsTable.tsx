@@ -154,7 +154,9 @@ export function RecentCallsTable({
         <div className="rcf-act-state">No calls in this range{selectedLabel ? ' for this number' : ''}.</div>
       ) : (
         <>
-          <div className={`rcf-act-tablewrap${refreshing ? ' rcf-act-busy' : ''}`}>
+          {/* The page's rows scroll inside a cap (~9 rows, heads sticky) so
+              the log never runs the page long; the pager stays under it. */}
+          <div className={`rcf-act-tablewrap rcf-act-tablecap${refreshing ? ' rcf-act-busy' : ''}`}>
             <table className="rcf-act-table">
               <thead>
                 <tr>

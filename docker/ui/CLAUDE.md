@@ -541,22 +541,40 @@ switch remounts instead of changing hook order.
 Picks one of three views (separate components, so toggling customer view or
 the preview can't break hook order):
 - **Customer** (`effectiveCustomer` set and not admin — tenant or admin
-  preview): `pages/rcf/CustomerNumbersPage.tsx`, keyed by customer id — quiet
-  header "Call forwarding numbers" (breadcrumb back to Dashboard) + Request /
-  Manage numbers (opens `DidManagement` in `DashboardOverlay`) + the full
-  `RoutingBoard` (search, chips, sort, paging, rows open `RowEditor`). Same
-  `accountData.ts` hooks as the dashboard. Styles `styles/rcf-dashboard.css`
-  (`rcfd-`/`rcfn-`).
+  preview): `pages/rcf/CustomerNumbersPage.tsx`, keyed by customer id. Layout
+  (§20): a one-row kit `CompactHeader` (crumb "Dashboard / <account>" + an
+  amber "Staff preview" tag for the admin preview · "Call forwarding numbers"
+  · subtitle incl. "Select a number to change where it rings." (readonly:
+  "…see its settings.") · Numbers / Forwarding / Paused figures (Numbers is
+  the ACCOUNT total past the 100-row cap; the others are of the rows listed,
+  said in their `title`) · Request / Manage / View numbers → `DidManagement`
+  in `DashboardOverlay`) over the `RoutingBoard`: ONE toolbar row (search ·
+  All/Forwarding/Paused chips · sort), the "first 100 of N" notice as a slim
+  info line under it (never hidden), sticky column heads, the rows, the pager
+  pinned at the bottom. Wider than 480px the board ends 24px above the bottom
+  of the first screen (`useViewportFit` → `--lk-md-top`, `.rcfd-board-host`
+  container query) and the rows scroll inside, so search, chips, sort,
+  paging and an open `RowEditor` stay on screen at 100+ numbers; the shell's
+  bottom padding is 24px, so the page itself does not scroll. An opened row
+  scrolls itself into view; paging / filtering return to the top. Phones:
+  natural height, routes two lines each (destination + week figures share
+  line 2). Same `accountData.ts` hooks as the dashboard. Styles
+  `styles/rcf-dashboard.css` (`rcfd-`/`rcfn-`).
 - **Admin in customer view, no preview picked**: `PreviewPrompt`.
 - **Admin / support**: the Administrative Call Forwarding Console (`RcfConsole`),
-  in the dashboard's look: `.rcf-scope.ad-scope.rcfc` + `.ad-shell`, granite
-  `DashboardHeader` (Staff/Support tag, "Viewing X", Forwards / Forwarding /
-  Paused figures, the `AdminScopeSelect` dropdown incl. All customers, "Open
-  dashboard" → `/dashboard?customer=…`), a segmented tab rail (Numbers / Call
-  activity / DID management; WAI-ARIA tabs, arrow keys), Numbers as a dashboard
-  `Card` with the `.ad-table` look (search incl. customer, area-code filter,
-  sortable header BUTTONS, Forwarding/Paused words + dot, Customer column on
-  All customers, rows → `RowEditor` with admin fields, browser paging).
+  in the dashboard's look: `.rcf-scope.ad-scope.rcfc` + `.ad-shell`. The granite
+  `DashboardHeader` is ONE row: kicker + Staff/Support tag, title, "Viewing X"
+  on the left; the `AdminScopeSelect` dropdown (incl. All customers) and "Open
+  dashboard" (→ `/dashboard?customer=…`) on the right. The segmented tab rail
+  (Numbers / Call activity / DID management; WAI-ARIA tabs, arrow keys) shares
+  its row with the view's figures (Forwards — "100+" at the cap — /
+  Forwarding / Paused, figure over label, `.rcfc-railrow` / `.rcfc-figures`).
+  Numbers is a dashboard `Card` whose header row carries the toolbar (search
+  incl. customer, area-code filter, Clear filters), with the `.ad-table` look
+  (sortable header BUTTONS, sticky, Forwarding/Paused words + dot, Customer
+  column on All customers, rows → `RowEditor` with admin fields, browser
+  paging in the pinned footer); wider than 480px the card is bounded to the
+  first screen like the board (`.rcfc-fit`) and its table scrolls inside.
   Scope is in the URL: `?customer=all|<id>`; absent = nothing chosen (prompt,
   nothing loads). Numbers / Activity / DID state is keyed per scope. DID
   management on All customers asks for one customer. `.rcfc .rcf-panel`
@@ -565,7 +583,9 @@ the preview can't break hook order):
   `styles/rcf-dashboard.css`.
 `GET /rcf` is capped at 100 rows server-side and ignores limit/offset; both
 the board and the console fetch once and page in the browser, and say so at
-100.
+100. Harness slugs (scratch): `rcf`, `rcf-all`, `rcf-customer`,
+`rcf-console-prompt`, `state-rcf-*`; the 100+-number case is the `big`
+persona (an RCF-only account with 130 numbers) where the harness has it.
 
 **`ReportingPage`** (`/reporting`, lazy)
 Staff pick a customer; an admin in customer view reports on the sidebar's
@@ -608,14 +628,55 @@ server's `outcome_label` ("Answered by voicemail"); the glossary explains it.
 unchanged) or `'account'` (the dashboard overlay — `numbers` prop picker, any
 product, `ad-prodtag` on non-forwarding options; `product_type=all` + `number`
 on the activity feed, no product + `number` on the table; GET /rcf disabled
-via `enabled:`). Keys carry the scope.
+via `enabled:`). Keys carry the scope. Its call log (`RecentCallsTable`)
+scrolls inside a ~9-row cap with sticky heads (`.rcf-act-tablecap`), the
+pager under it. **`DIDManagementTab`** (`pages/rcf/DidManagement.tsx`, the
+console tab and the dashboard / customer overlays): My Numbers and Available
+Numbers show 8 rows, then "Show all N numbers" (`useShowMore`) opens the rest
+inside a capped scroll with sticky heads (`.rcf-didwrap-cap`); a new filter
+collapses it. Request (Available Numbers) AND Request Release / Cancel
+Request (My Numbers) render only for the tenant `user` role — readonly
+tenants and staff (incl. an admin in customer view) never see them; the API
+403s anyone else. Both components are shared — keep their props and
+behaviour compatible with the dashboard's use. `RowEditor` validates ring
+timeout 5–120 s, the API's own bounds (`routers/rcf.py`).
 
-**`MyAccountPage`** — with `counts.numbers` (holistic API): one tile + header
-metric per product (`by_product`, catalog order) plus the SIP trunks tile, and
-a Voicemail section on Products when the account has mailbox numbers (same
-`['account-numbers', id, 'self']` list). Without it: the old tiles. At
-phone widths its tab rail and header metrics opt into `.dl-tabs-scroll` /
-`.dl-metrics-wrap` (§18.6) — before that the page scrolled sideways at 390px.
+**`MyAccountPage`** (`/my-account`) — route entry, header and tab rail in
+`pages/MyAccountPage.tsx`; the tabs in `pages/my-account/` (`OverviewTab`,
+`TeamTab`, `ProductsTab`, `SecurityTab`, shared `parts.tsx` + `format.ts`,
+data `myAccountData.ts`); styles `styles/my-account.css` (`ma-`) on the
+daylight `dl-*` primitives.
+- **Whose account:** a tenant's own (self-scoped endpoints, the keys it always
+  used: `['my-customer']`, `['my-billing']`, `['my-team']`,
+  `['my-account-rcf']`, `['my-account-trunks']`). An admin in "View as
+  Customer" with a preview picked sees THAT customer (staff endpoints: `GET
+  /customers/{id}` identity fields only + counts from `/reports/my-numbers?
+  customer_id` and `/trunks?customer_id`, `/customers/{id}/billing`, the
+  dashboard's `['dash-team', id]` team, `/rcf?customer_id`; keys suffixed
+  with the customer) and an amber "Staff preview" tag; Your Account is still
+  the admin's own profile. Staff with no customer (admin normal view,
+  support) get "No customer account" with an "Open Your Account" button.
+- **Layout (§20):** one-row `CompactHeader` (crumb, account name, one figure
+  per product with `counts.numbers` — catalog order — plus SIP trunks; two
+  per row on a phone) · `dl-tabs` rail (WAI-ARIA tabs, arrow keys;
+  `.dl-tabs-scroll` below 1024px) · **Overview** = ONE balanced row: Account
+  (identity + tags, Account type · Member since · Account ID in one row,
+  "Products on this account" — a line per product with numbers, call
+  forwarding always listed, SIP trunks on the SIP trunk line, links to
+  `/rcf` and `/voicemail`) beside the Estimated Monthly Bill (one line per
+  product; the trunk breakdown behind "Line details", `account:bill-details`;
+  total + the server disclaimer pinned to the card's foot, never collapsed).
+  The old "Your Numbers" tile row is folded into the Account card.
+  **Users & Access** = active users (8, then "Show all N" in a capped scroll)
+  with an "Inactive users N" expandable row (`account:inactive-users`).
+  **Products** = Remote Call Forwarding table (Number · Forwards to + ring /
+  caller ID / channels · Status; 6 rows beside other products, 8 alone, then
+  "Show all"; "Manage call forwarding →" `/rcf`, "first 100 of N" past the
+  cap) beside SIP Trunks + Voicemail (stacked, the last grows); API (retired,
+  `API_CALLING_ENABLED`, tenant only) and UCaaS (never `rcf`) unchanged.
+  **Your Account** = Profile (facts in one row, display name + Save inline)
+  and "Change Password" as an expandable card (closed every visit; fields +
+  submit in one row). Same PUT /auth/me calls and validation as before.
 
 **`TrunksPage`** (`/trunks`)
 The customer **SIP Trunking portal** — read + self-serve; trunk creation and

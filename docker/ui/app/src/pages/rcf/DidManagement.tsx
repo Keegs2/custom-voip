@@ -9,11 +9,16 @@
  * rcf `theme.ts` palette for inline styles, `.rcf-dialog*` (index.css) for
  * the two confirmation dialogs. Light resolves to exactly the daylight
  * values; dark to the granite set.
+ *
+ * Layout (docker/ui/CLAUDE.md §20): My Numbers and Available Numbers show
+ * their first 8 rows; "Show all N" opens the rest inside a scroll capped at
+ * that height (sticky column heads), and a new filter collapses it again.
  */
 import { Fragment, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Spinner } from '../../components/ui/Spinner';
 import { Reveal } from '../../components/fx/Reveal';
+import { ShowMoreButton, useShowMore } from '../../components/layout/kit';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/ui/Toast';
 import { fmt } from '../../utils/format';
@@ -31,6 +36,14 @@ import { T, TONE, tMix } from '../../styles/theme';
 import {
   AZURE_DEEP, DL, GREEN, INK, INK_DIM, INK_FAINT, INK_SOFT, MONO, RED,
 } from './theme';
+
+/** Rows a DID table shows before "Show all N" (§20: tables cap at 8 rows). */
+const DID_PREVIEW_ROWS = 8;
+
+/** Collapse key for a filter set — a new filter starts collapsed again. */
+function filterKey(f: DidFilterState): string {
+  return `${f.npa}|${f.nxx}|${f.state}|${f.search}`;
+}
 
 /** A translucent wash of a `var()` colour that isn't a theme token (the DL palette). */
 function mixVar(color: string, percent: number): string {
@@ -443,7 +456,7 @@ function RequestModal({ did, onConfirm, onCancel, isPending }: RequestModalProps
         >
           <span style={{ color: AZURE_DEEP, fontWeight: 700 }}>Note: </span>
           <span style={{ color: INK_SOFT }}>
-            This number will be marked as pending until an administrator approves the request. You will be notified once it is assigned.
+            Granite reviews requests — you’ll see this number under Pending Requests until it’s approved.
           </span>
         </div>
 
@@ -612,6 +625,12 @@ interface MyNumbersSectionProps {
   items: DidInventoryItem[];
   isLoading: boolean;
   isError: boolean;
+  /**
+   * Request Release / Cancel Request are shown only to the tenant `user` role
+   * (like Request on Available Numbers) — readonly tenants and staff never
+   * see them; the API answers 403 to anyone else.
+   */
+  canRelease: boolean;
   onRequestRelease: (item: DidInventoryItem) => void;
   onCancelRelease: (item: DidInventoryItem) => void;
   cancelingDid: string | null;
@@ -622,6 +641,7 @@ function MyNumbersSection({
   items,
   isLoading,
   isError,
+  canRelease,
   onRequestRelease,
   onCancelRelease,
   cancelingDid,
@@ -634,6 +654,7 @@ function MyNumbersSection({
   const availableStates = useMemo(() => extractStates(items), [items]);
 
   const filtered = useMemo(() => applyDidFilters(items, filters), [items, filters]);
+  const more = useShowMore(filtered, DID_PREVIEW_ROWS, filterKey(filters));
 
   if (isLoading) {
     return (
@@ -740,7 +761,8 @@ function MyNumbersSection({
               </button>
             </div>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
+            <>
+            <div className={`rcf-didwrap${more.expanded ? ' rcf-didwrap-cap' : ''}`}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
                 <thead>
                   <tr>
@@ -750,11 +772,11 @@ function MyNumbersSection({
                     <DidTh>Product</DidTh>
                     <DidTh>Status</DidTh>
                     <DidTh>Assigned</DidTh>
-                    <th className="rcf-th" aria-label="Actions" />
+                    {canRelease && <th className="rcf-th" aria-label="Actions" />}
                   </tr>
                 </thead>
-                <tbody>
-                  {filtered.map((item) => {
+                <tbody id={more.listId}>
+                  {more.visible.map((item) => {
                     const isExpanded = expandedId === item.id;
                     const location = [item.city, item.state].filter(Boolean).join(', ');
                     const pendingRelease = item.status === 'release_requested';
@@ -812,7 +834,8 @@ function MyNumbersSection({
                             </span>
                           </td>
 
-                          {/* Release action — request flow (pending state shows Cancel) */}
+                          {/* Release action — request flow (pending state shows Cancel); tenant `user` role only */}
+                          {canRelease && (
                           <td style={{ padding: '11px 18px 11px 16px', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                             {pendingRelease ? (
                               <button
@@ -850,13 +873,14 @@ function MyNumbersSection({
                               </button>
                             )}
                           </td>
+                          )}
                         </tr>
 
                         {/* Expanded detail panel */}
                         {isExpanded && (
                           <tr>
                             <td
-                              colSpan={7}
+                              colSpan={canRelease ? 7 : 6}
                               style={{
                                 padding: '0 20px 20px 20px',
                                 background: DL.well,
@@ -969,6 +993,8 @@ function MyNumbersSection({
                 </tbody>
               </table>
             </div>
+            {more.needed && <ShowMoreButton {...more.buttonProps} variant="bar" noun="numbers" />}
+            </>
           )}
         </>
       )}
@@ -1073,6 +1099,7 @@ function AvailableNumbersSection({
   );
 
   const filtered = useMemo(() => applyDidFilters(sortedItems, filters), [sortedItems, filters]);
+  const more = useShowMore(filtered, DID_PREVIEW_ROWS, filterKey(filters));
 
   if (isLoading) {
     return (
@@ -1188,7 +1215,8 @@ function AvailableNumbersSection({
               </button>
             </div>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
+            <>
+            <div className={`rcf-didwrap${more.expanded ? ' rcf-didwrap-cap' : ''}`}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
                 <thead>
                   <tr>
@@ -1198,8 +1226,8 @@ function AvailableNumbersSection({
                     {canRequest && <th className="rcf-th" aria-label="Actions" />}
                   </tr>
                 </thead>
-                <tbody>
-                  {filtered.map((item) => {
+                <tbody id={more.listId}>
+                  {more.visible.map((item) => {
                     const isRequesting = requestingDid === item.did;
                     const location = [item.city, item.state].filter(Boolean).join(', ');
                     return (
@@ -1252,6 +1280,8 @@ function AvailableNumbersSection({
                 </tbody>
               </table>
             </div>
+            {more.needed && <ShowMoreButton {...more.buttonProps} variant="bar" noun="numbers" />}
+            </>
           )}
         </>
       )}
@@ -1277,10 +1307,11 @@ export function DIDManagementTab({ customerId, filterToCustomer, onShowNumbers }
   // ALL hooks unconditionally at top — React rules-of-hooks
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
-  // Only the tenant `user` role may request numbers — the API 403s everyone
-  // else. Staff assign numbers in the inventory tool; readonly tenants are
-  // view-only. Keyed on the REAL role (user.role, as canEdit is), so an
-  // admin in customer-view mode — still role 'admin' — never sees Request.
+  // Only the tenant `user` role may request numbers, or request / cancel a
+  // release — the API 403s everyone else. Staff assign numbers in the
+  // inventory tool; readonly tenants are view-only. Keyed on the REAL role
+  // (user.role, as canEdit is), so an admin in customer-view mode — still
+  // role 'admin' — never sees Request or Request Release.
   const { user, isActualAdmin, isSupport } = useAuth();
   const canRequest = user?.role === 'user';
 
@@ -1412,6 +1443,7 @@ export function DIDManagementTab({ customerId, filterToCustomer, onShowNumbers }
           items={assignedItems}
           isLoading={myLoading}
           isError={myError}
+          canRelease={canRequest}
           onRequestRelease={handleRequestReleaseClick}
           onCancelRelease={handleCancelRelease}
           cancelingDid={cancelReleaseMutation.isPending ? (cancelReleaseMutation.variables ?? null) : null}

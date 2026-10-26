@@ -6,8 +6,10 @@
    Sits inside `.rcf-scope` (paper canvas, --rcf-* tokens, full-bleed via
    the shared negative margin). `.rcfd-shell` padding is the ONLY gutter.
 
-   Hierarchy: quiet page header (`rcfn-`) → routing board (white, highest
-   elevation, layered cool shadow) → overlay for the deep tools.
+   Hierarchy: one-row CompactHeader (`rcfn-` tunes it) → routing board
+   (white, highest elevation, layered cool shadow) → overlay for the deep
+   tools. Layout (docker/ui/CLAUDE.md §20): the board ends at the bottom of
+   the first screen and scrolls inside (toolbar on top, pager pinned).
    One orchestrated motion: route filaments light up top-to-bottom on first
    load (.rcfd-routes-intro, ≤ ~400ms). Everything else moves only on user
    interaction, and nothing moves under prefers-reduced-motion.
@@ -198,57 +200,60 @@
 .rcfd-iconbtn:hover { color: var(--rcf-ink); border-color: var(--dl-field-hover); background: var(--rcf-tint); }
 .rcfd-iconbtn:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 
-/* ─── Page header (customer /rcf) ──────────────────────────────────────── */
+/* ─── Page header (customer /rcf) — the kit's CompactHeader, tuned ──────── */
 
-.rcfn-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 14px 24px;
+/* The header's margin is the only gap above the board; the board ends 24px
+   above the bottom of the first screen, so the shell's bottom padding is
+   that same 24px (no page scroll at desktop). */
+.rcfd-shell.rcfn-shell {
+  gap: 0;
+  padding-bottom: 24px;
 }
 
-.rcfn-id { min-width: 0; flex: 1 1 320px; }
-
-.rcfn-crumb {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--rcf-ink-dim);
-}
-
-.rcfn-crumb a {
-  color: var(--rcf-azure-deep);
+.rcfn-head .lk-head-crumb a {
+  color: var(--t-accent-text);
   text-decoration: none;
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
-.rcfn-crumb a:hover { text-decoration: underline; text-underline-offset: 3px; }
-.rcfn-crumb a:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
+.rcfn-head .lk-head-crumb a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.rcfn-head .lk-head-crumb a:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
 
-.rcfn-title {
-  margin: 0;
-  font-size: clamp(22px, 2vw, 27px);
+.rcfn-crumbnav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rcfn-crumb-tail {
+  min-width: 0;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Amber staff marker — same family as the dashboard's "Staff preview" tag
+   and voicemail's crumb tag. */
+.rcfn-staff-tag,
+.rcfc-staff-tag {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  font-size: 0.58rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
-  color: var(--rcf-ink);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-warn-fg);
+  background: color-mix(in srgb, var(--dl-amber) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dl-amber) 38%, transparent);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }
 
-.rcfn-sub {
-  margin: 6px 0 0;
-  max-width: 62ch;
-  font-size: 13.5px;
-  line-height: 1.5;
-  color: var(--rcf-ink-dim);
-}
-
-@media (max-width: 640px) {
-  .rcfn-header .rcfd-btn { width: 100%; }
+@container lkhead (max-width: 420px) {
+  .rcfn-head .lk-head-actions .rcfd-btn { flex: 1 1 auto; }
 }
 
 /* ─── Panels ────────────────────────────────────────────────────────────── */
@@ -322,24 +327,66 @@
   container-name: rcfd-board;
 }
 
-.rcfd-board-head {
+.rcfd-board {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The host is the width container the bounding below responds to (the
+   board itself is the row-layout container, so it can't query itself). */
+.rcfd-board-host {
+  container-type: inline-size;
+  container-name: rcfd-host;
+  min-width: 0;
+}
+
+/* Wide enough to scroll inside: the board ends 24px above the bottom of the
+   first screen (--lk-md-top is written by useViewportFit), never shorter
+   than 420px; the rows scroll between the toolbar and the pager. */
+@container rcfd-host (min-width: 480px) {
+  .rcfd-board {
+    max-height: max(420px, calc(100vh - var(--lk-md-top, 200px) - 24px));
+    max-height: max(420px, calc(100dvh - var(--lk-md-top, 200px) - 24px));
+  }
+
+  .rcfd-board-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+/* One toolbar row: search · show chips · sort. */
+.rcfd-board-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px 20px;
-  padding: 20px 22px 16px;
+  gap: 10px 12px;
+  padding: 14px 18px;
   border-bottom: 1px solid var(--rcf-line);
 }
 
-.rcfd-board-titles { min-width: 0; }
-
-.rcfd-board-tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
+.rcfd-board-bar .rcfd-search {
+  flex: 1 1 240px;
+  width: auto;
+  max-width: 380px;
 }
+
+.rcfd-board-bar .rcfd-sort { margin-left: auto; }
+
+/* The "first 100" notice — a slim info line under the toolbar, never hidden. */
+.rcfd-board-note {
+  margin: 0;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--rcf-line-soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-info-fg);
+  background: var(--t-info-bg);
+}
+
+.rcfd-board-pager { flex-shrink: 0; }
 
 .rcfd-search {
   position: relative;
@@ -472,6 +519,9 @@
 }
 
 .rcfd-routes-cols {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   padding-top: 9px;
   padding-bottom: 9px;
   font-size: 12px;
@@ -496,8 +546,8 @@
 .rcfd-route:last-child { border-bottom-color: transparent; }
 
 .rcfd-route-main {
-  padding-top: 13px;
-  padding-bottom: 13px;
+  padding-top: 11px;
+  padding-bottom: 11px;
   cursor: pointer;
   transition: background-color var(--rcf-ease), box-shadow var(--rcf-ease);
 }
@@ -691,14 +741,6 @@
 .rcfd-route-editor .rcf-flabel { font-size: 12px; color: var(--rcf-ink-soft); }
 .rcfd-route-editor .rcf-fact-label { font-size: 11.5px; }
 
-.rcfd-board-foot {
-  margin: 0;
-  padding: 12px 22px 14px;
-  border-top: 1px solid var(--rcf-line-soft);
-  font-size: 12px;
-  color: var(--rcf-ink-dim);
-}
-
 /* Board narrower than the six-column row: two-line routes. */
 @container rcfd-board (max-width: 760px) {
   .rcfd-routes-cols { display: none; }
@@ -721,23 +763,26 @@
   .rcfd-status { grid-area: status; justify-self: end; }
   .rcfd-chev { grid-area: chev; }
 
-  .rcfd-board-head { padding: 16px 16px 14px; }
-  .rcfd-board-tools { width: 100%; }
-  .rcfd-search { width: 100%; flex: 1 1 100%; }
+  .rcfd-board-bar { padding: 14px 16px 12px; }
+  .rcfd-board-bar .rcfd-search { width: 100%; max-width: none; flex: 1 1 100%; }
+  .rcfd-board-bar .rcfd-sort { margin-left: 0; }
+  .rcfd-board-note { padding-left: 16px; padding-right: 16px; }
   .rcfd-route-open { margin: 6px; }
-  .rcfd-board-foot { padding-left: 16px; padding-right: 16px; }
 }
 
+/* Phone: still two lines per route (destination and week figures share the
+   second line), so a screen holds twice the rows it used to. */
 @container rcfd-board (max-width: 420px) {
   .rcfd-route-main {
-    grid-template-areas:
-      "from from status chev"
-      "fil  to   to     chev"
-      ".    kpi  kpi    chev";
+    grid-template-columns: 20px minmax(0, 1fr) auto 14px;
+    column-gap: 10px;
+    padding-left: 14px;
+    padding-right: 14px;
   }
 
-  .rcfd-route-kpi { flex-direction: row; gap: 8px; align-items: baseline; justify-self: start; text-align: left; }
-  .rcfd-route-kpi-sub { margin-top: 0; }
+  .rcfd-route-kpi-main { font-size: 12.5px; }
+  .rcfd-route-kpi-sub { font-size: 11.5px; }
+  .rcfd-route-label { font-size: 12px; }
   .rcfd-num { font-size: 13.5px; }
   .rcfd-chips { width: 100%; }
   .rcfd-chip { flex: 1; justify-content: center; padding: 0 6px; }
@@ -828,11 +873,45 @@
   padding: 20px 22px 28px;
 }
 
+/* ─── Shared deep tools (Call activity · DID management) ──────────────────
+   Used by the /rcf console tabs AND the dashboard / customer overlays, so
+   these rules are unscoped. §20: long tables never run the page long. */
+
+/* Call activity's call log: the page's rows scroll inside a cap (~9 rows),
+   heads sticky; the pager stays under it. */
+.rcf-act-tablewrap.rcf-act-tablecap {
+  max-height: 482px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* DID tables: the first 8 rows, then "Show all N" opens the rest inside a
+   scroll capped at about that height (sticky heads). */
+.rcf-didwrap {
+  position: relative;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.rcf-didwrap.rcf-didwrap-cap {
+  max-height: 500px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The inset line stands in for the collapsed border, which does not travel
+   with a sticky cell. */
+.rcf-act-tablecap thead th,
+.rcf-didwrap-cap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  box-shadow: inset 0 -1px 0 var(--dl-rule);
+}
+
 /* ─── Phones ────────────────────────────────────────────────────────────── */
 
 @media (max-width: 640px) {
-  .rcfd-shell { gap: 18px; }
-
   .rcf-scope.rcfd-overlay-root { padding: 0; }
 
   .rcfd-overlay {
@@ -875,33 +954,69 @@
    rule other daylight pages use.
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* Figures inside the granite header, under the identity (band tokens —
-   the same in both themes). */
+/* The console keeps no page scroll at desktop: the Numbers card ends 24px
+   above the bottom of the first screen, and so does the shell. */
+.rcfc > .ad-shell { padding-bottom: 24px; }
+
+/* "Viewing <customer>" in the band's meta line (band tokens). */
 .rcfc-context strong { color: var(--t-band-text-strong); font-weight: 600; }
 
-.rcfc-figures {
+/* The tab rail and the view's figures share ONE row (figures right), so the
+   granite band stays one row: identity left, picker + action right. */
+.rcfc-railrow {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 28px;
-  margin: 16px 0 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  min-width: 0;
 }
 
-.rcfc-figures > div { min-width: 0; }
+/* Figure over label, hairline-divided — the kit's header-stats look. */
+.rcfc-figures {
+  display: flex;
+  align-items: stretch;
+  margin: 0 0 0 auto;
+}
+
+.rcfc-figures > div {
+  display: flex;
+  flex-direction: column-reverse;   /* figure over label; read "Label value" */
+  align-items: flex-end;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 16px;
+}
+
+.rcfc-figures > div:first-child { padding-left: 0; }
+.rcfc-figures > div:last-child { padding-right: 2px; }
+.rcfc-figures > div + div { border-left: 1px solid var(--rcf-line); }
 
 .rcfc-figures dt {
-  font-size: 11.5px;
+  font-size: 0.57rem;
   font-weight: 600;
-  color: var(--t-band-text-dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rcf-ink-dim);
+  white-space: nowrap;
 }
 
 .rcfc-figures dd {
-  margin: 3px 0 0;
-  font-size: 22px;
+  margin: 0;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 1.12rem;
   font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
+  line-height: 1;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
-  color: var(--t-band-text-strong);
+  color: var(--rcf-ink);
+  white-space: nowrap;
+}
+
+/* Narrow: the figures drop under the tabs, left-aligned, spread across. */
+@container ad-shell (max-width: 640px) {
+  .rcfc-figures { width: 100%; margin-left: 0; }
+  .rcfc-figures > div { flex: 1 1 0; align-items: flex-start; }
 }
 
 .rcfc-prompt-icon {
@@ -963,6 +1078,78 @@
   padding: 0;
   container-type: inline-size;
   container-name: rcfc-numbers;
+}
+
+/* Title left, search + area code right — one row; they wrap under the title
+   on a narrow card. */
+.rcfc-card .ad-card-head {
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 12px;
+}
+
+.rcfc-card .ad-card-action {
+  flex: 1 1 380px;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  padding-top: 0;
+}
+
+.rcfc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 14px;
+  width: 100%;
+  min-width: 0;
+}
+
+.rcfc-toolbar .ad-search { max-width: 340px; }
+
+/* Narrow card: the toolbar wraps under the title, search full width. */
+@container rcfc-fit (max-width: 560px) {
+  .rcfc-toolbar { justify-content: flex-start; }
+  .rcfc-toolbar .ad-search { flex: 1 1 100%; max-width: none; }
+}
+
+/* The fit host: on a wide enough column the card ends 24px above the bottom
+   of the first screen (--lk-md-top from useViewportFit), never shorter than
+   420px; the table scrolls between the card head and the pager footer. */
+.rcfc-fit {
+  container-type: inline-size;
+  container-name: rcfc-fit;
+  min-width: 0;
+}
+
+@container rcfc-fit (min-width: 480px) {
+  .rcfc-fit > .rcfc-card {
+    max-height: max(420px, calc(100vh - var(--lk-md-top, 240px) - 24px));
+    max-height: max(420px, calc(100dvh - var(--lk-md-top, 240px) - 24px));
+  }
+
+  .rcfc-card .ad-card-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .rcfc-card .rcfc-tablewrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* Sticky column heads; the inset line stands in for the collapsed border,
+     which does not travel with a sticky cell. */
+  .rcfc-card .rcfc-tablewrap thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    box-shadow: inset 0 -1px 0 var(--rcf-line);
+  }
 }
 
 .rcfc-card .ad-state { padding-left: 18px; padding-right: 18px; }
