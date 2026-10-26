@@ -19,6 +19,13 @@
  *  - connections never form a cycle — loops are Go to blocks, which the
  *    compiler resolves (the old builder compiled back-edges to nothing);
  *  - a Go to whose target is deleted is cleared, not left dangling.
+ *
+ * Two read-only overlays can stand in for the draft on the canvas, and
+ * neither ever touches it: `preview` (a published version, History → View)
+ * and `proposal` (a Flow assistant proposal, revealed block by block).
+ * `replaceDraft()` is how a proposal becomes the draft on Accept: ONE
+ * undoable edit that autosave writes — unlike `load()`, which takes what the
+ * server already holds.
  */
 import { createContext, useContext } from 'react';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -37,7 +44,7 @@ import {
   type HistoryState,
   type Snapshot,
 } from '../model/history';
-import { estimateHeight, tidyLayout } from '../model/layout';
+import { callingOrder, estimateHeight, tidyLayout } from '../model/layout';
 
 export type FlowNode = Node<BlockData, IvrNodeType>;
 export type FlowEdge = Edge<{ keep?: Keep }>;
@@ -47,6 +54,18 @@ export interface PreviewGraph {
   publishedAt: string;
   nodes: FlowNode[];
   edges: FlowEdge[];
+}
+
+/** A Flow assistant proposal on the canvas, read-only (the draft is untouched). */
+export interface ProposalOverlay {
+  jobId: string;
+  /** Laid out with Tidy up (the server sends every block at 0,0). */
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  /** Block ids in calling order — the order they appear in. */
+  order: readonly string[];
+  /** How many of `order` are on screen (all of them under reduced motion). */
+  revealed: number;
 }
 
 export interface FlowMeta {
@@ -77,6 +96,8 @@ export interface FlowState {
   graphEpoch: number;
   /** A published version shown read-only instead of the draft (History → View). */
   preview: PreviewGraph | null;
+  /** A Flow assistant proposal shown read-only instead of the draft. */
+  proposal: ProposalOverlay | null;
   /** The block the simulator is on (canvas highlight). */
   simNodeId: string | null;
   /** Centre the canvas on this block (outline / issue clicks); token makes repeats fire. */
@@ -112,6 +133,22 @@ export interface FlowActions {
   setMeta: (patch: Partial<FlowMeta>) => void;
   enterPreview: (preview: PreviewGraph) => void;
   exitPreview: () => void;
+  /**
+   * Shows a proposal read-only, laid out with Tidy up. `instant` reveals every
+   * block at once (reduced motion); otherwise one block is on screen and
+   * `revealNext()` adds the rest in calling order. The draft is not touched.
+   */
+  showProposal: (jobId: string, graph: IvrGraph, opts?: { instant?: boolean }) => void;
+  /** One more proposal block on screen. Returns false once all of them are. */
+  revealNext: () => boolean;
+  clearProposal: () => void;
+  /**
+   * Accept: `graph` becomes the draft as ONE undoable edit that autosave
+   * WRITES (changeSeq moves, savedSeq doesn't — unlike `load()`, which takes
+   * content the server already holds). Clears any overlay and the selection
+   * and re-frames the canvas. Undo restores the previous draft.
+   */
+  replaceDraft: (graph: IvrGraph) => void;
   setSimNode: (id: string | null) => void;
   /** The §2 JSON of the current draft. */
   graph: () => IvrGraph;
@@ -272,6 +309,7 @@ export function createFlowStore(flow: Flow): FlowStore {
       savedSeq: 0,
       graphEpoch: 0,
       preview: null,
+      proposal: null,
       simNodeId: null,
       focusRequest: null,
 
@@ -344,10 +382,11 @@ export function createFlowStore(flow: Flow): FlowStore {
       },
 
       onPreviewNodesChange: (changes) => {
-        const p = get().preview;
+        const { preview: p, proposal: q } = get();
         const dims = changes.filter((c) => c.type === 'dimensions');
-        if (!p || dims.length === 0) return;
-        set({ preview: { ...p, nodes: applyNodeChanges(dims, p.nodes) } });
+        if (dims.length === 0) return;
+        if (p) set({ preview: { ...p, nodes: applyNodeChanges(dims, p.nodes) } });
+        else if (q) set({ proposal: { ...q, nodes: applyNodeChanges(dims, q.nodes) } });
       },
 
       connect: (source, handle, target) => {
@@ -507,6 +546,53 @@ export function createFlowStore(flow: Flow): FlowStore {
       setMeta: (patch) => set((s) => ({ meta: { ...s.meta, ...patch } })),
       enterPreview: (preview) => set((s) => ({ preview, selectedId: null, graphEpoch: s.graphEpoch + 1 })),
       exitPreview: () => set((s) => ({ preview: null, graphEpoch: s.graphEpoch + 1 })),
+
+      showProposal: (jobId, graph, opts = {}) => {
+        const g = fromGraph(graph);
+        const pos = tidyLayout(g.nodes, g.edges);
+        const order = callingOrder(g.nodes, g.edges);
+        set((s) => ({
+          proposal: {
+            jobId,
+            nodes: g.nodes.map((n) => toFlowNode({ ...n, position: pos.get(n.id) ?? n.position })),
+            edges: g.edges.map(toFlowEdge),
+            order,
+            revealed: opts.instant ? order.length : Math.min(1, order.length),
+          },
+          // One overlay at a time; nothing is selected on a read-only canvas.
+          preview: null,
+          selectedId: null,
+          nodes: s.nodes.some((n) => n.selected) ? s.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)) : s.nodes,
+          graphEpoch: s.graphEpoch + 1,
+        }));
+      },
+
+      revealNext: () => {
+        const q = get().proposal;
+        if (!q || q.revealed >= q.order.length) return false;
+        set({ proposal: { ...q, revealed: q.revealed + 1 } });
+        return q.revealed + 1 < q.order.length;
+      },
+
+      clearProposal: () => {
+        if (!get().proposal) return;
+        set((s) => ({ proposal: null, simNodeId: null, graphEpoch: s.graphEpoch + 1 }));
+      },
+
+      replaceDraft: (graph) => {
+        const s = get();
+        const g = fromGraph(graph);
+        // Not load(): this is the customer's edit, so it is recorded for undo
+        // (key null = its own step, never coalesced) and left dirty for
+        // autosave. viewport / keepGraph / foreignNodes stay as they are, so
+        // an undo restores exactly the previous draft.
+        commit(
+          { nodes: g.nodes.map(toFlowNode), edges: g.edges.map(toFlowEdge) },
+          null,
+          { selectedId: null, preview: null, proposal: null, simNodeId: null, graphEpoch: s.graphEpoch + 1 },
+        );
+      },
+
       setSimNode: (id) => set({ simNodeId: id }),
 
       graph: () => {

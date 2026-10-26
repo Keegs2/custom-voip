@@ -43,6 +43,14 @@ export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`;
 }
 
+/** "Kristin (US English, female)" as served — add the gender only when the
+ *  sidecar's label doesn't already say it. (New message dialog, Flow assistant.) */
+export function voiceLabel(v: { label: string; gender: string }): string {
+  return v.gender && !v.label.toLowerCase().includes(v.gender.toLowerCase())
+    ? `${v.label} (${v.gender})`
+    : v.label;
+}
+
 /** True when the draft was saved after the last publish (callers hear an older version). */
 export function hasUnpublishedChanges(flow: { updated_at: string; published_at: string | null }): boolean {
   if (!flow.published_at) return false;

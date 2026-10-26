@@ -1,0 +1,470 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   VISUAL IVR — THE FLOW ASSISTANT (loaded with the lazy builder chunk):
+   the panel (transcript + message box), the "What can I say?" guide, the
+   proposal banner over the canvas, the block-by-block reveal and the
+   New / Changed marks on a proposal's blocks.
+
+   Theming (docker/ui/CLAUDE.md §18): theme tokens and color-mix() of tokens
+   only — no literals, so light and dark both follow. Motion: the reveal and
+   the working dot stop under prefers-reduced-motion.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Top bar ─── */
+.ivr-top-assist { position: relative; }
+
+.ivr-top-dot {
+  width: 7px;
+  height: 7px;
+  margin-left: 2px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--t-accent-line);
+  box-shadow: 0 0 0 3px var(--t-accent-tint);
+  animation: ivr-asst-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ivr-asst-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Five tools must fit beside the flow name: below this width the secondary
+   buttons go icon-only (each keeps its accessible name). */
+@media (max-width: 1100px) {
+  .ivr-top-btn .ivr-top-label { display: none; }
+  .ivr-top-btn { padding-inline: 9px; }
+}
+
+/* ─── Sheets: full screen on a phone ─── */
+.ivr-sheet.ivr-sheet--full {
+  position: fixed;
+  inset: 0;
+  z-index: 1100; /* above the sidebar + mobile topbar; below dialogs (1200) and toasts */
+  box-shadow: none;
+}
+
+.ivr-sheet--full .ivr-sheet-body { padding: 14px 16px 18px; }
+.ivr-sheet--full .ivr-sheet-head { padding: 14px 12px 12px 16px; }
+.ivr-sheet--full .ivr-sheet-foot { padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px)); }
+
+/* The assistant's footer is the message box, not a button row. */
+.ivr-asst-sheet .ivr-sheet-foot { display: block; padding: 10px 14px 12px; }
+
+/* ─── Panel: tools row ─── */
+.ivr-asst-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.ivr-asst-toolbtns { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ivr-asst-guide-btn { display: inline-flex; align-items: center; gap: 6px; }
+.ivr-asst-guide-on { border-color: var(--t-accent-line); color: var(--t-accent-text); background: var(--t-accent-tint); }
+
+.ivr-asst-voice { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 180px; max-width: 260px; }
+.ivr-asst-voice-label { font-size: 0.7rem; font-weight: 600; color: var(--t-text-dim); }
+.dl-input.ivr-asst-voice-select { width: 100%; padding-top: 5px; padding-bottom: 5px; font-size: 0.76rem; }
+.ivr-asst-voice-compact { flex-direction: row; align-items: center; gap: 8px; flex: 0 1 auto; max-width: 240px; }
+.ivr-asst-voice-compact .ivr-asst-voice-label { flex-shrink: 0; }
+.ivr-asst-voice-off { margin: 0; flex: 1 1 100%; }
+
+/* ─── Panel: empty state + transcript ─── */
+.ivr-asst-empty {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px dashed var(--t-line-strong);
+  background: var(--t-tint);
+}
+
+.ivr-asst-empty-title { margin: 0 0 4px; font-size: 0.82rem; font-weight: 700; color: var(--t-text); }
+.ivr-asst-empty-copy { margin: 0; font-size: 0.76rem; line-height: 1.55; color: var(--t-text-soft); }
+
+.ivr-asst-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+
+.ivr-asst-turn {
+  max-width: 92%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  min-width: 0;
+}
+
+.ivr-asst-turn-you {
+  align-self: flex-end;
+  border-color: var(--t-accent-border);
+  background: var(--t-accent-wash);
+  border-bottom-right-radius: 4px;
+}
+
+.ivr-asst-turn-bot { align-self: flex-start; background: var(--t-tint); border-bottom-left-radius: 4px; }
+.ivr-asst-turn-live { border-color: var(--t-accent-line); box-shadow: inset 3px 0 0 var(--t-accent-line); }
+.ivr-asst-turn-refusal { border-color: var(--t-warn-border); background: var(--t-warn-bg); }
+
+.ivr-asst-turn-err {
+  align-self: flex-start;
+  border-color: var(--t-danger-border);
+  background: var(--t-danger-bg);
+  border-bottom-left-radius: 4px;
+}
+
+.ivr-asst-who {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 3px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--t-text-dim);
+}
+
+.ivr-asst-who > svg { color: var(--t-accent-text); }
+.ivr-asst-turn-err .ivr-asst-who,
+.ivr-asst-turn-err .ivr-asst-who > svg { color: var(--t-danger-fg); }
+.ivr-asst-who .ivr-tag { margin-left: 4px; }
+.ivr-tag.ivr-asst-tag-off { color: var(--t-text-soft); background: var(--t-hover); border-color: var(--t-line); }
+
+.ivr-asst-text {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--t-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ivr-asst-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--t-text-soft);
+}
+
+.ivr-asst-elapsed { font-weight: 500; color: var(--t-text-dim); font-variant-numeric: tabular-nums; }
+
+/* ─── Panel: the message box ─── */
+.ivr-asst-composer { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+.ivr-asst-refine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 6px 6px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--t-accent-border);
+  background: var(--t-accent-tint);
+  font-size: 0.74rem;
+  color: var(--t-text);
+}
+
+.ivr-asst-disclosure {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: var(--t-text-dim);
+}
+
+.dl-input.ivr-asst-box {
+  width: 100%;
+  min-height: 74px;
+  resize: vertical;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.ivr-asst-compose-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ivr-asst-count { font-size: 0.68rem; color: var(--t-text-dim); font-variant-numeric: tabular-nums; min-width: 0; }
+.ivr-asst-hint { margin: 0; font-size: 0.72rem; line-height: 1.45; color: var(--t-text-soft); }
+
+.ivr-asst-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--t-danger-border);
+  background: var(--t-danger-bg);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--t-danger-fg);
+}
+
+.ivr-asst-notice > svg { flex-shrink: 0; margin-top: 1px; }
+
+@media (max-width: 1180px) {
+  .ivr-asst-keys { display: none; }
+}
+
+/* ─── "What can I say?" ─── */
+.ivr-asg {
+  margin-bottom: 16px;
+  padding: 14px 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface-sunken);
+}
+
+.ivr-asg-title {
+  margin: 0;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--t-text-strong);
+}
+
+.ivr-asg-intro { margin: 3px 0 12px; font-size: 0.72rem; line-height: 1.45; color: var(--t-text-dim); }
+
+.ivr-asg-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.ivr-asg-row { padding-top: 10px; border-top: 1px solid var(--t-line-soft); }
+.ivr-asg-row:first-child { padding-top: 0; border-top: 0; }
+.ivr-asg-get { margin: 0 0 6px; font-size: 0.76rem; font-weight: 700; color: var(--t-text); }
+
+.ivr-asg-phrases { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; }
+
+.ivr-asg-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-surface);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--t-text);
+  overflow-wrap: anywhere;
+}
+
+.ivr-asg-chip-hint { border-style: dashed; background: transparent; color: var(--t-text-soft); }
+.ivr-asg-chip-hint strong { color: var(--t-text); }
+.ivr-asg-chip-number { border-color: var(--t-accent-border); background: var(--t-accent-tint); font-weight: 600; }
+.ivr-asg-kind { font-size: 0.64rem; font-weight: 500; color: var(--t-text-dim); }
+
+.ivr-asg-builds { margin: 6px 0 0; font-size: 0.68rem; color: var(--t-text-dim); }
+.ivr-asg-block { font-weight: 700; color: var(--t-accent-text); }
+
+.ivr-asg-sub { margin: 16px 0 6px; font-size: 0.74rem; font-weight: 700; color: var(--t-text); }
+.ivr-asg-note { margin: 0; font-size: 0.72rem; color: var(--t-text-dim); }
+
+.ivr-asg-limits { margin: 0; padding-left: 18px; font-size: 0.72rem; line-height: 1.55; color: var(--t-text-soft); }
+
+.ivr-asg-examples { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.ivr-asg-example {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  font: inherit;
+  text-align: left;
+  color: var(--t-text);
+  cursor: pointer;
+  transition: border-color var(--rcf-ease), background var(--rcf-ease);
+}
+
+.ivr-asg-example:hover:not(:disabled) { border-color: var(--t-accent-border); background: var(--t-tint-hover); }
+.ivr-asg-example:disabled { cursor: default; opacity: 0.6; }
+.ivr-asg-example-text { font-size: 0.74rem; line-height: 1.5; overflow-wrap: anywhere; }
+
+.ivr-asg-example-use {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--t-accent-text);
+}
+
+/* ─── The proposal banner ─── */
+.ivr-prop {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 12px;
+  background: var(--t-surface-raised);
+  border: 1px solid var(--t-accent-border);
+  box-shadow: var(--t-shadow-pop), var(--t-glow);
+  color: var(--t-text);
+}
+
+/* Docked at the top of the canvas column: the canvas stage takes the rest,
+   so the framed flow is never hidden behind the banner. */
+.ivr-canvas-wrap--docked { display: flex; flex-direction: column; }
+.ivr-canvas-wrap--docked .ivr-canvas-stage { position: relative; inset: auto; flex: 1 1 auto; min-height: 0; }
+
+.ivr-prop--docked {
+  position: relative;
+  z-index: 5;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 58%;
+  margin: 12px 16px 10px;
+}
+
+.ivr-prop--docked .ivr-prop-body { flex: 1 1 auto; }
+
+.ivr-prop--inline { position: relative; }
+
+.ivr-prop-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 10px 9px 14px;
+  border-bottom: 1px solid var(--t-line-soft);
+}
+
+.ivr-prop-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  color: var(--t-accent-text);
+  background: var(--t-accent-tint);
+}
+
+.ivr-prop-titles { flex: 1; min-width: 0; }
+
+.ivr-prop-title {
+  margin: 0;
+  font-family: "Archivo", "IBM Plex Sans", sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--t-text-strong);
+}
+
+.ivr-prop-meta { margin: 2px 0 0; font-size: 0.7rem; line-height: 1.4; color: var(--t-text-dim); overflow-wrap: anywhere; }
+
+.ivr-prop-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px 4px;
+}
+
+.ivr-prop-summary,
+.ivr-prop-assume { max-width: 88ch; }
+
+.ivr-prop--inline .ivr-prop-body { max-height: none; overflow: visible; }
+
+.ivr-prop-summary { margin: 0 0 10px; font-size: 0.8rem; line-height: 1.55; color: var(--t-text); overflow-wrap: anywhere; }
+.ivr-prop-part { margin-bottom: 12px; }
+.ivr-prop-h { margin: 0 0 6px; font-size: 0.72rem; font-weight: 700; color: var(--t-text); }
+
+.ivr-prop-h-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 6px;
+}
+
+.ivr-prop-h-row .ivr-prop-h { margin: 0; }
+
+.ivr-prop-assume { margin: 0; padding-left: 18px; font-size: 0.74rem; line-height: 1.55; color: var(--t-text-soft); overflow-wrap: anywhere; }
+.ivr-prop-assume li + li { margin-top: 3px; }
+
+.ivr-prop-msgs { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.ivr-prop-msg {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  box-shadow: inset 3px 0 0 var(--ivr-play);
+}
+
+.ivr-prop-msg-main { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.ivr-prop-msg-name { font-size: 0.76rem; font-weight: 700; color: var(--t-text); overflow-wrap: anywhere; }
+
+.ivr-prop-msg-text {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--t-text-soft);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+.ivr-prop-msg-err { font-size: 0.7rem; font-weight: 600; color: var(--t-danger-fg); }
+.ivr-prop-listen { flex-shrink: 0; }
+
+.ivr-prop-err { margin: 0 14px 10px; font-size: 0.74rem; line-height: 1.45; }
+.ivr-prop-note { margin: 0 14px 8px; font-size: 0.72rem; color: var(--t-warn-fg); }
+
+.ivr-prop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--t-line-soft);
+}
+
+.ivr-prop .ivr-issues { margin-top: 0; }
+
+@media (max-width: 560px) {
+  .ivr-prop-msg { flex-wrap: wrap; }
+  .ivr-prop-actions .dl-btn { flex: 1 1 calc(50% - 6px); justify-content: center; }
+}
+
+/* ─── The reveal: a proposal's blocks appear in calling order ─── */
+.ivr-flow .react-flow__node.ivr-rf-pending { opacity: 0; pointer-events: none; }
+.ivr-flow .react-flow__node.ivr-rf-in > .ivr-node { animation: ivr-asst-node-in 280ms cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+.ivr-flow .react-flow__edge.ivr-rf-edge-in { animation: ivr-asst-fade-in 320ms ease-out both; }
+
+@keyframes ivr-asst-node-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes ivr-asst-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ivr-top-dot,
+  .ivr-flow .react-flow__node.ivr-rf-in > .ivr-node,
+  .ivr-flow .react-flow__edge.ivr-rf-edge-in { animation: none; }
+}
+
+/* New / Changed on a proposal's blocks */
+.ivr-node-mark {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.ivr-node-mark--new { color: var(--t-accent-text); background: var(--t-accent-tint); border: 1px solid var(--t-accent-border); }
+.ivr-node-mark--changed { color: var(--t-warn-fg); background: var(--t-warn-bg); border: 1px solid var(--t-warn-border); }
+.ivr-node-mark + .ivr-node-flag { margin-left: 4px; }
+
+/* ─── Phone view ─── */
+.ivr-phone-assist { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; }

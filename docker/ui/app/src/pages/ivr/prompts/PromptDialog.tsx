@@ -21,6 +21,7 @@ import { AudioCapturePanel } from '../../voicemail/AudioCapturePanel';
 import { useAudioCapture, type CaptureSource } from '../../voicemail/useAudioCapture';
 import { useIvrWorkspace } from '../IvrContext';
 import { invalidateIvr, ivrErrorText, ivrKeys, useVoices } from '../ivrData';
+import { voiceLabel } from '../format';
 
 /** The prompt format (docs/IVR_INTERFACES.md §4): 8 kHz mono PCM16. */
 export const PROMPT_SAMPLE_RATE = 8000;
@@ -42,14 +43,6 @@ function defaultName(text: string): string {
   if (words) return words.length > 60 ? `${words.slice(0, 57)}…` : words;
   const d = new Date();
   return `Message ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-}
-
-/** "Kristin (US English, female)" as served — add the gender only when the
- *  sidecar's label doesn't already say it. */
-function voiceLabel(v: { label: string; gender: string }): string {
-  return v.gender && !v.label.toLowerCase().includes(v.gender.toLowerCase())
-    ? `${v.label} (${v.gender})`
-    : v.label;
 }
 
 export function PromptDialog({ onClose, onCreated, forWhat }: PromptDialogProps) {

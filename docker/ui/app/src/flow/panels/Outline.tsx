@@ -29,6 +29,11 @@ function Caption({ via }: { via: OutHandle | null }) {
   return <span className="ivr-ol-cap">{via.label}</span>;
 }
 
+/**
+ * `nodes`: a read-only overlay's blocks (a published version or a Flow
+ * assistant proposal) — the outline then reads the overlay, and choosing a
+ * block only centres it (there is nothing to select or edit).
+ */
 export function Outline({ nodes: override }: { nodes?: readonly FlowNode[] }) {
   // ── Hooks first (React #310) ──
   const store = useFlowStoreApi();
@@ -40,7 +45,7 @@ export function Outline({ nodes: override }: { nodes?: readonly FlowNode[] }) {
   const start = nodes.find((n) => n.type === 'entry');
   const seen = new Set<string>();
 
-  const pick = (id: string) => store.getState().focusBlock(id);
+  const pick = (id: string) => (override ? store.getState().revealBlock(id) : store.getState().focusBlock(id));
 
   const item = (node: FlowNode, via: OutHandle | null, depth: number): ReactNode => {
     seen.add(node.id);

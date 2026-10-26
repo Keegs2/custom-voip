@@ -12,7 +12,16 @@ import type { IvrNodeType } from '../../types/ivr';
 import { BlockIcon } from '../canvas/BlockIcon';
 import { BLOCK_DND_MIME } from '../canvas/FlowCanvas';
 
-export function Palette({ disabled, previewing }: { disabled: boolean; previewing: boolean }) {
+export function Palette({
+  disabled,
+  previewing,
+  previewKind = 'version',
+}: {
+  disabled: boolean;
+  previewing: boolean;
+  /** What is on the canvas instead of the draft. */
+  previewKind?: 'version' | 'proposal';
+}) {
   const store = useFlowStoreApi();
 
   const add = (type: IvrNodeType) => {
@@ -39,7 +48,9 @@ export function Palette({ disabled, previewing }: { disabled: boolean; previewin
     <div className="ivr-palette">
       <p className="ivr-side-hint">
         {previewing
-          ? 'You are looking at a published version. Go back to your draft to edit.'
+          ? previewKind === 'proposal'
+            ? 'You are looking at a proposed flow. Accept or discard it to edit your draft.'
+            : 'You are looking at a published version. Go back to your draft to edit.'
           : disabled
             ? 'This flow is view-only.'
             : 'Drag a block onto the canvas, or click one to add it after the selected block.'}

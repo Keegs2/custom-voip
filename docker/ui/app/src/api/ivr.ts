@@ -1,5 +1,6 @@
 /**
- * Visual IVR API — docs/IVR_INTERFACES.md §8.2, typed 1:1.
+ * Visual IVR API — docs/IVR_INTERFACES.md §8.2, typed 1:1; the Flow
+ * assistant routes follow docs/IVR_ASSIST_INTERFACES.md §5.
  *
  * Mounted at /v1/ivr; apiRequest prefixes /api, so the browser calls
  * /api/v1/ivr/... (nginx strips /api; prompt uploads and audio go through
@@ -17,6 +18,10 @@
  */
 import { apiPostForBlob, apiRequest, apiRequestForm } from './client';
 import type {
+  AssistJob,
+  AssistOutcome,
+  AssistStarted,
+  AssistStartRequest,
   Destinations,
   Flow,
   FlowCreate,
@@ -109,9 +114,41 @@ export function restoreFlowVersion(
   });
 }
 
-/** Walks the CURRENT draft (pass it) with a chosen caller, time and key presses. */
+/**
+ * Walks the CURRENT draft (pass it) with a chosen caller, time and key
+ * presses — or, with `assist_job_id`, that Flow assistant proposal.
+ */
 export function simulateFlow(flowId: number, body: SimulateRequest, customerId?: number): Promise<SimulateResult> {
   return apiRequest('POST', scoped(`${BASE}/flows/${flowId}/simulate`, customerId), body);
+}
+
+/* ─── Flow assistant (docs/IVR_ASSIST_INTERFACES.md §5) ───── */
+
+/**
+ * Starts one assistant job for one customer message → 202 `{ job_id,
+ * conversation_id }`. Errors: 403 `ivr_assist_not_enabled`, 409
+ * `assist_busy` (a job for this flow is running), 429 `assist_rate_limited`
+ * (+ `retry_after_s`) / `assist_daily_limit`, 404 for another tenant's flow.
+ */
+export function startAssist(flowId: number, body: AssistStartRequest, customerId?: number): Promise<AssistStarted> {
+  return apiRequest('POST', scoped(`${BASE}/flows/${flowId}/assist`, customerId), body);
+}
+
+/** Poll target. A job still `running` after 300 s reads as `failed` `assistant_failed`. */
+export function getAssistJob(flowId: number, jobId: string, customerId?: number): Promise<AssistJob> {
+  return apiRequest('GET', scoped(`${BASE}/flows/${flowId}/assist/${encodeURIComponent(jobId)}`, customerId));
+}
+
+/** 204. Recorded once; a later DIFFERENT outcome is 409. */
+export function postAssistOutcome(
+  flowId: number,
+  jobId: string,
+  outcome: AssistOutcome,
+  customerId?: number,
+): Promise<void> {
+  return apiRequest('POST', scoped(`${BASE}/flows/${flowId}/assist/${encodeURIComponent(jobId)}/outcome`, customerId), {
+    outcome,
+  });
 }
 
 /* ─── Numbers ─────────────────────────────────────────────── */

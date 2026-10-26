@@ -4,6 +4,11 @@
  * the server on the CURRENT draft — sent with the request, so unsaved edits
  * count). The canvas highlights the block each step is on.
  *
+ * With a `target` it tests a Flow assistant PROPOSAL instead (assist
+ * contract §5: `assist_job_id`, no `draft_graph` — the server stands its new
+ * messages in by name). The proposal is on the canvas, so the steps follow
+ * its blocks; nothing touches the draft.
+ *
  * Times are wall-clock times in the flow's business-hours time zone (the
  * first Business hours block's), so "Saturday 11 AM" means what the
  * customer means by it.
@@ -17,7 +22,7 @@ import { ivrErrorText } from '../../pages/ivr/ivrData';
 import { useIvrWorkspace } from '../../pages/ivr/IvrContext';
 import { DIGIT_ORDER, isIvrNodeType, timezoneLabel } from '../model/blocks';
 import { checkExternalNumber, toUsE164 } from '../compile/policy';
-import { useFlow, useFlowStoreApi } from '../store/flowStore';
+import { useFlow, useFlowStoreApi, type FlowNode } from '../store/flowStore';
 import { useBuilderData } from '../BuilderData';
 import { useAnalysis } from '../useFlowAnalysis';
 import { BlockIcon } from '../canvas/BlockIcon';
@@ -98,13 +103,28 @@ function describeOutcome(outcome: unknown): string {
 
 /* ─── Panel ───────────────────────────────────────────────── */
 
-export function SimulatorPanel({ onClose }: { onClose: () => void }) {
+/** A Flow assistant proposal to test instead of the draft. */
+export interface SimulatorTarget {
+  assistJobId: string;
+  nodes: readonly FlowNode[];
+  titleOf: (id: string) => string;
+}
+
+export interface SimulatorPanelProps {
+  onClose: () => void;
+  target?: SimulatorTarget | null;
+  /** Phone width: the sheet covers the screen. */
+  fullscreen?: boolean;
+}
+
+export function SimulatorPanel({ onClose, target = null, fullscreen = false }: SimulatorPanelProps) {
   // ── ALL hooks unconditionally at the top (React #310) ──
   const ws = useIvrWorkspace();
   const store = useFlowStoreApi();
-  const { readOnly } = useBuilderData();
+  const builder = useBuilderData();
   const analysis = useAnalysis();
-  const nodes = useFlow((s) => s.nodes);
+  const draftNodes = useFlow((s) => s.nodes);
+  const nodes = target?.nodes ?? draftNodes;
   const ids = { mode: useId(), number: useId(), when: useId(), keys: useId() };
   const tz = useMemo(() => {
     const hours = nodes.find((n) => n.type === 'schedule');
@@ -123,9 +143,10 @@ export function SimulatorPanel({ onClose }: { onClose: () => void }) {
     mutationFn: () => {
       const at = fromLocalInput(when, tz) ?? now;
       const caller = callerMode === 'anonymous' ? 'anonymous' : (toUsE164(number) ?? number.trim());
+      const call = { caller, at: new Date(at).toISOString(), digits: keys };
       return simulateFlow(
         store.getState().meta.id,
-        { draft_graph: store.getState().graph(), caller, at: new Date(at).toISOString(), digits: keys },
+        target ? { assist_job_id: target.assistJobId, ...call } : { draft_graph: store.getState().graph(), ...call },
         ws.scope.customerId,
       );
     },
@@ -147,6 +168,9 @@ export function SimulatorPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => () => store.getState().setSimNode(null), [store]);
 
   // ── Derived (after all hooks) ──
+  // A proposal is read-only on screen, but anyone who can edit may test it.
+  const readOnly = target ? !ws.canEdit : builder.readOnly;
+  const titleOf = target?.titleOf ?? analysis.titleOf;
   const numberOk = callerMode === 'anonymous' || checkExternalNumber(number).e164 !== null;
   const presets: { label: string; ms: number }[] = [
     { label: 'Now', ms: now },
@@ -158,10 +182,15 @@ export function SimulatorPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <SideSheet
-      title="Test call"
-      sub="Walk a pretend call through your current draft — nothing is dialed."
+      title={target ? 'Test call: proposal' : 'Test call'}
+      sub={
+        target
+          ? 'Walk a pretend call through the proposed flow — nothing is dialed and your draft is unchanged.'
+          : 'Walk a pretend call through your current draft — nothing is dialed.'
+      }
       icon={<FlaskConical size={16} aria-hidden="true" />}
       onClose={onClose}
+      fullscreen={fullscreen}
       footer={
         <>
           <button type="button" className="dl-btn dl-btn-ghost" onClick={onClose}>
@@ -336,8 +365,12 @@ export function SimulatorPanel({ onClose }: { onClose: () => void }) {
                     {i + 1}
                   </span>
                   <div className="ivr-tx-main">
-                    <button type="button" className="ivr-tx-title" onClick={() => store.getState().focusBlock(s.node_id)}>
-                      {kind && <BlockIcon type={kind} size={13} />} {analysis.titleOf(s.node_id)}
+                    <button
+                      type="button"
+                      className="ivr-tx-title"
+                      onClick={() => (target ? store.getState().revealBlock(s.node_id) : store.getState().focusBlock(s.node_id))}
+                    >
+                      {kind && <BlockIcon type={kind} size={13} />} {titleOf(s.node_id)}
                     </button>
                     {s.says.length > 0 && (
                       <p className="ivr-tx-says">

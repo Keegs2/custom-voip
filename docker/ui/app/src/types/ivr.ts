@@ -208,6 +208,12 @@ export interface IvrSummary {
   numbers: IvrNumber[];
   flows: FlowSummary[];
   limits: IvrLimits;
+  /**
+   * The Flow assistant (docs/IVR_ASSIST_INTERFACES.md §5). Optional: an older
+   * API omits it, which reads as "not available". The reason it is off is
+   * never shown to customers.
+   */
+  assist?: AssistAvailability;
 }
 
 export type PromptKind = 'tts' | 'upload' | 'recording';
@@ -258,6 +264,11 @@ export interface FlowVersionDetail {
 
 export interface SimulateRequest {
   draft_graph?: IvrGraph;
+  /**
+   * Simulate that Flow assistant job's proposal instead (assist contract §5):
+   * the server ignores `draft_graph` and stands its new messages in by name.
+   */
+  assist_job_id?: string;
   /** E.164, or `anonymous` for a withheld caller ID. */
   caller: string;
   /** ISO 8601 instant the call happens at. */
@@ -333,3 +344,75 @@ export interface TtsPromptCreate {
   text: string;
   voice: string;
 }
+
+/* ─── Flow assistant (docs/IVR_ASSIST_INTERFACES.md §5) ───── */
+
+export interface AssistAvailability {
+  available: boolean;
+}
+
+/** `POST /ivr/flows/{id}/assist` (writer) → 202 `AssistStarted`. */
+export interface AssistStartRequest {
+  /** The customer's own words, 1–2000 characters. */
+  message: string;
+  /** Continue a conversation (same flow, < 24 h old); omit to start one. */
+  conversation_id?: string;
+  /** Refine that job's unaccepted proposal (it becomes the base). */
+  refine_job_id?: string;
+  /** Else the builder's in-memory draft (§2) is the base; else the stored one. */
+  draft_graph?: IvrGraph;
+}
+
+export interface AssistStarted {
+  job_id: string;
+  conversation_id: string;
+}
+
+export type AssistJobStatus = 'running' | 'done' | 'failed';
+
+/** §5.3 — the customer text for each is CRAG's (see flow/assist/model.ts). */
+export type AssistJobErrorCode = 'assistant_unavailable' | 'assistant_busy' | 'assistant_failed';
+
+/** A message the proposal needs. Its placeholder id (−1 … −20) stands in the graph until Accept. */
+export interface AssistNewPrompt {
+  placeholder_id: number;
+  name: string;
+  /** What callers hear (numbers already spelled out, no alias tokens). */
+  text: string;
+}
+
+export interface AssistProposal {
+  kind: 'proposal';
+  /** §2 graph; every position {0,0}; new messages are NEGATIVE prompt ids. */
+  draft_graph: IvrGraph;
+  new_prompts: AssistNewPrompt[];
+  summary: string;
+  assumptions: string[];
+  /** Compiler errors left after the repair rounds (usually empty). */
+  issues: Issue[];
+  warnings: Issue[];
+}
+
+export interface AssistClarify {
+  kind: 'clarify';
+  question: string;
+}
+
+export interface AssistCannotBuild {
+  kind: 'cannot_build';
+  message: string;
+}
+
+export type AssistResult = AssistProposal | AssistClarify | AssistCannotBuild;
+
+/** `GET /ivr/flows/{id}/assist/{job_id}`. */
+export interface AssistJob {
+  job_id: string;
+  conversation_id: string;
+  status: AssistJobStatus;
+  elapsed_ms: number;
+  result?: AssistResult | null;
+  error?: { code: string; message: string } | null;
+}
+
+export type AssistOutcome = 'accepted' | 'discarded';

@@ -291,7 +291,7 @@ return { items: raw.items ?? [], total: raw.total ?? raw.items?.length ?? 0 };
 | `cdrs.ts` | `/cdrs` | `searchCdrs`, `getCdr`, `rateCdr`, `getCdrSummary`, `getCdrActivity`, customer-scoped helpers. `product_type` may be `'all'` (= no product filter; `/cdrs/activity` defaults to rcf when omitted); `number` = one of the customer's own numbers (inbound destination OR outbound caller ID), sent only when set |
 | `reports.ts` | `/reports` | Reporting endpoints; `getMyNumbers(customerId?)` = the customer's numbers, EVERY product — also the dashboard's numbers list (§7) |
 | `rates.ts` | `/rates` | CRUD + `getMarginsData`, `lookupRate` |
-| `ivr.ts` | `/v1/ivr` | Visual IVR, typed 1:1 to `docs/IVR_INTERFACES.md` §8.2: summary, flows (CRUD, validate, publish `{revision}`, versions, restore, simulate), numbers, destinations, prompts (TTS, multipart upload, rename, delete, tts-preview, playback URL), voices. Staff pass `customer_id` on EVERY route (§19) |
+| `ivr.ts` | `/v1/ivr` | Visual IVR, typed 1:1 to `docs/IVR_INTERFACES.md` §8.2: summary, flows (CRUD, validate, publish `{revision}`, versions, restore, simulate), numbers, destinations, prompts (TTS, multipart upload, rename, delete, tts-preview, playback URL), voices. Plus the Flow assistant (`docs/IVR_ASSIST_INTERFACES.md` §5): `startAssist` (202 `{job_id, conversation_id}`), `getAssistJob`, `postAssistOutcome`, `simulate` with `assist_job_id`. Staff pass `customer_id` on EVERY route (§19) |
 | `documents.ts` | `/documents` | folders CRUD, document upload/download/update/delete, stats |
 | `sipp.ts` | `/sipp` | `listSippPresets`, `runSipp` |
 | `health.ts` | `/health` | `getHealth`, `getDetailedHealth` |
@@ -1713,6 +1713,7 @@ validation and the "what callers hear" preview, never sent (plan D2).
 | `flow/FlowBuilder.tsx`, `canvas/`, `panels/`, `config/` | The builder UI (below). |
 | `flow/useAutosave.ts`, `useFlowAnalysis.ts` | Autosave under the revision lock; client mirror + debounced server `/validate`. |
 | `styles/ivr.css`, `styles/ivr-builder.css` | Page + shared pieces / the builder (loaded with its chunk). Prefix `ivr-`. |
+| `flow/assist/` | The Flow assistant (below): `model.ts` (pure: job parsing, §5.3 texts, placeholder substitution, accept planning, Tidy-up positions, New/Changed marks), `conversation.ts` (pure state machine), `guide.ts` (§6 wording, verbatim), `useFlowAssistant.ts` (the hook + `AssistProvider`), `useListen.ts`, `AssistPanel.tsx`, `KeywordGuide.tsx`, `ProposalBanner.tsx`. Styles `styles/ivr-assist.css` (prefixes `ivr-asst-`, `ivr-asg-`, `ivr-prop-`). |
 
 ### Personas
 
@@ -1727,7 +1728,8 @@ customer (the API answers 400 `customer_id required`). Support → product home.
 ### The builder
 
 - **Layout:** top bar (← IVR, name, live version, save state, undo / redo /
-  Tidy up, Test call, History, Publish) · left Blocks | Outline · React
+  Tidy up, Flow assistant (when available), Test call, History, Publish —
+  below 1100 px the middle buttons go icon-only) · left Blocks | Outline · React
   Flow canvas · right settings panel or a sheet (Publish / Test call /
   History). Opens at a readable zoom anchored at Start when the whole flow
   wouldn't fit legibly (the MiniMap shows the rest); a saved viewport wins.
@@ -1764,8 +1766,73 @@ customer (the API answers 400 `customer_id required`). Support → product home.
   checked as you type. Caller-ID choice, ring time, a visible "No answer
   or busy" exit. The Voicemail block picks from the voicemail group.
 - **Phone width (< 768 px):** read-only diagram + the outline, "edit on a
-  larger screen". The canvas column never collapses to 0 px (React Flow
+  larger screen" — the Flow assistant still works there (full-screen sheet
+  that steps aside when a proposal lands; the banner sits above the diagram). The canvas column never collapses to 0 px (React Flow
   warns while a window narrows into the phone view).
+
+### Flow assistant (`docs/IVR_ASSIST_INTERFACES.md` §5–§7)
+
+A customer describes a flow in plain English; the API returns a proposal
+(it calls the separate AI step, aliases numbers first and compiles the
+result itself); the builder draws it read-only; the customer accepts,
+refines or discards it. **Nothing publishes.** The UI says "Flow
+assistant" and never names a model or vendor.
+
+- **Availability:** `summary.assist.available` (absent on an older API =
+  hidden) AND the viewer can edit. Readonly users never see it; an admin in
+  "View as Customer" with no pick still gets `PreviewPrompt` (no builder).
+- **State:** `useFlowAssistant` is created once in `BuilderShell` and shared
+  through `AssistProvider`, so closing the panel keeps the conversation, a
+  running job and the proposal. `conversation.ts` is the state machine: one
+  `conversation_id` per builder (sent with every later message); while a
+  proposal is on the canvas the message box stays closed until Accept,
+  Discard or **Refine** (the next message carries `refine_job_id`, no
+  `draft_graph`); otherwise a message carries the in-memory draft. A newer
+  proposal marks the older turn "Replaced"; a question or refusal leaves the
+  proposal and Refine mode as they were.
+- **Jobs:** POST → poll every 1.5 s, give up after 300 s; transient poll
+  failures keep polling, 400/403/404 stop. Failed jobs show CRAG's own §5.3
+  text for the code (never a server-passed message); start errors (403
+  `ivr_assist_not_enabled`, 409 `assist_busy`, 429 `assist_rate_limited`
+  with `retry_after_s`, 429 `assist_daily_limit`) have their own wording.
+  `AssistAnnouncer` (a polite live region, keyed by `announceSeq`) is
+  mounted whenever the assistant is available, so status is read out even
+  with the panel closed.
+- **Panel** (`AssistPanel`, a `SideSheet`; full screen + modal on a phone):
+  intro, voice picker (`GET /ivr/voices`, the voice new messages are read in),
+  "What can I say?" (`KeywordGuide`: the §6 table as phrase chips, the
+  account's number names, the limits, three examples — a click fills the
+  box), the transcript, the §6 disclosure verbatim above the message box
+  (1–2000 chars, ⌘/Ctrl+Enter sends). Sending folds the guide away.
+- **Proposal on the canvas:** `store.showProposal()` — the store's
+  `proposal` overlay (never the draft): Tidy-up positions, blocks revealed
+  one at a time in calling order (`layout.callingOrder` = Tidy up's own walk;
+  `revealNext()` on a ~2.4 s budget; at once under `prefers-reduced-motion`).
+  Unrevealed blocks are laid out but invisible (`ivr-rf-pending`), so the
+  first framing fits the whole flow. New messages (negative placeholder ids)
+  are named on the blocks (`proposalPromptName`); blocks carry New / Changed
+  marks vs the draft (`proposalChanges`). The canvas is `preview` mode; the
+  palette, undo/redo/tidy (buttons and shortcuts), History and Publish are
+  off; Test call tests the proposal. `ProposalBanner` is docked above the
+  canvas (the canvas shrinks below it; it collapses, and does so by itself
+  when a test call opens) or inline above the phone diagram: summary,
+  assumptions, new messages with **Listen** (`tts-preview`, chosen voice,
+  cached per voice+text), issues/warnings (click → centre the block),
+  **Accept · Refine · Discard · Try a test call** (`SimulatorPanel` with a
+  `target` → `simulate { assist_job_id }`, no `draft_graph`). The Outline
+  follows any overlay (version or proposal).
+- **Accept:** `createMissingPrompts` makes each new message the graph uses
+  (`POST /ivr/prompts/tts`, chosen voice) one at a time, recording each real
+  id at once; the first failure stops with the error and keeps the mapping,
+  so "Try again" creates only what is missing. Then `acceptedGraph`
+  (placeholders → real ids — a leftover placeholder throws, it can never be
+  saved — plus Tidy-up positions, no viewport) → `store.replaceDraft()`: ONE
+  undoable edit that autosave WRITES (changeSeq moves, savedSeq doesn't;
+  unlike `load()`, which takes server content as already saved). Undo
+  restores the previous draft (new messages stay in the account). Then
+  `outcome: accepted` (fire-and-forget); a toast offers Undo while the accept
+  is still the latest edit. **Discard** clears the overlay and posts
+  `outcome: discarded`.
 
 ### Theming
 
@@ -1776,8 +1843,21 @@ palette (§18.5). `--literals` over `pages/ivr`, `flow`, `ivr*.css`: 0.
 
 ### Checks
 
-`node scripts/run-ivr-tests.mjs` (the compile mirror's fixture tests —
-prompt order, Go to loops, removed keys, transfer policy, hours, transcript
-— and the model: §2 round trip with unknown fields, undo coalescing,
-layout; no dependencies). Visual: the theme harness with the §8.2 mock
-(2 IVR numbers, 3 flows incl. one with errors and one that always 409s).
+`node scripts/run-ivr-tests.mjs` runs every builder self-test:
+- Node suites (built-in type stripping, no bundler): the compile mirror's
+  fixture tests (prompt order, Go to loops, removed keys, transfer policy,
+  hours, transcript), the model (§2 round trip with unknown fields, undo
+  coalescing, layout) and the Flow assistant's pure logic
+  (`flow/assist/assist.assert.ts`: placeholder substitution, accept-retry
+  mapping reuse, Tidy-up positions, calling order, job parsing + §5.3 texts,
+  the conversation state machine; it also checks the guide's examples,
+  disclosure and phrases against `docs/IVR_ASSIST_INTERFACES.md` word for
+  word when the doc is in the checkout).
+- A Vite-SSR pass for suites that import `.tsx` or the store
+  (`flow/assist/assistUi.assert.ts`: the proposal overlay never touches the
+  draft, the reveal steps, `replaceDraft` is one undoable dirty edit and
+  undo restores the draft, `load()` is not dirty; the guide, panel and
+  banner rendered to strings).
+
+Visual: the theme harness with the §8.2 mock (2 IVR numbers, 3 flows incl.
+one with errors and one that always 409s).

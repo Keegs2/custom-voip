@@ -40,6 +40,11 @@
 
 .ivr-flow-wrap { position: absolute; inset: 0; }
 
+/* The canvas's own box inside its column. Absolute = the whole column, as
+   before; a docked Flow assistant proposal banner turns the column into a
+   stack and the stage takes what is left below it (ivr-assist.css). */
+.ivr-canvas-stage { position: absolute; inset: 0; }
+
 /* ─── Top bar ─── */
 .ivr-topbar {
   display: flex;

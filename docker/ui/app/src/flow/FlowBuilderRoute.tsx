@@ -1,7 +1,8 @@
 /**
  * FlowBuilderRoute — /ivr/flows/:flowId, the lazily loaded builder chunk
  * (React Flow + the builder; nothing here reaches the main bundle).
- * Loads the flow (and the account summary for its limits), then mounts
+ * Loads the flow (and the account summary for its limits and whether the
+ * Flow assistant is available), then mounts
  * FlowBuilder keyed by the flow's id. Not-entitled / missing flows go back
  * to /ivr with an explanation.
  */
@@ -12,6 +13,7 @@ import { useIvrWorkspace } from '../pages/ivr/IvrContext';
 import { isIvrError, ivrErrorText, useFlow as useFlowQuery, useIvrSummary } from '../pages/ivr/ivrData';
 import { FlowBuilder } from './FlowBuilder';
 import '../styles/ivr-builder.css';
+import '../styles/ivr-assist.css';
 
 export function FlowBuilderRoute({ flowId }: { flowId: number }) {
   // ── Hooks first (React #310) ──
@@ -42,5 +44,13 @@ export function FlowBuilderRoute({ flowId }: { flowId: number }) {
       </div>
     );
   }
-  return <FlowBuilder key={flow.data.id} flow={flow.data} maxBlocks={summary.data?.limits.max_blocks} />;
+  return (
+    <FlowBuilder
+      key={flow.data.id}
+      flow={flow.data}
+      maxBlocks={summary.data?.limits.max_blocks}
+      // An older API has no `assist`: the Flow assistant stays hidden.
+      assistAvailable={summary.data?.assist?.available === true}
+    />
+  );
 }
