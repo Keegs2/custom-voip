@@ -51,6 +51,8 @@
      the paper renders exactly as it did. */
   --cq-keyline-content: none;
   --cq-strip-position: static;
+  /* The records table's "more this way" edge shade (ink, faint). */
+  --cq-pan-shade: color-mix(in srgb, var(--t-text) 12%, transparent);
 }
 
 :root[data-theme='dark'],
@@ -73,6 +75,7 @@
   --cq-tile-bg: var(--t-panel-bg);
   --cq-keyline-content: '';
   --cq-strip-position: relative;
+  --cq-pan-shade: var(--t-scrim);
 }
 
 /* ─── Wide content shell — Calls & Quality page ONLY. The shared `.dl-shell`
@@ -98,6 +101,117 @@
 }
 
 .cq-viewtabs { align-self: flex-start; margin-top: 4px; }
+
+/* The results block: one slim row (Records / Summary switch + the top
+   pager), the table, the bottom pager — 12px apart. */
+.dl-stack.cq-results { gap: 12px; }
+
+.cq-recordsbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 24px;
+  min-width: 0;
+}
+
+.cq-recordsbar .cq-viewtabs { align-self: center; margin-top: 0; }
+.cq-viewtabs.dlx-seg { padding: 3px; }
+.cq-viewtabs .dlx-seg-btn { padding: 5px 14px; }
+
+.cq-recordsbar-pager { flex: 1 1 520px; min-width: 0; }
+
+/* ─── Records table (CallsTable) — fits the content column at 1440×900
+   (layout pass, docker/ui/CLAUDE.md §20): 11px cell sides instead of 16,
+   one compact Call cell (direction icon + product tag), clipped names.
+   Narrower, the table pans inside its panel (.dlx4-tablewrap), with a soft
+   edge shade where there is more to see. ─── */
+.cq-table .dl-th,
+.cq-table .dlx-td { padding-left: 11px; padding-right: 11px; }
+.cq-table .dl-th:first-child,
+.cq-table .dlx-td:first-child { padding-left: 18px; }
+.cq-table .dl-th:last-child,
+.cq-table .dlx-td:last-child { padding-right: 18px; }
+
+/* The pan frame: CallsTable sets is-left / is-right while there is more
+   table that way, and a soft shade shows on that edge. */
+.cq-panwrap { position: relative; }
+
+.cq-panwrap::before,
+.cq-panwrap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 18px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--rcf-ease);
+}
+
+.cq-panwrap::before { left: 0; background: linear-gradient(to right, var(--cq-pan-shade), transparent); }
+.cq-panwrap::after { right: 0; background: linear-gradient(to left, var(--cq-pan-shade), transparent); }
+.cq-panwrap.is-left::before,
+.cq-panwrap.is-right::after { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cq-panwrap::before,
+  .cq-panwrap::after { transition: none; }
+}
+
+/* Loss % shows only where the panel has room for it (container query on
+   the records panel); otherwise it lives in the Quality pill's tooltip and
+   the call-detail modal. */
+.cq-records {
+  container-type: inline-size;
+  container-name: cqrec;
+}
+
+.cq-table .cq-col-loss { display: none; }
+
+@container cqrec (min-width: 860px) {
+  .cq-records--tenant .cq-table .cq-col-loss { display: table-cell; }
+}
+
+@container cqrec (min-width: 1200px) {
+  .cq-records--staff .cq-table .cq-col-loss { display: table-cell; }
+}
+
+.cq-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.cq-dir { flex-shrink: 0; }
+.cq-dir-in { color: var(--t-accent-text); }
+.cq-dir-out { color: var(--t-text-dim); }
+
+/* One line, ellipsis — the full text is the span's title. */
+.cq-clip {
+  display: inline-block;
+  max-width: var(--cq-clip, 120px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.cq-clip-customer { --cq-clip: 108px; }
+.cq-clip-trunk { --cq-clip: 100px; }
+
+.cq-sr {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* ─── Search row card. NOT a .dl-panel: that clips overflow, and the
    staff "More" popover must hang outside the card. ─── */
