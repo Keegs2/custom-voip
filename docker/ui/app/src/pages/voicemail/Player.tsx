@@ -1,6 +1,7 @@
 /**
  * Player — play/pause, a scrubbable timeline, time / duration and speed for
- * one voicemail message or greeting. The timeline is a native range input
+ * one voicemail message or greeting, on ONE row (speed wraps under the
+ * timeline only when the pane is narrow). The timeline is a native range input
  * (keyboard, touch and screen readers for free), dressed with a filled
  * azure track. Mount it KEYED by the item id so a new item starts clean.
  */
@@ -76,10 +77,8 @@ export function Player({ mint, durationMs, label, onMinted, compact = false }: P
         <span className="vm-time" aria-hidden="true">
           {formatClock(currentTime)} / {formatClock(max)}
         </span>
-      </div>
 
-      {!compact && (
-        <div className="vm-player-foot">
+        {!compact && (
           <div className="vm-speed" role="group" aria-label="Playback speed">
             {SPEEDS.map((s) => (
               <button
@@ -93,14 +92,10 @@ export function Player({ mint, durationMs, label, onMinted, compact = false }: P
               </button>
             ))}
           </div>
-          {error && (
-            <span className="vm-player-err" role="alert">
-              {error}
-            </span>
-          )}
-        </div>
-      )}
-      {compact && error && (
+        )}
+      </div>
+
+      {error && (
         <span className="vm-player-err" role="alert">
           {error}
         </span>

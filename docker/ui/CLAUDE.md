@@ -1192,15 +1192,23 @@ dial-in).
   controls (`PreviewPrompt` until one is picked); admin normal view →
   `AdminVoicemailConsole` (`?customer=<id>`, absent = All customers, a
   "Viewing" select); support → productHome. Views are keyed by scope.
-- **Body** `pages/voicemail/VoicemailWorkspace.tsx`: page header (Unread /
-  Messages / Mailboxes, `EncryptionBadge`, New mailbox for staff), mailbox
-  switcher (grouped by customer on All customers), suspended banner, tabs
-  **Messages** (`InboxView`: Inbox/Saved/Trash with counts, `MessageList`,
-  `ReadingPane` + `Player`) and **Greeting & settings** (`MailboxSettings`:
-  `GreetingsPanel`, details, PIN, storage, staff Administration = suspend /
-  resume / delete with typed number). States: loading, 503 → "temporarily
-  unavailable", tenant not enabled → `VoicemailIntro`, no mailboxes (staff
-  get the create CTA). Times render in the MAILBOX timezone (`format.ts`).
+- **Body** `pages/voicemail/VoicemailWorkspace.tsx` (layout kit, §20):
+  `CompactHeader` in one row (crumb · Voicemail + `EncryptionBadge` ·
+  admin "Viewing" picker · Unread / Messages / Mailboxes · New mailbox for
+  staff), a slim one-row mailbox bar (grouped by customer on All
+  customers), suspended banner, tabs **Messages** (`InboxView` =
+  `MasterDetail`: Inbox/Saved/Trash with counts over the scrolling
+  `MessageList` | `ReadingPane` — caller + Played/New badge, ONE inline
+  meta row Received · Length · Mailbox, a one-row `Player`, the transcript
+  clamped to 4 lines with "Show full transcript", actions + retention line
+  pinned in the pane footer; both panes end at the bottom of the first
+  screen) and **Greeting & settings** (`MailboxSettings`: `BalancedGrid`
+  Greeting | Details + Transcription in one equal-height row, then
+  expandable rows PIN · Storage · staff Administration (suspend / resume /
+  delete — still typed-number confirmation), placed under the shorter
+  column; open state remembered as `vm:pin` / `vm:storage` / `vm:admin`).
+  States: loading, 503 → "temporarily unavailable", tenant not enabled →
+  `VoicemailIntro`, no mailboxes (staff get the create CTA). Times render in the MAILBOX timezone (`format.ts`).
 - **Scope + cache** (`voicemailData.ts`): tenant key `self:<own id>` with no
   customer_id; staff `c:<id>` with `customer_id`; console All = `all`. Every
   mutation invalidates `['voicemail']`. The sidebar shares the summary key.

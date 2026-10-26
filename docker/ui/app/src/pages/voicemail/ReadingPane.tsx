@@ -1,7 +1,9 @@
 /**
- * ReadingPane — the open message: who called, when (mailbox timezone), the
- * player, its transcript (v1.1, TranscriptPanel) and the actions for its
- * folder. Mutation controls render only when the viewer can edit (readonly
+ * ReadingPane — the open message: who called, ONE inline meta row (received
+ * in the mailbox timezone · length · mailbox), the player, its transcript
+ * (v1.1, TranscriptPanel — first lines, "Show full transcript") and, pinned
+ * under the scrolling body, the actions for its folder (always visible in
+ * the bounded MasterDetail pane). Mutation controls render only when the viewer can edit (readonly
  * tenants get play + download).
  *
  *   inbox / saved:  Mark read|unread · Save|Move to Inbox · Download · Delete
@@ -14,7 +16,8 @@ import { getMessagePlaybackToken } from '../../api/voicemail';
 import { Player } from './Player';
 import { TranscriptPanel } from './TranscriptPanel';
 import type { VoicemailScope } from './voicemailData';
-import { callerSubtitle, callerTitle, formatDate, formatDurationMs, formatFullWhen, formatPhone } from './format';
+import { callerSubtitle, callerTitle, formatDate, formatDurationMs, formatFullWhen, formatMetaWhen, formatPhone } from './format';
+import { ScrollArea } from '../../components/layout/kit';
 
 export type MessageActionKind = 'read' | 'save' | 'trash' | 'restore' | 'purge';
 
@@ -64,116 +67,125 @@ export function ReadingPane({
   const inTrash = folder === 'trash';
 
   return (
-    <article className="vm-pane-body" aria-labelledby={`vm-msg-${message.id}`}>
-      <header className="vm-msg-head">
-        <div className="vm-msg-id">
-          <h2 id={`vm-msg-${message.id}`} className="vm-msg-title">
-            {title}
-          </h2>
-          {sub && <p className="vm-msg-number">{sub}</p>}
-        </div>
-        <span className={`vm-state ${message.is_read ? 'vm-state-read' : 'vm-state-new'}`}>
-          {inTrash ? 'In Trash' : message.is_read ? (message.is_saved ? 'Saved' : 'Played') : 'New'}
-        </span>
-      </header>
+    <article className="vm-read" aria-labelledby={`vm-msg-${message.id}`}>
+      <ScrollArea className="vm-read-scroll">
+        <div className="vm-pane-body">
+          <header className="vm-msg-head">
+            <div className="vm-msg-id">
+              <h2 id={`vm-msg-${message.id}`} className="vm-msg-title">
+                {title}
+              </h2>
+              {sub && <p className="vm-msg-number">{sub}</p>}
+            </div>
+            <span className={`vm-state ${message.is_read ? 'vm-state-read' : 'vm-state-new'}`}>
+              {inTrash ? 'In Trash' : message.is_read ? (message.is_saved ? 'Saved' : 'Played') : 'New'}
+            </span>
+          </header>
 
-      <dl className="vm-facts">
-        <div>
-          <dt>Received</dt>
-          <dd>{formatFullWhen(message.created_at, timeZone)}</dd>
-        </div>
-        <div>
-          <dt>Length</dt>
-          <dd>{formatDurationMs(message.duration_ms)}</dd>
-        </div>
-        <div className="vm-fact-wide">
-          <dt>Mailbox</dt>
-          <dd>
-            {mailbox.label} · <span className="vm-nowrap">{formatPhone(mailbox.did)}</span>
-          </dd>
-        </div>
-      </dl>
+          {/* Clip box: a separator that starts a wrapped line is cut off. */}
+          <div className="vm-meta-clip">
+            <dl className="vm-meta">
+              <div title={formatFullWhen(message.created_at, timeZone)}>
+                <dt>Received</dt>
+                <dd>{formatMetaWhen(message.created_at, timeZone)}</dd>
+              </div>
+              <div>
+                <dt>Length</dt>
+                <dd>{formatDurationMs(message.duration_ms)}</dd>
+              </div>
+              <div>
+                <dt>Mailbox</dt>
+                <dd>
+                  {mailbox.label} · <span className="vm-nowrap">{formatPhone(mailbox.did)}</span>
+                </dd>
+              </div>
+            </dl>
+          </div>
 
-      <Player
-        key={message.id}
-        mint={mint}
-        durationMs={message.duration_ms}
-        label={`message from ${title}`}
-        onMinted={onPlaybackMinted}
-      />
+          <Player
+            key={message.id}
+            mint={mint}
+            durationMs={message.duration_ms}
+            label={`message from ${title}`}
+            onMinted={onPlaybackMinted}
+          />
 
-      <TranscriptPanel
-        scope={scope}
-        message={message}
-        mailbox={mailbox}
-        folder={folder}
-        canEdit={canEdit}
-        canManage={canManage}
-        transcriptionAvailable={transcriptionAvailable}
-        onMarkRead={markRead}
-        onOpenSettings={onOpenSettings}
-      />
+          <TranscriptPanel
+            scope={scope}
+            message={message}
+            mailbox={mailbox}
+            folder={folder}
+            canEdit={canEdit}
+            canManage={canManage}
+            transcriptionAvailable={transcriptionAvailable}
+            onMarkRead={markRead}
+            onOpenSettings={onOpenSettings}
+          />
+        </div>
+      </ScrollArea>
 
-      <div className="vm-actions" role="group" aria-label="Message actions">
-        {canEdit && !inTrash && (
-          <>
+      <footer className="vm-read-foot">
+        <div className="vm-actions" role="group" aria-label="Message actions">
+          {canEdit && !inTrash && (
+            <>
+              <button
+                type="button"
+                className="dl-btn dl-btn-ghost vm-btn-sm"
+                disabled={busy}
+                onClick={() => onAction('read', !message.is_read)}
+              >
+                {message.is_read ? <Mail size={14} aria-hidden="true" /> : <MailOpen size={14} aria-hidden="true" />}
+                {message.is_read ? 'Mark unread' : 'Mark read'}
+              </button>
+              <button
+                type="button"
+                className="dl-btn dl-btn-ghost vm-btn-sm"
+                disabled={busy}
+                onClick={() => onAction('save', !message.is_saved)}
+              >
+                {message.is_saved ? <BookmarkMinus size={14} aria-hidden="true" /> : <Bookmark size={14} aria-hidden="true" />}
+                {message.is_saved ? 'Move to Inbox' : 'Save'}
+              </button>
+            </>
+          )}
+          {canEdit && inTrash && (
+            <button type="button" className="dl-btn dl-btn-ghost vm-btn-sm" disabled={busy} onClick={() => onAction('restore')}>
+              <ArchiveRestore size={14} aria-hidden="true" />
+              Restore
+            </button>
+          )}
+          <button type="button" className="dl-btn dl-btn-ghost vm-btn-sm" disabled={busy} onClick={onDownload}>
+            {pending === 'download' ? <span className="vm-spin" aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
+            Download
+          </button>
+          {canEdit && (
             <button
               type="button"
-              className="dl-btn dl-btn-ghost vm-btn-sm"
+              className="dl-btn dl-btn-danger vm-btn-sm vm-actions-end"
               disabled={busy}
-              onClick={() => onAction('read', !message.is_read)}
+              onClick={() => onAction(inTrash ? 'purge' : 'trash')}
             >
-              {message.is_read ? <Mail size={14} aria-hidden="true" /> : <MailOpen size={14} aria-hidden="true" />}
-              {message.is_read ? 'Mark unread' : 'Mark read'}
+              <Trash2 size={14} aria-hidden="true" />
+              {inTrash ? 'Delete forever' : 'Delete'}
             </button>
-            <button
-              type="button"
-              className="dl-btn dl-btn-ghost vm-btn-sm"
-              disabled={busy}
-              onClick={() => onAction('save', !message.is_saved)}
-            >
-              {message.is_saved ? <BookmarkMinus size={14} aria-hidden="true" /> : <Bookmark size={14} aria-hidden="true" />}
-              {message.is_saved ? 'Move to Inbox' : 'Save'}
-            </button>
-          </>
-        )}
-        {canEdit && inTrash && (
-          <button type="button" className="dl-btn dl-btn-ghost vm-btn-sm" disabled={busy} onClick={() => onAction('restore')}>
-            <ArchiveRestore size={14} aria-hidden="true" />
-            Restore
-          </button>
-        )}
-        <button type="button" className="dl-btn dl-btn-ghost vm-btn-sm" disabled={busy} onClick={onDownload}>
-          {pending === 'download' ? <span className="vm-spin" aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
-          Download
-        </button>
-        {canEdit && (
-          <button
-            type="button"
-            className="dl-btn dl-btn-danger vm-btn-sm vm-actions-end"
-            disabled={busy}
-            onClick={() => onAction(inTrash ? 'purge' : 'trash')}
-          >
-            <Trash2 size={14} aria-hidden="true" />
-            {inTrash ? 'Delete forever' : 'Delete'}
-          </button>
-        )}
-      </div>
+          )}
+        </div>
 
-      <p className="vm-retention">
-        <Lock size={12} strokeWidth={2.4} aria-hidden="true" />
-        {inTrash ? (
-          <span>
-            In Trash{message.deleted_at ? ` since ${formatDate(message.deleted_at, timeZone)}` : ''}. Trash is
-            emptied automatically after {TRASH_DAYS} days.
-          </span>
-        ) : (
-          <span>
-            Encrypted at rest. Kept until {formatDate(message.expires_at, timeZone)} — messages are deleted
-            automatically after {mailbox.retention_days} days.
-          </span>
-        )}
-      </p>
+        <p className="vm-retention">
+          <Lock size={12} strokeWidth={2.4} aria-hidden="true" />
+          {inTrash ? (
+            <span>
+              In Trash{message.deleted_at ? ` since ${formatDate(message.deleted_at, timeZone)}` : ''}. Trash is
+              emptied automatically after {TRASH_DAYS} days.
+            </span>
+          ) : (
+            <span>
+              Encrypted at rest. Kept until {formatDate(message.expires_at, timeZone)} — messages are deleted
+              automatically after {mailbox.retention_days} days.
+            </span>
+          )}
+        </p>
+      </footer>
     </article>
   );
 }

@@ -8,9 +8,10 @@
  * "Custom" needs a stored greeting (the API answers 422 otherwise), so it is
  * disabled until one exists; choosing it with none active activates the
  * newest. Deleting the active greeting drops the mailbox back to standard
- * (server-side, contract §4.3). Readonly viewers can listen only.
+ * (server-side, contract §4.3). Readonly viewers can listen only. The list
+ * shows the first 4 greetings, then "Show all N greetings" (layout kit).
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import type { Greeting, GreetingMode, Mailbox, MailboxUpdate } from '../../types/voicemail';
@@ -22,14 +23,20 @@ import { Player } from './Player';
 import { ConfirmDialog } from './VmDialog';
 import { GreetingDialog } from './GreetingDialog';
 import { formatDate, formatDurationMs, safeTimeZone } from './format';
+import { ShowMoreButton, useShowMore } from '../../components/layout/kit';
+
+/** Greetings listed before "Show all". */
+const GREETINGS_SHOWN = 4;
 
 export interface GreetingsPanelProps {
   scope: VoicemailScope;
   mailbox: Mailbox;
   canEdit: boolean;
+  /** Layout classes from the parent (e.g. the kit's `lk-grow`). */
+  className?: string;
 }
 
-export function GreetingsPanel({ scope, mailbox, canEdit }: GreetingsPanelProps) {
+export function GreetingsPanel({ scope, mailbox, canEdit, className }: GreetingsPanelProps) {
   // ── ALL hooks unconditionally at the top (React #310) ──
   const queryClient = useQueryClient();
   const { toastOk, toastErr } = useToast();
@@ -55,9 +62,10 @@ export function GreetingsPanel({ scope, mailbox, canEdit }: GreetingsPanelProps)
   });
 
   const mintFor = useCallback((id: number) => () => getGreetingPlaybackToken(id), []);
+  const list = useMemo(() => greetings.data ?? [], [greetings.data]);
+  const more = useShowMore(list, GREETINGS_SHOWN);
 
   // ── Derived (after all hooks) ──
-  const list = greetings.data ?? [];
   const tz = safeTimeZone(mailbox.timezone);
   const newest = [...list].sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
   const activeId = mailbox.greeting_mode === 'custom' ? mailbox.active_greeting_id : null;
@@ -73,7 +81,10 @@ export function GreetingsPanel({ scope, mailbox, canEdit }: GreetingsPanelProps)
   };
 
   return (
-    <section className="dl-panel vm-settings-panel vm-span-2" aria-labelledby={`vm-greet-${mailbox.id}`}>
+    <section
+      className={`dl-panel vm-settings-panel vm-greet-panel${className ? ` ${className}` : ''}`}
+      aria-labelledby={`vm-greet-${mailbox.id}`}
+    >
       <div className="dl-panel-head">
         <span id={`vm-greet-${mailbox.id}`} className="dl-panel-title">
           Greeting
@@ -133,52 +144,55 @@ export function GreetingsPanel({ scope, mailbox, canEdit }: GreetingsPanelProps)
             No custom greetings yet.{canEdit ? ' Record one in your browser or upload an audio file.' : ''}
           </div>
         ) : (
-          <ul className="vm-greetings">
-            {list.map((g) => {
-              const active = g.id === activeId;
-              return (
-                <li key={g.id} className={`vm-greeting${active ? ' vm-greeting-on' : ''}`}>
-                  <div className="vm-greeting-id">
-                    <span className="vm-greeting-name">{g.label}</span>
-                    <span className="vm-greeting-meta">
-                      {formatDurationMs(g.duration_ms)} · Added {formatDate(g.created_at, tz)}
-                    </span>
-                  </div>
-                  <Player key={g.id} compact mint={mintFor(g.id)} durationMs={g.duration_ms} label={`greeting ${g.label}`} />
-                  <div className="vm-greeting-actions">
-                    {active ? (
-                      <span className="dl-pill dl-pill-on">Active</span>
-                    ) : (
-                      canEdit && (
+          <>
+            <ul className="vm-greetings" id={more.listId}>
+              {more.visible.map((g) => {
+                const active = g.id === activeId;
+                return (
+                  <li key={g.id} className={`vm-greeting${active ? ' vm-greeting-on' : ''}`}>
+                    <div className="vm-greeting-id">
+                      <span className="vm-greeting-name">{g.label}</span>
+                      <span className="vm-greeting-meta">
+                        {formatDurationMs(g.duration_ms)} · Added {formatDate(g.created_at, tz)}
+                      </span>
+                    </div>
+                    <Player key={g.id} compact mint={mintFor(g.id)} durationMs={g.duration_ms} label={`greeting ${g.label}`} />
+                    <div className="vm-greeting-actions">
+                      {active ? (
+                        <span className="dl-pill dl-pill-on">Active</span>
+                      ) : (
+                        canEdit && (
+                          <button
+                            type="button"
+                            className="dl-btn dl-btn-ghost vm-btn-sm"
+                            disabled={patch.isPending}
+                            onClick={() => patch.mutate({ greeting_mode: 'custom', active_greeting_id: g.id })}
+                          >
+                            Use this
+                          </button>
+                        )
+                      )}
+                      {canEdit && (
                         <button
                           type="button"
-                          className="dl-btn dl-btn-ghost vm-btn-sm"
-                          disabled={patch.isPending}
-                          onClick={() => patch.mutate({ greeting_mode: 'custom', active_greeting_id: g.id })}
+                          className="vm-iconbtn vm-iconbtn-danger"
+                          aria-label={`Delete greeting ${g.label}`}
+                          title="Delete"
+                          onClick={() => {
+                            remove.reset();
+                            setDeleteTarget(g);
+                          }}
                         >
-                          Use this
+                          <Trash2 size={14} aria-hidden="true" />
                         </button>
-                      )
-                    )}
-                    {canEdit && (
-                      <button
-                        type="button"
-                        className="vm-iconbtn vm-iconbtn-danger"
-                        aria-label={`Delete greeting ${g.label}`}
-                        title="Delete"
-                        onClick={() => {
-                          remove.reset();
-                          setDeleteTarget(g);
-                        }}
-                      >
-                        <Trash2 size={14} aria-hidden="true" />
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {more.needed && <ShowMoreButton {...more.buttonProps} noun="greetings" className="vm-greetings-more" />}
+          </>
         )}
       </div>
 

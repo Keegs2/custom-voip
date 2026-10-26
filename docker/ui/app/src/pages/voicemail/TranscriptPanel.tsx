@@ -8,8 +8,9 @@
  *   pending / processing       spinner + "Transcribing…" (5 s poll, stops after
  *                              3 min → "Still transcribing — check back shortly.";
  *                              "Transcription is paused." when unavailable)
- *   done                       the text (selectable) + Copy; low-confidence note
- *                              under 0.6; language when not en-US
+ *   done                       the first 4 lines (selectable) + "Show full
+ *                              transcript" + Copy; low-confidence note under
+ *                              0.6; language when not en-US
  *   empty                      "No speech detected in this message."
  *   failed                     "We couldn't transcribe this message." + Try again
  *   disabled, mailbox off      "Transcription is off for this mailbox." — the
@@ -38,6 +39,7 @@ import { TRANSCRIPTION_LANGUAGES } from '../../types/voicemail';
 import { retryTranscript } from '../../api/voicemail';
 import { ApiError } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
+import { ClampText } from '../../components/layout/kit';
 import {
   FOLDER_TRANSCRIPT_POLL_MS,
   invalidateTranscript,
@@ -54,6 +56,8 @@ import {
   type VoicemailScope,
 } from './voicemailData';
 
+/** Lines of a done transcript shown before "Show full transcript". */
+const TRANSCRIPT_LINES = 4;
 /** Below this the panel suggests listening to be sure (plan §11.4). */
 const LOW_CONFIDENCE = 0.6;
 /** How far the folder list (polled every 10 s) can trail this pane's own fetch. */
@@ -229,11 +233,18 @@ export function TranscriptPanel({
         </button>
       </>
     );
+    // First lines only; "Show full transcript" opens the rest in place (the
+    // reading pane scrolls). The whole text is in the DOM either way.
     body = (
-      // Focusable so keyboard users can scroll a long transcript.
-      <div className="vm-tx-text" tabIndex={0}>
+      <ClampText
+        lines={TRANSCRIPT_LINES}
+        moreLabel="Show full transcript"
+        lessLabel="Show less"
+        wrapperClassName="vm-tx-box"
+        className="vm-tx-text"
+      >
         {text}
-      </div>
+      </ClampText>
     );
     if (transcript.confidence !== null && transcript.confidence < LOW_CONFIDENCE) {
       note = (

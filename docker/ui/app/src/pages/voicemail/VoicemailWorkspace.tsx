@@ -4,10 +4,12 @@
  * The route entry (pages/VisualVoicemailPage.tsx) decides the scope and the
  * abilities; this component never reads `user.customer_id`.
  *
- *   ┌ daylight header: crumb · title · sub        Unread | Messages | Mailboxes  [Encrypted at rest] ┐
- *   ┌ mailbox bar: [Mailbox ▾]  (617) 555-0134 · Active                         [+ New mailbox]     ┐
+ *   ┌ CompactHeader (one row): crumb · Voicemail [Encrypted at rest]   [Viewing ▾]  Unread | Messages | Mailboxes  [+ New mailbox] ┐
+ *   ┌ mailbox bar (one slim row): Mailbox [Front desk ▾]          (617) 555-0134 · Active ┐
  *   [ Messages | Greeting & settings ]                                           (tab rail)
- *   InboxView (folders · list · reading pane)  |  MailboxSettings
+ *   InboxView (MasterDetail: list | reading pane)  |  MailboxSettings
+ *
+ * Layout follows docker/ui/CLAUDE.md §20 (layout kit).
  *
  * States: loading, error (503 → "temporarily unavailable"), a tenant whose
  * voicemail isn't switched on (VoicemailIntro), no mailboxes (staff get the
@@ -30,6 +32,7 @@ import { NewMailboxDialog } from './NewMailboxDialog';
 import { EncryptionBadge } from './EncryptionBadge';
 import { VoicemailIntro } from './VoicemailIntro';
 import { formatPhone } from './format';
+import { CompactHeader, type HeaderStat } from '../../components/layout/kit';
 import { ApiError } from '../../api/client';
 
 type Tab = 'messages' | 'settings';
@@ -273,50 +276,44 @@ export function VoicemailWorkspace({
     );
   }
 
+  const stats: HeaderStat[] | undefined =
+    ready && list.length > 0
+      ? [
+          { label: 'Unread', value: unread },
+          { label: 'Messages', value: stored },
+          { label: list.length === 1 ? 'Mailbox' : 'Mailboxes', value: list.length },
+        ]
+      : undefined;
+
   return (
     <div className="dl-scope vm-scope">
       <div className="dl-shell vm-shell">
-        <header className="dl-header vm-header fx-load">
-          <div className="dl-header-id">
-            <div className="dl-crumb">
+        <CompactHeader
+          className="vm-header fx-load"
+          crumb={
+            <>
               <span>Visual Voicemail</span>
               <span className="dl-crumb-sep" aria-hidden="true">
                 /
               </span>
               <span className="vm-crumb-tail">{crumb}</span>
               {tag && <span className="vm-staff-tag">{tag}</span>}
-            </div>
-            <h1 className="dl-title">Voicemail</h1>
-            <p className="dl-sub">Listen to messages, set your greeting, and keep every mailbox tidy — from any browser.</p>
-            <div className="vm-header-badges">
-              <EncryptionBadge />
-            </div>
-          </div>
-          <div className="vm-header-side">
-            {tools}
-            {ready && list.length > 0 && (
-              <div className="dl-metrics" aria-label="Voicemail totals">
-                <div className="dl-metric">
-                  <div className="dl-metric-value">{unread}</div>
-                  <div className="dl-metric-label">Unread</div>
-                </div>
-                <div className="dl-metric">
-                  <div className="dl-metric-value">{stored}</div>
-                  <div className="dl-metric-label">Messages</div>
-                </div>
-                <div className="dl-metric">
-                  <div className="dl-metric-value">{list.length}</div>
-                  <div className="dl-metric-label">{list.length === 1 ? 'Mailbox' : 'Mailboxes'}</div>
-                </div>
-              </div>
-            )}
-            {canManage && ready && list.length > 0 && (
+            </>
+          }
+          title="Voicemail"
+          titleAside={<EncryptionBadge />}
+          subtitle="Listen to messages, set your greeting, and keep every mailbox tidy — from any browser."
+          tools={tools}
+          stats={stats}
+          statsLabel="Voicemail totals"
+          actions={
+            canManage && ready && list.length > 0 ? (
               <button type="button" className="dl-btn dl-btn-primary vm-btn-sm" onClick={() => setCreating(true)}>
                 <Plus size={14} aria-hidden="true" /> New mailbox
               </button>
-            )}
-          </div>
-        </header>
+            ) : undefined
+          }
+        />
 
         <div className="vm-body fx-load fx-load-d1">{body}</div>
       </div>
