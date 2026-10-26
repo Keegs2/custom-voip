@@ -80,7 +80,8 @@ const CALL_FIELDS: readonly FieldDoc[] = [
   {
     name: 'stir_badge',
     type: 'string',
-    description: 'STIR/SHAKEN attestation level (`A`, `B` or `C`) when one applied; else `null`.',
+    description:
+      'The caller-ID attestation shown in the portal, for example `A`, `B` or `C`; other values may appear. `null` when there is none.',
   },
 ];
 

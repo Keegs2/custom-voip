@@ -6,7 +6,7 @@
  * DID assignment (admin provisioning) and GET /trunks/call-paths (a price
  * list, not tenant-scoped).
  */
-import { AUTH_HEADER, S401, S422, notFound, ok } from '../common';
+import { AUTH_HEADER, S401, S403_EDIT, S422, notFound, ok } from '../common';
 import { READ_ROLES, WRITE_ROLES, type FieldDoc, type SectionDoc } from '../types';
 
 const TRUNK_FIELDS: readonly FieldDoc[] = [
@@ -84,7 +84,7 @@ export const TRUNKING: SectionDoc = {
             { name: 'limit', in: 'query', type: 'integer', description: 'Page size. Default `100`.' },
             { name: 'offset', in: 'query', type: 'integer', description: 'Rows to skip. Default `0`.' },
           ],
-          returns: 'An array of trunks.',
+          returns: 'An array of trunks, paged with `limit` and `offset` (no `total`).',
           fields: TRUNK_FIELDS.map((f) => ({ ...f, name: `[].${f.name}` })),
           statuses: [ok(), S401, S422],
           example: {
@@ -114,14 +114,14 @@ export const TRUNKING: SectionDoc = {
           method: 'GET',
           path: '/trunks/{trunk_id}/stats',
           title: 'Live trunk usage',
-          summary: 'Calls on the trunk right now, plus the last hour’s totals.',
-          description: ['The portal refreshes this every 15 seconds; polling at a similar pace suits a wallboard.'],
+          summary: 'Approximate live call count, plus the last hour’s totals.',
+          description: ['`current_channels` is an approximate live count, and `channel_utilization` is worked out from it.'],
           roles: READ_ROLES,
           params: [TRUNK_ID],
           returns: 'One object.',
           fields: [
             { name: 'trunk_id', type: 'integer', description: 'The trunk.' },
-            { name: 'current_channels', type: 'integer', description: 'Calls on the trunk right now.' },
+            { name: 'current_channels', type: 'integer', description: 'Calls on the trunk right now (approximate).' },
             { name: 'max_channels', type: 'integer', description: 'Most simultaneous calls.' },
             { name: 'channel_utilization', type: 'string', description: 'In use, as a percentage string (`"24.0%"`).' },
             { name: 'cps_limit', type: 'integer', description: 'Most new calls per second.' },
@@ -172,13 +172,13 @@ export const TRUNKING: SectionDoc = {
           returns: 'An array.',
           fields: [
             { name: '[].id', type: 'integer', description: 'The entry’s id (to remove it).' },
-            { name: '[].ip_address', type: 'string', description: 'The address.' },
+            { name: '[].ip_address', type: 'string', description: 'The address in CIDR form (`203.0.113.50/32` for a single host).' },
             { name: '[].description', type: 'string', description: 'Your note, or `null`.' },
           ],
           statuses: [ok(), S401, notFound('The trunk')],
           example: {
             request: `curl "$BASE/trunks/12/ips" ${AUTH_HEADER}`,
-            response: '[\n  { "id": 31, "ip_address": "203.0.113.50", "description": "HQ firewall" }\n]',
+            response: '[\n  { "id": 31, "ip_address": "203.0.113.50/32", "description": "HQ firewall" }\n]',
           },
         },
         {
@@ -208,12 +208,13 @@ export const TRUNKING: SectionDoc = {
           returns: 'The new entry.',
           fields: [
             { name: 'id', type: 'integer', description: 'The entry’s id.' },
-            { name: 'ip_address', type: 'string', description: 'The address.' },
+            { name: 'ip_address', type: 'string', description: 'The address in CIDR form (`203.0.113.51/32` for a single host).' },
             { name: 'description', type: 'string', description: 'Your note, or `null`.' },
           ],
           statuses: [
             ok('Added.'),
             S401,
+            S403_EDIT,
             notFound('The trunk'),
             { code: 409, when: 'The address is already on this trunk.' },
             S422,
@@ -223,7 +224,7 @@ export const TRUNKING: SectionDoc = {
               `curl -X POST "$BASE/trunks/12/ips" ${AUTH_HEADER} \\\n` +
               '  -H "Content-Type: application/json" \\\n' +
               '  -d \'{"ip_address": "203.0.113.51", "description": "Backup firewall"}\'',
-            response: '{\n  "id": 32,\n  "ip_address": "203.0.113.51",\n  "description": "Backup firewall"\n}',
+            response: '{\n  "id": 32,\n  "ip_address": "203.0.113.51/32",\n  "description": "Backup firewall"\n}',
           },
         },
         {
@@ -239,7 +240,7 @@ export const TRUNKING: SectionDoc = {
             { name: 'ip_id', in: 'path', type: 'integer', required: true, description: 'The entry’s `id`.' },
           ],
           returns: '`{ "status": "deleted" }`.',
-          statuses: [ok('Removed.'), S401, notFound('The trunk or entry')],
+          statuses: [ok('Removed.'), S401, S403_EDIT, notFound('The trunk or entry')],
           example: {
             request: `curl -X DELETE "$BASE/trunks/12/ips/32" ${AUTH_HEADER}`,
             response: '{\n  "status": "deleted"\n}',
@@ -259,7 +260,7 @@ export const TRUNKING: SectionDoc = {
           title: 'List a trunk’s numbers',
           summary: 'The inbound numbers on a trunk.',
           description: [
-            'To add a number to a trunk, request it with `POST /numbers/{did}/request` and `product_type: "trunk"` — the same review flow as any number.',
+            'Ask your Granite account team to add numbers to a trunk.',
           ],
           roles: READ_ROLES,
           params: [TRUNK_ID],

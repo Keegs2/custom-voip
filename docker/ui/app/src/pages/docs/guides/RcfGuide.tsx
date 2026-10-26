@@ -182,7 +182,7 @@ const CONTENT: ProductGuideContent = {
             </>
             <>
               The number waits under <Ui>Pending Requests</Ui> as <Ui>Pending Approval</Ui>. Once Granite approves it, it
-              appears on your RCF page, ready for you to set where it rings.
+              appears on your RCF page, already forwarding — check its forwarding destination and change it if needed.
             </>
           </Steps>
           <Note>
@@ -243,7 +243,7 @@ const CONTENT: ProductGuideContent = {
           </Bullets>
           <Para>
             For any period, open <Path items={['Insights', 'Reporting']} /> and select{' '}
-            <Ui>Download spreadsheet (CSV)</Ui> or <Ui>Download PDF summary</Ui>.
+            <Ui>Spreadsheet (CSV)</Ui> or <Ui>PDF summary</Ui>.
           </Para>
         </>
       ),

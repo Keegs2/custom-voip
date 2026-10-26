@@ -4,8 +4,8 @@
  *
  * Routes: /docs/guides is the overview; /docs/guides/:topic opens a product
  * guide. Any other slug (incl. the old `trunking` / `calling`) redirects to
- * the overview. The Guides page no longer reads GUIDE_PRODUCTS from
- * ../docProducts (that list still types the shared ProductSelector).
+ * the overview. The Guides page doesn't read GUIDE_PRODUCTS from
+ * ../docProducts; its slugs are defined here.
  *
  * Content rules (customers only — docker/ui/CLAUDE.md §7 "Guides"): describe
  * only what a tenant `user` / `readonly` can see and do today, name things by

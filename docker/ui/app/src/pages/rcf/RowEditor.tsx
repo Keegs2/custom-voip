@@ -240,7 +240,7 @@ export function RowEditor({ entry, isAdmin, canEdit, onClose }: RowEditorProps) 
                     className="rcf-input rcf-input-mono"
                     style={{ flex: 1, minWidth: 0 }}
                     value={draft.failover_to}
-                    placeholder="Optional — rings if primary fails"
+                    placeholder="Optional"
                     disabled={saving}
                     onChange={(e) => set('failover_to')(e.target.value)}
                     onKeyDown={onEnterSave}
@@ -262,6 +262,8 @@ export function RowEditor({ entry, isAdmin, canEdit, onClose }: RowEditorProps) 
                   {entry.failover_to ? fmt(entry.failover_to) : 'None'}
                 </div>
               )}
+              {/* Routing does not read failover_to yet — say so, so nobody relies on it. */}
+              <div className="rcf-help">Saved for future use — calls don’t fail over to it today.</div>
             </div>
 
             {/* Label */}
