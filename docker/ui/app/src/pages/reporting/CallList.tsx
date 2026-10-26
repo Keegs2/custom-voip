@@ -4,6 +4,12 @@
  * (`limit`/`offset` on `/reports/calls`); the pager is the shared
  * CdrPaginationBar so it looks and behaves like Calls & Quality.
  *
+ * Layout (docker/ui/CLAUDE.md §20.3): the table is CAPPED — the page's rows
+ * scroll inside a box about 8 rows tall with sticky column heads, and the
+ * one pager sits under it — so a 50-row page never turns the report into a
+ * wall. Paging, page size and the filters work exactly as before; a page
+ * change scrolls the box back to its first row.
+ *
  * Outcome / direction filters are owned by the page (the CSV export sends
  * the same ones); page + page size live here and reset whenever the page
  * remounts this component for a new report scope (keyed by the caller).
@@ -47,6 +53,7 @@ export function CallList({ scope, enabled, filters, onFiltersChange }: CallListP
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const topRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const query = useReportCalls(
     scope,
@@ -62,8 +69,10 @@ export function CallList({ scope, enabled, filters, onFiltersChange }: CallListP
   const rangeStart = rows.length > 0 ? (page - 1) * pageSize + 1 : 0;
   const rangeEnd = rows.length > 0 ? (page - 1) * pageSize + rows.length : 0;
 
+  /** Back to the first row of the capped box, with the card in view. */
   function scrollToTop(): void {
-    topRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    topRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
   function changePage(next: number): void {
@@ -172,7 +181,6 @@ export function CallList({ scope, enabled, filters, onFiltersChange }: CallListP
 
         {data && total > 0 && (
           <div className="dl-stack" style={{ gap: 12 }}>
-            {pager}
             {query.error != null && (
               <div className="dl-banner dl-banner-err" role="alert">That page didn’t load — showing the last one. Try again in a moment.</div>
             )}
@@ -181,7 +189,13 @@ export function CallList({ scope, enabled, filters, onFiltersChange }: CallListP
               style={{ boxShadow: 'none' }}
               aria-busy={paging || undefined}
             >
-              <div className="dlx4-tablewrap">
+              <div
+                ref={scrollRef}
+                className="dlx4-tablewrap rpt-tablewrap-cap rpt-calls-scroll"
+                role="region"
+                aria-label="Calls, newest first"
+                tabIndex={0}
+              >
                 <table className="rpt-table" style={{ minWidth: 780 }}>
                   <caption className="rpt-sr">Calls, newest first</caption>
                   <thead>

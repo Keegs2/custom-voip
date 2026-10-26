@@ -1,12 +1,21 @@
 /**
  * CallsTable — the merged Calls & Quality results table.
  *
- * Column union of the CDR Search table and the Call Quality table: Time,
- * Customer (staff), Product, Dir, From, To, Duration, Quality pill, Loss %,
- * Status, Carrier (staff), Trunk, Cost Est. (staff). Row click opens the call-detail
- * modal (the old inline expanded-row idiom is gone — the modal carries all
- * of it and more, including the hangup cause, which no longer gets a column
- * but stays in the modal's Call Info and the CSV export).
+ * Columns (2026-10 layout pass, docker/ui/CLAUDE.md §20 — the table FITS the
+ * content column at 1440×900 for staff and tenants; narrower, it pans inside
+ * its own panel): Time · Leg (staff, All/Carrier legs only) · Customer
+ * (staff) · Call (direction icon + product tag) · From · To · Duration
+ * (a red "N/A" pill when the call was not answered — the old Status column)
+ * · Quality (pill; packet loss in its tooltip) · Loss % (only where the
+ * panel has room — a container query: tenants from ~860px of table, staff
+ * from ~1200px) · Carrier (staff) · Trunk · Cost Est. (staff). Secondary
+ * fields moved OUT of the table into the call-detail modal, which already
+ * carried them: the per-direction packet loss (and the Loss % column where
+ * it does not fit), the answered/not-answered status pill, the full year of
+ * the timestamp (tooltip too). Row click opens the
+ * call-detail modal (the old inline expanded-row idiom is gone — the modal
+ * carries all of it and more, including the hangup cause, which no longer
+ * gets a column but stays in the modal's Call Info and the CSV export).
  *
  * Carrier/Trunk cells render via the shared callsFormat.ts mapping (also
  * used by the modal + CSV): inbound rows show the origination carrier+PoP,
@@ -44,6 +53,8 @@
  * (dl-admin.css), `dlx4-*` (dl-platform-b.css). Horizontal scroll INSIDE the
  * panel at laptop widths (dlx4-tablewrap).
  */
+import { useEffect, useState } from 'react';
+import { PhoneIncoming, PhoneOutgoing } from 'lucide-react';
 import { fmt, fmtMoneySmart } from '../../utils/format';
 import { gradeLabel, gradeTone, packetLossColor, qualityStatusReason, INK_FAINT } from './quality';
 import type { Grade, QualityStatus } from './quality';
@@ -67,6 +78,19 @@ function fmtTime(iso: string): string {
   );
 }
 
+/** The table's compact stamp: "10-22 15:16:00" — the year only when it is
+    not the current one (the full stamp is the cell's tooltip + the modal). */
+function fmtTimeShort(iso: string, thisYear: number): string {
+  const full = fmtTime(iso);
+  return new Date(iso).getFullYear() === thisYear ? full.slice(5) : full;
+}
+
+/** Table phone numbers: NANP drops the "+1 " (the modal keeps it). */
+function fmtPhoneShort(raw: string): string {
+  const pretty = fmt(raw) || raw || '--';
+  return pretty.startsWith('+1 (') ? pretty.slice(3) : pretty;
+}
+
 function fmtDurationSec(sec: number): string {
   if (sec < 60) return `${Math.round(sec)}s`;
   const m = Math.floor(sec / 60);
@@ -74,14 +98,22 @@ function fmtDurationSec(sec: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
-function DirectionTag({ dir }: { dir: CallDirection }) {
-  // Inbound reads azure (traffic toward us), outbound reads neutral slate.
-  return <span className={dir === 'inbound' ? 'dl-tag' : 'dl-tag dl-tag-slate'}>{dir}</span>;
-}
-
-/** The call's product, named by the shared catalog (unknown products still read). */
-function ProductTag({ pt }: { pt: ProductType }) {
-  return <span className="dl-tag">{productTag(pt)}</span>;
+/**
+ * The call's direction + product in one compact cell: a phone-in / phone-out
+ * icon (inbound azure — traffic toward us, outbound slate; the word is in
+ * the tooltip and for screen readers) and the product tag from the shared
+ * catalog (unknown products still read).
+ */
+function CallType({ dir, pt }: { dir: CallDirection; pt: ProductType }) {
+  const inbound = dir === 'inbound';
+  const Icon = inbound ? PhoneIncoming : PhoneOutgoing;
+  return (
+    <span className="cq-type" title={inbound ? 'Inbound' : 'Outbound'}>
+      <Icon size={13} strokeWidth={2.2} aria-hidden="true" className={inbound ? 'cq-dir cq-dir-in' : 'cq-dir cq-dir-out'} />
+      <span className="cq-sr">{inbound ? 'Inbound' : 'Outbound'} </span>
+      <span className="dl-tag">{productTag(pt)}</span>
+    </span>
+  );
 }
 
 interface GradePillProps {
@@ -91,13 +123,15 @@ interface GradePillProps {
   mos?: number | null;
   /** Staff get the technical "not graded" reason in the tooltip. */
   isStaff: boolean;
+  /** Packet loss % for the tooltip (the table's old Loss % column). */
+  lossPct?: number | null;
 }
 
 /**
  * Grade pill — the ONE rendering of a quality grade on the Calls surfaces.
  * One-way audio → red "One-way"; ungraded → "—" with the reason as tooltip.
  */
-export function GradePill({ grade, status, mos, isStaff }: GradePillProps) {
+export function GradePill({ grade, status, mos, isStaff, lossPct }: GradePillProps) {
   const reason = qualityStatusReason(status, isStaff ? 'staff' : 'customer');
   if (grade == null) {
     return (
@@ -111,7 +145,11 @@ export function GradePill({ grade, status, mos, isStaff }: GradePillProps) {
   const text = status === 'no_rtp' || mos == null ? word : mos.toFixed(2);
   return (
     <span
-      title={status === 'no_rtp' ? (reason ?? word) : `${word}${mos != null ? ` · MOS ${mos.toFixed(2)}` : ''}`}
+      title={
+        status === 'no_rtp'
+          ? (reason ?? word)
+          : `${word}${mos != null ? ` · MOS ${mos.toFixed(2)}` : ''}${lossPct != null ? ` · ${lossPct.toFixed(2)}% packet loss` : ''}`
+      }
       style={{
         fontSize: '0.7rem',
         fontWeight: 700,
@@ -219,12 +257,16 @@ export function CallsTable({
   isStaff,
   rowsMode = 'calls',
 }: CallsTableProps) {
+  // ALL hooks unconditionally at the top (React #310 prevention).
+  const { setScroller, left: panLeft, right: panRight } = usePanEdges();
   const showLeg = isStaff && rowsMode !== 'calls';
-  const colCount = (isStaff ? 13 : 10) + (showLeg ? 1 : 0);
-  const minWidth = (isStaff ? 1240 : 940) + (showLeg ? 70 : 0);
+  const colCount = (isStaff ? 11 : 8) + (showLeg ? 1 : 0);
+  // Below this the table pans inside its panel (never the page).
+  const minWidth = (isStaff ? 1040 : 760) + (showLeg ? 60 : 0);
+  const thisYear = new Date().getFullYear();
 
   return (
-    <section className="dl-panel">
+    <section className={`dl-panel cq-records ${isStaff ? 'cq-records--staff' : 'cq-records--tenant'}`}>
       {/* Quick-filter toolbar — client-side, current page only */}
       <div
         style={{
@@ -255,157 +297,192 @@ export function CallsTable({
         </span>
       </div>
 
-      <div className="dlx4-tablewrap">
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth }}>
-          <thead>
-            <tr>
-              <th className="dl-th">Time</th>
-              {showLeg && <th className="dl-th">Leg</th>}
-              {isStaff && <th className="dl-th">Customer</th>}
-              <th className="dl-th">Product</th>
-              <th className="dl-th">Dir</th>
-              <th className="dl-th">From</th>
-              <th className="dl-th">To</th>
-              <th className="dl-th">Duration</th>
-              <th className="dl-th" title="Call quality — the worse of the two audio directions">Quality</th>
-              <th className="dl-th">Loss %</th>
-              <th className="dl-th">Status</th>
-              {isStaff && <th className="dl-th">Carrier</th>}
-              <th className="dl-th">Trunk</th>
-              {isStaff && (
-                <th className="dl-th" title="Estimated cost — billing of record is Equinox">
-                  Cost Est.
-                </th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {cdrs.length === 0 && (
+      <div className={`cq-panwrap${panLeft ? ' is-left' : ''}${panRight ? ' is-right' : ''}`}>
+        <div ref={setScroller} className="dlx4-tablewrap">
+          <table className="cq-table" style={{ width: '100%', borderCollapse: 'collapse', minWidth }}>
+            <thead>
               <tr>
-                <td colSpan={colCount} style={{ padding: 20 }}>
-                  <div className="dl-empty">
-                    {pageRowCount === 0 ? (
-                      <>
-                        <p style={{ fontWeight: 600, margin: 0, color: T.text }}>No records found</p>
-                        <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>Adjust your filters and search again.</p>
-                      </>
-                    ) : (
-                      <>
-                        <p style={{ fontWeight: 600, margin: 0, color: T.text }}>No rows match the quick filter</p>
-                        <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>
-                          It only scans this page — clear it or use Destination Prefix to search server-side.
-                        </p>
-                      </>
-                    )}
-                  </div>
-                </td>
+                <th className="dl-th">Time</th>
+                {showLeg && <th className="dl-th">Leg</th>}
+                {isStaff && <th className="dl-th">Customer</th>}
+                <th className="dl-th" title="Direction and product">Call</th>
+                <th className="dl-th">From</th>
+                <th className="dl-th">To</th>
+                <th className="dl-th" title="Talk time — N/A when the call was not answered">Duration</th>
+                <th className="dl-th" title="Call quality — the worse of the two audio directions; packet loss in the tooltip">Quality</th>
+              <th className="dl-th cq-col-loss">Loss %</th>
+                {isStaff && <th className="dl-th">Carrier</th>}
+                <th className="dl-th">Trunk</th>
+                {isStaff && (
+                  <th className="dl-th" title="Estimated cost — billing of record is Equinox">
+                    Cost Est.
+                  </th>
+                )}
               </tr>
-            )}
-            {cdrs.map((cdr) => {
-              const answered = cdr.answer_time != null;
-              const isSelected = cdr.uuid === selectedUuid;
-              const carrier = carrierLabel(cdr);
-              const q = rowGrade(cdr);
-              const lossPct = cdr.quality_status === 'rated' ? (cdr.packet_loss_pct ?? null) : null;
-              const trunk = trunkLabel(cdr.trunk_id, trunkNames);
-              const billedColor =
-                cdr.total_cost != null && cdr.total_cost > 0
-                  ? T.accentText
-                  : T.textDim;
-
-              return (
-                <tr
-                  key={cdr.uuid}
-                  className={isSelected ? 'dl-row dlx-row-active' : 'dl-row'}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => onSelect(cdr)}
-                >
-                  <td className="dlx-td">
-                    <span className="dlx4-mono" style={{ color: T.textDim }}>
-                      {fmtTime(cdr.start_time)}
-                    </span>
-                  </td>
-                  {showLeg && (
-                    <td className="dlx-td"><LegBadge cdr={cdr} /></td>
-                  )}
-                  {isStaff && (
-                    <td className="dlx-td" style={{ color: T.textDim, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {customerNames?.[cdr.customer_id] ?? `#${cdr.customer_id}`}
-                    </td>
-                  )}
-                  <td className="dlx-td"><ProductTag pt={cdr.product_type} /></td>
-                  <td className="dlx-td"><DirectionTag dir={cdr.direction} /></td>
-                  <td className="dlx-td">
-                    <span style={{ color: T.text, whiteSpace: 'nowrap' }}>
-                      {fmt(cdr.caller_id) || cdr.caller_id || '--'}
-                    </span>
-                  </td>
-                  <td className="dlx-td">
-                    <span style={{ color: T.text, whiteSpace: 'nowrap' }}>
-                      {fmt(cdr.destination) || cdr.destination || '--'}
-                    </span>
-                  </td>
-                  <td className="dlx-td">
-                    <span style={{ fontVariantNumeric: 'tabular-nums', color: T.text }}>
-                      {fmtCallDuration(cdr, fmtDurationSec)}
-                    </span>
-                  </td>
-                  <td className="dlx-td">
-                    <GradePill grade={q.grade} status={q.status} mos={q.mos} isStaff={isStaff} />
-                  </td>
-                  <td className="dlx-td">
-                    <span
-                      style={{
-                        fontVariantNumeric: 'tabular-nums',
-                        fontWeight: 600,
-                        color: lossPct != null ? packetLossColor(lossPct) : INK_FAINT,
-                      }}
-                    >
-                      {lossPct != null ? `${lossPct.toFixed(2)}%` : '—'}
-                    </span>
-                  </td>
-                  <td className="dlx-td">
-                    <span className={answered ? 'dl-pill dl-pill-on' : 'dl-pill dl-pill-off'}>
-                      {answered ? 'Ans' : 'N/A'}
-                    </span>
-                  </td>
-                  {isStaff && (
-                    <td className="dlx-td">
-                      {isOnNetCall(cdr) ? (
-                        <span className="dl-tag">On-net</span>
+            </thead>
+            <tbody>
+              {cdrs.length === 0 && (
+                <tr>
+                  <td colSpan={colCount} style={{ padding: 20 }}>
+                    <div className="dl-empty">
+                      {pageRowCount === 0 ? (
+                        <>
+                          <p style={{ fontWeight: 600, margin: 0, color: T.text }}>No records found</p>
+                          <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>Adjust your filters and search again.</p>
+                        </>
                       ) : (
-                        <span
-                          style={{
-                            whiteSpace: 'nowrap',
-                            color: carrier === EMPTY ? INK_FAINT : T.text,
-                          }}
-                        >
-                          {carrier}
-                        </span>
+                        <>
+                          <p style={{ fontWeight: 600, margin: 0, color: T.text }}>No rows match the quick filter</p>
+                          <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>
+                            It only scans this page — clear it or use Destination Prefix to search server-side.
+                          </p>
+                        </>
                       )}
-                    </td>
-                  )}
-                  <td
-                    className="dlx-td"
-                    style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >
-                    <span style={{ color: trunk === EMPTY ? INK_FAINT : T.text }}>
-                      {trunk}
-                    </span>
+                    </div>
                   </td>
-                  {isStaff && (
+                </tr>
+              )}
+              {cdrs.map((cdr) => {
+                const answered = cdr.answer_time != null;
+                const isSelected = cdr.uuid === selectedUuid;
+                const carrier = carrierLabel(cdr);
+                const q = rowGrade(cdr);
+                const lossPct = cdr.quality_status === 'rated' ? (cdr.packet_loss_pct ?? null) : null;
+                const trunk = trunkLabel(cdr.trunk_id, trunkNames);
+                const billedColor =
+                  cdr.total_cost != null && cdr.total_cost > 0
+                    ? T.accentText
+                    : T.textDim;
+
+                return (
+                  <tr
+                    key={cdr.uuid}
+                    className={isSelected ? 'dl-row dlx-row-active' : 'dl-row'}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => onSelect(cdr)}
+                  >
                     <td className="dlx-td">
-                      <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: billedColor }}>
-                        {fmtMoneySmart(cdr.total_cost)}
+                      <span className="dlx4-mono" style={{ color: T.textDim }} title={fmtTime(cdr.start_time)}>
+                        {fmtTimeShort(cdr.start_time, thisYear)}
                       </span>
                     </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    {showLeg && (
+                      <td className="dlx-td"><LegBadge cdr={cdr} /></td>
+                    )}
+                    {isStaff && (
+                      <td className="dlx-td">
+                        {/* title = the full name when the cell truncates */}
+                        <span className="cq-clip cq-clip-customer" style={{ color: T.textDim }} title={customerNames?.[cdr.customer_id]}>
+                          {customerNames?.[cdr.customer_id] ?? `#${cdr.customer_id}`}
+                        </span>
+                      </td>
+                    )}
+                    <td className="dlx-td"><CallType dir={cdr.direction} pt={cdr.product_type} /></td>
+                    <td className="dlx-td">
+                      <span style={{ color: T.text, whiteSpace: 'nowrap' }} title={fmt(cdr.caller_id) || cdr.caller_id || undefined}>
+                        {fmtPhoneShort(cdr.caller_id)}
+                      </span>
+                    </td>
+                    <td className="dlx-td">
+                      <span style={{ color: T.text, whiteSpace: 'nowrap' }} title={fmt(cdr.destination) || cdr.destination || undefined}>
+                        {fmtPhoneShort(cdr.destination)}
+                      </span>
+                    </td>
+                    <td className="dlx-td">
+                      {answered ? (
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: T.text }}>
+                          {fmtCallDuration(cdr, fmtDurationSec)}
+                        </span>
+                      ) : (
+                        <span className="dl-pill dl-pill-off" title="Not answered">N/A</span>
+                      )}
+                    </td>
+                    <td className="dlx-td">
+                      <GradePill grade={q.grade} status={q.status} mos={q.mos} isStaff={isStaff} lossPct={lossPct} />
+                    </td>
+                    <td className="dlx-td cq-col-loss">
+                      <span
+                        style={{
+                          fontVariantNumeric: 'tabular-nums',
+                          fontWeight: 600,
+                          color: lossPct != null ? packetLossColor(lossPct) : INK_FAINT,
+                        }}
+                      >
+                        {lossPct != null ? `${lossPct.toFixed(2)}%` : '—'}
+                      </span>
+                    </td>
+                    {isStaff && (
+                      <td className="dlx-td">
+                        {isOnNetCall(cdr) ? (
+                          <span className="dl-tag">On-net</span>
+                        ) : (
+                          <span
+                            style={{
+                              whiteSpace: 'nowrap',
+                              color: carrier === EMPTY ? INK_FAINT : T.text,
+                            }}
+                          >
+                            {carrier}
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    <td className="dlx-td">
+                      <span
+                        className="cq-clip cq-clip-trunk"
+                        style={{ color: trunk === EMPTY ? INK_FAINT : T.text }}
+                        title={trunk === EMPTY ? undefined : trunk}
+                      >
+                        {trunk}
+                      </span>
+                    </td>
+                    {isStaff && (
+                      <td className="dlx-td">
+                        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: billedColor }}>
+                          {fmtMoneySmart(cdr.total_cost)}
+                        </span>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   );
+}
+
+/**
+ * Which edges of the table scroller have more table beyond them — drives the
+ * soft "more this way" shades while the table pans inside its panel (it fits
+ * at 1440 × 900; narrower windows and the Leg column make it pan).
+ */
+function usePanEdges(): { setScroller: (el: HTMLDivElement | null) => void; left: boolean; right: boolean } {
+  // A callback ref held in state: the effect re-subscribes if the scroller
+  // element is ever replaced.
+  const [el, setScroller] = useState<HTMLDivElement | null>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+
+  useEffect(() => {
+    if (!el) return;
+    const update = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      const left = el.scrollLeft > 1;
+      const right = max > 1 && el.scrollLeft < max - 1;
+      setEdges((cur) => (cur.left === left && cur.right === right ? cur : { left, right }));
+    };
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener('scroll', update);
+      observer.disconnect();
+    };
+  }, [el]);
+
+  return { setScroller, left: edges.left, right: edges.right };
 }

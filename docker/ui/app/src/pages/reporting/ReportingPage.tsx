@@ -1,19 +1,22 @@
 /**
  * ReportingPage — `/reporting`, the customer-facing "how did my calls go?"
- * page (docs/CUSTOMER_REPORTING_DESIGN.md).
+ * page (docs/CUSTOMER_REPORTING_DESIGN.md). Laid out with the layout kit
+ * (docker/ui/CLAUDE.md §20 — balanced, compact, expandable):
  *
- * Composition (top → bottom):
- *   1. Quiet daylight header.
- *   2. Staff only: customer picker (a report is always about ONE customer —
- *      the API 422s a staff request without customer_id). Tenants never see
- *      it and never send customer_id.
- *   3. Controls: period presets / custom dates, number picker, downloads.
- *   4. Summary: the ELI5 sentence (built client-side) + headline figures.
- *   5. Calls over time (stacked bars).
- *   6. Busiest times · Missed calls & why · Call quality.
- *   7. Your numbers.
- *   8. Every call (server-paginated, outcome/direction filters).
- *   9. Glossary.
+ *   ┌ CompactHeader: Insights / Granite CRAG · Reporting   [Customer ▾]  [Download spreadsheet] [Download PDF summary] ┐
+ *   ┌ scope bar (one slim row): Period [This month|…] · Numbers [All numbers ▾] ·  Oct 1 – Oct 22, 2026 · times in … ┐
+ *   ┌ Summary: sentence + 5 figures ┐ ┌ Calls over time (chart fills the row) ────────────┐   one row, one height
+ *   ┌ Busiest times ┐ ┌ Missed calls & why ┐ ┌ Call quality ┐                                  one row, one height
+ *   ┌ Your numbers — 8 rows, "Show all N numbers" opens the rest inside a capped scroll ─┐
+ *   ┌ Every call — filters · capped, scrolling table (sticky heads) · pager ─────────────┐
+ *   ┌ Words on this page ⌄ (collapsed) ──────────────────────────────────────────────────┐
+ *
+ * Every card's "What does this mean?" is a collapsed disclosure. Staff pick
+ * the customer in the header (a report is always about ONE customer — the
+ * API 422s a staff request without customer_id); an admin in "View as
+ * Customer" reports on the sidebar's preview customer (named in the crumb
+ * with an amber "Staff preview" tag, no picker). Tenants never see a picker
+ * and never send customer_id. The downloads are the header's actions.
  *
  * Scope model: ONE `ReportScope` object (dates + browser tz + numbers +
  * staff customer) feeds every query and both exports, so the page, the CSV
@@ -25,6 +28,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
+import { BalancedGrid, CompactHeader } from '../../components/layout/kit';
 import { useAuth } from '../../contexts/AuthContext';
 import { listCustomers } from '../../api/customers';
 import { downloadReportCsv, reportQuery } from '../../api/reports';
@@ -35,7 +39,7 @@ import type { ReportScope } from '../../types/reports';
 import { CallList, type CallListFilters } from './CallList';
 import { NumbersTable } from './NumbersTable';
 import { BusiestCard, Glossary, MissedCard, QualityCard, SummaryHero, TrendCard } from './ReportCards';
-import { ReportControls } from './ReportControls';
+import { ReportControls, ReportDownloads } from './ReportControls';
 import {
   browserTimeZone,
   fmtLongDate,
@@ -244,73 +248,71 @@ function ReportingView() {
     refetch: () => void overview.refetch(),
   };
 
+  const crumbTail = previewCustomer?.name ?? 'Granite CRAG';
+  const staffTag = isStaffViewer ? (customerViewMode ? 'Staff preview' : 'Staff') : null;
+
+  // Staff (not previewing a sidebar customer) pick the customer in the header.
+  const customerPicker =
+    isStaffViewer && !previewCustomer ? (
+      <div className="rpt-headpick">
+        <label className="dl-flabel" htmlFor="rpt-customer">
+          {customerViewMode ? 'Previewing' : 'Customer'}
+        </label>
+        <select
+          id="rpt-customer"
+          className="dl-input rpt-headpick-select"
+          value={staffCustomerId ?? ''}
+          onChange={(e) => handleCustomerChange(e.target.value)}
+          disabled={customersLoading}
+          title="A report always covers one customer. Customers see this page for their own account only."
+        >
+          <option value="">{customersLoading ? 'Loading customers…' : 'Pick a customer…'}</option>
+          {staffCustomers.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} ({c.account_type.toUpperCase()})
+            </option>
+          ))}
+        </select>
+      </div>
+    ) : undefined;
+
   return (
     <div className="dl-scope rpt-scope">
       <div className="dl-shell">
-        {/* ── Quiet page header ─────────────────────────────────────────── */}
-        <header className="dl-header fx-load">
-          <div className="dl-header-id">
-            <div className="dl-crumb">
+        <CompactHeader
+          className="rpt-header fx-load"
+          crumb={
+            <>
               <span>Insights</span>
               <span className="dl-crumb-sep" aria-hidden="true">/</span>
-              <span>Granite CRAG</span>
-            </div>
-            <h1 className="dl-title">Reporting</h1>
-            <p className="dl-sub">
-              A simple picture of your calls — how many you had, when they came in, how many were answered and how
-              clear they sounded.
-            </p>
-          </div>
-        </header>
+              <span className="rpt-crumb-tail">{crumbTail}</span>
+              {staffTag && <span className="rpt-staff-tag">{staffTag}</span>}
+            </>
+          }
+          title="Reporting"
+          subtitle="A simple picture of your calls — how many you had, when they came in, how many were answered and how clear they sounded."
+          tools={customerPicker}
+          actions={
+            scopeReady ? (
+              <ReportDownloads
+                canDownload={overview.data != null}
+                csvBusy={csvBusy}
+                pdfBusy={pdfBusy}
+                onDownloadCsv={() => void handleDownloadCsv()}
+                onDownloadPdf={() => void handleDownloadPdf()}
+              />
+            ) : undefined
+          }
+        />
 
-        <div className="dl-stack fx-load fx-load-d1" style={{ paddingBottom: 24 }}>
-          {/* ── Staff customer picker ───────────────────────────────────── */}
-          {isStaffViewer && (
-            <div className="rpt-staffbar">
-              {previewCustomer ? (
-                <>
-                  <span className="rpt-staffbar-label">Previewing report for</span>
-                  <strong>{previewCustomer.name}</strong>
-                  <span className="rpt-staffbar-note">
-                    Change the customer in the sidebar. Customers see this page for their own account only.
-                  </span>
-                </>
-              ) : (
-                <>
-                  <label className="rpt-staffbar-label" htmlFor="rpt-customer">
-                    {customerViewMode ? 'Previewing report for' : 'Customer'}
-                  </label>
-                  <select
-                    id="rpt-customer"
-                    className="dl-input"
-                    value={staffCustomerId ?? ''}
-                    onChange={(e) => handleCustomerChange(e.target.value)}
-                    disabled={customersLoading}
-                  >
-                    <option value="">{customersLoading ? 'Loading customers…' : 'Pick a customer…'}</option>
-                    {staffCustomers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.account_type.toUpperCase()})
-                      </option>
-                    ))}
-                  </select>
-                  <span className="rpt-staffbar-note">
-                    {customerViewMode
-                      ? 'Customers see this page for their own account only — no picker.'
-                      : 'Staff view — a report always covers one customer.'}
-                  </span>
-                </>
-              )}
-            </div>
-          )}
-
+        <div className="dl-stack rpt-body fx-load fx-load-d1">
           {!scopeReady ? (
             <section className="dl-panel">
               <div className="dl-center">
                 <div className="dl-center-icon"><Info size={26} aria-hidden="true" /></div>
                 <p style={{ margin: 0, fontWeight: 700, color: T.text }}>Pick a customer to see their report</p>
                 <p style={{ margin: 0, fontSize: '0.8rem', color: T.textDim }}>
-                  Reports are always about one customer’s own calls.
+                  Reports are always about one customer’s own calls. Customers see this page for their own account only.
                 </p>
               </div>
             </section>
@@ -331,11 +333,6 @@ function ReportingView() {
                 onNumbersChange={handleNumbersChange}
                 numbersLoading={myNumbers.isLoading}
                 numbersFailed={myNumbers.isError}
-                canDownload={overview.data != null}
-                csvBusy={csvBusy}
-                pdfBusy={pdfBusy}
-                onDownloadCsv={() => void handleDownloadCsv()}
-                onDownloadPdf={() => void handleDownloadPdf()}
               />
 
               {csvTruncated && (
@@ -366,17 +363,20 @@ function ReportingView() {
                 </div>
               )}
 
-              <SummaryHero overview={overviewState} sentence={sentence} />
+              {/* Row 1 — the summary leads, the chart takes the row's height. */}
+              <BalancedGrid columns="minmax(0, 1fr) minmax(0, 1.6fr)" stackBelow="lg" gap="var(--rcf-stack)">
+                <SummaryHero overview={overviewState} sentence={sentence} />
+                <TrendCard
+                  trend={{ data: trend.data, isLoading: trend.isLoading, error: trend.error, refetch: () => void trend.refetch() }}
+                />
+              </BalancedGrid>
 
-              <TrendCard
-                trend={{ data: trend.data, isLoading: trend.isLoading, error: trend.error, refetch: () => void trend.refetch() }}
-              />
-
-              <div className="rpt-grid3">
+              {/* Row 2 — three insight cards, one height. */}
+              <BalancedGrid columns="repeat(3, minmax(0, 1fr))" stackBelow="lg" gap="var(--rcf-stack)">
                 <BusiestCard overview={overviewState} />
                 <MissedCard overview={overviewState} />
                 <QualityCard overview={overviewState} />
-              </div>
+              </BalancedGrid>
 
               <NumbersTable
                 numbers={{ data: numbers.data, isLoading: numbers.isLoading, error: numbers.error, refetch: () => void numbers.refetch() }}

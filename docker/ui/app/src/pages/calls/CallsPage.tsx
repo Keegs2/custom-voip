@@ -3,17 +3,19 @@
  * Search (/cdrs) and Call Quality (/call-quality) pages; BOTH routes render
  * it so bookmarks keep working.
  *
- * Composition (top → bottom):
- *   1. Quiet daylight header (role-aware copy).
+ * Composition (top → bottom; layout kit, docker/ui/CLAUDE.md §20):
+ *   1. CompactHeader — one row (role-aware crumb + copy).
  *   2. Search row — ONE compact, centered toolbar row (committed-search
  *      model below): scope selects, time range (+ inline From/To only for
  *      Custom), staff "More" (zone / rows / rated only), Search + Export.
  *      See CallsFilterBar.
  *   3. KPI row — one centered band of equal-width, page-scoped tiles. See
  *      CallsKpiStrip.
- *   4. Records / Summary segmented control (Summary is staff-only — it
- *      exposes cost).
- *   5. Server-paginated results table; row click opens CdrDetailModal.
+ *   4. ONE slim row: the Records / Summary switch (staff only — Summary
+ *      exposes cost) and, on Records, the top pager beside it.
+ *   5. Server-paginated results table (fits the column at 1440 — secondary
+ *      fields live in the modal; narrower it pans inside its panel); row
+ *      click opens CdrDetailModal; the pager again under it.
  *
  * (The former "Quality Trends" chart section was removed 2026-10 at the
  * owner's request — the per-call grades in the table/modal and the KPI
@@ -72,6 +74,7 @@ import { CallsKpiStrip } from './CallsKpiStrip';
 import { CallsTable } from './CallsTable';
 import { CdrSummaryView } from './CdrSummaryView';
 import { CdrDetailModal } from './CdrDetailModal';
+import { CompactHeader } from '../../components/layout/kit';
 import type { CallsFilters } from './callsFilters';
 import type { Cdr, CdrSearchParams } from '../../types/cdr';
 import '../../styles/dl-admin.css';
@@ -370,22 +373,22 @@ export function CallsPage() {
       {/* dlx4-shell-wide: page-scoped 1800px cap (vs the shared 1200px
           .dl-shell) so the CDR table gets real width — see dl-platform-b.css */}
       <div className="dl-shell dlx4-shell-wide">
-        {/* ── Quiet page header ─────────────────────────────────────── */}
-        <header className="dl-header fx-load">
-          <div className="dl-header-id">
-            <div className="dl-crumb">
+        <CompactHeader
+          className="cq-header fx-load"
+          crumb={
+            <>
               <span>{isStaff ? 'Support' : 'Voice'}</span>
               <span className="dl-crumb-sep" aria-hidden="true">/</span>
               <span>Granite CRAG</span>
-            </div>
-            <h1 className="dl-title">Calls &amp; Quality</h1>
-            <p className="dl-sub">
-              {isStaff
-                ? 'Call detail records with voice-quality diagnostics — search, inspect, export.'
-                : 'Your call history with voice-quality diagnostics — MOS, packet loss, jitter, and RTP detail for every call.'}
-            </p>
-          </div>
-        </header>
+            </>
+          }
+          title="Calls & Quality"
+          subtitle={
+            isStaff
+              ? 'Call detail records with voice-quality diagnostics — search, inspect, export.'
+              : 'Your call history with voice-quality diagnostics — MOS, packet loss, jitter, and RTP detail for every call.'
+          }
+        />
 
         <div className="dl-stack cq-stack fx-load fx-load-d1">
           <CallsFilterBar
@@ -409,87 +412,94 @@ export function CallsPage() {
             <CallsKpiStrip cdrs={cdrs} total={total} isStaff={isStaff} rowsMode={rowsMode} />
           )}
 
-          {/* Records / Summary segmented control — Summary exposes cost, so
-              it is staff-only; tenants get the Records view directly. */}
-          {isStaff && (
-            <div className="dlx-seg cq-viewtabs" role="tablist" aria-label="CDR views">
-              {VIEW_TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={activeTab === tab.id}
-                  className={activeTab === tab.id ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
-                  onClick={() => setActiveTab(tab.id)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {activeTab === 'records' && (
-            <>
-              {isLoading && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    color: T.textDim,
-                    fontSize: '0.85rem',
-                    padding: '40px 0',
-                  }}
-                >
-                  <Spinner /> Searching CDRs…
-                </div>
-              )}
-
-              {!isLoading && !isError && data && (
-                <div ref={resultsRef} className="dl-stack" style={{ scrollMarginTop: 12 }}>
-                  {showPager && <CdrPaginationBar {...pagerProps} />}
-
-                  <div
-                    aria-busy={paging || undefined}
-                    className={paging ? 'dlx4-fetchdim' : undefined}
-                  >
-                    {cdrs.length === 0 && page > 1 ? (
-                      // Unknown-total overrun: one Next past the real end (the
-                      // full-page heuristic can't see the boundary). Distinct
-                      // from "no matches" — the search DID match rows.
-                      <div className="dl-empty">
-                        <p style={{ fontWeight: 600, margin: 0, color: T.text }}>
-                          Nothing on this page
-                        </p>
-                        <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>
-                          The result set ends before page {page.toLocaleString()} — step back with Prev or First.
-                        </p>
-                      </div>
-                    ) : (
-                      <CallsTable
-                        cdrs={visibleCdrs}
-                        pageRowCount={cdrs.length}
-                        customerNames={isStaff ? customerNames : undefined}
-                        trunkNames={trunkNames}
-                        quickFilter={quickFilter}
-                        onQuickFilterChange={setQuickFilter}
-                        onSelect={handleSelect}
-                        selectedUuid={selectedCdr?.uuid ?? null}
-                        isStaff={isStaff}
-                        rowsMode={rowsMode}
-                      />
-                    )}
+          {/* One slim row: the Records / Summary switch (Summary exposes cost,
+              so it is staff-only — tenants get Records directly) and the top
+              pager beside it. The results block is the pagination scroll
+              target. */}
+          <div ref={resultsRef} className="dl-stack cq-results" style={{ scrollMarginTop: 12 }}>
+            {(isStaff || (activeTab === 'records' && !isLoading && !isError && showPager)) && (
+              <div className="cq-recordsbar">
+                {isStaff && (
+                  <div className="dlx-seg cq-viewtabs" role="tablist" aria-label="CDR views">
+                    {VIEW_TABS.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === tab.id}
+                        className={activeTab === tab.id ? 'dlx-seg-btn dlx-seg-btn-active' : 'dlx-seg-btn'}
+                        onClick={() => setActiveTab(tab.id)}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
                   </div>
+                )}
+                {activeTab === 'records' && !isLoading && !isError && showPager && (
+                  <div className="cq-recordsbar-pager">
+                    <CdrPaginationBar {...pagerProps} />
+                  </div>
+                )}
+              </div>
+            )}
 
-                  {showPager && <CdrPaginationBar {...pagerProps} />}
+            {activeTab === 'records' && isLoading && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  color: T.textDim,
+                  fontSize: '0.85rem',
+                  padding: '40px 0',
+                }}
+              >
+                <Spinner /> Searching CDRs…
+              </div>
+            )}
+
+            {activeTab === 'records' && !isLoading && !isError && data && (
+              <>
+                <div
+                  aria-busy={paging || undefined}
+                  className={paging ? 'dlx4-fetchdim' : undefined}
+                >
+                  {cdrs.length === 0 && page > 1 ? (
+                    // Unknown-total overrun: one Next past the real end (the
+                    // full-page heuristic can't see the boundary). Distinct
+                    // from "no matches" — the search DID match rows.
+                    <div className="dl-empty">
+                      <p style={{ fontWeight: 600, margin: 0, color: T.text }}>
+                        Nothing on this page
+                      </p>
+                      <p style={{ fontSize: '0.74rem', margin: '4px 0 0' }}>
+                        The result set ends before page {page.toLocaleString()} — step back with Prev or First.
+                      </p>
+                    </div>
+                  ) : (
+                    <CallsTable
+                      cdrs={visibleCdrs}
+                      pageRowCount={cdrs.length}
+                      customerNames={isStaff ? customerNames : undefined}
+                      trunkNames={trunkNames}
+                      quickFilter={quickFilter}
+                      onQuickFilterChange={setQuickFilter}
+                      onSelect={handleSelect}
+                      selectedUuid={selectedCdr?.uuid ?? null}
+                      isStaff={isStaff}
+                      rowsMode={rowsMode}
+                    />
+                  )}
                 </div>
-              )}
-            </>
-          )}
 
-          {activeTab === 'summary' && isStaff && (
-            <CdrSummaryView params={committed.params} nonce={committed.nonce} />
-          )}
+                {showPager && <CdrPaginationBar {...pagerProps} />}
+              </>
+            )}
+
+            {activeTab === 'summary' && isStaff && (
+              <CdrSummaryView params={committed.params} nonce={committed.nonce} />
+            )}
+          </div>
         </div>
       </div>
 

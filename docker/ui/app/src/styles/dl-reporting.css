@@ -10,6 +10,13 @@
    only (`--t-*`, docker/ui/CLAUDE.md §18) plus the `--cq-*` page tokens of
    dl-platform-b.css (ReportingPage imports it) and the two below.
    Hand-written @media only (never Tailwind md:* — see CLAUDE.md).
+
+   Layout (docker/ui/CLAUDE.md §20): CompactHeader (kit) · one slim scope
+   bar · two BalancedGrid rows (summary | chart; three insight cards) · the
+   numbers + call tables capped at about 8 rows · a collapsed glossary. The
+   kit owns rows / heights / disclosures (`lk-*`); this file only tunes the
+   page's own pieces inside them. Breakpoints that follow the content
+   column are CONTAINER queries on `.rpt-body`.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ─── Page tokens (§18.3 rule 2). LIGHT = today's values (the skeleton's
@@ -48,73 +55,113 @@
   max-width: 100%;
 }
 
-/* ─── Staff customer picker bar ─── */
-.rpt-staffbar {
-  display: flex;
-  flex-wrap: wrap;
+/* ─── Header: crumb tail, amber staff tag, staff customer picker ─── */
+.rpt-body {
+  container-type: inline-size;
+  container-name: rptbody;
+  min-width: 0;
+  --rcf-stack: 16px;   /* rows sit at the kit's 16px rhythm */
+}
+
+.rpt-crumb-tail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rpt-staff-tag {
+  display: inline-flex;
   align-items: center;
-  gap: 10px 14px;
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--t-accent-line) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--t-accent-line) 18%, transparent);
-}
-
-.rpt-staffbar-label {
-  font-size: 0.66rem;
+  font-size: 0.58rem;
   font-weight: 700;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--t-text-dim);
+  color: var(--t-warn-fg);
+  background: var(--t-warn-bg);
+  border: 1px solid var(--t-warn-border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }
 
-.rpt-staffbar select { min-width: 240px; max-width: 100%; }
-
-.rpt-staffbar-note {
-  font-size: 0.72rem;
-  color: var(--t-text-dim);
-}
-
-/* ─── Controls slab ─── */
-.rpt-controls {
+.rpt-headpick {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px 24px;
-}
-
-.rpt-controls-left {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 14px 20px;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
 }
 
-.rpt-controls-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+.rpt-headpick .dl-flabel { margin: 0; flex-shrink: 0; }
+
+.rpt-headpick-select {
+  width: 230px;
+  max-width: 100%;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-weight: 600;
 }
 
-.rpt-custom-dates {
+.rpt-dl-btn { white-space: nowrap; }
+
+/* ─── Scope bar — ONE slim row: period · numbers · the range in words ─── */
+.rpt-scopebar {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 14px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--t-line-soft);
+  align-items: center;
+  gap: 8px 22px;
+  padding: 8px 16px;
+  /* Hosts the number picker's popover, which must hang below the bar: the
+     shared .dl-panel clips (overflow: hidden). Nothing here bleeds to the
+     rounded edge, so letting it overflow is safe. */
+  overflow: visible;
 }
 
-.rpt-custom-dates .dl-input { min-width: 160px; }
+.rpt-scopebar-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+}
+
+.rpt-scopebar .dl-flabel { margin: 0; flex-shrink: 0; }
+
+.rpt-scopebar .dlx-seg { padding: 3px; }
+.rpt-scopebar .dlx-seg-btn { padding: 5px 12px; }
+
+/* The number picker: label inline with its button in the bar. */
+.rpt-scopebar .rpt-numpick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.rpt-scopebar .rpt-numpick-btn { padding-top: 6px; padding-bottom: 6px; }
+
+.rpt-custom-dates .dl-input {
+  min-width: 150px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.rpt-custom-help { font-size: 0.72rem; }
 
 .rpt-tzline {
-  margin-top: 12px;
-  font-size: 0.7rem;
+  /* Takes the rest of the row and shrinks (ellipsis) before it wraps. */
+  flex: 1 1 0;
+  min-width: 150px;
+  margin: 0;
+  text-align: right;
+  font-size: 0.72rem;
   color: var(--t-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+.rpt-tzline strong { color: var(--t-text-soft); font-weight: 700; }
 
 /* ─── Number picker (button + popover checklist) ─── */
 .rpt-numpick { position: relative; }
@@ -193,12 +240,6 @@
   color: var(--t-text-dim);
 }
 
-/* The settings panel hosts the number picker's popover, which must hang
-   below the panel: the shared .dl-panel clips (overflow: hidden), which cut
-   the list off after its first option. Nothing in this panel bleeds to its
-   rounded edge, so letting it overflow is safe. */
-.dl-panel:has(> .dl-panel-body > .rpt-controls) { overflow: visible; }
-
 /* Product tag on a picker option — only when the customer's numbers span
    more than one product (call forwarding, voicemail, SIP trunk, …). */
 .rpt-prodtag {
@@ -253,24 +294,30 @@
   color: var(--t-text);
 }
 
-.rpt-hero-stats { margin-top: 18px; }
+.rpt-summary .rpt-sentence { font-size: clamp(1.02rem, 1.45vw, 1.2rem); }
 
-/* ─── Card grid — 1 → 2 → 3 columns ─── */
-.rpt-grid3 {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--rcf-stack);
+/* Five figures as 3 + 2: Calls · Answered · Missed over Time on the phone ·
+   Typical call — even tiles whatever the card's width. */
+.rpt-hero-stats { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.rpt-hero-stats > .dlx4-statcell { grid-column: span 2; }
+.rpt-hero-stats > .dlx4-statcell:nth-child(n + 4) { grid-column: span 3; }
+
+/* ─── Calls over time: the chart takes whatever height the row gives it
+   (the summary beside it leads). The frame is absolutely placed, so the
+   drawn SVG never feeds back into the row height. ─── */
+.rpt-chart-box-fill {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 190px;
 }
 
-@media (min-width: 760px) {
-  .rpt-grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.rpt-chart-box-fill > .dl-qtc-frame,
+.rpt-chart-box-fill > .dl-qtc-empty {
+  position: absolute;
+  inset: 0;
 }
 
-@media (min-width: 1180px) {
-  .rpt-grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
-/* Cards in the grid stretch to equal height, explainer pinned to the foot */
+/* Cards stretch to their row's height, explainer pinned to the foot */
 .rpt-card {
   display: flex;
   flex-direction: column;
@@ -284,6 +331,21 @@
 }
 
 .rpt-card-foot { margin-top: auto; }
+
+/* Busiest times: day above, hour below, each half of the card's height, so
+   the card reads as full beside its taller neighbours. */
+.rpt-busiest {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 14px;
+}
+
+/* Stacked (the row's grid is one column below 960px of content): natural
+   height, nothing to share out. */
+@container rptbody (max-width: 959.98px) {
+  .rpt-busiest { grid-template-rows: auto auto auto; }
+}
 
 /* ─── Big figure + caption (busiest day, grade word) ─── */
 .rpt-bigword {
@@ -318,38 +380,12 @@
   margin: 0;
 }
 
-/* ─── "What does this mean?" — native <details>, keyboard-ready ─── */
-.rpt-explain {
-  border-radius: 8px;
-}
-
-.rpt-explain > summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  list-style: none;
-  cursor: pointer;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--t-accent-text);
-  border-radius: 6px;
-  padding: 2px 0;
-  user-select: none;
-}
-
-.rpt-explain > summary::-webkit-details-marker { display: none; }
-.rpt-explain > summary:hover { text-decoration: underline; }
-
-.rpt-explain > summary:focus-visible {
-  outline: 2px solid var(--t-focus);
-  outline-offset: 2px;
-}
-
-.rpt-explain-chev { transition: transform var(--rcf-ease); }
-.rpt-explain[open] .rpt-explain-chev { transform: rotate(180deg); }
+/* ─── "What does this mean?" — the kit's bare Disclosure (lk-disc--bare);
+   only the type size and the tinted answer box are the page's own. ─── */
+.rpt-explain.lk-disc--bare .lk-disc-title { font-size: 0.72rem; font-weight: 600; gap: 6px; }
+.rpt-explain.lk-disc--bare > .lk-disc-head .lk-disc-toggle { padding: 2px 0; }
 
 .rpt-explain-body {
-  margin-top: 8px;
   padding: 10px 13px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--t-accent-line) 5%, transparent);
@@ -369,7 +405,7 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 9px;
 }
 
 .rpt-bar-top {
@@ -379,7 +415,7 @@
   gap: 12px;
   font-size: 0.78rem;
   color: var(--t-text);
-  margin-bottom: 5px;
+  margin-bottom: 4px;
 }
 
 .rpt-bar-count {
@@ -394,7 +430,7 @@
 }
 
 .rpt-bar-track {
-  height: 8px;
+  height: 7px;
   border-radius: 8px;
   background: var(--t-line-soft);
   overflow: hidden;
@@ -515,11 +551,26 @@
   margin-top: 1px;
 }
 
-.rpt-table-foot {
-  display: flex;
-  justify-content: center;
-  padding: 12px 16px;
-  border-top: 1px solid var(--t-line-soft);
+/* A table body capped at about 8 rows: scrolls inside, sticky column heads
+   (the `dl-th` tint is opaque, so rows never show through). "Your numbers"
+   after "Show all"; "Every call" always. */
+.rpt-tablewrap-cap {
+  max-height: var(--rpt-rows-cap, 482px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.rpt-calls-scroll { --rpt-rows-cap: 440px; }
+
+.rpt-tablewrap-cap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.rpt-calls-scroll:focus-visible {
+  outline: 2px solid var(--t-focus);
+  outline-offset: -2px;
 }
 
 /* ─── Call list filter row ─── */
@@ -548,9 +599,12 @@
   margin: 0;
 }
 
-@media (min-width: 760px) {
+@container rptbody (min-width: 640px) {
   .rpt-glossary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* The glossary disclosure sits on the page like the other cards. */
+.rpt-glossary-disc { box-shadow: var(--dl-panel-shadow); }
 
 .rpt-glossary dt {
   font-family: "Archivo", "IBM Plex Sans", sans-serif;
@@ -582,7 +636,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .rpt-skel { animation: none; }
-  .rpt-explain-chev { transition: none; }
 }
 
 /* ─── Inline card error with retry ─── */
@@ -594,15 +647,27 @@
   gap: 10px;
 }
 
-/* ─── Phone widths ─── */
-@media (max-width: 560px) {
-  .rpt-controls-actions { width: 100%; }
-  .rpt-controls-actions .dl-btn { flex: 1 1 auto; }
-  .rpt-numpick-btn { min-width: 0; width: 100%; }
-  .rpt-numpick { width: 100%; }
-  .rpt-controls-left { width: 100%; }
-  .rpt-controls-left > .dlx4-field { width: 100%; }
-  .rpt-staffbar select { min-width: 0; width: 100%; }
+/* ─── Narrow content (container queries — follow the space beside the
+   sidebar): the range line drops under the pickers, then everything goes
+   full width. ─── */
+@container rptbody (max-width: 900px) {
+  .rpt-tzline { flex-basis: 100%; text-align: left; white-space: normal; }
+}
+
+@container rptbody (max-width: 560px) {
+  .rpt-scopebar { padding: 10px 12px; }
+  .rpt-scopebar .rpt-numpick,
+  .rpt-scopebar .rpt-numpick-btn { width: 100%; min-width: 0; }
+  .rpt-custom-dates .dl-input { min-width: 0; flex: 1 1 130px; }
   .rpt-table td { padding: 10px 12px; }
   .rpt-listfilters { padding: 12px 14px; }
+  .rpt-hero-stats .dlx4-statcell { padding: 12px 10px 10px; }
+}
+
+/* Header tools / actions at phone width (the kit wraps the side under the
+   title; here the buttons share the row). */
+@container lkhead (max-width: 420px) {
+  .rpt-header .lk-head-actions .rpt-dl-btn { flex: 1 1 auto; justify-content: center; }
+  .rpt-headpick { width: 100%; }
+  .rpt-headpick-select { min-width: 0; max-width: none; flex: 1 1 auto; }
 }
