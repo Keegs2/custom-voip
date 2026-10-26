@@ -9,8 +9,11 @@
    are CONTAINER queries on the kit's own hosts, so they follow the space
    beside the sidebar, not the window. Motion: one height transition on
    disclosures + chevrons, off under prefers-reduced-motion.
-   Loaded once, globally (main.tsx), after index.css / theme.css; page CSS
-   loaded later may tune it at equal specificity.
+   Loaded once, globally (main.tsx), after index.css / theme.css. main.tsx
+   imports App first, so the CSS of EAGERLY imported pages is injected BEFORE
+   this file and loses equal-specificity ties to it: those pages tune kit
+   rules with one more class (e.g. `.gd-scope .lk-…`). Lazy pages load after
+   and may tune at equal specificity.
    ══════════════════════════════════════════════════════════════════════════ */
 
 :root {
@@ -498,6 +501,18 @@
   .lk-stats { width: 100%; justify-content: space-between; }
   .lk-stat { flex: 1 1 0; padding: 0 10px; }
   .lk-stat:first-child { padding-left: 0; }
+  .lk-stat dt { white-space: normal; }
+
+  /* Four or more figures: two per row instead of one row wider than a phone. */
+  .lk-stats:has(> .lk-stat:nth-child(4)) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+  .lk-stats:has(> .lk-stat:nth-child(4)) > .lk-stat:nth-child(odd) {
+    padding-left: 0;
+    border-left: none;
+  }
 }
 
 /* ─── Reduced motion ────────────────────────────────────────────────────── */

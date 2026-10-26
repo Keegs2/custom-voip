@@ -2288,7 +2288,7 @@ never viewport media queries, never Tailwind `md:*`.
 |---|---|---|
 | 1440 × 900 | ~1100px | Multi-column rows, followers active, MasterDetail side by side and bounded to the screen, header one row, KPI rows of 6 |
 | 820 × 1180 | ~520px (sidebar still shown) | `BalancedGrid` (md) stacks; MasterDetail stacks (list first, its ScrollArea capped at `min(50vh, 440px)`, detail at natural height, actions under it); CompactHeader's right side wraps under the title; the dashboard drops to 2 → 1 columns, `.ad-col` dissolves (`display: contents`, dense flow), followers go natural with a 420px cap |
-| 390 × 844 | ~340px | One column everywhere; header tools / actions full width, stats spread across; KPIs 2-up; no horizontal page scroll (the harness's "layout warnings" must be empty) |
+| 390 × 844 | ~340px | One column everywhere; header tools / actions full width, stats spread across (four or more figures go two per row, labels may wrap); KPIs 2-up; no horizontal page scroll (the harness's "layout warnings" must be empty) |
 
 ### 20.7 Accessibility
 
@@ -2331,6 +2331,17 @@ never viewport media queries, never Tailwind `md:*`.
   put the span on the column, not on the cards in it.
 - `useShowMore(items, Number.POSITIVE_INFINITY)` = "show everything" (a
   follower lists every item); `needed` is then false.
+- **CSS order:** `main.tsx` imports `App` before the global sheets, so the
+  CSS of pages `App.tsx` imports EAGERLY (dashboard, RCF, My Account,
+  Guides…) is injected BEFORE `index.css` / `layout-kit.css` and loses
+  every equal-specificity tie to `dl-*` / `lk-*` rules. Tune a kit or
+  `dl-*` rule from such a page with one more class (`.gd-scope .lk-…`,
+  `.ma-head .lk-stats`). Lazy pages load later and win ties.
+- **A stacked `.lk-col` follower** keeps its natural height: the kit only
+  gives it `flex: 1 1 0` through `--lk-follow-flex`, which BalancedGrid sets
+  side by side. A page grid that wants `.lk-col` followers to share the row
+  sets both `--lk-follow: size` and `--lk-follow-flex: 1 1 0` in its
+  multi-column query.
 
 ### 20.9 Roll-out checklist (per page)
 
