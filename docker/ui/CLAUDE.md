@@ -712,9 +712,8 @@ every persona.
   product guide; any other slug (incl. the old `trunking` / `calling`)
   redirects to `/docs/guides`. `/docs/rcf` → `/docs/guides/rcf`.
   `#<task id>` deep-links (opens + scrolls to) one task. Slugs + content
-  types: `guides/guideTopics.ts` (the page no longer reads
-  `GUIDE_PRODUCTS` from `docProducts.ts`; that type only feeds the shared
-  `ProductSelector`).
+  types: `guides/guideTopics.ts` (the page doesn't read `GUIDE_PRODUCTS`
+  from `docProducts.ts`).
 - **Layout (§20):** `CompactHeader` · `GuideSwitcher` (one row of four
   link cards — Overview, RCF, Visual Voicemail, IVR — `aria-current`,
   2 × 2 below ~860px of content) · then the guide. A product guide is ONE
@@ -769,8 +768,8 @@ current status, nothing we don't want customers to know".
   (`apiSectionForLegacySlug`: `rcf` → numbers, `telemetry` → calls); any other
   slug, `calling` included, → `/docs/api`. `#<entry-id>` deep-links an entry
   (opened + scrolled into view on arrival; a Contents click writes it).
-  `ApiProduct` / `API_PRODUCTS` / `isApiProduct` are deprecated leftovers kept
-  only because `ProductSelector`'s card map is typed over them.
+  The old product-card rail (`ProductSelector`) and its `ApiProduct` /
+  `API_PRODUCTS` / `isApiProduct` types were removed 2026-10-26 (unused).
 - **Truth contract** (header of `api/types.ts`): document ONLY routes a tenant
   `user` / `readonly` can call today, with the fields a tenant actually gets
   (CDRs: the `services/tenant_redaction.py` allowlist — whole minutes,

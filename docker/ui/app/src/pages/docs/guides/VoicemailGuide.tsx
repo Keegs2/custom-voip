@@ -287,7 +287,7 @@ const CONTENT: ProductGuideContent = {
       question: 'Do I get an email when a message arrives?',
       answer: (
         <Para>
-          No. New messages appear in the Inbox within seconds, and the sidebar shows how many are unread.
+          No. New messages appear in the Inbox when you open or refresh it, and the sidebar shows how many are unread.
         </Para>
       ),
     },

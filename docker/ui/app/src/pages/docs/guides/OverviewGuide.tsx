@@ -98,6 +98,14 @@ const PLACES: readonly { name: string; text: ReactNode }[] = [
     ),
   },
   {
+    name: 'Support',
+    text: (
+      <>
+        Read-only users only: <Ui>Call Quality</Ui>, your call records and how each call sounded.
+      </>
+    ),
+  },
+  {
     name: 'My Account',
     text: <>Your account details, the people on it, and your own name and password. Select your name at the bottom of the sidebar.</>,
   },
