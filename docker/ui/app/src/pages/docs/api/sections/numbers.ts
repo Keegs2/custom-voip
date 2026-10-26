@@ -12,7 +12,7 @@ const RCF_FIELDS: readonly FieldDoc[] = [
   { name: 'id', type: 'integer', description: 'The entry’s id (usable in place of the number when updating).' },
   { name: 'did', type: 'string', description: 'Your number, E.164.' },
   { name: 'name', type: 'string', description: 'Your label for it, or `null`.' },
-  { name: 'forward_to', type: 'string', description: 'Where calls go: an E.164 number, or a 3–6 digit extension.' },
+  { name: 'forward_to', type: 'string', description: 'Where calls go: an E.164 number.' },
   {
     name: 'ring_timeout',
     type: 'integer',
@@ -97,7 +97,6 @@ export const NUMBERS: SectionDoc = {
               type: 'string (date-time)',
               description: 'When it was assigned or requested, when known; else `null`.',
             },
-            { name: '[].notes', type: 'string', description: 'Notes on requests and releases, or `null`.' },
             { name: '[].customer_id', type: 'integer', description: 'Your account’s id.' },
             { name: '[].customer_name', type: 'string', description: 'Your account’s name.' },
           ],
@@ -113,7 +112,6 @@ export const NUMBERS: SectionDoc = {
               '    "city": "Boston",\n' +
               '    "state": "MA",\n' +
               '    "assigned_at": "2026-01-15T10:00:00+00:00",\n' +
-              '    "notes": null,\n' +
               '    "customer_id": 7,\n' +
               '    "customer_name": "Acme Water Co."\n' +
               '  }\n' +
@@ -175,6 +173,7 @@ export const NUMBERS: SectionDoc = {
           summary: 'Reserve an available number for your account, pending review.',
           description: [
             'The number is reserved for you straight away and shows as `reserved` in `GET /numbers/my` until Granite completes the assignment.',
+            'The body is optional: send a `notes` field for the reviewer, or no body at all.',
           ],
           roles: WRITE_ROLES,
           params: [
@@ -189,8 +188,7 @@ export const NUMBERS: SectionDoc = {
               name: 'product_type',
               in: 'body',
               type: 'string',
-              required: true,
-              description: '`rcf` (call forwarding) or `trunk` (SIP trunk).',
+              description: 'Optional. Default `rcf`. `rcf` (call forwarding) or `trunk` (SIP trunk).',
             },
             { name: 'notes', in: 'body', type: 'string', description: 'A note for the reviewer.' },
           ],
@@ -208,7 +206,7 @@ export const NUMBERS: SectionDoc = {
             request:
               `curl -X POST "$BASE/numbers/%2B16175550141/request" ${AUTH_HEADER} \\\n` +
               '  -H "Content-Type: application/json" \\\n' +
-              '  -d \'{"product_type": "rcf", "notes": "Second line for the Boston office"}\'',
+              '  -d \'{"notes": "Second line for the Boston office"}\'',
             response:
               '{\n' +
               '  "status": "reserved",\n' +
@@ -245,6 +243,7 @@ export const NUMBERS: SectionDoc = {
           statuses: [
             ok('Requested — `status` is `release_requested`.'),
             S401,
+            S403_EDIT,
             notFound('The number'),
             { code: 409, when: 'The number isn’t `assigned`, or a release is already waiting for review.' },
             S422,
@@ -287,6 +286,7 @@ export const NUMBERS: SectionDoc = {
           statuses: [
             ok('Withdrawn — `status` is `assigned`.'),
             S401,
+            S403_EDIT,
             notFound('The number'),
             { code: 409, when: 'There’s no release waiting for review.' },
             S422,
@@ -392,7 +392,7 @@ export const NUMBERS: SectionDoc = {
               name: 'forward_to',
               in: 'body',
               type: 'string',
-              description: 'New destination: an E.164 number, a 10-digit US number, or a 3–6 digit extension.',
+              description: 'New destination: an E.164 number or a 10-digit US number.',
             },
             {
               name: 'ring_timeout',
@@ -421,9 +421,10 @@ export const NUMBERS: SectionDoc = {
             ok('Updated.'),
             { code: 400, when: 'No fields were sent.' },
             S401,
+            S403_EDIT,
             { code: 403, when: '`max_channels` was sent — only Granite can change it.' },
             notFound('The number'),
-            { code: 422, when: 'A destination isn’t a valid number or extension, or `ring_timeout` is outside 5–120.' },
+            { code: 422, when: 'A destination isn’t a valid phone number, or `ring_timeout` is outside 5–120.' },
           ],
           example: {
             request:

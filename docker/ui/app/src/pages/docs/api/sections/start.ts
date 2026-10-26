@@ -75,7 +75,7 @@ export const START: SectionDoc = {
               items: [
                 'A token is valid for 8 hours from sign-in. There is no refresh token: when a request returns `401`, sign in again and retry it.',
                 'A token acts as the user who signed in, with that user’s role. Keep it secret, like a password.',
-                'A disabled user can’t sign in (`403`).',
+                'A disabled user can’t sign in (`403`), and their existing sign-ins stop working within a minute (`401`).',
               ],
             },
           ],
@@ -103,8 +103,8 @@ export const START: SectionDoc = {
             {
               type: 'p',
               text:
-                'Every endpoint works on your own account only. Anything that isn’t yours answers `404 Not Found`, ' +
-                'exactly as if it didn’t exist.',
+                'Every endpoint works on your own account only. Endpoints that act on one of your objects answer ' +
+                '`404 Not Found` for anything not on your account, exactly as if it didn’t exist.',
             },
           ],
         },
@@ -190,8 +190,9 @@ export const START: SectionDoc = {
               items: [
                 'Phone numbers are E.164: `+`, country code, number — `+16175550123`. Where an endpoint accepts any format, a bare 10-digit number is read as a US number (`6175550123` → `+16175550123`).',
                 'A number inside a URL path: encode the `+` as `%2B` (`/rcf/%2B16175550123`).',
-                'Lists either return everything up to a stated cap, or page with `limit` and `offset` and include a `total`. Each endpoint says which.',
-                'Call lengths and minutes are talk time in whole minutes, rounded to the nearest minute — an answered call counts as at least 1. Seconds are never returned.',
+                'Most lists either return everything (some up to a stated cap) or page with `limit` and `offset` and include a `total`. `GET /trunks` is the exception: a plain array paged with `limit` and `offset`, with no `total`. Each endpoint says which.',
+                'Call records and reports give talk time in whole minutes, rounded to the nearest minute — an answered call counts as at least 1. Averages (`avg_duration_minutes`, `avg_minutes`) may have one decimal.',
+                'Other durations name their unit: `ring_timeout` and `max_message_seconds` are seconds, and voicemail lengths (`duration_ms`) are milliseconds.',
               ],
             },
           ],
