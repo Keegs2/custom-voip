@@ -575,6 +575,33 @@ and the number picker list EVERY product's numbers (`/reports/my-numbers`,
 list spans more than one; the table / PDF sub-line adds the product for
 non-forwarding numbers ("Front desk · Voicemail"); the call list shows the
 server's `outcome_label` ("Answered by voicemail"); the glossary explains it.
+- **Layout (§20, 2026-10):** `CompactHeader` in one row — crumb (the
+  preview customer's name + amber "Staff preview" / "Staff" tag), title,
+  subtitle; staff **Customer** picker as `tools` (not while previewing);
+  the downloads **Spreadsheet (CSV)** + **PDF summary** as `actions`
+  (accessible names "Download …"; shown once a customer is in scope). Then
+  ONE slim scope bar (`ReportControls`): Period presets · Numbers picker
+  (label inline) · "Oct 1 – Oct 22, 2026 · New York time" (full zone in
+  the tooltip); Custom dates open From/To inline in the same bar (it wraps
+  to a second line). Body rows: **Summary | Calls over time** (one
+  `BalancedGrid` row, 1 : 1.6 — the summary leads; the chart's `fill` mode
+  takes the row's height, min 190px, its frame absolutely placed so the
+  SVG never feeds back into the row height); **Busiest · Missed · Quality**
+  (three equal columns, one height; Busiest shares its height between day
+  and hour); **Your numbers** (8 rows, "Show all N numbers" opens the rest
+  inside a scroll capped at ~8 rows with sticky heads — `useShowMore`,
+  `.rpt-tablewrap-cap`); **Every call** (filters, the page's rows in a
+  capped scroll ~440px with sticky heads, ONE pager under it; paging, page
+  size, filters and the CSV filters unchanged; a page change scrolls the
+  box to its first row); **Words on this page** (`Disclosure` card,
+  collapsed, `reporting:glossary`). Every card's "What does this mean?" is
+  a kit `Disclosure variant="bare"` (`Explainer` in `ReportBits.tsx`).
+  Both grids stack below 960px of content; the bar's range line drops
+  under the pickers below 900px; everything is full width below 560px
+  (container queries on `.rpt-body`). 1440 × 900: header, bar, summary,
+  chart and the three insight cards' figures are on the first screen
+  (≈2,500px page, was ≈5,500px). The PDF (`ReportPdfDocument`) is
+  untouched — it renders from data, not the page.
 
 **`CallActivityTab`** (`pages/rcf/`) — `scope` prop: `'rcf'` (default, the
 /rcf console — GET /rcf picker, `product_type=rcf` + `destination`,
@@ -637,9 +664,31 @@ The merged CDR search + voice-quality page. Top composition (2026-10 rework):
 - **No charts.** The Quality Trends section (`QualityTrendsSection`,
   `components/charts/QualityTrendChart`) was removed 2026-10 at the owner's
   request — do not re-add graphs to this page.
-- Records/Summary tabs (Summary = staff, tabular), paginated `CallsTable`,
-  `CdrDetailModal` on row click. Page CSS: `cq-`/`cqf-`/`cqk-` classes in
-  `styles/dl-platform-b.css`. Grades: see §16.
+- **Header** — `CompactHeader`, one row (crumb Support/Voice, title,
+  role-aware subtitle).
+- **Records row** — ONE slim row: the Records/Summary switch (staff;
+  Summary = tabular, staff-only) with the top pager beside it
+  (`.cq-recordsbar`); tenants get the pager alone. The pager repeats under
+  the table. The results block is the pagination scroll target.
+- **`CallsTable` fits the content column at 1440 × 900** (staff and
+  tenant; 11px cell sides, `.cq-table`). Columns: Time ("10-22 15:16:00";
+  the year only when not the current one — full stamp in the tooltip) ·
+  Leg (staff, All/Carrier legs only) · Customer (staff, clipped + title) ·
+  **Call** (phone-in / phone-out icon — inbound azure, outbound slate, the
+  word for screen readers and in the tooltip — + the product tag) · From ·
+  To (NANP without "+1 "; full number in the tooltip and the modal) ·
+  **Duration** (a red "N/A" pill when not answered — the old Status
+  column) · Quality (pill; packet loss in its tooltip) · **Loss %** only
+  where the panel has room (container query on `.cq-records`: tenants
+  from 860px, staff from 1200px of panel) · Carrier (staff) · Trunk
+  (clipped + title) · Cost Est. (staff). Everything moved out of the row
+  is in `CdrDetailModal` (status, per-direction loss, full timestamps).
+  Narrower (820 / 390, or the Leg column), the table pans INSIDE its panel
+  (`.dlx4-tablewrap`) with a soft edge shade where there is more
+  (`.cq-panwrap.is-left/.is-right`, set by `usePanEdges`); the page never
+  scrolls sideways. Rows stay `tr.dl-row`; row click opens
+  `CdrDetailModal`. Page CSS: `cq-`/`cqf-`/`cqk-` classes in
+  `styles/dl-platform-b.css` (+ `--cq-pan-shade`). Grades: see §16.
 
 **`TroubleshootingPage`** (`/troubleshooting`)
 Full-screen page (outside `AppLayout`, renders its own `Sidebar`). This is a
