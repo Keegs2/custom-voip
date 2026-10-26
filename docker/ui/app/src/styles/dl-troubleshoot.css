@@ -99,36 +99,44 @@
   max-width: 1800px;
 }
 
-/* ─── Header + section rhythm ───
-   The shared .dl-header bottom-aligns its two halves; on this page the right
-   half is a single action, so it is centred against the title block instead
-   (no floating-at-the-baseline button). The stack gap matches the header's
-   zone gap so header → search → results are evenly spaced. */
-.dl-header.dlx5-header {
-  align-items: center;
-}
-
+/* ─── Header + page rhythm (layout kit, docker/ui/CLAUDE.md §20) ───
+   The header is the kit's CompactHeader (one row); its one action is a
+   compact ghost link. The results panel ends 24px above the first screen's
+   bottom edge and the shell ends there too, so a full results panel scrolls
+   inside itself and the page does not scroll. */
 .dlx5-header-action {
   flex-shrink: 0;
-  height: 38px;
-  padding: 0 16px;
+  height: 34px;
+  padding: 0 14px;
+  font-size: 0.78rem;
+  gap: 7px;
 }
 
-.dl-stack.dlx5-stack {
-  gap: var(--rcf-zone);
-  padding-bottom: var(--rcf-zone);
+.dl-shell.dlx5-shell {
+  padding-bottom: 24px;
 }
 
-/* ─── Search form ───
-   One control height family: 40px for the primary omnibox row, 36px for
-   every secondary control (segmented presets, datetime pickers, Advanced
-   fields). Labels are the shared .dl-flabel (fixed 6px gap), so baselines
-   line up across columns. */
+.dlx5-search {
+  margin-bottom: 16px;
+}
+
+/* ─── Search form — ONE row at desktop ───
+   omnibox · time-range presets · Search / Clear, all 40px tall; the live
+   hint sits under the omnibox and the resolved window under the presets.
+   Start / End only appear for "Custom"; Advanced is a kit Disclosure.
+   Breakpoints are CONTAINER queries on the panel (they follow the space
+   beside the sidebar): presets + buttons drop under the omnibox below 980px
+   of panel, and everything stacks below 640px. */
+.dlx5-search-host {
+  container-type: inline-size;
+  container-name: tssearch;
+}
+
 .dlx5-search-body {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 20px 20px 18px;
+  gap: 8px;
+  padding: 14px 18px 8px;
 }
 
 .dlx5-field {
@@ -142,42 +150,73 @@
   padding-bottom: 0;
 }
 
-/* Shared 3-column grid — Time range · Start · End, and the Advanced
-   From · To · Call-ID row use the SAME tracks so they align column-for-column. */
-.dlx5-grid3 {
+.dlx5-searchgrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px 20px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px) auto;
+  grid-template-areas:
+    'omni range actions'
+    'hint window window';
+  gap: 6px 16px;
+  align-items: end;
 }
 
-@media (max-width: 980px) {
-  .dlx5-grid3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .dlx5-grid3.dlx5-timerow > .dlx5-field:first-child { grid-column: 1 / -1; }
+.dlx5-f-omni { grid-area: omni; }
+.dlx5-f-range { grid-area: range; }
+
+.dlx5-search-actions {
+  grid-area: actions;
+  display: flex;
+  gap: 8px;
 }
 
-@media (max-width: 640px) {
-  .dlx5-grid3 { grid-template-columns: minmax(0, 1fr); }
+.dlx5-search-actions .dl-btn {
+  flex-shrink: 0;
+  height: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
-/* Time-range row sits on a hairline that separates "what" from "when". */
-.dlx5-timerow {
-  padding-top: 18px;
-  border-top: 1px solid var(--t-line-soft);
+.dlx5-search-btn {
+  min-width: 118px;
+}
+
+.dlx5-clear-btn {
+  min-width: 76px;
+}
+
+@container tssearch (max-width: 979.98px) {
+  .dlx5-searchgrid {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'omni omni'
+      'hint hint'
+      'range actions'
+      'window window';
+  }
+  .dlx5-f-range { margin-top: 6px; }
+}
+
+@container tssearch (max-width: 639.98px) {
+  .dlx5-searchgrid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'omni'
+      'hint'
+      'range'
+      'window'
+      'actions';
+  }
+  .dlx5-search-actions .dl-btn { flex: 1 1 0; }
+  /* Five presets on a phone: sized by their labels, tighter, so every
+     label stays whole (beats the base rule below on specificity). */
+  .dlx5-seg .dlx5-seg-btn { flex: 1 1 auto; padding: 0 3px; font-size: 0.7rem; }
 }
 
 /* ─── Omnibox — the primary search control ───
-   One mono field with an inset glyph; Search/Clear sit inline at the same
-   40px height so the eye's loop is type → confirm hint → Enter. */
-.dlx5-omnirow {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
-}
-
+   One mono field with an inset glyph; Search / Clear sit on the same row at
+   the same 40px height so the eye's loop is type → confirm hint → Enter. */
 .dlx5-omniwrap {
   position: relative;
-  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -198,37 +237,18 @@
   font-size: 0.92rem;
 }
 
-.dlx5-omnirow .dl-btn {
-  flex-shrink: 0;
-  height: 40px;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.dlx5-search-btn {
-  min-width: 124px;
-}
-
-.dlx5-clear-btn {
-  min-width: 84px;
-}
-
-/* Narrow: the buttons wrap under the full-width box, sharing the row */
-@media (max-width: 620px) {
-  .dlx5-omnirow { flex-wrap: wrap; }
-  .dlx5-omniwrap { flex-basis: 100%; }
-  .dlx5-omnirow .dl-btn { flex: 1 1 0; }
-}
-
 /* ─── Live truth hint under the omnibox ───
    Always states exactly what Search will send; reserves one line of height
    so appearing/disappearing text doesn't bounce the rows below. */
 .dlx5-hintstrip {
+  grid-area: hint;
+  align-self: start;
   display: flex;
   flex-direction: column;
   gap: 3px;
-  margin: 8px 2px 0;
+  margin: 0 2px;
   min-height: 18px;
+  min-width: 0;
 }
 
 .dlx5-hint {
@@ -255,14 +275,29 @@
   font-weight: 600;
 }
 
-/* Segmented preset control — one joined 36px track filling its column
-   (same height as the pickers beside it). Page-scoped descendant of the
-   established `dlx-seg` idiom; promote to a shared `.dl-seg` on the next
-   design-system pass. */
+/* The window a preset resolves to — quiet, under the presets. */
+.dlx5-window {
+  grid-area: window;
+  align-self: start;
+  margin: 0 2px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--t-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.dlx5-window-tz {
+  color: var(--t-text-faint);
+}
+
+/* Segmented preset control — one joined 40px track filling its column
+   (the omnibox's height). Page-scoped descendant of the established
+   `dlx-seg` idiom; promote to a shared `.dl-seg` on the next design-system
+   pass. */
 .dlx5-seg {
   display: flex;
   width: 100%;
-  height: 36px;
+  height: 40px;
   padding: 3px;
   gap: 2px;
   box-sizing: border-box;
@@ -308,75 +343,77 @@
   box-shadow: var(--ts-seg-shadow);
 }
 
-/* ─── Advanced disclosure — quiet uppercase toggle + rotating caret ─── */
-.dlx5-advbar {
+/* ─── Custom range — one slim row, labels inline ─── */
+.dlx5-customrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  padding-top: 8px;
+  border-top: 1px solid var(--t-line-soft);
+}
+
+.dlx5-inline-field {
   display: flex;
   align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  min-height: 24px;
+  gap: 10px;
 }
 
-.dlx5-advbar-note {
-  font-size: 0.7rem;
-  color: var(--t-text-faint);
+.dlx5-inline-field .dl-flabel {
+  margin: 0;
+  white-space: nowrap;
 }
 
-.dlx5-adv-toggle {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 0 -2px;
-  padding: 4px 2px;
-  border: none;
-  background: none;
-  font-family: inherit;
+.dlx5-search .dlx5-inline-field .dl-input.dlx5-ctl {
+  width: 220px;
+}
+
+@container tssearch (max-width: 639.98px) {
+  .dlx5-customrow { flex-direction: column; align-items: stretch; }
+  .dlx5-inline-field { justify-content: space-between; }
+  .dlx5-search .dlx5-inline-field .dl-input.dlx5-ctl { width: auto; flex: 1 1 auto; min-width: 0; }
+}
+
+/* ─── Advanced — the kit's bare Disclosure (From · To · Call-ID) ───
+   Hairline above, so "what / when" and "more criteria" read as two rows. */
+.dlx5-adv-disc {
+  padding-top: 4px;
+  border-top: 1px solid var(--t-line-soft);
+}
+
+.dlx5-adv-disc .lk-disc-title {
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--t-text-dim);
-  cursor: pointer;
-  transition: color var(--rcf-ease);
 }
 
-.dlx5-adv-toggle:hover {
+.dlx5-adv-disc .lk-disc-count {
   color: var(--t-accent-text);
+  background: var(--t-accent-tint);
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
-.dlx5-adv-toggle:focus-visible {
-  outline: 2px solid var(--t-focus);
-  outline-offset: 2px;
-  border-radius: 4px;
+.dlx5-adv-disc .lk-disc-summary {
+  font-size: 0.7rem;
+  color: var(--t-text-faint);
 }
 
-.dlx5-adv-caret {
-  display: inline-flex;
-  transition: transform var(--rcf-ease);
+/* Shared 3-column grid for the Advanced fields. */
+.dlx5-grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 20px;
+  align-items: start;
 }
 
-.dlx5-adv-toggle[aria-expanded="true"] .dlx5-adv-caret {
-  transform: rotate(90deg);
+@container tssearch (max-width: 759.98px) {
+  .dlx5-grid3 { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* Collapsed-with-active-criteria badge — advanced filters still apply while
-   hidden, and the toggle says so. */
-.dlx5-adv-count {
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 1px 8px;
-  border-radius: 20px;
-  color: var(--t-accent-text);
-  background: color-mix(in srgb, var(--t-accent-line) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--t-accent-line) 30%, transparent);
-}
-
-/* The open Advanced grid sits directly under its toggle (the column gap
-   of .dlx5-search-body is too loose for a disclosure and its content). */
 .dlx5-adv {
-  margin-top: -6px;
+  padding-bottom: 6px;
 }
 
 /* ─── Inline validation note (custom-range errors) ─── */
@@ -384,15 +421,154 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: -6px 0 0;
+  margin: 0;
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--t-danger-fg);
 }
 
-/* ─── Results head — title + count on one line, summary beneath ─── */
+/* ─── Results panel — bounded to the first screen ───
+   Head (title · what was searched · count) on ONE line, then the table in a
+   scroller with sticky column heads, then the pager pinned underneath. From
+   480px of panel the panel ends 24px above the screen's bottom edge
+   (--ts-res-top is written by useViewportFit); narrower it is its natural
+   height and the page scrolls. */
+.dlx5-results-host {
+  container-type: inline-size;
+  container-name: tsres;
+}
+
+.dlx5-results {
+  display: flex;
+  flex-direction: column;
+}
+
+.dlx5-results-head {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.dlx5-results-sub {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--t-text-dim);
+}
+
 .dlx5-results-count {
   margin-left: auto;
+}
+
+.dlx5-results-note {
+  padding: 16px 20px;
+}
+
+.dlx5-results-note-tight {
+  padding: 12px 20px 4px;
+}
+
+.dl-center.dlx5-empty {
+  padding: 44px 24px 48px;
+}
+
+.dl-center.dlx5-loading {
+  flex-direction: row;
+  gap: 10px;
+  padding: 44px 24px;
+  color: var(--t-text-dim);
+  font-size: 0.85rem;
+}
+
+@container tsres (min-width: 480px) {
+  .dlx5-results {
+    max-height: max(360px, calc(100vh - var(--ts-res-top, 320px) - 24px));
+    max-height: max(360px, calc(100dvh - var(--ts-res-top, 320px) - 24px));
+  }
+  .dlx5-results > :not(.dlx5-results-scroll) { flex-shrink: 0; }
+  .dlx5-results-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  .dlx5-table thead .dl-th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+}
+
+@container tsres (max-width: 639.98px) {
+  .dlx5-results-head { flex-wrap: wrap; }
+  .dlx5-results-sub { order: 3; flex-basis: 100%; white-space: normal; }
+}
+
+/* ─── Results table — columns by priority ───
+   Every column at full width. As the panel narrows: the "Ladder" word goes
+   (the glyph stays), then Orig / Term, then Attestation / Zone (the parties
+   stack, the date sits over the clock), then Duration and the open column
+   (the whole row opens the call; its name says so). The call panel always
+   shows all of them. */
+.dlx5-table th,
+.dlx5-table td {
+  padding: 9px 8px;
+  white-space: nowrap;
+}
+
+.dlx5-table th.dl-th {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.dlx5-table th:first-child,
+.dlx5-table td:first-child {
+  padding-left: 20px;
+}
+
+.dlx5-table .dlx5-c-open {
+  width: 1%;
+  padding-left: 8px;
+  padding-right: 20px;
+  text-align: right;
+}
+
+.dlx5-party-arrow {
+  margin: 0 6px;
+}
+
+@container tsres (max-width: 1079.98px) {
+  .dlx5-openhint-label { display: none; }
+}
+
+@container tsres (max-width: 959.98px) {
+  .dlx5-table .dlx5-c-orig,
+  .dlx5-table .dlx5-c-term { display: none; }
+}
+
+@container tsres (max-width: 759.98px) {
+  .dlx5-table .dlx5-c-attest,
+  .dlx5-table .dlx5-c-zone { display: none; }
+  .dlx5-table td.dlx5-c-party .dlx5-party { display: block; }
+  .dlx5-table td.dlx5-c-party .dlx5-party-arrow { display: none; }
+  .dlx5-table td.dlx5-c-time .dlx5-ts-date { display: block; color: var(--t-text-dim); }
+  .dlx5-table td.dlx5-c-result { white-space: normal; }
+  .dlx5-table td.dlx5-c-result .dlx5-attempts { margin: 4px 0 0; }
+}
+
+@container tsres (max-width: 519.98px) {
+  .dlx5-table .dlx5-c-dur,
+  .dlx5-table .dlx5-c-open { display: none; }
+  .dlx5-table th,
+  .dlx5-table td { padding-left: 6px; padding-right: 6px; }
+  .dlx5-table th:first-child,
+  .dlx5-table td:first-child { padding-left: 12px; }
+  .dlx5-table th:last-child,
+  .dlx5-table td:last-child { padding-right: 12px; }
+  .dlx5-table td.dlx5-c-result .dlx5-attempts { padding: 1px 6px; }
+  .dlx5-table td.dlx5-c-result .dlx5-attempts-count { display: none; }
 }
 
 /* Screen-reader-only text (e.g. the open-detail column header) */

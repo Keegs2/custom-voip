@@ -11,10 +11,16 @@
  * the time range uses relative presets that resolve to concrete instants at
  * Search time (same idiom as the CDR page's filter bar).
  *
- * Search form layout (2026-10): omnibox row (40px controls, primary Search at
- * the row's end) with the live hint under it, then a 3-column filter grid
- * (Time range · Start · End) that the Advanced grid (From · To · Call-ID)
- * shares column-for-column, so every label and control lines up vertically.
+ * Layout (docker/ui/CLAUDE.md §20 — balanced, compact): a one-row
+ * CompactHeader; the search form is ONE row at desktop (omnibox · time-range
+ * presets · Search / Clear) with the live hint under the omnibox and the
+ * resolved window under the presets; Start / End appear only for "Custom";
+ * Advanced (From · To · Call-ID) is a kit Disclosure whose row says how many
+ * criteria are active. The results panel is bounded to the first screen
+ * (useViewportFit): the table scrolls inside it under sticky column heads and
+ * the pager stays pinned under it, so the page itself does not scroll. Low-
+ * priority columns drop out as the panel narrows (container queries) — the
+ * call panel always has all of them.
  *
  * Results columns (2026-09 redesign): Time (compact 24h+ms) · From→To ·
  * Orig/Term carrier (derived client-side from the group's endpoint aliases)
@@ -83,6 +89,7 @@ import {
   ZonePill,
 } from './troubleshooting/CallBadges';
 import { CallTraceModal, type StepDirection } from './troubleshooting/CallTraceModal';
+import { CompactHeader, Disclosure, useViewportFit } from '../components/layout/kit';
 import '../styles/dl-troubleshoot.css';
 
 // Dev-only self-test for one-row-per-call grouping (RESULT from the A leg,
@@ -319,7 +326,7 @@ function fmtWindowStamp(iso: string): string {
 
 function EmptyState() {
   return (
-    <div className="dl-center">
+    <div className="dl-center dlx5-empty">
       <div className="dl-center-icon">
         {/* Network / signal icon */}
         <svg
@@ -338,9 +345,10 @@ function EmptyState() {
           <circle cx={12} cy={20} r={1} fill="currentColor" stroke="none" />
         </svg>
       </div>
-      <p style={{ margin: 0, color: INK_DIM, fontSize: '0.85rem', maxWidth: 380 }}>
+      <p style={{ margin: 0, color: INK_DIM, fontSize: '0.85rem', maxWidth: 440 }}>
         Search by phone number — any format, full or a 3+ digit partial — or by
-        SIP Call-ID, then open a call to read its signaling ladder.
+        SIP Call-ID, then open a call to read its signaling ladder. Numbers match
+        the caller, the callee, or anywhere in the SIP message.
       </p>
       <p style={{ margin: 0, color: INK_FAINT, fontFamily: MONO, fontSize: '0.7rem' }}>
         +1 (617) 454-4217 · 617.454.4217 · 4544217 · a84b4c76@sbc-1
@@ -445,21 +453,23 @@ function ResultsTable({
 
   return (
     <>
-      <div className="dlx5-tablewrap">
-        {/* min-width keeps the nowrap columns readable; narrower panels PAN
-            inside the wrap (visible scrollbar) instead of crushing/overflowing. */}
-        <table style={{ width: '100%', minWidth: 960, borderCollapse: 'collapse', fontSize: '0.78rem', color: INK_SOFT }}>
+      {/* The scroller: the results panel bounds it to the first screen (the
+          column heads stick), and low-priority columns drop out as the panel
+          narrows (dlx5-c-* in dl-troubleshoot.css), so it pans sideways only
+          as a last resort on the narrowest phones. */}
+      <div className="dlx5-tablewrap dlx5-results-scroll" role="region" aria-label="Calls found">
+        <table className="dlx5-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', color: INK_SOFT }}>
           <thead>
             <tr>
-              <th className="dl-th" style={{ padding: '10px 10px 10px 20px' }}>Time</th>
-              <th className="dl-th" style={{ padding: '10px 10px' }}>From → To</th>
-              <th className="dl-th" style={{ padding: '10px 10px' }}>Orig</th>
-              <th className="dl-th" style={{ padding: '10px 10px' }}>Term</th>
-              <th className="dl-th" style={{ padding: '10px 10px' }}>Result</th>
-              <th className="dl-th" style={{ padding: '10px 10px' }}>Attestation</th>
-              <th className="dl-th" style={{ padding: '10px 10px' }}>Duration</th>
-              <th className="dl-th" style={{ padding: '10px 10px' }}>Zone</th>
-              <th className="dl-th" style={{ padding: '10px 20px 10px 8px', width: 84 }}>
+              <th className="dl-th dlx5-c-time">Time</th>
+              <th className="dl-th dlx5-c-party">From → To</th>
+              <th className="dl-th dlx5-c-orig">Orig</th>
+              <th className="dl-th dlx5-c-term">Term</th>
+              <th className="dl-th dlx5-c-result">Result</th>
+              <th className="dl-th dlx5-c-attest">Attestation</th>
+              <th className="dl-th dlx5-c-dur">Duration</th>
+              <th className="dl-th dlx5-c-zone">Zone</th>
+              <th className="dl-th dlx5-c-open">
                 <span className="dlx5-visually-hidden">Open call detail</span>
               </th>
             </tr>
@@ -469,6 +479,10 @@ function ResultsTable({
               const row = group.representative;
               const { endpoints, zone } = rowFacts[idx];
               const isActive = activeIdx === idx;
+              // "Oct 22 15:16:00.005" → date + clock, so narrow panels can
+              // set the date over the time instead of widening the column.
+              const stamp = fmtCompactTs(row.timestamp);
+              const cut = stamp.lastIndexOf(' ');
 
               return (
                 <tr
@@ -485,34 +499,41 @@ function ResultsTable({
                   onKeyDown={(e) => handleRowKeyDown(e, idx)}
                   title="Open the SIP ladder and call detail"
                 >
-                  {/* Time — compact single line, 24h, ms precision */}
+                  {/* Time — 24h, ms precision; the date sits over the clock on narrow panels */}
                   <td
+                    className="dlx5-c-time"
                     style={{
-                      padding: '9px 10px 9px 20px',
-                      whiteSpace: 'nowrap',
                       fontFamily: MONO,
                       fontSize: '0.7rem',
                       color: INK_SOFT,
                       fontVariantNumeric: 'tabular-nums',
                     }}
                   >
-                    {fmtCompactTs(row.timestamp)}
+                    {cut > 0 ? (
+                      <>
+                        <span className="dlx5-ts-date">{stamp.slice(0, cut)}</span>{' '}
+                        <span className="dlx5-ts-clock">{stamp.slice(cut + 1)}</span>
+                      </>
+                    ) : (
+                      stamp
+                    )}
                   </td>
 
-                  {/* From → To */}
-                  <td style={{ padding: '9px 10px', whiteSpace: 'nowrap' }}>
-                    <span style={{ fontFamily: MONO, fontSize: '0.72rem', fontWeight: 500, color: INK_SOFT }}>
+                  {/* From → To (stacked on narrow panels) */}
+                  <td className="dlx5-c-party">
+                    <span className="dlx5-party" style={{ fontFamily: MONO, fontSize: '0.72rem', fontWeight: 500, color: INK_SOFT }}>
                       {displayUser(row.from_user)}
                     </span>
-                    <span style={{ color: INK_GHOST, margin: '0 6px' }}>→</span>
-                    <span style={{ fontFamily: MONO, fontSize: '0.72rem', fontWeight: 600, color: AZURE_DEEP }}>
+                    <span className="dlx5-party-arrow" style={{ color: INK_GHOST }}>→</span>
+                    <span className="dlx5-party" style={{ fontFamily: MONO, fontSize: '0.72rem', fontWeight: 600, color: AZURE_DEEP }}>
                       {displayUser(row.to_user)}
                     </span>
                   </td>
 
                   {/* Orig carrier — external source of the ingress INVITE */}
                   <td
-                    style={{ padding: '9px 10px', fontFamily: MONO, fontSize: '0.7rem', color: INK_DIM, whiteSpace: 'nowrap' }}
+                    className="dlx5-c-orig"
+                    style={{ fontFamily: MONO, fontSize: '0.7rem', color: INK_DIM }}
                     title={endpoints.orig ?? 'No externally-sourced INVITE captured'}
                   >
                     {endpoints.orig !== null ? carrierEndpointLabel(endpoints.orig) : '—'}
@@ -520,37 +541,38 @@ function ResultsTable({
 
                   {/* Term carrier — external destination of the egress INVITE */}
                   <td
-                    style={{ padding: '9px 10px', fontFamily: MONO, fontSize: '0.7rem', color: INK_DIM, whiteSpace: 'nowrap' }}
+                    className="dlx5-c-term"
+                    style={{ fontFamily: MONO, fontSize: '0.7rem', color: INK_DIM }}
                     title={endpoints.term ?? 'No terminating leg (inbound-only or failed call)'}
                   >
                     {endpoints.term !== null ? carrierEndpointLabel(endpoints.term) : '—'}
                   </td>
 
                   {/* Result */}
-                  <td style={{ padding: '9px 10px', whiteSpace: 'nowrap' }}>
+                  <td className="dlx5-c-result">
                     <StatusPill status={group.finalStatus} />
                     <AttemptsBadge attempts={group.attempts} />
                   </td>
 
                   {/* Attestation */}
-                  <td style={{ padding: '9px 10px' }}>
+                  <td className="dlx5-c-attest">
                     <AttestationBadge attestation={group.attestation} />
                   </td>
 
                   {/* Duration */}
-                  <td style={{ padding: '9px 10px', fontVariantNumeric: 'tabular-nums', color: INK_DIM, whiteSpace: 'nowrap' }}>
+                  <td className="dlx5-c-dur" style={{ fontVariantNumeric: 'tabular-nums', color: INK_DIM }}>
                     {group.durationSec !== null ? fmtCallDuration(group.durationSec) : '—'}
                   </td>
 
                   {/* Zone (from the HEP capture node id) */}
-                  <td style={{ padding: '9px 10px', whiteSpace: 'nowrap' }}>
+                  <td className="dlx5-c-zone">
                     <ZonePill zone={zone} />
                   </td>
 
-                  {/* Open-panel affordance (label + panel glyph) */}
-                  <td style={{ padding: '9px 20px 9px 8px', textAlign: 'right' }}>
+                  {/* Open-panel affordance (label + panel glyph; the label drops on narrow panels) */}
+                  <td className="dlx5-c-open">
                     <span className="dlx5-openhint" aria-hidden="true">
-                      Ladder
+                      <span className="dlx5-openhint-label">Ladder</span>
                       <span className="dlx5-chevron">
                         <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                           <rect x={3} y={4} width={18} height={16} rx={2} />
@@ -638,6 +660,10 @@ export function TroubleshootingPage() {
   // Shared desktop sidebar collapse — same localStorage key as AppLayout, so
   // the state carries across navigation between shells.
   const { collapsed, toggleCollapsed } = useSidebarCollapse();
+  // The results panel ends 24px above the first screen's bottom edge (its
+  // table scrolls inside) — useViewportFit keeps its document offset fresh.
+  const resultsRef = useRef<HTMLElement>(null);
+  useViewportFit(resultsRef, '--ts-res-top');
 
   const searchMutation = useMutation({
     mutationFn: (params: HomerSearchParams) => searchSipTraces(params),
@@ -813,48 +839,43 @@ export function TroubleshootingPage() {
           with the sidebar slide. */}
       <div className={collapsed ? 'dl-scope dlx5-canvas dlx5-canvas--collapsed' : 'dl-scope dlx5-canvas'}>
         {/* dlx5-shell-wide: page-scoped 1800px cap matching the Calls &
-            Quality page (dlx4-shell-wide) — the shared .dl-shell stays 1200. */}
-        <div className="dl-shell dlx5-shell-wide">
-          {/* ── Quiet console header ─────────────────────────────────── */}
-          <header className="dl-header dlx5-header fx-load">
-            <div className="dl-header-id">
-              <div className="dl-crumb">
+            Quality page (dlx4-shell-wide) — the shared .dl-shell stays 1200.
+            dlx5-shell: the bottom padding equals the results panel's gap to
+            the screen edge, so a full results panel never scrolls the page. */}
+        <div className="dl-shell dlx5-shell-wide dlx5-shell">
+          <CompactHeader
+            className="dlx5-header fx-load"
+            crumb={
+              <>
                 <span>Troubleshooting</span>
                 <span className="dl-crumb-sep" aria-hidden="true">/</span>
                 <span>Granite CRAG</span>
-              </div>
-              <h1 className="dl-title">SIP Trace Search</h1>
-              <p className="dl-sub">
-                Find any call by phone number — any format, full or partial — or by Call-ID, then open it to read the full signaling ladder.
-              </p>
-            </div>
+              </>
+            }
+            title="SIP Trace Search"
+            subtitle="Find any call by phone number — any format, full or partial — or by Call-ID, then open it to read the full signaling ladder."
+            actions={
+              <a
+                className="dl-btn dl-btn-ghost dlx5-header-action"
+                href="/grafana/"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <ExternalIcon size={13} />
+                Open SIP Dashboard
+              </a>
+            }
+          />
 
-            <a
-              className="dl-btn dl-btn-ghost dlx5-header-action"
-              href="/grafana/"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ExternalIcon size={13} />
-              Open SIP Dashboard
-            </a>
-          </header>
-
-          <div className="dl-stack dlx5-stack">
-            {/* ── Search form ──────────────────────────────────────────── */}
-            <section className="dl-panel dlx5-search fx-load fx-load-d1" aria-labelledby="sip-search-title">
-              <div className="dl-panel-head">
-                <span className="dl-panel-title" id="sip-search-title">Search</span>
-                <span className="dl-panel-sub">
-                  Numbers match the caller, the callee, or anywhere in the SIP message — paste them in any format.
-                </span>
-              </div>
-              <div className="dl-panel-body dlx5-search-body">
-                {/* Omnibox — the one control most searches need. Search /
-                    Clear sit on the field's row at the same 40px height. */}
-                <div className="dlx5-field">
-                  <label className="dl-flabel" htmlFor="sip-omni">Number or Call-ID</label>
-                  <div className="dlx5-omnirow">
+          {/* ── Search form — one row at desktop ─────────────────────── */}
+          <section className="dl-panel dlx5-search fx-load fx-load-d1" aria-labelledby="sip-search-title">
+            <h2 className="dlx5-visually-hidden" id="sip-search-title">Search</h2>
+            <div className="dlx5-search-host">
+              <div className="dlx5-search-body">
+                <div className="dlx5-searchgrid">
+                  {/* Omnibox — the one control most searches need. */}
+                  <div className="dlx5-field dlx5-f-omni">
+                    <label className="dl-flabel" htmlFor="sip-omni">Number or Call-ID</label>
                     <div className="dlx5-omniwrap">
                       <span className="dlx5-omni-icon" aria-hidden="true">
                         <SearchIcon />
@@ -871,6 +892,41 @@ export function TroubleshootingPage() {
                         autoFocus
                       />
                     </div>
+                  </div>
+
+                  {/* Time range — relative presets, resolved at Search time. */}
+                  <div className="dlx5-field dlx5-f-range">
+                    <span className="dl-flabel" id="sip-range-label">Time Range</span>
+                    <div className="dlx5-seg" role="group" aria-labelledby="sip-range-label">
+                      {TRACE_PRESETS.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          aria-pressed={rangePreset === p.id}
+                          className={rangePreset === p.id ? 'dlx5-seg-btn dlx5-seg-btn-active' : 'dlx5-seg-btn'}
+                          onClick={() => setRangePreset(p.id)}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        aria-pressed={isCustomRange}
+                        className={isCustomRange ? 'dlx5-seg-btn dlx5-seg-btn-active' : 'dlx5-seg-btn'}
+                        onClick={() => {
+                          // Seed the editable pickers from the window currently shown.
+                          setStartLocal(startPickerValue);
+                          setEndLocal(endPickerValue);
+                          setRangePreset('custom');
+                        }}
+                      >
+                        Custom
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Search / Clear on the row's end, at the omnibox's height. */}
+                  <div className="dlx5-search-actions">
                     <button
                       type="button"
                       className="dl-btn dl-btn-primary dlx5-search-btn"
@@ -916,112 +972,72 @@ export function TroubleshootingPage() {
                       </p>
                     )}
                   </div>
+
+                  {/* The window a preset resolves to (a live preview; the real
+                      instants are taken when Search is clicked). */}
+                  {rangePreview && (
+                    <p className="dlx5-window">
+                      {fmtWindowStamp(rangePreview.start.toISOString())} → {fmtWindowStamp(rangePreview.end.toISOString())}{' '}
+                      <span className="dlx5-window-tz">(local)</span>
+                    </p>
+                  )}
                 </div>
 
-                {/* Time range — relative presets, resolved at Search time.
-                    Same 3-column grid as the Advanced row below, so the two
-                    rows align column-for-column. */}
-                <div className="dlx5-grid3 dlx5-timerow">
-                  <div className="dlx5-field">
-                    <span className="dl-flabel" id="sip-range-label">Time Range</span>
-                    <div className="dlx5-seg" role="group" aria-labelledby="sip-range-label">
-                      {TRACE_PRESETS.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          aria-pressed={rangePreset === p.id}
-                          className={rangePreset === p.id ? 'dlx5-seg-btn dlx5-seg-btn-active' : 'dlx5-seg-btn'}
-                          onClick={() => setRangePreset(p.id)}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        aria-pressed={isCustomRange}
-                        className={isCustomRange ? 'dlx5-seg-btn dlx5-seg-btn-active' : 'dlx5-seg-btn'}
-                        onClick={() => {
-                          // Seed the editable pickers from the window currently shown.
-                          setStartLocal(startPickerValue);
-                          setEndLocal(endPickerValue);
-                          setRangePreset('custom');
-                        }}
-                      >
-                        Custom
-                      </button>
+                {/* Custom range — Start / End appear only when they can be edited. */}
+                {isCustomRange && (
+                  <div className="dlx5-customrow">
+                    <div className="dlx5-field dlx5-inline-field">
+                      <label className="dl-flabel" htmlFor="sip-start">Start (local)</label>
+                      <input
+                        id="sip-start"
+                        type="datetime-local"
+                        value={startPickerValue}
+                        aria-invalid={derived.rangeError !== null}
+                        onChange={(e) => setStartLocal(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        className="dl-input dlx5-ctl"
+                        style={{ colorScheme: 'light' }}
+                      />
                     </div>
+                    <div className="dlx5-field dlx5-inline-field">
+                      <label className="dl-flabel" htmlFor="sip-end">End (local)</label>
+                      <input
+                        id="sip-end"
+                        type="datetime-local"
+                        value={endPickerValue}
+                        aria-invalid={derived.rangeError !== null}
+                        onChange={(e) => setEndLocal(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        className="dl-input dlx5-ctl"
+                        style={{ colorScheme: 'light' }}
+                      />
+                    </div>
+                    {derived.rangeError !== null && (
+                      <p className="dlx5-invalid" role="alert">
+                        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx={12} cy={12} r={10} />
+                          <line x1={12} y1={8} x2={12} y2={12} />
+                          <line x1={12} y1={16} x2="12.01" y2={16} />
+                        </svg>
+                        {derived.rangeError}
+                      </p>
+                    )}
                   </div>
-
-                  <div className="dlx5-field">
-                    <label className="dl-flabel" htmlFor="sip-start">
-                      Start{isCustomRange ? ' (local)' : ''}
-                    </label>
-                    <input
-                      id="sip-start"
-                      type="datetime-local"
-                      value={startPickerValue}
-                      disabled={!isCustomRange}
-                      aria-invalid={derived.rangeError !== null}
-                      onChange={(e) => setStartLocal(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      className="dl-input dlx5-ctl"
-                      style={{ colorScheme: 'light' }}
-                    />
-                  </div>
-
-                  <div className="dlx5-field">
-                    <label className="dl-flabel" htmlFor="sip-end">
-                      End{isCustomRange ? ' (local)' : ''}
-                    </label>
-                    <input
-                      id="sip-end"
-                      type="datetime-local"
-                      value={endPickerValue}
-                      disabled={!isCustomRange}
-                      aria-invalid={derived.rangeError !== null}
-                      onChange={(e) => setEndLocal(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      className="dl-input dlx5-ctl"
-                      style={{ colorScheme: 'light' }}
-                    />
-                  </div>
-                </div>
-
-                {derived.rangeError !== null && (
-                  <p className="dlx5-invalid" role="alert">
-                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx={12} cy={12} r={10} />
-                      <line x1={12} y1={8} x2={12} y2={12} />
-                      <line x1={12} y1={16} x2="12.01" y2={16} />
-                    </svg>
-                    {derived.rangeError}
-                  </p>
                 )}
 
-                {/* Advanced — From / To / Call-ID, collapsed by default */}
-                <div className="dlx5-advbar">
-                  <button
-                    type="button"
-                    className="dlx5-adv-toggle"
-                    aria-expanded={advancedOpen}
-                    aria-controls="sip-advanced"
-                    onClick={() => setAdvancedOpen((open) => !open)}
-                  >
-                    <span className="dlx5-adv-caret" aria-hidden="true">
-                      <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="9 18 15 12 9 6" />
-                      </svg>
-                    </span>
-                    Advanced
-                    {!advancedOpen && advActiveCount > 0 && (
-                      <span className="dlx5-adv-count">{advActiveCount} active</span>
-                    )}
-                  </button>
-                  <span className="dlx5-advbar-note">From · To · Call-ID — combined with the search above</span>
-                </div>
-
-                {advancedOpen && (
-                  <div className="dlx5-grid3 dlx5-adv" id="sip-advanced">
+                {/* Advanced — From / To / Call-ID, collapsed by default; the
+                    row says how many are active (they apply while hidden). */}
+                <Disclosure
+                  variant="bare"
+                  className="dlx5-adv-disc"
+                  title="Advanced"
+                  count={advActiveCount > 0 ? `${advActiveCount} active` : undefined}
+                  summary="From · To · Call-ID — combined with the search above"
+                  open={advancedOpen}
+                  onOpenChange={setAdvancedOpen}
+                  id="sip-advanced"
+                >
+                  <div className="dlx5-grid3 dlx5-adv">
                     <div className="dlx5-field">
                       <label className="dl-flabel" htmlFor="sip-from">From</label>
                       <input
@@ -1070,36 +1086,42 @@ export function TroubleshootingPage() {
                       </p>
                     </div>
                   </div>
-                )}
+                </Disclosure>
               </div>
-            </section>
+            </div>
+          </section>
 
-            {/* ── Results ──────────────────────────────────────────────── */}
-            <section className="dl-panel fx-load fx-load-d2" aria-labelledby="sip-results-title">
+          {/* ── Results — bounded to the first screen ──────────────────── */}
+          <div className="dlx5-results-host">
+            <section
+              ref={resultsRef}
+              className="dl-panel dlx5-results fx-load fx-load-d2"
+              aria-labelledby="sip-results-title"
+            >
               <div className="dl-panel-head dlx5-results-head">
-                <span className="dl-panel-title" id="sip-results-title">Results</span>
+                <h2 className="dl-panel-title" id="sip-results-title">Results</h2>
+                {hasSearched && lastSearch && (
+                  <span className="dlx5-results-sub">
+                    Searched {lastSearch.summary} · {fmtWindowStamp(lastSearch.startIso)} →{' '}
+                    {fmtWindowStamp(lastSearch.endIso)} (local)
+                  </span>
+                )}
                 {hasSearched && !isLoading && !isError && (
                   <span className="dl-count dlx5-results-count">
                     {totalCalls} {totalCalls === 1 ? 'call' : 'calls'} · {totalMessages} messages
                   </span>
                 )}
-                {hasSearched && lastSearch && (
-                  <span className="dl-panel-sub">
-                    Searched {lastSearch.summary} · {fmtWindowStamp(lastSearch.startIso)} →{' '}
-                    {fmtWindowStamp(lastSearch.endIso)} (local)
-                  </span>
-                )}
               </div>
 
               {isLoading && (
-                <div className="dl-center" style={{ flexDirection: 'row', gap: 10, color: INK_DIM, fontSize: '0.85rem' }}>
+                <div className="dl-center dlx5-loading">
                   <Spinner size="xs" />
                   Searching SIP traces…
                 </div>
               )}
 
               {isError && !isLoading && (
-                <div style={{ padding: 20 }}>
+                <div className="dlx5-results-note">
                   <div className="dl-banner dl-banner-err">
                     {errorMessage ?? 'Search failed. Is the Homer backend reachable?'}
                   </div>
@@ -1109,7 +1131,7 @@ export function TroubleshootingPage() {
               {!isLoading && !isError && !hasSearched && <EmptyState />}
 
               {!isLoading && !isError && hasSearched && results.length === 0 && (
-                <div style={{ padding: 20 }}>
+                <div className="dlx5-results-note">
                   <div className="dl-empty">
                     {page > 1
                       ? `No older traces on page ${page} — the result set ended. Step back with Prev.`
@@ -1119,7 +1141,7 @@ export function TroubleshootingPage() {
               )}
 
               {!isLoading && !isError && correlationNotice !== null && results.length > 0 && (
-                <div style={{ padding: '12px 20px 0' }}>
+                <div className="dlx5-results-note dlx5-results-note-tight">
                   <CorrelationBanner notice={correlationNotice} />
                 </div>
               )}
@@ -1139,8 +1161,8 @@ export function TroubleshootingPage() {
                 />
               )}
 
-              {/* Cursor pager — "Page N" status left, Prev / Next right, on the
-                  table's 20px edges (no totals exist for trace search; Next
+              {/* Cursor pager — pinned under the table: "Page N" status left,
+                  Prev / Next right (no totals exist for trace search; Next
                   disables when the server reports the window exhausted). Page 1
                   with nothing older: no pager. */}
               {showPager && (

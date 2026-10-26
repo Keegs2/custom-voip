@@ -8,9 +8,13 @@
  * `fullscreen` (phone width, where there is no right column): the sheet
  * covers the screen instead, so it becomes MODAL — aria-modal, and Tab stays
  * inside it.
+ *
+ * In the desktop builder the head also carries the right panel's own
+ * controls (PanelChromeButtons: wider / narrower).
  */
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { PanelChromeButtons } from './PanelChromeButtons';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -88,6 +92,7 @@ export function SideSheet({ title, sub, onClose, busy = false, children, footer,
           </h2>
           {sub && <div className="ivr-sheet-sub">{sub}</div>}
         </div>
+        {!fullscreen && <PanelChromeButtons />}
         <button type="button" className="vm-iconbtn" onClick={onClose} disabled={busy} aria-label={`Close ${title}`} title="Close (Esc)">
           <X size={15} aria-hidden="true" />
         </button>

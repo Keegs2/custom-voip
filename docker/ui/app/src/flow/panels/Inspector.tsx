@@ -14,6 +14,7 @@ import { useAnalysis, type ShownIssue } from '../useFlowAnalysis';
 import { useBuilderData } from '../BuilderData';
 import { BlockIcon } from '../canvas/BlockIcon';
 import { ExitList } from '../config/ExitList';
+import { PanelChromeButtons } from './PanelChromeButtons';
 import {
   ConditionForm,
   DialForm,
@@ -92,6 +93,7 @@ function BlockPanel({ node }: { node: FlowNode }) {
           <span className="ivr-insp-kind">{meta.label}</span>
           <span className="ivr-insp-desc">{meta.description}</span>
         </div>
+        <PanelChromeButtons />
         <button
           type="button"
           className="vm-iconbtn"
@@ -196,6 +198,7 @@ function FlowChecklist() {
             {readOnly ? 'Select a block to see its settings.' : 'Select a block to edit it, or drag one in from the left.'}
           </span>
         </div>
+        <PanelChromeButtons />
       </div>
       <div className="ivr-insp-body">
         <div className={`ivr-verdict ivr-verdict-${errors.length ? 'error' : warnings.length ? 'warning' : 'ok'}`}>

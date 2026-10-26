@@ -313,11 +313,27 @@
   z-index: 5;
   flex: 0 1 auto;
   min-height: 0;
-  max-height: 58%;
+  /* Short enough that the framed flow keeps most of the column (§20); the
+     details scroll inside, the choices stay pinned underneath. */
+  max-height: 48%;
   margin: 12px 16px 10px;
+  container-type: inline-size;
+  container-name: ivrprop;
 }
 
 .ivr-prop--docked .ivr-prop-body { flex: 1 1 auto; }
+
+/* Wide enough: what the flow does beside the new messages, one height. */
+@container ivrprop (min-width: 680px) {
+  .ivr-prop-body.ivr-prop-body--split {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 0 22px;
+    align-items: start;
+  }
+}
+
+.ivr-prop-col { min-width: 0; }
 
 .ivr-prop--inline { position: relative; }
 

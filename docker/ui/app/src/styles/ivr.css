@@ -308,14 +308,38 @@
 .ivr-mini-btn:disabled { opacity: 0.4; cursor: default; }
 .ivr-mini-btn-danger:hover:not(:disabled) { color: var(--t-danger-fg); border-color: var(--t-danger-border); background: var(--t-danger-bg); }
 
-/* ─── /ivr header ─── */
-.ivr-header { align-items: flex-end; }
+/* ─── /ivr — header, cards, lists (layout kit, docker/ui/CLAUDE.md §20) ───
+   The header is the kit's CompactHeader (one row at desktop). Numbers and
+   Flows sit side by side as ONE row of equal-height cards (BalancedGrid,
+   stacks below 960px of content); Messages runs full width under them. The
+   page ends 24px under its last card. Breakpoints are container queries on
+   .ivr-sections, so they follow the space beside the sidebar. */
+.dl-shell.ivr-shell { padding-bottom: 24px; }
 
-.ivr-header-side {
-  display: flex;
-  align-items: flex-end;
-  gap: 32px;
-  flex-wrap: wrap;
+/* The admin console's customer picker, inline in the header row. */
+.lk-head .ivr-scope-pick {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lk-head .ivr-scope-pick .ivr-label {
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-text-dim);
+}
+
+.lk-head .ivr-scope-select {
+  min-width: 200px;
+  max-width: 260px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-weight: 600;
 }
 
 .ivr-scope-pick { display: flex; flex-direction: column; min-width: 240px; }
@@ -333,36 +357,70 @@
   color: var(--t-text-strong);
 }
 
-/* ─── Panels + list rows ─── */
-.ivr-sections { display: flex; flex-direction: column; gap: var(--rcf-stack); }
+/* ─── Panels ─── */
+.ivr-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  container-type: inline-size;
+  container-name: ivrpage;
+}
 
 .ivr-panel { padding: 0; overflow: hidden; }
+
+/* A card in the Numbers | Flows row: a flex column, so its foot sits on the
+   bottom edge when the row's other card is taller. */
+.ivr-card { display: flex; flex-direction: column; min-width: 0; }
 
 .ivr-panel-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 20px 22px 16px;
+  padding: 14px 20px 12px;
 }
 
 .ivr-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-family: "Archivo", "IBM Plex Sans", sans-serif;
   font-size: 1.02rem;
   font-weight: 700;
   letter-spacing: -0.015em;
-  margin: 0 0 4px;
+  margin: 0 0 3px;
   color: var(--t-text-strong);
 }
 
-.ivr-panel-sub { margin: 0; font-size: 0.78rem; line-height: 1.5; color: var(--t-text-dim); max-width: 64ch; }
+.ivr-title-count {
+  font-family: "Public Sans", "IBM Plex Sans", sans-serif;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-text-soft);
+  background: color-mix(in srgb, var(--t-neutral-fg) 10%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.ivr-panel-sub { margin: 0; font-size: 0.76rem; line-height: 1.5; color: var(--t-text-dim); max-width: 92ch; }
+
+.ivr-card-foot {
+  margin: auto 0 0;
+  padding: 10px 20px 12px;
+  border-top: 1px solid var(--t-line-soft);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--t-text-dim);
+}
 
 .ivr-empty {
   display: flex;
   gap: 14px;
   align-items: flex-start;
-  margin: 0 22px 22px;
-  padding: 16px 18px;
+  margin: 0 20px 18px;
+  padding: 14px 16px;
   border-radius: 10px;
   border: 1px dashed var(--t-line-strong);
   background: var(--t-tint);
@@ -383,50 +441,77 @@
 .ivr-empty-title { margin: 2px 0 3px; font-size: 0.86rem; font-weight: 700; color: var(--t-text); }
 .ivr-empty-copy { margin: 0; font-size: 0.78rem; line-height: 1.55; color: var(--t-text-soft); max-width: 70ch; }
 
-.ivr-rows { list-style: none; margin: 0; padding: 0; }
+/* ─── Numbers / Flows rows: two lines each ───
+   Line 1: the number (or flow) + its actions. Line 2: the status word and
+   the facts (answers with / used by, published / edited), wrapping when
+   the card is narrow. "Show all N" opens the rest inside a capped scroll. */
+.ivr-list-wrap { min-width: 0; }
+.ivr-card .ivr-list-wrap.lk-cap { --lk-cap: 400px; }
 
-.ivr-row {
+.ivr-items { list-style: none; margin: 0; padding: 0; }
+
+.ivr-item {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'id actions'
+    'meta meta';
   align-items: center;
-  gap: 16px;
-  padding: 13px 22px;
+  gap: 5px 12px;
+  padding: 11px 20px 12px;
   border-top: 1px solid var(--t-line-soft);
   font-size: 0.82rem;
   color: var(--t-text);
 }
 
-.ivr-rows-numbers .ivr-row { grid-template-columns: minmax(170px, 1.1fr) minmax(140px, 1fr) minmax(170px, 1.1fr) minmax(120px, 0.8fr) auto; }
-.ivr-rows-flows .ivr-row { grid-template-columns: minmax(170px, 1.2fr) minmax(170px, 1.1fr) minmax(140px, 1fr) minmax(120px, 0.8fr) auto; }
+.ivr-item:hover { background: var(--t-tint-hover); }
 
-.ivr-row:not(.ivr-row-head):hover { background: var(--t-tint-hover); }
+.ivr-item-id {
+  grid-area: id;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
 
-.ivr-row-head {
-  padding-top: 9px;
-  padding-bottom: 9px;
-  background: var(--t-tint);
-  font-size: 0.68rem;
-  font-weight: 600;
+.ivr-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.74rem;
   color: var(--t-text-dim);
 }
 
-.ivr-cell { min-width: 0; }
-.ivr-cell-id { display: flex; flex-direction: column; gap: 2px; }
+.ivr-item-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.ivr-item-meta {
+  grid-area: meta;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 14px;
+  min-width: 0;
+  font-size: 0.74rem;
+  color: var(--t-text-soft);
+}
+
+.ivr-item-meta .ivr-status { font-size: 0.74rem; }
+.ivr-item-fact { min-width: 0; }
+.ivr-item-when { color: var(--t-text-dim); font-variant-numeric: tabular-nums; }
+.ivr-item-pending { color: var(--t-text-dim); }
 
 .ivr-number {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.005em;
   white-space: nowrap;
-}
-
-.ivr-cell-sub { font-size: 0.72rem; color: var(--t-text-dim); }
-.ivr-cell-when { color: var(--t-text-soft); font-variant-numeric: tabular-nums; }
-
-.ivr-cell-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
 }
 
 .ivr-link,
@@ -436,7 +521,15 @@
   text-decoration: none;
 }
 
-.ivr-flow-name { font-weight: 700; color: var(--t-text); }
+.ivr-flow-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  color: var(--t-text);
+}
+
 .ivr-link:hover,
 .ivr-flow-name:hover { color: var(--t-accent-text-hover); text-decoration: underline; text-underline-offset: 3px; }
 .ivr-numlist { font-variant-numeric: tabular-nums; color: var(--t-text-soft); }
@@ -458,35 +551,19 @@
 .ivr-status-danger .ivr-status-dot { background: var(--t-danger-solid); }
 .ivr-status-neutral { color: var(--t-text-soft); }
 .ivr-status-neutral .ivr-status-dot { background: transparent; border: 1.5px solid var(--t-text-faint); }
-.ivr-status-stack { display: flex; flex-direction: column; gap: 3px; }
 
-/* Rows restack on narrow content widths. */
-@media (max-width: 900px) {
-  .ivr-row-head { display: none; }
-  .ivr-rows-numbers .ivr-row,
-  .ivr-rows-flows .ivr-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 6px 12px;
-    padding: 14px 16px;
-  }
-  .ivr-row .ivr-cell-id { grid-column: 1 / 2; }
-  .ivr-row .ivr-cell-actions { grid-column: 2; grid-row: 1; }
-  .ivr-row .ivr-cell[data-label] { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline; }
-  .ivr-row .ivr-cell[data-label]::before {
-    content: attr(data-label);
-    flex: 0 0 104px;
-    font-size: 0.7rem;
-    color: var(--t-text-dim);
-  }
-  .ivr-panel-head { padding: 16px; flex-wrap: wrap; }
+@container ivrpage (max-width: 559.98px) {
+  .ivr-panel-head { padding: 14px 16px 12px; flex-wrap: wrap; }
+  .ivr-item { padding: 11px 16px 12px; }
+  .ivr-item-id { flex-direction: column; gap: 1px; }
+  .ivr-card-foot { padding: 10px 16px 12px; }
   .ivr-empty { margin: 0 16px 16px; }
+  .ivr-item-actions .dl-btn { padding: 6px 10px; }
 }
 
-@media (max-width: 560px) {
-  .ivr-cell-actions .dl-btn { padding: 6px 10px; }
-  .ivr-header-side { width: 100%; }
-  .ivr-scope-pick,
-  .ivr-scope-select { min-width: 0; width: 100%; }
+@container lkhead (max-width: 420px) {
+  .lk-head .ivr-scope-pick { width: 100%; }
+  .lk-head .ivr-scope-select { min-width: 0; max-width: none; flex: 1 1 auto; }
 }
 
 /* ─── Choice list (Bind a flow) ─── */
@@ -639,33 +716,43 @@
   color: var(--t-text);
 }
 
-@media (max-width: 900px) {
+/* Stacks by the space it has (container query), not the window. */
+.ivr-intro-host { container-type: inline-size; container-name: ivrintro; }
+
+@container ivrintro (max-width: 719.98px) {
   .ivr-intro { grid-template-columns: minmax(0, 1fr); }
   .ivr-intro-art { border-right: 0; border-bottom: 1px solid var(--t-line); padding: 24px 18px; }
   .ivr-intro-copy { padding: 24px 18px; }
 }
 
-/* ─── Messages (prompt manager) ─── */
+/* ─── Messages (prompt manager) ───
+   One compact row per message: name, kind · length · date and the spoken
+   text (one clamped line, the full text in the tooltip and the DOM) on the
+   left; the one-row player and the actions on the right. First 4, then
+   "Show all N messages". Below 720px of content the player drops under. */
 .ivr-prompts { list-style: none; margin: 0; padding: 0; }
 
 .ivr-prompt {
   display: grid;
-  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 320px) auto;
   gap: 18px;
   align-items: center;
-  padding: 12px 22px;
+  padding: 8px 20px;
   border-top: 1px solid var(--t-line-soft);
 }
 
+/* The "Show all N messages" bar, a touch slimmer under compact rows. */
+.ivr-messages .lk-more--bar { padding-top: 8px; padding-bottom: 8px; }
+
 .ivr-prompt:hover { background: var(--t-tint-hover); }
 .ivr-prompt .vm-player { margin: 0; }
-.ivr-prompt-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ivr-prompt-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ivr-prompt-name { font-size: 0.84rem; font-weight: 700; color: var(--t-text); }
 
 .ivr-prompt-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
+  gap: 2px 14px;
   font-size: 0.72rem;
   color: var(--t-text-dim);
   font-variant-numeric: tabular-nums;
@@ -675,22 +762,23 @@
 .ivr-kind-tts { color: var(--ivr-play-ink); }
 
 .ivr-prompt-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.74rem;
   line-height: 1.45;
   color: var(--t-text-soft);
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 
 .ivr-prompt-actions { display: flex; gap: 6px; }
 
-@media (max-width: 900px) {
-  .ivr-prompt { grid-template-columns: minmax(0, 1fr) auto; padding: 12px 16px; gap: 8px 12px; }
-  .ivr-prompt .vm-player { grid-column: 1 / -1; grid-row: 2; }
+@container ivrpage (max-width: 719.98px) {
+  .ivr-prompt { grid-template-columns: minmax(0, 1fr) auto; padding: 11px 16px; gap: 8px 12px; }
   .ivr-prompt-id { grid-column: 1; grid-row: 1; }
   .ivr-prompt-actions { grid-column: 2; grid-row: 1; }
+  .ivr-prompt .vm-player { grid-column: 1 / -1; grid-row: 2; }
 }
 
 /* ─── New message dialog ─── */

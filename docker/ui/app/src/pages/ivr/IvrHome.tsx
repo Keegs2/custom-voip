@@ -7,10 +7,23 @@
  *   entitled, no numbers    → "no IVR number yet" + flows + messages
  *   otherwise               → numbers + flows + messages
  *
+ * Layout (docker/ui/CLAUDE.md §20 — balanced, compact, expandable):
+ *
+ *   ┌ CompactHeader: crumb · IVR   [Customer ▾]  Numbers | Flows | Live  [+ New flow] ┐
+ *   ┌ Your IVR numbers ─────────────┐ ┌ Flows ──────────────────────────┐   one row,
+ *   │ number · name     [Change] ✎ │ │ Main menu       [Open builder] … │   one height
+ *   │ ● Live · answers with …      │ │ ● Published · used by · edited   │
+ *   └───────────────────────────────┘ └──────────────────────────────────┘
+ *   ┌ Messages (first 4, then "Show all N messages") ──────────────── [+ New message] ┐
+ *
+ * Each list shows 6 rows, then "Show all N" opens the rest inside a capped
+ * scroll (the cards sit side by side, so neither pushes its row taller).
+ *
  * Writers (tenant 'user', staff) get New flow, Choose flow, Rename and
  * Delete; a 'readonly' user sees the same page with view-only actions.
  *
- * React #310: every hook is unconditional, above the state branches.
+ * React #310: every hook is unconditional, above the state branches; the
+ * lists' "show all" hooks live in their own card components.
  */
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -19,6 +32,7 @@ import { ArrowUpRight, PencilLine, Plus, Trash2, Workflow } from 'lucide-react';
 import { createFlow, deleteFlow, updateFlow, updateIvrNumber } from '../../api/ivr';
 import { useToast } from '../../components/ui/ToastContext';
 import { Spinner } from '../../components/ui/Spinner';
+import { BalancedGrid, CompactHeader, ShowMoreButton, useShowMore, type HeaderStat } from '../../components/layout/kit';
 import type { FlowSummary, IvrNumber } from '../../types/ivr';
 import { fmt } from '../../utils/format';
 import { ConfirmDialog } from '../voicemail/VmDialog';
@@ -28,6 +42,9 @@ import { IvrIntro } from './IvrIntro';
 import { PromptManager } from './prompts/PromptManager';
 import { formatWhen, hasUnpublishedChanges, plural } from './format';
 import { invalidateIvr, isIvrError, ivrErrorText, useIvrSummary } from './ivrData';
+
+/** Rows a card shows before "Show all N" (§20.3: short lists 4–6). */
+const LIST_LIMIT = 6;
 
 type DialogState =
   | { kind: 'none' }
@@ -93,35 +110,49 @@ export function IvrHome({ staffPicker }: { staffPicker?: ReactNode }) {
   // ── Derived (after all hooks) ──
   const notEntitled =
     (summary.data && !summary.data.enabled) || isIvrError(summary.error, 403, 'ivr_not_enabled');
+  const entitled = summary.data?.enabled === true;
+
+  const stats: HeaderStat[] | undefined = entitled && summary.data
+    ? [
+        { label: 'IVR numbers', value: summary.data.numbers.length },
+        { label: 'Flows', value: summary.data.flows.length },
+        {
+          label: 'Live',
+          value: summary.data.numbers.filter((n) => n.enabled && n.published).length,
+          title: 'Numbers whose callers hear a published flow',
+        },
+      ]
+    : undefined;
 
   const header = (
-    <header className="dl-header ivr-header">
-      <div className="dl-header-id">
-        <div className="dl-crumb">
-          <span>{ws.customerName}</span>
+    <CompactHeader
+      className="ivr-header fx-load"
+      crumb={
+        <>
+          <span className="vm-crumb-tail">{ws.customerName}</span>
           <span className="dl-crumb-sep" aria-hidden="true">/</span>
           <span>IVR</span>
           {ws.staff && <span className="vm-staff-tag">{ws.viewer === 'admin' ? 'Staff' : 'Staff preview'}</span>}
-        </div>
-        <h1 className="dl-title">IVR</h1>
-        <p className="dl-sub">Design what callers hear when they dial your IVR numbers — menus, business hours and transfers.</p>
-      </div>
-      <div className="ivr-header-side">
-        {staffPicker}
-        {summary.data?.enabled && (
-          <div className="dl-metrics dl-metrics-wrap">
-            <Metric value={summary.data.numbers.length} label="IVR numbers" />
-            <Metric value={summary.data.flows.length} label="Flows" />
-            <Metric value={summary.data.numbers.filter((n) => n.enabled && n.published).length} label="Live" />
-          </div>
-        )}
-      </div>
-    </header>
+        </>
+      }
+      title="IVR"
+      subtitle="Design what callers hear when they dial your IVR numbers — menus, business hours and transfers."
+      tools={staffPicker}
+      stats={stats}
+      statsLabel="IVR totals"
+      actions={
+        entitled && ws.canEdit ? (
+          <button type="button" className="dl-btn dl-btn-primary vm-btn-sm" onClick={() => setDialog({ kind: 'new-flow' })}>
+            <Plus size={14} aria-hidden="true" /> New flow
+          </button>
+        ) : undefined
+      }
+    />
   );
 
   if (summary.isLoading) {
     return (
-      <div className="dl-shell">
+      <div className="dl-shell ivr-shell">
         {header}
         <div className="ivr-state" role="status">
           <Spinner /> Loading your IVR…
@@ -131,15 +162,17 @@ export function IvrHome({ staffPicker }: { staffPicker?: ReactNode }) {
   }
   if (notEntitled) {
     return (
-      <div className="dl-shell">
+      <div className="dl-shell ivr-shell">
         {header}
-        <IvrIntro staff={ws.staff} />
+        <div className="ivr-intro-host fx-load fx-load-d1">
+          <IvrIntro staff={ws.staff} />
+        </div>
       </div>
     );
   }
   if (summary.isError || !summary.data) {
     return (
-      <div className="dl-shell">
+      <div className="dl-shell ivr-shell">
         {header}
         <div className="dl-banner dl-banner-err ivr-gap" role="alert">
           {ivrErrorText(summary.error, 'Your IVR couldn’t be loaded.')}{' '}
@@ -156,181 +189,23 @@ export function IvrHome({ staffPicker }: { staffPicker?: ReactNode }) {
     m.error ? ivrErrorText(m.error, fallback) : null;
 
   return (
-    <div className="dl-shell">
+    <div className="dl-shell ivr-shell">
       {header}
 
-      <div className="ivr-sections">
-        {/* ── Numbers ─────────────────────────────────────── */}
-        <section className="dl-panel ivr-panel" aria-labelledby="ivr-numbers-title">
-          <div className="ivr-panel-head">
-            <div>
-              <h2 id="ivr-numbers-title" className="ivr-panel-title">
-                Your IVR numbers
-              </h2>
-              <p className="ivr-panel-sub">Each number answers with one flow. Callers hear its published version.</p>
-            </div>
-          </div>
-          {numbers.length === 0 ? (
-            <div className="ivr-empty">
-              <span className="ivr-empty-icon" aria-hidden="true">
-                <Workflow size={20} strokeWidth={1.8} />
-              </span>
-              <div>
-                <p className="ivr-empty-title">No IVR number yet</p>
-                <p className="ivr-empty-copy">
-                  {ws.staff
-                    ? 'Assign an IVR number to this customer in TED (Customer 360 → Products). Flows can be built and tested now.'
-                    : 'You can build and test flows now. Ask your Granite account team for an IVR number; once it’s assigned, choose the flow it answers with here.'}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <ul className="ivr-rows ivr-rows-numbers">
-              <li className="ivr-row ivr-row-head" aria-hidden="true">
-                <span>Number</span>
-                <span>Answers with</span>
-                <span>Callers hear</span>
-                <span>Last published</span>
-                <span />
-              </li>
-              {numbers.map((n) => {
-                const flow = n.flow_id !== null ? flowsById.get(n.flow_id) ?? null : null;
-                return (
-                  <li key={n.id} className="ivr-row">
-                    <span className="ivr-cell ivr-cell-id">
-                      <span className="ivr-number">{fmt(n.did)}</span>
-                      <span className="ivr-cell-sub">{n.name ?? 'No name'}</span>
-                    </span>
-                    <span className="ivr-cell" data-label="Answers with">
-                      {flow ? (
-                        <Link className="ivr-link" to={ws.href(`/ivr/flows/${flow.id}`)}>
-                          {flow.name}
-                        </Link>
-                      ) : (
-                        <span className="ivr-muted">{n.flow_name ?? 'No flow'}</span>
-                      )}
-                    </span>
-                    <span className="ivr-cell" data-label="Callers hear">
-                      <NumberStatus number={n} flow={flow} />
-                    </span>
-                    <span className="ivr-cell ivr-cell-when" data-label="Last published">
-                      {formatWhen(flow?.published_at)}
-                    </span>
-                    <span className="ivr-cell ivr-cell-actions">
-                      {ws.canEdit && (
-                        <>
-                          <button type="button" className="dl-btn dl-btn-ghost ivr-btn-sm" onClick={() => setDialog({ kind: 'bind', number: n })}>
-                            {n.flow_id === null ? 'Choose a flow' : 'Change flow'}
-                          </button>
-                          <button
-                            type="button"
-                            className="vm-iconbtn"
-                            aria-label={`Rename ${fmt(n.did)}`}
-                            title="Rename"
-                            onClick={() => setDialog({ kind: 'rename-number', number: n })}
-                          >
-                            <PencilLine size={15} aria-hidden="true" />
-                          </button>
-                        </>
-                      )}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-
-        {/* ── Flows ───────────────────────────────────────── */}
-        <section className="dl-panel ivr-panel" aria-labelledby="ivr-flows-title">
-          <div className="ivr-panel-head">
-            <div>
-              <h2 id="ivr-flows-title" className="ivr-panel-title">
-                Flows
-              </h2>
-              <p className="ivr-panel-sub">A flow is the menu and routing you design. Edits stay a draft until you publish.</p>
-            </div>
-            {ws.canEdit && (
-              <button type="button" className="dl-btn dl-btn-primary" onClick={() => setDialog({ kind: 'new-flow' })}>
-                <Plus size={15} aria-hidden="true" /> New flow
-              </button>
-            )}
-          </div>
-          {flows.length === 0 ? (
-            <div className="ivr-empty">
-              <span className="ivr-empty-icon" aria-hidden="true">
-                <Workflow size={20} strokeWidth={1.8} />
-              </span>
-              <div>
-                <p className="ivr-empty-title">No flows yet</p>
-                <p className="ivr-empty-copy">
-                  {ws.canEdit
-                    ? 'Start one with New flow: drag blocks onto the canvas, connect them, then publish.'
-                    : 'Nobody has built a flow on this account yet.'}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <ul className="ivr-rows ivr-rows-flows">
-              <li className="ivr-row ivr-row-head" aria-hidden="true">
-                <span>Flow</span>
-                <span>Status</span>
-                <span>Used by</span>
-                <span>Last edited</span>
-                <span />
-              </li>
-              {flows.map((f) => (
-                <li key={f.id} className="ivr-row">
-                  <span className="ivr-cell ivr-cell-id">
-                    <Link className="ivr-flow-name" to={ws.href(`/ivr/flows/${f.id}`)}>
-                      {f.name}
-                    </Link>
-                  </span>
-                  <span className="ivr-cell" data-label="Status">
-                    <FlowStatus flow={f} />
-                  </span>
-                  <span className="ivr-cell" data-label="Used by">
-                    {f.numbers.length ? (
-                      <span className="ivr-numlist">{f.numbers.map(fmt).join(', ')}</span>
-                    ) : (
-                      <span className="ivr-muted">No number</span>
-                    )}
-                  </span>
-                  <span className="ivr-cell ivr-cell-when" data-label="Last edited">
-                    {formatWhen(f.updated_at)}
-                  </span>
-                  <span className="ivr-cell ivr-cell-actions">
-                    <Link className="dl-btn dl-btn-ghost ivr-btn-sm" to={ws.href(`/ivr/flows/${f.id}`)}>
-                      {ws.canEdit ? 'Open builder' : 'View'} <ArrowUpRight size={13} aria-hidden="true" />
-                    </Link>
-                    {ws.canEdit && (
-                      <>
-                        <button
-                          type="button"
-                          className="vm-iconbtn"
-                          aria-label={`Rename ${f.name}`}
-                          title="Rename"
-                          onClick={() => setDialog({ kind: 'rename-flow', flow: f })}
-                        >
-                          <PencilLine size={15} aria-hidden="true" />
-                        </button>
-                        <button
-                          type="button"
-                          className="vm-iconbtn vm-iconbtn-danger"
-                          aria-label={`Delete ${f.name}`}
-                          title="Delete"
-                          onClick={() => setDialog({ kind: 'delete-flow', flow: f })}
-                        >
-                          <Trash2 size={15} aria-hidden="true" />
-                        </button>
-                      </>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+      <div className="ivr-sections fx-load fx-load-d1">
+        <BalancedGrid columns="minmax(0, 1fr) minmax(0, 1fr)" stackBelow="lg" className="ivr-row1">
+          <NumbersCard
+            numbers={numbers}
+            flowsById={flowsById}
+            onBind={(number) => setDialog({ kind: 'bind', number })}
+            onRename={(number) => setDialog({ kind: 'rename-number', number })}
+          />
+          <FlowsCard
+            flows={flows}
+            onRename={(flow) => setDialog({ kind: 'rename-flow', flow })}
+            onDelete={(flow) => setDialog({ kind: 'delete-flow', flow })}
+          />
+        </BalancedGrid>
 
         {/* ── Messages ────────────────────────────────────── */}
         <PromptManager />
@@ -433,12 +308,204 @@ export function IvrHome({ staffPicker }: { staffPicker?: ReactNode }) {
   );
 }
 
-function Metric({ value, label }: { value: number; label: string }) {
+/* ─── Numbers ─────────────────────────────────────────────── */
+
+function NumbersCard({
+  numbers,
+  flowsById,
+  onBind,
+  onRename,
+}: {
+  numbers: readonly IvrNumber[];
+  flowsById: ReadonlyMap<number, FlowSummary>;
+  onBind: (n: IvrNumber) => void;
+  onRename: (n: IvrNumber) => void;
+}) {
+  // ── Hooks first (React #310) ──
+  const ws = useIvrWorkspace();
+  const more = useShowMore(numbers, LIST_LIMIT);
+
   return (
-    <div className="dl-metric">
-      <div className="dl-metric-value">{value.toLocaleString()}</div>
-      <div className="dl-metric-label">{label}</div>
-    </div>
+    <section className="dl-panel ivr-panel ivr-card" aria-labelledby="ivr-numbers-title">
+      <div className="ivr-panel-head">
+        <div>
+          <h2 id="ivr-numbers-title" className="ivr-panel-title">
+            Your IVR numbers
+          </h2>
+          <p className="ivr-panel-sub">Each number answers with one flow. Callers hear its published version.</p>
+        </div>
+      </div>
+      {numbers.length === 0 ? (
+        <div className="ivr-empty">
+          <span className="ivr-empty-icon" aria-hidden="true">
+            <Workflow size={20} strokeWidth={1.8} />
+          </span>
+          <div>
+            <p className="ivr-empty-title">No IVR number yet</p>
+            <p className="ivr-empty-copy">
+              {ws.staff
+                ? 'Assign an IVR number to this customer in TED (Customer 360 → Products). Flows can be built and tested now.'
+                : 'You can build and test flows now. Ask your Granite account team for an IVR number; once it’s assigned, choose the flow it answers with here.'}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className={more.expanded ? 'ivr-list-wrap lk-cap' : 'ivr-list-wrap'}>
+          <ul className="ivr-items" id={more.listId}>
+            {more.visible.map((n) => {
+              const flow = n.flow_id !== null ? flowsById.get(n.flow_id) ?? null : null;
+              return (
+                <li key={n.id} className="ivr-item">
+                  <span className="ivr-item-id">
+                    <span className="ivr-number">{fmt(n.did)}</span>
+                    <span className="ivr-item-name">{n.name ?? 'No name'}</span>
+                  </span>
+                  <span className="ivr-item-actions">
+                    {ws.canEdit && (
+                      <>
+                        <button type="button" className="dl-btn dl-btn-ghost ivr-btn-sm" onClick={() => onBind(n)}>
+                          {n.flow_id === null ? 'Choose a flow' : 'Change flow'}
+                        </button>
+                        <button
+                          type="button"
+                          className="vm-iconbtn"
+                          aria-label={`Rename ${fmt(n.did)}`}
+                          title="Rename"
+                          onClick={() => onRename(n)}
+                        >
+                          <PencilLine size={15} aria-hidden="true" />
+                        </button>
+                      </>
+                    )}
+                  </span>
+                  <span className="ivr-item-meta">
+                    <NumberStatus number={n} flow={flow} />
+                    <span className="ivr-item-fact">
+                      Answers with{' '}
+                      {flow ? (
+                        <Link className="ivr-link" to={ws.href(`/ivr/flows/${flow.id}`)}>
+                          {flow.name}
+                        </Link>
+                      ) : (
+                        <span className="ivr-muted">{n.flow_name ?? 'no flow'}</span>
+                      )}
+                    </span>
+                    {flow?.published_at && (
+                      <span className="ivr-item-fact ivr-item-when">Published {formatWhen(flow.published_at)}</span>
+                    )}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {more.needed && <ShowMoreButton {...more.buttonProps} noun="numbers" variant="bar" />}
+      <p className="ivr-card-foot">
+        {ws.staff
+          ? 'IVR numbers are assigned in TED (Customer 360 → Products).'
+          : 'Your Granite account team assigns IVR numbers.'}
+      </p>
+    </section>
+  );
+}
+
+/* ─── Flows ───────────────────────────────────────────────── */
+
+function FlowsCard({
+  flows,
+  onRename,
+  onDelete,
+}: {
+  flows: readonly FlowSummary[];
+  onRename: (f: FlowSummary) => void;
+  onDelete: (f: FlowSummary) => void;
+}) {
+  // ── Hooks first (React #310) ──
+  const ws = useIvrWorkspace();
+  const more = useShowMore(flows, LIST_LIMIT);
+
+  return (
+    <section className="dl-panel ivr-panel ivr-card" aria-labelledby="ivr-flows-title">
+      <div className="ivr-panel-head">
+        <div>
+          <h2 id="ivr-flows-title" className="ivr-panel-title">
+            Flows
+          </h2>
+          <p className="ivr-panel-sub">A flow is the menu and routing you design. Edits stay a draft until you publish.</p>
+        </div>
+      </div>
+      {flows.length === 0 ? (
+        <div className="ivr-empty">
+          <span className="ivr-empty-icon" aria-hidden="true">
+            <Workflow size={20} strokeWidth={1.8} />
+          </span>
+          <div>
+            <p className="ivr-empty-title">No flows yet</p>
+            <p className="ivr-empty-copy">
+              {ws.canEdit
+                ? 'Start one with New flow: drag blocks onto the canvas, connect them, then publish.'
+                : 'Nobody has built a flow on this account yet.'}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className={more.expanded ? 'ivr-list-wrap lk-cap' : 'ivr-list-wrap'}>
+          <ul className="ivr-items" id={more.listId}>
+            {more.visible.map((f) => (
+              <li key={f.id} className="ivr-item">
+                <span className="ivr-item-id">
+                  <Link className="ivr-flow-name" to={ws.href(`/ivr/flows/${f.id}`)}>
+                    {f.name}
+                  </Link>
+                  <span className="ivr-item-name ivr-item-when">Edited {formatWhen(f.updated_at)}</span>
+                </span>
+                <span className="ivr-item-actions">
+                  <Link className="dl-btn dl-btn-ghost ivr-btn-sm" to={ws.href(`/ivr/flows/${f.id}`)}>
+                    {ws.canEdit ? 'Open builder' : 'View'} <ArrowUpRight size={13} aria-hidden="true" />
+                  </Link>
+                  {ws.canEdit && (
+                    <>
+                      <button
+                        type="button"
+                        className="vm-iconbtn"
+                        aria-label={`Rename ${f.name}`}
+                        title="Rename"
+                        onClick={() => onRename(f)}
+                      >
+                        <PencilLine size={15} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className="vm-iconbtn vm-iconbtn-danger"
+                        aria-label={`Delete ${f.name}`}
+                        title="Delete"
+                        onClick={() => onDelete(f)}
+                      >
+                        <Trash2 size={15} aria-hidden="true" />
+                      </button>
+                    </>
+                  )}
+                </span>
+                <span className="ivr-item-meta">
+                  <FlowStatus flow={f} />
+                  <span className="ivr-item-fact">
+                    {f.numbers.length ? (
+                      <>
+                        Used by <span className="ivr-numlist">{f.numbers.map(fmt).join(', ')}</span>
+                      </>
+                    ) : (
+                      <span className="ivr-muted">No number</span>
+                    )}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {more.needed && <ShowMoreButton {...more.buttonProps} noun="flows" variant="bar" />}
+    </section>
   );
 }
 
@@ -463,9 +530,9 @@ function NumberStatus({ number, flow }: { number: IvrNumber; flow: FlowSummary |
 function FlowStatus({ flow }: { flow: FlowSummary }) {
   if (!flow.published_version) return <StatusWord tone="neutral">Draft, never published</StatusWord>;
   return (
-    <span className="ivr-status-stack">
+    <>
       <StatusWord tone="ok">Published · version {flow.published_version}</StatusWord>
-      {hasUnpublishedChanges(flow) && <span className="ivr-cell-sub">Draft has unpublished changes</span>}
-    </span>
+      {hasUnpublishedChanges(flow) && <span className="ivr-item-fact ivr-item-pending">Draft has unpublished changes</span>}
+    </>
   );
 }

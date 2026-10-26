@@ -4,14 +4,19 @@
  * signed URL, minted on first Play), rename, delete — a message still used
  * by a flow's draft answers 409 `prompt_in_use` and the dialog names the
  * flows. New messages come from PromptDialog.
+ *
+ * Layout (docker/ui/CLAUDE.md §20): one compact row per message — name, kind,
+ * length, date and the spoken text on one clamped line; the player and the
+ * actions on the right — the first 4, then "Show all N messages".
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileAudio, Mic, PencilLine, Plus, Trash2, Type } from 'lucide-react';
 import { deletePrompt, getPromptPlaybackUrl, renamePrompt } from '../../../api/ivr';
 import type { Prompt, PromptKind } from '../../../types/ivr';
 import { useToast } from '../../../components/ui/ToastContext';
 import { Spinner } from '../../../components/ui/Spinner';
+import { ShowMoreButton, useShowMore } from '../../../components/layout/kit';
 import { Player } from '../../voicemail/Player';
 import { ConfirmDialog } from '../../voicemail/VmDialog';
 import { NameDialog } from '../IvrDialogs';
@@ -26,6 +31,9 @@ export function KindIcon({ kind, size = 14 }: { kind: PromptKind; size?: number 
   return <FileAudio size={size} aria-hidden="true" />;
 }
 
+/** Messages shown before "Show all N messages" (§20.3: short lists 4–6). */
+const MESSAGES_LIMIT = 4;
+
 type Dialog = { kind: 'none' } | { kind: 'new' } | { kind: 'rename'; prompt: Prompt } | { kind: 'delete'; prompt: Prompt };
 
 export function PromptManager() {
@@ -37,6 +45,8 @@ export function PromptManager() {
   const voices = useVoices(ws.scope);
   const [dialog, setDialog] = useState<Dialog>({ kind: 'none' });
   const close = () => setDialog({ kind: 'none' });
+  const list = useMemo(() => [...(prompts.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [prompts.data]);
+  const more = useShowMore(list, MESSAGES_LIMIT);
 
   const rename = useMutation({
     mutationFn: ({ prompt, name }: { prompt: Prompt; name: string }) => renamePrompt(prompt.id, name, ws.scope.customerId),
@@ -56,21 +66,21 @@ export function PromptManager() {
   });
 
   // ── Derived (after all hooks) ──
-  const list = [...(prompts.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   const voiceLabel = (id: string | null | undefined) => voices.data?.find((v) => v.id === id)?.label ?? null;
 
   return (
-    <section className="dl-panel ivr-panel" aria-labelledby="ivr-messages-title">
+    <section className="dl-panel ivr-panel ivr-messages" aria-labelledby="ivr-messages-title">
       <div className="ivr-panel-head">
         <div>
           <h2 id="ivr-messages-title" className="ivr-panel-title">
             Messages
+            {list.length > 0 && <span className="ivr-title-count">{list.length}</span>}
           </h2>
           <p className="ivr-panel-sub">Recordings and text read aloud. Use them in Play message, Menu and Hang up blocks.</p>
         </div>
         {ws.canEdit && (
-          <button type="button" className="dl-btn dl-btn-ghost" onClick={() => setDialog({ kind: 'new' })}>
-            <Plus size={15} aria-hidden="true" /> New message
+          <button type="button" className="dl-btn dl-btn-ghost vm-btn-sm" onClick={() => setDialog({ kind: 'new' })}>
+            <Plus size={14} aria-hidden="true" /> New message
           </button>
         )}
       </div>
@@ -101,15 +111,9 @@ export function PromptManager() {
           </div>
         </div>
       ) : (
-        <ul className="ivr-prompts">
-          {list.map((p) => (
+        <ul className="ivr-prompts" id={more.listId}>
+          {more.visible.map((p) => (
             <li key={p.id} className="ivr-prompt">
-              <Player
-                mint={() => getPromptPlaybackUrl(p.id, ws.scope.customerId).then((r) => ({ url: r.url, expires_in: 120 }))}
-                durationMs={p.duration_ms}
-                label={p.name}
-                compact
-              />
               <div className="ivr-prompt-id">
                 <span className="ivr-prompt-name">{p.name}</span>
                 <span className="ivr-prompt-meta">
@@ -120,8 +124,18 @@ export function PromptManager() {
                   <span>{formatLength(p.duration_ms)}</span>
                   <span>Added {formatWhen(p.created_at)}</span>
                 </span>
-                {p.kind === 'tts' && p.tts_text && <span className="ivr-prompt-text">“{p.tts_text}”</span>}
+                {p.kind === 'tts' && p.tts_text && (
+                  <span className="ivr-prompt-text" title={p.tts_text}>
+                    “{p.tts_text}”
+                  </span>
+                )}
               </div>
+              <Player
+                mint={() => getPromptPlaybackUrl(p.id, ws.scope.customerId).then((r) => ({ url: r.url, expires_in: 120 }))}
+                durationMs={p.duration_ms}
+                label={p.name}
+                compact
+              />
               {ws.canEdit && (
                 <div className="ivr-prompt-actions">
                   <button
@@ -148,6 +162,7 @@ export function PromptManager() {
           ))}
         </ul>
       )}
+      {more.needed && <ShowMoreButton {...more.buttonProps} noun="messages" variant="bar" />}
 
       {dialog.kind === 'new' && <PromptDialog onClose={close} />}
       {dialog.kind === 'rename' && (
