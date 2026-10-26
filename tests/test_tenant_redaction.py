@@ -16,8 +16,8 @@ Covers:
       - GET /v1/calls/{id} (completed + active)
       - GET /v1/customers, /v1/customers/me, /v1/rcf/{did}: traffic_grade
         (internal routing grade) absent for tenants, present for staff; the
-        tenant customer record is an ALLOWLIST (no daily_limit / cpm_limit /
-        ucaas_enabled, counts.api_dids always 0)
+        tenant customer record is an ALLOWLIST (no daily_limit / cpm_limit,
+        ucaas_enabled kept, counts.api_dids always 0)
     Tenant responses contain NONE of the forbidden keys (full denylist,
     asserted recursively); tenant-ignored filters (rated_only/sbc_id/zone)
     cannot be used as an oracle; staff responses keep the historical keys
@@ -768,19 +768,18 @@ def test_redact_customer_fields_pure():
 #: Operations settings a tenant must never get from a customer record
 #: (owner rule; the docs audit found /customers/me returning them).
 _OPS_CUSTOMER_KEYS = {"traffic_grade", "daily_limit", "cpm_limit"}
-#: The tenant /customers/me top-level keys (allowlist + counts). No
-#: ucaas_enabled: the customer UI reads it from the signed-in user (/auth/me).
-_TENANT_ME_KEYS = {"id", "name", "account_type", "status", "created_at", "counts"}
-#: Staff-only on a customer record besides the ops settings.
-_STAFF_ONLY_CUSTOMER_KEYS = _OPS_CUSTOMER_KEYS | {"ucaas_enabled"}
+#: The tenant /customers/me top-level keys (allowlist + counts).
+#: ucaas_enabled is the customer's own add-on flag and My Account reads it.
+_TENANT_ME_KEYS = {"id", "name", "account_type", "status", "ucaas_enabled", "created_at",
+                   "counts"}
 
 
 def test_customer_allowlist_and_denylist_sets():
     assert _OPS_CUSTOMER_KEYS <= tr.FORBIDDEN_TENANT_CUSTOMER_KEYS
     assert not (tr.TENANT_CUSTOMER_FIELDS & tr.FORBIDDEN_TENANT_CUSTOMER_KEYS)
-    # ucaas_enabled is not a customer-record field for tenants (the UI reads
-    # the add-on flag from /auth/me's user object)
-    assert "ucaas_enabled" not in tr.TENANT_CUSTOMER_FIELDS
+    # the customer's own UCaaS add-on flag stays (My Account reads it)
+    assert "ucaas_enabled" in tr.TENANT_CUSTOMER_FIELDS
+    assert "ucaas_enabled" not in tr.FORBIDDEN_TENANT_CUSTOMER_KEYS
     assert tr.TENANT_CUSTOMER_FIELDS | {"counts"} == _TENANT_ME_KEYS
     assert tr.TENANT_CUSTOMER_COUNT_KEYS == ("rcf", "api_dids", "trunks", "numbers")
 
@@ -802,10 +801,10 @@ def test_redact_my_customer_pure_is_an_allowlist():
     assert out["counts"] == {"rcf": 2, "api_dids": 0, "trunks": 1,
                              "numbers": {"total": 3, "by_product": {"rcf": 2, "trunk": 1}}}
     assert tr.redact_my_customer({"id": 1, "counts": {}})["counts"] == {"api_dids": 0}
-    assert "ucaas_enabled" not in out
+    assert out["ucaas_enabled"] is False
     row = tr.redact_customer_row({"id": 1, "name": "x", "traffic_grade": "a", "cpm_limit": 1,
                                   "ucaas_enabled": True, "new_col": 1})
-    assert row == {"id": 1, "name": "x"}
+    assert row == {"id": 1, "name": "x", "ucaas_enabled": True}
 
 
 def test_tenant_customer_endpoints_hide_traffic_grade(client, tokens):
@@ -828,10 +827,11 @@ def test_tenant_customer_endpoints_hide_traffic_grade(client, tokens):
             # product-agnostic numbers (number_routing): no internals
             assert me["counts"]["numbers"] == {"total": 1, "by_product": {"rcf": 1}}
             assert "product_ref_id" not in r.text and "customer_status" not in r.text
-            # allowlisted shape: no traffic_grade / daily_limit / cpm_limit /
-            # ucaas_enabled; api_dids kept, always 0
+            # allowlisted shape: no traffic_grade / daily_limit / cpm_limit;
+            # ucaas_enabled kept (the UI reads it); api_dids kept, always 0
             assert set(me) == _TENANT_ME_KEYS
-            assert not (_STAFF_ONLY_CUSTOMER_KEYS & set(me))
+            assert not (_OPS_CUSTOMER_KEYS & set(me))
+            assert me["ucaas_enabled"] is False
             assert set(me["counts"]) == {"rcf", "api_dids", "trunks", "numbers"}
             assert me["counts"]["api_dids"] == 0
 
@@ -860,7 +860,7 @@ def test_staff_customer_endpoints_keep_traffic_grade(client, tokens):
         assert me["traffic_grade"] == "premium"
         assert float(me["daily_limit"]) == 500.0 and me["cpm_limit"] == 60
         assert me["ucaas_enabled"] is False
-        assert set(me) == _TENANT_ME_KEYS | _STAFF_ONLY_CUSTOMER_KEYS
+        assert set(me) == _TENANT_ME_KEYS | _OPS_CUSTOMER_KEYS
 
         r = await client.get(f"/v1/rcf/{RCF_DID_A}", headers=_h(tokens, "admin"))
         assert r.status_code == 200, r.text

@@ -19,9 +19,7 @@ export interface MyCustomer {
    *  customer caller. Not rendered in the customer UI. */
   daily_limit?: number | null;
   cpm_limit?: number | null;
-  /** UCaaS add-on — staff only on this endpoint; a customer reads it from
-   *  the signed-in user (`User.ucaas_enabled`, /auth/me). */
-  ucaas_enabled?: boolean | null;
+  ucaas_enabled: boolean | null;
   created_at: string;
   counts: {
     rcf: number;

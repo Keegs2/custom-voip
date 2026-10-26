@@ -258,7 +258,7 @@ async def list_customers(
     SLIM (financial/ops columns — balance, credit_limit, fraud_score,
     daily_limit, cpm_limit — are withheld). Tenant users see only their own
     row, also slim and additionally WITHOUT `traffic_grade` (internal routing
-    grade) and `ucaas_enabled`, rebuilt from the tenant allowlist
+    grade), rebuilt from the tenant allowlist
     (`tenant_redaction.TENANT_CUSTOMER_FIELDS`). Same response shape otherwise
     (id + name for dropdowns).
     """
@@ -272,8 +272,9 @@ async def list_customers(
                traffic_grade, ucaas_enabled, created_at"""
     else:
         # Tenant: the allowlist columns only (tenant_redaction
-        # .TENANT_CUSTOMER_FIELDS) — no traffic_grade, no ucaas_enabled.
-        select_cols = """id, name, account_type, status, created_at"""
+        # .TENANT_CUSTOMER_FIELDS) — no traffic_grade (internal routing grade).
+        select_cols = """id, name, account_type, status,
+               ucaas_enabled, created_at"""
 
     query = f"""
         SELECT {select_cols}
@@ -343,21 +344,21 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
 
     Tenants (user/readonly) get the allowlisted shape
     (`tenant_redaction.redact_my_customer`): no traffic_grade, daily_limit or
-    cpm_limit (operations settings — not even SELECTed for them), no
-    ucaas_enabled (the customer UI reads it from /auth/me) and
-    `counts.api_dids` always 0. Staff (admin/support, incl. an admin in
-    "View as Customer") keep the full shape.
+    cpm_limit (operations settings — not even SELECTed for them) and
+    `counts.api_dids` always 0; `ucaas_enabled` (their own add-on flag, read
+    by the UI) stays. Staff (admin/support, incl. an admin in "View as
+    Customer") keep the full shape.
     """
     customer_id = user.get("customer_id")
     if customer_id is None:
         raise HTTPException(status_code=404, detail="No customer associated with this account")
 
     staff = tr.is_staff(user)
-    staff_cols = "traffic_grade, daily_limit, cpm_limit, ucaas_enabled," if staff else ""
+    ops_cols = "traffic_grade, daily_limit, cpm_limit," if staff else ""
     row = await db.fetch_one(
         f"""
-        SELECT id, name, account_type, status, {staff_cols}
-               created_at
+        SELECT id, name, account_type, status, {ops_cols}
+               ucaas_enabled, created_at
         FROM customers WHERE id = $1::int
         """,
         customer_id,
@@ -397,7 +398,7 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
         "traffic_grade": c.get("traffic_grade"),
         "daily_limit": c.get("daily_limit"),
         "cpm_limit": c.get("cpm_limit"),
-        "ucaas_enabled": c.get("ucaas_enabled"),
+        "ucaas_enabled": c["ucaas_enabled"],
         "created_at": c["created_at"].isoformat() if c["created_at"] is not None else None,
         "counts": {
             "rcf": rcf_count["n"],
@@ -406,9 +407,9 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
             "numbers": cn.numbers_count(number_rows),
         },
     }
-    # traffic_grade / daily_limit / cpm_limit / ucaas_enabled: staff only (an
-    # admin in "View as Customer" mode is still role=admin and keeps them).
-    # Tenants get the allowlist shape.
+    # traffic_grade / daily_limit / cpm_limit are operations settings: staff
+    # only (an admin in "View as Customer" mode is still role=admin and keeps
+    # them). Tenants get the allowlist shape.
     return body if staff else tr.redact_my_customer(body)
 
 

@@ -342,11 +342,10 @@ FORBIDDEN_TENANT_CUSTOMER_KEYS: frozenset[str] = frozenset({
 #: The ONLY keys of a customer RECORD a tenant may receive (allowlist):
 #: GET /v1/customers tenant rows and GET /v1/customers/me (+ ``counts``).
 #: A column added to those SELECTs later does NOT reach tenants unless it is
-#: added here. ``ucaas_enabled`` is deliberately NOT on it: a customer's UI
-#: reads the add-on flag from the signed-in user (GET /auth/me /
-#: POST /auth/login ``user.ucaas_enabled``), not from the customer record.
+#: added here. ``ucaas_enabled`` stays: it is the customer's own add-on flag
+#: (not an internal) and the customer UI reads it (My Account).
 TENANT_CUSTOMER_FIELDS: frozenset[str] = frozenset({
-    "id", "name", "account_type", "status", "created_at",
+    "id", "name", "account_type", "status", "ucaas_enabled", "created_at",
 })
 
 #: The ONLY keys of `/customers/me` ``counts`` a tenant receives. ``api_dids``

@@ -117,7 +117,7 @@ Staff shapes are unchanged. Everything lives in `services/tenant_redaction.py`:
   rows through `redact_cdr_row()` / `redact_summary_row()` and add a case to
   `tests/test_tenant_redaction.py` (asserts the full denylist recursively).
 - **Customer records (allowlist).** `TENANT_CUSTOMER_FIELDS` = `id, name,
-  account_type, status, created_at` is the ONLY set a tenant
+  account_type, status, ucaas_enabled, created_at` is the ONLY set a tenant
   gets from a customer record: `GET /v1/customers` tenant rows
   (`redact_customer_row`) and `GET /v1/customers/me` (`redact_my_customer`:
   the record allowlist + `counts` limited to `TENANT_CUSTOMER_COUNT_KEYS`
@@ -126,11 +126,10 @@ Staff shapes are unchanged. Everything lives in `services/tenant_redaction.py`:
   cpm_limit`. `FORBIDDEN_TENANT_CUSTOMER_KEYS` (`traffic_grade`,
   `daily_limit`, `cpm_limit`, `fraud_*`, `balance`, `credit_limit`) is the
   test denylist and what `redact_customer_fields` strips from customer-JOINED
-  rows (`GET /v1/rcf/{did}`). `ucaas_enabled` is NOT on the allowlist (not
-  selected for tenants): a customer's UI reads the add-on flag from the
-  signed-in user (`/auth/me` / login `user.ucaas_enabled`, unchanged) —
-  `MyAccountPage` uses `customer.ucaas_enabled ?? user.ucaas_enabled`. Staff
-  (admin incl. "View as Customer", support) keep the full `/me` shape.
+  rows (`GET /v1/rcf/{did}`). `ucaas_enabled` stays on the allowlist: it is
+  the customer's own add-on flag (not an internal) and My Account reads it
+  from `/customers/me`. Staff (admin incl. "View as Customer", support) keep
+  the full `/me` shape.
 - **Other tenant shapes.** `GET /v1/numbers/my`: rows rebuilt from
   `number_inventory.TENANT_MY_NUMBER_KEYS` (no `notes` — the free-text audit
   trail carries staff-written notes; not selected) and api rows hidden in

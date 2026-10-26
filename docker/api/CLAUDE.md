@@ -252,9 +252,9 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 ### Customers
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/v1/customers` | List customers (filterable by status, account_type). Tenant: own row only, allowlisted `{id, name, account_type, status, created_at}` |
+| `GET` | `/v1/customers` | List customers (filterable by status, account_type). Tenant: own row only, allowlisted `{id, name, account_type, status, ucaas_enabled, created_at}` |
 | `POST` | `/v1/customers` | Create customer (`account_type` `api` → 422 while API Calling is retired) |
-| `GET` | `/v1/customers/me` | Own record + `counts`: `{rcf, api_dids, trunks, numbers: {total, by_product}}` — `numbers` covers every product the account owns (`number_routing`; zero-count products omitted; api hidden). Tenants (user/readonly) get the allowlisted shape `{id, name, account_type, status, created_at, counts}` (`tenant_redaction.redact_my_customer`): no `traffic_grade` / `daily_limit` / `cpm_limit` / `ucaas_enabled` (not even SELECTed; the UI reads the UCaaS flag from `/auth/me`), `counts.api_dids` always 0. Staff (admin incl. "View as Customer", support) keep the full shape |
+| `GET` | `/v1/customers/me` | Own record + `counts`: `{rcf, api_dids, trunks, numbers: {total, by_product}}` — `numbers` covers every product the account owns (`number_routing`; zero-count products omitted; api hidden). Tenants (user/readonly) get the allowlisted shape `{id, name, account_type, status, ucaas_enabled, created_at, counts}` (`tenant_redaction.redact_my_customer`): no `traffic_grade` / `daily_limit` / `cpm_limit` (not even SELECTed), `counts.api_dids` always 0; `ucaas_enabled` (the customer's own add-on flag, read by My Account) stays. Staff (admin incl. "View as Customer", support) keep the full shape |
 | `GET` | `/v1/customers/{id}` | Get customer by ID |
 | `PUT` | `/v1/customers/{id}` | Update customer |
 | `DELETE` | `/v1/customers/{id}` | Delete customer (cascading, transactional) |
