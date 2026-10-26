@@ -20,23 +20,121 @@
 }
 
 .ivr-work {
+  /* Panel widths (docker/ui/CLAUDE.md §20: the canvas gets the room). The
+     left panel folds into a rail of block icons; the right panel can be
+     wide, and folds into a rail while it only shows the checklist. */
+  --ivr-left-w: 216px;
+  --ivr-right-w: 344px;
   display: grid;
   /* The canvas never collapses to 0 (React Flow can't render at 0 × n — it
      would happen for a frame while a window narrows into the phone view). */
-  grid-template-columns: 216px minmax(240px, 1fr) 344px;
+  grid-template-columns: var(--ivr-left-w) minmax(240px, 1fr) var(--ivr-right-w);
   min-height: 0;
 }
 
 @media (max-width: 1180px) {
-  .ivr-work { grid-template-columns: 200px minmax(240px, 1fr) 320px; }
+  .ivr-work { --ivr-left-w: 200px; --ivr-right-w: 320px; }
 }
 
 @media (max-width: 960px) {
-  .ivr-work { grid-template-columns: 168px minmax(240px, 1fr) 284px; }
+  .ivr-work { --ivr-left-w: 168px; --ivr-right-w: 284px; }
 }
+
+/* The sizes the user picked win at every width. */
+.ivr-work.ivr-work--right-wide { --ivr-right-w: clamp(344px, 33vw, 480px); }
+.ivr-work.ivr-work--left-rail { --ivr-left-w: 56px; }
+.ivr-work.ivr-work--right-rail { --ivr-right-w: 56px; }
 
 /* The collapsed sidebar's edge tab sits on the canvas's left edge. */
 .ivr-canvas--collapsed .ivr-left { padding-left: 12px; }
+.ivr-canvas--collapsed .ivr-work.ivr-work--left-rail { --ivr-left-w: 68px; }
+
+/* ─── Panel chrome: hide / show, wider / narrower ─── */
+.ivr-chrome { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.ivr-chrome-btn { width: 30px; height: 30px; flex-shrink: 0; }
+
+.ivr-left-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 10px 4px 12px;
+}
+
+.ivr-left-top .ivr-left-tabs { flex: 1 1 auto; min-width: 0; margin: 0; }
+
+/* The narrow panel (≤ 960px windows) keeps both tab labels whole beside the fold button. */
+@media (max-width: 960px) {
+  .ivr-left-top { gap: 4px; margin: 10px 6px 4px 8px; }
+  .ivr-left-top .ivr-left-tab { padding-inline: 4px; }
+  .ivr-left-top .ivr-chrome-btn { width: 28px; height: 28px; }
+}
+
+/* A folded panel: one column of icon buttons. */
+.ivr-left--rail,
+.ivr-right--rail {
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  padding-bottom: 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.ivr-rail-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 36px;
+  min-height: 36px;
+  padding: 8px 0;
+  flex-shrink: 0;
+  border-radius: 9px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  color: var(--t-text-soft);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--rcf-ease), border-color var(--rcf-ease), color var(--rcf-ease);
+}
+
+.ivr-rail-btn:hover { background: var(--t-tint-hover); border-color: var(--t-accent-border); color: var(--t-text); }
+.ivr-rail-btn:focus-visible { outline: 2px solid var(--t-focus); outline-offset: 2px; }
+
+.ivr-rail-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-ok-fg);
+}
+
+.ivr-rail-check--err .ivr-rail-status { color: var(--t-danger-fg); }
+.ivr-rail-check--err { border-color: var(--t-danger-border); }
+
+.ivr-palette--rail { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+
+.ivr-pal-rail {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--t-line-soft);
+}
+
+.ivr-pal-rail:last-child { padding-bottom: 0; border-bottom: 0; }
+
+.ivr-pal-item.ivr-pal-item--icon {
+  width: 38px;
+  height: 36px;
+  padding: 0 0 0 3px;
+  justify-content: center;
+}
 
 .ivr-flow-wrap { position: absolute; inset: 0; }
 

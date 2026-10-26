@@ -8,6 +8,12 @@
  *   │                  │ Flow assistant proposal                │ history                       │
  *   └──────────────────┴────────────────────────────────────────┴───────────────────────────────┘
  *
+ * Panels (docker/ui/CLAUDE.md §20 — the canvas gets the room): the left
+ * panel folds into a rail of block icons (still drag / click to add); the
+ * right panel can be made wider, and while it only shows the checklist it
+ * folds into a rail too — selecting a block or opening a sheet brings it
+ * back. Each choice is remembered (`crag_open:ivr:*`, a convenience only).
+ *
  * Below 768px it is a read-only diagram + outline with "edit on a larger
  * screen" (the Flow assistant still works there, as a full-screen sheet).
  * The store is created HERE, once per mount: the route keys this component
@@ -16,7 +22,7 @@
  *
  * React #310: hooks first; the phone/desktop split is a child switch.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
@@ -25,8 +31,12 @@ import {
   Eye,
   FlaskConical,
   History,
+  CircleCheck,
   Loader2,
   MonitorSmartphone,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightOpen,
   Redo2,
   RotateCcw,
   Rocket,
@@ -35,6 +45,8 @@ import {
   Wand2,
 } from 'lucide-react';
 import type { Flow, Issue } from '../types/ivr';
+import { useOpenState } from '../components/layout/kit';
+import { cn } from '../utils/cn';
 import { useIvrWorkspace } from '../pages/ivr/IvrContext';
 import { useDestinations, usePrompts } from '../pages/ivr/ivrData';
 import { formatWhen } from '../pages/ivr/format';
@@ -53,6 +65,7 @@ import { HistoryPanel } from './panels/HistoryPanel';
 import { SimulatorPanel, type SimulatorTarget } from './panels/SimulatorPanel';
 import { ConflictDialog } from './panels/ConflictDialog';
 import { AddBlockMenu, type AddRequest } from './panels/AddBlockMenu';
+import { PanelChromeContext, type PanelChrome } from './panels/panelChrome';
 import { blockTitle } from './model/summary';
 import { AssistProvider, useAssist, useFlowAssistant, type FlowAssistant } from './assist/useFlowAssistant';
 import { AssistAnnouncer, AssistPanel } from './assist/AssistPanel';
@@ -123,6 +136,13 @@ function BuilderShell({ maxBlocks, assistAvailable }: { maxBlocks?: number; assi
   const autosave = useAutosave(store, ws.scope, readOnly);
   const [sheetState, setSheet] = useState<Sheet>(null);
   const [addRequest, setAddRequest] = useState<AddRequest | null>(null);
+  // Panel layout (remembered per browser; storage is a convenience only).
+  const [leftOpen, setLeftOpen] = useOpenState({ defaultOpen: true, persistKey: 'ivr:blocks-panel' });
+  const [checklistOpen, setChecklistOpen] = useOpenState({ defaultOpen: true, persistKey: 'ivr:checklist' });
+  const [wide, setWide] = useOpenState({ defaultOpen: false, persistKey: 'ivr:panel-wide' });
+  const rightId = useId();
+  // Mirrors Inspector: a selected block that exists shows its settings.
+  const hasSelection = useFlow((s) => s.selectedId !== null && s.nodes.some((n) => n.id === s.selectedId));
   const narrowRef = useRef(narrow);
   useEffect(() => {
     narrowRef.current = narrow;
@@ -253,6 +273,20 @@ function BuilderShell({ maxBlocks, assistAvailable }: { maxBlocks?: number; assi
         ? 'assist'
         : sheetState;
 
+  // The right column shows the checklist only when nothing else claims it;
+  // only then may it fold into the rail.
+  const showingChecklist = sheet === null && !hasSelection;
+  const rightRail = showingChecklist && !checklistOpen;
+  const chrome = useMemo<PanelChrome>(
+    () => ({
+      wide,
+      toggleWide: () => setWide(!wide),
+      hide: showingChecklist ? () => setChecklistOpen(false) : null,
+      panelId: rightId,
+    }),
+    [wide, setWide, showingChecklist, setChecklistOpen, rightId],
+  );
+
   const { refine } = assist;
   const onRefine = useCallback(() => {
     refine();
@@ -299,52 +333,66 @@ function BuilderShell({ maxBlocks, assistAvailable }: { maxBlocks?: number; assi
                 onRefine={onRefine}
               />
             ) : (
-              <div className="ivr-builder">
-                <TopBar autosave={autosave} analysis={analysis} assist={assist} sheet={sheet} setSheet={setSheet} />
-                <div className={`ivr-work${sheet ? ' ivr-work--sheet' : ''}`}>
-                  <LeftColumn
-                    readOnly={readOnly}
-                    overlay={overlay}
-                    previewKind={preview ? 'version' : 'proposal'}
-                  />
-                  {/* A proposal's banner is docked above the canvas (the canvas
-                      shrinks and frames the flow below it); a version's floats. */}
-                  <div className={`ivr-canvas-wrap${!preview && proposal && shown ? ' ivr-canvas-wrap--docked' : ''}`}>
-                    {preview && <PreviewBanner onRestore={() => setSheet('history')} />}
-                    {!preview && proposal && shown && (
-                      <ProposalBanner
-                        key={shown.jobId}
-                        variant="docked"
-                        changes={changes}
-                        onRefine={onRefine}
-                        onTestCall={() => setSheet('assist-sim')}
-                      />
+              <PanelChromeContext.Provider value={chrome}>
+                <div className="ivr-builder">
+                  <TopBar autosave={autosave} analysis={analysis} assist={assist} sheet={sheet} setSheet={setSheet} />
+                  <div
+                    className={cn(
+                      'ivr-work',
+                      sheet && 'ivr-work--sheet',
+                      !leftOpen && 'ivr-work--left-rail',
+                      rightRail && 'ivr-work--right-rail',
+                      wide && !rightRail && 'ivr-work--right-wide',
                     )}
-                    <div className="ivr-canvas-stage">
-                      <FlowCanvas mode={overlay ? 'preview' : readOnly ? 'readonly' : 'edit'} override={overlay} />
+                  >
+                    <LeftColumn
+                      readOnly={readOnly}
+                      overlay={overlay}
+                      previewKind={preview ? 'version' : 'proposal'}
+                      open={leftOpen}
+                      onOpenChange={setLeftOpen}
+                    />
+                    {/* A proposal's banner is docked above the canvas (the canvas
+                        shrinks and frames the flow below it); a version's floats. */}
+                    <div className={`ivr-canvas-wrap${!preview && proposal && shown ? ' ivr-canvas-wrap--docked' : ''}`}>
+                      {preview && <PreviewBanner onRestore={() => setSheet('history')} />}
+                      {!preview && proposal && shown && (
+                        <ProposalBanner
+                          key={shown.jobId}
+                          variant="docked"
+                          changes={changes}
+                          onRefine={onRefine}
+                          onTestCall={() => setSheet('assist-sim')}
+                        />
+                      )}
+                      <div className="ivr-canvas-stage">
+                        <FlowCanvas mode={overlay ? 'preview' : readOnly ? 'readonly' : 'edit'} override={overlay} />
+                      </div>
                     </div>
+                    <aside className={cn('ivr-right', rightRail && 'ivr-right--rail')} id={rightId} aria-label="Settings">
+                      {rightRail ? (
+                        <ChecklistRail errorCount={analysis.errorCount} onShow={() => setChecklistOpen(true)} panelId={rightId} />
+                      ) : sheet === 'publish' ? (
+                        <PublishPanel
+                          flush={autosave.flush}
+                          onClose={() => setSheet(null)}
+                          onConflict={() => setSheet(null)}
+                        />
+                      ) : sheet === 'history' ? (
+                        <HistoryPanel flush={autosave.flush} onClose={() => setSheet(null)} onConflict={() => setSheet(null)} />
+                      ) : sheet === 'sim' ? (
+                        <SimulatorPanel onClose={() => setSheet(null)} />
+                      ) : sheet === 'assist' ? (
+                        <AssistPanel onClose={() => setSheet(null)} />
+                      ) : sheet === 'assist-sim' && simTarget ? (
+                        <SimulatorPanel key={simTarget.assistJobId} target={simTarget} onClose={() => setSheet('assist')} />
+                      ) : (
+                        <Inspector />
+                      )}
+                    </aside>
                   </div>
-                  <aside className="ivr-right" aria-label="Settings">
-                    {sheet === 'publish' ? (
-                      <PublishPanel
-                        flush={autosave.flush}
-                        onClose={() => setSheet(null)}
-                        onConflict={() => setSheet(null)}
-                      />
-                    ) : sheet === 'history' ? (
-                      <HistoryPanel flush={autosave.flush} onClose={() => setSheet(null)} onConflict={() => setSheet(null)} />
-                    ) : sheet === 'sim' ? (
-                      <SimulatorPanel onClose={() => setSheet(null)} />
-                    ) : sheet === 'assist' ? (
-                      <AssistPanel onClose={() => setSheet(null)} />
-                    ) : sheet === 'assist-sim' && simTarget ? (
-                      <SimulatorPanel key={simTarget.assistJobId} target={simTarget} onClose={() => setSheet('assist')} />
-                    ) : (
-                      <Inspector />
-                    )}
-                  </aside>
                 </div>
-              </div>
+              </PanelChromeContext.Provider>
             )}
             {assist.available && <AssistAnnouncer />}
             {autosave.status.kind === 'conflict' && (
@@ -561,22 +609,62 @@ function LeftColumn({
   readOnly,
   overlay,
   previewKind,
+  open,
+  onOpenChange,
 }: {
   readOnly: boolean;
   /** A read-only version or proposal on the canvas instead of the draft. */
   overlay: CanvasOverride | null;
   previewKind: 'version' | 'proposal';
+  /** The full panel; false = the rail (block icons only). */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
+  // ── Hooks first (React #310) ──
   const previewing = overlay !== null;
   const [tab, setTab] = useState<'blocks' | 'outline'>(readOnly ? 'outline' : 'blocks');
-  return (
-    <aside className="ivr-left" aria-label="Blocks and outline">
-      <div className="ivr-left-tabs" role="tablist" aria-label="Left panel">
-        <button type="button" role="tab" aria-selected={tab === 'blocks'} className={`ivr-left-tab${tab === 'blocks' ? ' ivr-left-tab-on' : ''}`} onClick={() => setTab('blocks')}>
-          Blocks
+  const panelId = useId();
+
+  if (!open) {
+    return (
+      <aside className="ivr-left ivr-left--rail" id={panelId} aria-label="Blocks and outline">
+        <button
+          type="button"
+          className="ivr-rail-btn"
+          aria-expanded="false"
+          aria-controls={panelId}
+          aria-label="Show blocks and outline"
+          title="Show blocks and outline"
+          onClick={() => onOpenChange(true)}
+        >
+          <PanelLeftOpen size={16} aria-hidden="true" />
         </button>
-        <button type="button" role="tab" aria-selected={tab === 'outline'} className={`ivr-left-tab${tab === 'outline' ? ' ivr-left-tab-on' : ''}`} onClick={() => setTab('outline')}>
-          Outline
+        {!readOnly && !previewing && <Palette rail disabled={false} previewing={false} />}
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="ivr-left" id={panelId} aria-label="Blocks and outline">
+      <div className="ivr-left-top">
+        <div className="ivr-left-tabs" role="tablist" aria-label="Left panel">
+          <button type="button" role="tab" aria-selected={tab === 'blocks'} className={`ivr-left-tab${tab === 'blocks' ? ' ivr-left-tab-on' : ''}`} onClick={() => setTab('blocks')}>
+            Blocks
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'outline'} className={`ivr-left-tab${tab === 'outline' ? ' ivr-left-tab-on' : ''}`} onClick={() => setTab('outline')}>
+            Outline
+          </button>
+        </div>
+        <button
+          type="button"
+          className="vm-iconbtn ivr-chrome-btn"
+          aria-expanded="true"
+          aria-controls={panelId}
+          aria-label="Hide blocks and outline"
+          title="Hide — more room for the canvas"
+          onClick={() => onOpenChange(false)}
+        >
+          <PanelLeftClose size={15} aria-hidden="true" />
         </button>
       </div>
       <div className="ivr-left-body" role="tabpanel">
@@ -587,6 +675,35 @@ function LeftColumn({
         )}
       </div>
     </aside>
+  );
+}
+
+/* ─── The checklist, folded into the right rail ───────────── */
+
+function ChecklistRail({ errorCount, onShow, panelId }: { errorCount: number; onShow: () => void; panelId: string }) {
+  const label =
+    errorCount > 0 ? `Show the checklist — ${errorCount} ${errorCount === 1 ? 'thing' : 'things'} to fix` : 'Show the checklist';
+  return (
+    <button
+      type="button"
+      className={`ivr-rail-btn ivr-rail-check${errorCount > 0 ? ' ivr-rail-check--err' : ''}`}
+      aria-expanded="false"
+      aria-controls={panelId}
+      aria-label={label}
+      title={label}
+      onClick={onShow}
+    >
+      <PanelRightOpen size={16} aria-hidden="true" />
+      <span className="ivr-rail-status" aria-hidden="true">
+        {errorCount > 0 ? (
+          <>
+            <CircleAlert size={14} /> {errorCount}
+          </>
+        ) : (
+          <CircleCheck size={14} />
+        )}
+      </span>
+    </button>
   );
 }
 
