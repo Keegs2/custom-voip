@@ -354,12 +354,22 @@ def test_me_counts_api_dids_zero_when_off(monkeypatch):
                                           "numbers": numbers}
             assert not any("api_dids" in q for q in queries + numbers_queries)
             monkeypatch.setenv("API_CALLING_ENABLED", "true")
+            # A TENANT never gets a real api_dids value, flag on or off (api
+            # is hidden from every customer list); the key stays, always 0.
+            r = await c.get("/v1/customers/me")
+            assert r.json()["counts"] == {"rcf": 4, "api_dids": 0, "trunks": 2,
+                                          "numbers": numbers}
+            assert not any("api_dids" in q for q in queries + numbers_queries)
+        # Staff (admin "View as Customer") shape is unchanged: the real count
+        # while the flag is on.
+        async with _client((customers.router, "/v1/customers"),
+                           role="admin", customer_id=3) as c:
             r = await c.get("/v1/customers/me")
             assert r.json()["counts"] == {"rcf": 4, "api_dids": 9, "trunks": 2,
                                           "numbers": numbers}
         # api is hidden from the product-agnostic numbers with the flag OFF
         # AND ON (retired product: never one of a customer's numbers)
-        assert len(numbers_queries) == 2
+        assert len(numbers_queries) == 3
         assert all("NOT IN ('api')" in q for q in numbers_queries)
 
     _run(go())

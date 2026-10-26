@@ -396,7 +396,10 @@ def authz_db():
                 "('admin@test.local',    'x', NULL, 'admin',    'Admin'), "
                 "('support@test.local',  'x', NULL, 'support',  'Support'), "
                 "('alpha@test.local',    'x', $1,   'user',     'Alpha User'), "
-                "('alpha-ro@test.local', 'x', $1,   'readonly', 'Alpha RO')",
+                "('alpha-ro@test.local', 'x', $1,   'readonly', 'Alpha RO'), "
+                # sub 5: the customer-less `user` the fail-closed tests mint
+                # (the JWT middleware refuses a token whose user is missing).
+                "('noscope@test.local',  'x', NULL, 'user',     'No Scope')",
                 cid_a)
 
             state.update(cid_a=cid_a, cid_b=cid_b,

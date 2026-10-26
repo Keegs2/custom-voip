@@ -170,7 +170,8 @@ class Harness:
                 INSERT INTO users (id, email, password_hash, customer_id, role, name) VALUES
                   (50, 'a-user@test', 'x', 101, 'user', 'A User'),
                   (51, 'a-ro@test', 'x', 101, 'readonly', 'A Readonly'),
-                  (52, 'b-user@test', 'x', 102, 'user', 'B User');
+                  (52, 'b-user@test', 'x', 102, 'user', 'B User'),
+                  (53, 'support@test', 'x', NULL, 'support', 'Support');
                 SELECT setval('users_id_seq', 1000);
                 """)
         finally:

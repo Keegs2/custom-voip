@@ -125,7 +125,8 @@ CREATE TABLE users (
   email VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   customer_id INT REFERENCES customers(id) ON DELETE SET NULL,
-  role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user', 'readonly')),
+  -- role CHECK as after 39_users_support_role.sql (support exists in prod)
+  role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user', 'readonly', 'support')),
   name VARCHAR(255) NOT NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -179,11 +180,17 @@ GRANT ALL ON customers, users, rcf_numbers, sip_trunks, trunk_dids, api_dids, cd
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO api;
 
 -- Seeds: admin user 1 (assigned_by FK target, matches the admin JWT sub) and
--- rcf customer 42 (matches the tenant JWT customer_id).
+-- rcf customer 42 (matches the tenant JWT customer_id). Users 2 (support) and
+-- 3 (tenant) back the other minted JWTs: the JWT middleware refuses a token
+-- whose user is missing or not active (auth/user_status.py).
 INSERT INTO users (id, email, password_hash, role, name)
 VALUES (1, 'admin@test.local', 'x', 'admin', 'Test Admin');
 INSERT INTO customers (id, name, account_type, status)
 VALUES (42, 'Test RCF Co', 'rcf', 'active');
+INSERT INTO users (id, email, password_hash, role, customer_id, name) VALUES
+  (2, 'support@test.local', 'x', 'support', NULL, 'Test Support'),
+  (3, 'tenant@test.local', 'x', 'user', 42, 'Test Tenant');
+SELECT setval('users_id_seq', 1000);
 """
 
 

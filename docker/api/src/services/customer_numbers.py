@@ -155,6 +155,19 @@ def _hidden_sql(column: str) -> str:
     return f"{column} NOT IN ({literals})"
 
 
+def not_hidden_sql(column: str) -> str:
+    """Predicate: ``column`` is not a HIDDEN product, NULL-safe (a NULL
+    product — e.g. a did_inventory row without one — passes). For
+    customer-facing lists that read product columns directly (GET
+    /numbers/my, tenant branch) rather than through ``owned_numbers_sql``."""
+    if not _SQL_ALIAS.match(column.replace(".", "_", 1)):
+        raise ValueError(f"bad SQL column {column!r}")
+    if not HIDDEN_PRODUCTS:
+        return "TRUE"
+    literals = ", ".join("'" + p + "'" for p in HIDDEN_PRODUCTS)
+    return f"({column} IS NULL OR {column} NOT IN ({literals}))"
+
+
 def owned_numbers_sql(customer_bind: Optional[str]) -> str:
     """One row per owned DID: number, name, product, forwards_to, enabled,
     customer_id — for one customer (`customer_bind`, e.g. ``"$1::int"``) or,

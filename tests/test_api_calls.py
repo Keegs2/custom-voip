@@ -372,3 +372,39 @@ def test_from_did_ownership_gate_and_stir_attest(calls_db, client, api_calling_o
             await db.execute("DELETE FROM customers WHERE id = $1", other["id"])
 
     _run(go())
+
+
+# ---------------------------------------------------------------------------
+# Writers only (auth.dependencies.require_writer): with the retired product ON,
+# a readonly tenant (or support staff) can neither originate nor control a
+# call — 403 before any DB access, nothing originated, no fee charged.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("role", ["readonly", "support"])
+def test_flag_on_non_writers_403(calls_db, api_calling_on, fake_originate, role):
+    from fastapi import FastAPI, Request
+    from routers import calls
+
+    db, cid = calls_db["db"], calls_db["customer_id"]
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def _inject_user(request: Request, call_next):
+        request.state.user = {"sub": "43", "role": role, "customer_id": cid}
+        return await call_next(request)
+
+    app.include_router(calls.router, prefix="/v1/calls")
+
+    async def go():
+        bal0 = await _balance(db, cid)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as c:
+            r = await c.post("/v1/calls", json=_body())
+            assert r.status_code == 403, r.text
+            r = await c.post("/v1/calls/any-call/update", json={"action": "hangup"})
+            assert r.status_code == 403, r.text
+            if role == "readonly":
+                assert r.json()["detail"] == "Read-only accounts can't change this."
+        assert fake_originate == []
+        assert await _balance(db, cid) == bal0
+
+    _run(go())

@@ -327,12 +327,35 @@ def redact_summary_row(row: Mapping[str, Any]) -> dict[str, Any]:
 STAFF_ROLES: frozenset[str] = frozenset({"admin", "support"})
 
 #: Customer-record keys a tenant must NEVER receive. `traffic_grade` is an
-#: internal routing grade (owner decision 2026-09); `fraud_score` and the
-#: financial/limit columns are already withheld by the tenant SELECTs and are
-#: listed here so a future SELECT regression still cannot leak them.
+#: internal routing grade (owner decision 2026-09); `daily_limit` /
+#: `cpm_limit` are fraud/velocity guard thresholds (operations settings, not
+#: the customer's); `fraud_score` and the financial columns are already
+#: withheld by the tenant SELECTs. Enforcement for customer RECORDS is the
+#: allowlist below; this denylist is what the tests assert (and what
+#: `redact_customer_fields` strips from customer-JOINED rows such as
+#: GET /v1/rcf/{did}).
 FORBIDDEN_TENANT_CUSTOMER_KEYS: frozenset[str] = frozenset({
     "traffic_grade", "fraud_score", "fraud_flags", "balance", "credit_limit",
+    "daily_limit", "cpm_limit",
 })
+
+#: The ONLY keys of a customer RECORD a tenant may receive (allowlist):
+#: GET /v1/customers tenant rows and GET /v1/customers/me (+ ``counts``).
+#: A column added to those SELECTs later does NOT reach tenants unless it is
+#: added here. ``ucaas_enabled`` stays: it is the customer's own add-on flag
+#: (not an internal) and the customer UI reads it (My Account).
+TENANT_CUSTOMER_FIELDS: frozenset[str] = frozenset({
+    "id", "name", "account_type", "status", "ucaas_enabled", "created_at",
+})
+
+#: The ONLY keys of `/customers/me` ``counts`` a tenant receives. ``api_dids``
+#: is kept for a stable shape (the UI and tests read the key) but is ALWAYS 0
+#: for a tenant: API Calling is retired and hidden from every customer list
+#: (customer_numbers.HIDDEN_PRODUCTS), whatever API_CALLING_ENABLED says.
+TENANT_CUSTOMER_COUNT_KEYS: tuple[str, ...] = ("rcf", "api_dids", "trunks", "numbers")
+
+assert not (TENANT_CUSTOMER_FIELDS & FORBIDDEN_TENANT_CUSTOMER_KEYS), (
+    "tenant customer allowlist overlaps the forbidden set")
 
 
 def is_staff(user: Mapping[str, Any]) -> bool:
@@ -341,7 +364,25 @@ def is_staff(user: Mapping[str, Any]) -> bool:
 
 
 def redact_customer_fields(obj: Mapping[str, Any]) -> dict[str, Any]:
-    """Tenant view of a customer (or customer-joined) object: drop every
-    forbidden internal key, keep everything else unchanged."""
+    """Tenant view of a customer-JOINED object (e.g. an RCF row carrying
+    `customer_name`): drop every forbidden internal key, keep everything else
+    unchanged. Customer RECORDS use the allowlist `redact_customer_row`."""
     return {k: v for k, v in dict(obj).items()
             if k not in FORBIDDEN_TENANT_CUSTOMER_KEYS}
+
+
+def redact_customer_row(obj: Mapping[str, Any]) -> dict[str, Any]:
+    """Tenant view of a customer record, built from the ALLOWLIST
+    `TENANT_CUSTOMER_FIELDS` only (anything else is dropped)."""
+    return {k: v for k, v in dict(obj).items() if k in TENANT_CUSTOMER_FIELDS}
+
+
+def redact_my_customer(body: Mapping[str, Any]) -> dict[str, Any]:
+    """Tenant view of GET /v1/customers/me: the record allowlist plus
+    ``counts`` restricted to `TENANT_CUSTOMER_COUNT_KEYS`, with ``api_dids``
+    forced to 0 (no real value ever reaches a tenant)."""
+    out = redact_customer_row(body)
+    counts = dict(body.get("counts") or {})
+    out["counts"] = {k: counts[k] for k in TENANT_CUSTOMER_COUNT_KEYS if k in counts}
+    out["counts"]["api_dids"] = 0
+    return out

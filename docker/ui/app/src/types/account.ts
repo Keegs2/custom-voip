@@ -15,12 +15,15 @@ export interface MyCustomer {
   /** Internal routing grade — returned to staff (admin/support) only; never
    *  present for a customer (tenant) caller. Not rendered in the customer UI. */
   traffic_grade?: TrafficGrade;
-  daily_limit: number | null;
-  cpm_limit: number | null;
+  /** Operations limits — staff only, like `traffic_grade`; absent for a
+   *  customer caller. Not rendered in the customer UI. */
+  daily_limit?: number | null;
+  cpm_limit?: number | null;
   ucaas_enabled: boolean | null;
   created_at: string;
   counts: {
     rcf: number;
+    /** API Calling is retired: always 0 for a customer (key kept). */
     api_dids: number;
     trunks: number;
     /**

@@ -15,7 +15,9 @@ Covers:
       - GET /v1/trunks/{id}/stats
       - GET /v1/calls/{id} (completed + active)
       - GET /v1/customers, /v1/customers/me, /v1/rcf/{did}: traffic_grade
-        (internal routing grade) absent for tenants, present for staff
+        (internal routing grade) absent for tenants, present for staff; the
+        tenant customer record is an ALLOWLIST (no daily_limit / cpm_limit,
+        ucaas_enabled kept, counts.api_dids always 0)
     Tenant responses contain NONE of the forbidden keys (full denylist,
     asserted recursively); tenant-ignored filters (rated_only/sbc_id/zone)
     cannot be used as an oracle; staff responses keep the historical keys
@@ -755,11 +757,54 @@ def assert_no_tenant_customer_keys(obj, path="$"):
 def test_redact_customer_fields_pure():
     out = tr.redact_customer_fields(
         {"id": 1, "name": "x", "traffic_grade": "premium", "fraud_score": 3,
+         "daily_limit": 500, "cpm_limit": 60,
          "customer_name": "x", "forward_to": "+1"})
     assert out == {"id": 1, "name": "x", "customer_name": "x", "forward_to": "+1"}
     assert tr.is_staff({"role": "admin"}) and tr.is_staff({"role": "support"})
     assert not tr.is_staff({"role": "user"}) and not tr.is_staff({"role": "readonly"})
     assert not tr.is_staff({})
+
+
+#: Operations settings a tenant must never get from a customer record
+#: (owner rule; the docs audit found /customers/me returning them).
+_OPS_CUSTOMER_KEYS = {"traffic_grade", "daily_limit", "cpm_limit"}
+#: The tenant /customers/me top-level keys (allowlist + counts).
+#: ucaas_enabled is the customer's own add-on flag and My Account reads it.
+_TENANT_ME_KEYS = {"id", "name", "account_type", "status", "ucaas_enabled", "created_at",
+                   "counts"}
+
+
+def test_customer_allowlist_and_denylist_sets():
+    assert _OPS_CUSTOMER_KEYS <= tr.FORBIDDEN_TENANT_CUSTOMER_KEYS
+    assert not (tr.TENANT_CUSTOMER_FIELDS & tr.FORBIDDEN_TENANT_CUSTOMER_KEYS)
+    # the customer's own UCaaS add-on flag stays (My Account reads it)
+    assert "ucaas_enabled" in tr.TENANT_CUSTOMER_FIELDS
+    assert "ucaas_enabled" not in tr.FORBIDDEN_TENANT_CUSTOMER_KEYS
+    assert tr.TENANT_CUSTOMER_FIELDS | {"counts"} == _TENANT_ME_KEYS
+    assert tr.TENANT_CUSTOMER_COUNT_KEYS == ("rcf", "api_dids", "trunks", "numbers")
+
+
+def test_redact_my_customer_pure_is_an_allowlist():
+    staff_body = {
+        "id": 7, "name": "Acme", "account_type": "hybrid", "status": "active",
+        "traffic_grade": "premium", "daily_limit": 500, "cpm_limit": 60,
+        "ucaas_enabled": False, "created_at": "2026-01-01T00:00:00+00:00",
+        "fraud_score": 9, "balance": 12.5, "some_future_column": "x",
+        "counts": {"rcf": 2, "api_dids": 5, "trunks": 1,
+                   "numbers": {"total": 3, "by_product": {"rcf": 2, "trunk": 1}},
+                   "future_count": 4},
+    }
+    out = tr.redact_my_customer(staff_body)
+    assert set(out) == _TENANT_ME_KEYS
+    assert_no_tenant_customer_keys(out)
+    assert "some_future_column" not in out             # allowlist, not denylist
+    assert out["counts"] == {"rcf": 2, "api_dids": 0, "trunks": 1,
+                             "numbers": {"total": 3, "by_product": {"rcf": 2, "trunk": 1}}}
+    assert tr.redact_my_customer({"id": 1, "counts": {}})["counts"] == {"api_dids": 0}
+    assert out["ucaas_enabled"] is False
+    row = tr.redact_customer_row({"id": 1, "name": "x", "traffic_grade": "a", "cpm_limit": 1,
+                                  "ucaas_enabled": True, "new_col": 1})
+    assert row == {"id": 1, "name": "x", "ucaas_enabled": True}
 
 
 def test_tenant_customer_endpoints_hide_traffic_grade(client, tokens):
@@ -772,6 +817,7 @@ def test_tenant_customer_endpoints_hide_traffic_grade(client, tokens):
             assert [c["id"] for c in rows] == [CID_A]
             assert_no_tenant_customer_keys(rows)
             assert rows[0]["name"] == "Tenant A"      # rest of the shape intact
+            assert set(rows[0]) == tr.TENANT_CUSTOMER_FIELDS      # the allowlist
 
             r = await client.get("/v1/customers/me", headers=h)
             assert r.status_code == 200, r.text
@@ -781,7 +827,13 @@ def test_tenant_customer_endpoints_hide_traffic_grade(client, tokens):
             # product-agnostic numbers (number_routing): no internals
             assert me["counts"]["numbers"] == {"total": 1, "by_product": {"rcf": 1}}
             assert "product_ref_id" not in r.text and "customer_status" not in r.text
-            assert "daily_limit" in me and "cpm_limit" in me  # unchanged shape
+            # allowlisted shape: no traffic_grade / daily_limit / cpm_limit;
+            # ucaas_enabled kept (the UI reads it); api_dids kept, always 0
+            assert set(me) == _TENANT_ME_KEYS
+            assert not (_OPS_CUSTOMER_KEYS & set(me))
+            assert me["ucaas_enabled"] is False
+            assert set(me["counts"]) == {"rcf", "api_dids", "trunks", "numbers"}
+            assert me["counts"]["api_dids"] == 0
 
             r = await client.get(f"/v1/rcf/{RCF_DID_A}", headers=h)
             assert r.status_code == 200, r.text
@@ -800,10 +852,15 @@ def test_staff_customer_endpoints_keep_traffic_grade(client, tokens):
             grades = {c["id"]: c["traffic_grade"] for c in r.json()}
             assert grades == {CID_A: "premium", CID_B: "economy"}
 
-        # Admin "View as Customer" (role=admin + customer_id) keeps it on /me.
+        # Admin "View as Customer" (role=admin + customer_id) keeps the full
+        # staff shape on /me (ops settings included).
         r = await client.get("/v1/customers/me", headers=_h(tokens, "admin_a"))
         assert r.status_code == 200, r.text
-        assert r.json()["traffic_grade"] == "premium"
+        me = r.json()
+        assert me["traffic_grade"] == "premium"
+        assert float(me["daily_limit"]) == 500.0 and me["cpm_limit"] == 60
+        assert me["ucaas_enabled"] is False
+        assert set(me) == _TENANT_ME_KEYS | _OPS_CUSTOMER_KEYS
 
         r = await client.get(f"/v1/rcf/{RCF_DID_A}", headers=_h(tokens, "admin"))
         assert r.status_code == 200, r.text

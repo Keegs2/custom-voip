@@ -258,7 +258,8 @@ async def list_customers(
     SLIM (financial/ops columns — balance, credit_limit, fraud_score,
     daily_limit, cpm_limit — are withheld). Tenant users see only their own
     row, also slim and additionally WITHOUT `traffic_grade` (internal routing
-    grade; see services/tenant_redaction.py). Same response shape otherwise
+    grade), rebuilt from the tenant allowlist
+    (`tenant_redaction.TENANT_CUSTOMER_FIELDS`). Same response shape otherwise
     (id + name for dropdowns).
     """
     if user.get("role") == "admin":
@@ -270,7 +271,8 @@ async def list_customers(
         select_cols = """id, name, account_type, status,
                traffic_grade, ucaas_enabled, created_at"""
     else:
-        # Tenant: no traffic_grade (internal routing grade — owner rule).
+        # Tenant: the allowlist columns only (tenant_redaction
+        # .TENANT_CUSTOMER_FIELDS) — no traffic_grade (internal routing grade).
         select_cols = """id, name, account_type, status,
                ucaas_enabled, created_at"""
 
@@ -302,7 +304,7 @@ async def list_customers(
 
     results = await db.fetch_all(query, *values)
     if customer_filter is not None:
-        return [tr.redact_customer_fields(r) for r in results]
+        return [tr.redact_customer_row(r) for r in results]
     return [dict(r) for r in results]
 
 
@@ -339,15 +341,23 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
     owns (services/customer_numbers.py — number_routing; enabled or not;
     zero-count products omitted; api hidden). The legacy rcf / api_dids /
     trunks keys are unchanged.
+
+    Tenants (user/readonly) get the allowlisted shape
+    (`tenant_redaction.redact_my_customer`): no traffic_grade, daily_limit or
+    cpm_limit (operations settings — not even SELECTed for them) and
+    `counts.api_dids` always 0; `ucaas_enabled` (their own add-on flag, read
+    by the UI) stays. Staff (admin/support, incl. an admin in "View as
+    Customer") keep the full shape.
     """
     customer_id = user.get("customer_id")
     if customer_id is None:
         raise HTTPException(status_code=404, detail="No customer associated with this account")
 
+    staff = tr.is_staff(user)
+    ops_cols = "traffic_grade, daily_limit, cpm_limit," if staff else ""
     row = await db.fetch_one(
-        """
-        SELECT id, name, account_type, status, traffic_grade,
-               daily_limit, cpm_limit,
+        f"""
+        SELECT id, name, account_type, status, {ops_cols}
                ucaas_enabled, created_at
         FROM customers WHERE id = $1::int
         """,
@@ -362,7 +372,9 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
     )
     # API Calling is retired: while off the api_dids count is reported as 0
     # (key kept so the response shape is stable for the UI) and not queried.
-    if api_calling_enabled():
+    # A tenant never gets a real value (api is hidden from every customer
+    # list), so it is only ever queried for staff with the flag on.
+    if staff and api_calling_enabled():
         api_count = await db.fetch_one(
             "SELECT COUNT(*)::int AS n FROM api_dids WHERE customer_id = $1::int",
             customer_id,
@@ -383,9 +395,9 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
         "name": c["name"],
         "account_type": c["account_type"],
         "status": c["status"],
-        "traffic_grade": c["traffic_grade"],
-        "daily_limit": c["daily_limit"],
-        "cpm_limit": c["cpm_limit"],
+        "traffic_grade": c.get("traffic_grade"),
+        "daily_limit": c.get("daily_limit"),
+        "cpm_limit": c.get("cpm_limit"),
         "ucaas_enabled": c["ucaas_enabled"],
         "created_at": c["created_at"].isoformat() if c["created_at"] is not None else None,
         "counts": {
@@ -395,9 +407,10 @@ async def get_my_customer(user: dict = Depends(get_current_user)):
             "numbers": cn.numbers_count(number_rows),
         },
     }
-    # traffic_grade is an internal routing grade: staff only (an admin in
-    # "View as Customer" mode is still role=admin and keeps it).
-    return body if tr.is_staff(user) else tr.redact_customer_fields(body)
+    # traffic_grade / daily_limit / cpm_limit are operations settings: staff
+    # only (an admin in "View as Customer" mode is still role=admin and keeps
+    # them). Tenants get the allowlist shape.
+    return body if staff else tr.redact_my_customer(body)
 
 
 # NOTE: like `/me` above, this literal `/me/billing` route MUST be declared

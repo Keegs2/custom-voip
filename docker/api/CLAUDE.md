@@ -117,8 +117,8 @@ The "API Calling" product (account_type `api`: `/v1/calls` originate, API CPS ti
 | `POST /v1/tiers`, `PATCH /v1/tiers/{id}` | `tier_type: "api"` → 422 (`API Calling is retired: …`) |
 | `POST /v1/customers` | `account_type: "api"` → 422 (`API Calling is retired: …`). `hybrid` stays allowed and now means **RCF + SIP Trunking** (Granite Telephony is hybrid). `PUT` cannot change account_type (no field) |
 | `GET /v1/customers/me/billing`, `/{id}/billing` | No `"product": "api"` / "API Calling" line item for ANY account_type (hybrid → rcf + trunk only; a legacy `api` account → only an rcf line if it has RCF numbers). `api_tier_id` is not even read |
-| `GET /v1/customers/me` | `counts.api_dids` is `0` (key kept for a stable shape; `api_dids` not queried) |
-| `POST /v1/numbers/{did}/assign`, `POST /v1/numbers/{did}/request` | `product_type: "api"` → 422 (`API Calling is retired: …`). Listing (`/inventory`, `/my`, `/stats`), `/reconcile` and `/unassign` of EXISTING api rows keep working (admin cleanup) |
+| `GET /v1/customers/me` | `counts.api_dids` is `0` (key kept for a stable shape; `api_dids` not queried). For a TENANT it is `0` even with the flag on; only staff get the real count then |
+| `POST /v1/numbers/{did}/assign`, `POST /v1/numbers/{did}/request` | `product_type: "api"` → 422 (`API Calling is retired: …`). Listing (`/inventory`, `/my` for staff, `/stats`), `/reconcile` and `/unassign` of EXISTING api rows keep working (admin cleanup); tenants' `/my` hides api rows like every customer list |
 | `POST /v1/onboarding` | `products.selected` containing `"api"` (alone or mixed) or a non-null `products.api` block → 422 (`API Calling is retired: … deselect it`). Never silently dropped. Stored pre-retirement rows are untouched |
 
 Not changed (reported, deliberately): `esl_client.originate_call` stays (unreachable; `_send_esl_command` is shared with trunks); `redis_client.check_cps_limit/get_current_cps/record_cps_hit` keep their `tier_type="api"` default (only caller is calls.py, which passes it explicitly — no trunk caller); no DB migration — the `set_default_cps_tiers` trigger (`07_cps_tiers.sql`) still assigns `api_basic` to new `api`/`hybrid` customers, harmless while the flag is off (no fee line, no originate path). Restore = set `API_CALLING_ENABLED=true` on the services VM (+ FS + UI constant) and restart.
@@ -159,9 +159,13 @@ Redis is used for:
 - Public onboarding exempt: `POST /v1/onboarding` and `POST /onboarding` (unauthenticated intake form submission). Only the POST method is exempt — GET/approve/reject still require admin.
 - WebSocket paths exempt: anything starting with `/ws/`
 - Encrypted voicemail exempt (auth inside the router): `/v1/voicemail/fs/*` + `/voicemail/fs/*` (X-Ingest-Secret) and GET/HEAD `/(v1/)voicemail/(messages|greetings)/<id>/audio` (playback token). Bearer tokens whose `typ` is not `session` are rejected everywhere.
+- Visual IVR prompt audio exempt: GET/HEAD `/(v1/)ivr/prompts/<id>/audio` (playback token). SBC feeds exempt (shared bearer checked in the router): POST `…/carrier-status/report`, POST `…/live-trunk-stats/report`.
 - CORS preflight (`OPTIONS`) always passes through
+- **User status re-check (`auth/user_status.py`):** after the signature / expiry / `typ` checks pass, the middleware reads `users.status` for the token's `sub` (one PK read, `SELECT status FROM users WHERE id = $1::int`). Not `active` (disabled), deleted, missing, or a `sub` that is not a user id → **401** `{"detail": "Not authenticated"}` (the UI's 401 handler signs the user out). Per-process TTL cache **30 s** (`STATUS_TTL_S`), so a disabled user is out within 30 s instead of at token expiry (≤ 8 h); each uvicorn worker re-reads on its own expiry. **DB unavailable** (no pool, connection/query error, no answer within 2 s) → **fail OPEN for this check only**: the request proceeds on the JWT alone (signature + expiry still enforced), one WARNING per 60 s per process, the open answer reused for 5 s. Rationale: a DB blip must not sign every customer and the TED service account out at once, and nearly every route needs the DB anyway. Every exempt path above returns before the check. TED's revup client logs in as a real service user and re-logs in on a 401, so it is unaffected.
 
 JWT claims contain: `sub` (user ID), `email`, `role`, `customer_id`, `typ` (`"session"`).
+
+**Roles.** `admin` (platform staff, unscoped), `support` (platform-wide READ-ONLY staff: whitelisted reads via `get_support_read_filter`, 403 on every write), `user` (tenant, read + write own customer), `readonly` (tenant, read own customer, **403 on every mutation**). Tenant-reachable mutations depend on `auth.dependencies.require_writer` (admin + user; readonly → 403 "Read-only accounts can't change this.", support → 403 "Support accounts can't change this.", unknown roles fail closed) BEFORE their tenant scope dependency; voicemail / IVR use their own `vm_writer` / `ivr_writer` with the same semantics, and `POST /numbers/{did}/request` its stricter `user`-only allow-list.
 
 ## CORS Configuration
 
@@ -237,7 +241,7 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 ### Auth
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `POST` | `/v1/auth/login` | None | Login, returns JWT |
+| `POST` | `/v1/auth/login` | None | Login, returns JWT. Password checked FIRST: unknown email / wrong password (any account status) → the same 401 `Invalid email or password` (an unknown email still pays one bcrypt check); only the right password on a disabled account → 403 `Account is disabled` |
 | `GET` | `/v1/auth/me` | User | Get current user info |
 | `PUT` | `/v1/auth/me` | User | Update own name/password |
 | `POST` | `/v1/auth/register` | Admin | Create new user |
@@ -248,9 +252,9 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 ### Customers
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/v1/customers` | List customers (filterable by status, account_type) |
+| `GET` | `/v1/customers` | List customers (filterable by status, account_type). Tenant: own row only, allowlisted `{id, name, account_type, status, ucaas_enabled, created_at}` |
 | `POST` | `/v1/customers` | Create customer (`account_type` `api` → 422 while API Calling is retired) |
-| `GET` | `/v1/customers/me` | Own record + `counts`: `{rcf, api_dids, trunks, numbers: {total, by_product}}` — `numbers` covers every product the account owns (`number_routing`; zero-count products omitted; api hidden) |
+| `GET` | `/v1/customers/me` | Own record + `counts`: `{rcf, api_dids, trunks, numbers: {total, by_product}}` — `numbers` covers every product the account owns (`number_routing`; zero-count products omitted; api hidden). Tenants (user/readonly) get the allowlisted shape `{id, name, account_type, status, ucaas_enabled, created_at, counts}` (`tenant_redaction.redact_my_customer`): no `traffic_grade` / `daily_limit` / `cpm_limit` (not even SELECTed), `counts.api_dids` always 0; `ucaas_enabled` (the customer's own add-on flag, read by My Account) stays. Staff (admin incl. "View as Customer", support) keep the full shape |
 | `GET` | `/v1/customers/{id}` | Get customer by ID |
 | `PUT` | `/v1/customers/{id}` | Update customer |
 | `DELETE` | `/v1/customers/{id}` | Delete customer (cascading, transactional) |
@@ -263,16 +267,16 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | `GET` | `/v1/rcf` | User (tenant-scoped) | List RCF numbers (non-admins forced to own customer_id — the query param is ignored for them; admins filter by customer_id, enabled) |
 | `POST` | `/v1/rcf` | Admin | Create RCF number (provisioning) |
 | `GET` | `/v1/rcf/{did}` | User (tenant-scoped) | Get RCF config by DID (cross-tenant → 404, no existence leak) |
-| `PUT` | `/v1/rcf/{identifier}` | User (tenant-scoped; max_channels admin-only) | Update RCF (by ID or DID); cross-tenant → 404 |
-| `PATCH` | `/v1/rcf/{identifier}` | User (tenant-scoped; max_channels admin-only) | Partial update (alias for PUT) |
+| `PUT` | `/v1/rcf/{identifier}` | Writer (admin/user; readonly + support → 403), tenant-scoped; max_channels admin-only | Update RCF (by ID or DID); cross-tenant → 404. A tenant `forward_to` that is a 3-6 digit local extension → 422 `Use a 10-digit US number or E.164.` (admins may still set one; existing rows untouched) |
+| `PATCH` | `/v1/rcf/{identifier}` | Writer, tenant-scoped; max_channels admin-only | Partial update (alias for PUT) |
 | `DELETE` | `/v1/rcf/{identifier}` | Admin | Delete RCF number (by ID or DID); customer number release is request-based via `/v1/numbers/{did}/request-release` (admin approves with `/v1/numbers/{did}/unassign`) |
 
 ### Calls (API Calling) — RETIRED, mounted only when `API_CALLING_ENABLED=true`
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/v1/calls` | Originate outbound call via ESL (CPS-limited) |
+| `POST` | `/v1/calls` | Originate outbound call via ESL (CPS-limited) — writer (readonly + support → 403) |
 | `GET` | `/v1/calls/{call_id}` | Get call status (active or completed CDR) |
-| `POST` | `/v1/calls/{call_id}/update` | Control live call (hangup, transfer) |
+| `POST` | `/v1/calls/{call_id}/update` | Control live call (hangup, transfer) — writer |
 
 ### SIP Trunks
 | Method | Path | Description |
@@ -283,9 +287,9 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | `GET` | `/v1/trunks/{id}` | Get trunk detail |
 | `PUT` | `/v1/trunks/{id}` | Update trunk |
 | `PUT` | `/v1/trunks/{id}/call-paths` | Assign call path package |
-| `POST` | `/v1/trunks/{id}/ips` | Add auth IP |
+| `POST` | `/v1/trunks/{id}/ips` | Add auth IP — writer (admin/user; readonly + support → 403), trunk owner (cross-tenant → 404). Body `TrunkIP`: ONE IPv4/IPv6 host address (stored canonical; a CIDR/range, a zone suffix or junk → 422 with a sentence — Kamailio matches `ip_address = '$si'` and FS routes to `host(ip_address)`, so a range would never authenticate), `description` ≤ 100 chars (else 422). Duplicate → 409 |
 | `GET` | `/v1/trunks/{id}/ips` | List auth IPs |
-| `DELETE` | `/v1/trunks/{id}/ips/{ip_id}` | Remove auth IP |
+| `DELETE` | `/v1/trunks/{id}/ips/{ip_id}` | Remove auth IP — writer, trunk owner |
 | `POST` | `/v1/trunks/{id}/dids` | Assign DID to trunk |
 | `GET` | `/v1/trunks/{id}/dids` | List trunk DIDs |
 | `GET` | `/v1/trunks/{id}/stats` | Real-time trunk stats (ESL + DB) |
@@ -335,10 +339,10 @@ Read-only ELI5 reports over `cdrs`; whole minutes only, no costs/seconds/interna
 | `POST` | `/v1/numbers/{did}/assign` | Admin | Assign DID to customer (creates product record; `product_type` `api` → 422 while API Calling is retired; `voicemail` (+ optional `label`) creates a mailbox via `services/voicemail/mailboxes.create_mailbox`, `product_ref_id` = mailbox id; `ivr` (+ optional `name`) creates an `ivr_numbers` row and sets `customers.ivr_enabled=true` if it was false, `product_ref_id` = ivr_numbers id — refused 409 when `number_routing` already routes the DID) |
 | `POST` | `/v1/numbers/{did}/unassign` | Admin | Unassign DID (removes product record; a voicemail DID deletes its mailbox via `delete_mailbox`; an ivr DID deletes its `ivr_numbers` row — the customer's flows stay) |
 | `GET` | `/v1/numbers/available` | User | Browse available DIDs with filters |
-| `GET` | `/v1/numbers/my` | User | Customer's assigned numbers (includes `status`, e.g. `release_requested`): `did_inventory` rows UNION one `number_routing` fallback arm (every product incl. api and voicemail; fallback-only rows have `assigned_at: null`) |
-| `POST` | `/v1/numbers/{did}/request` | User | Reserve a number for admin review |
-| `POST` | `/v1/numbers/{did}/request-release` | User (tenant-scoped) | Request release of an assigned DID: `assigned` → `release_requested` (cross-tenant → 404, no existence leak; 409 if not `assigned`) |
-| `POST` | `/v1/numbers/{did}/cancel-release` | User (tenant-scoped) | Cancel a pending release request: back to `assigned` (also the admin DENY action) |
+| `GET` | `/v1/numbers/my` | User | Customer's assigned numbers (includes `status`, e.g. `release_requested`): `did_inventory` rows UNION one `number_routing` fallback arm (every product; fallback-only rows have `assigned_at: null`). Tenant rows = `{did, product_type, status, city, state, assigned_at, customer_id, customer_name}` (`TENANT_MY_NUMBER_KEYS`): no `notes` (the staff audit trail) and api (retired) hidden in both arms (`customer_numbers.not_hidden_sql`). Staff shape unchanged (notes + api rows) |
+| `POST` | `/v1/numbers/{did}/request` | `user` role only | Reserve a number for admin review. Body optional: none / `{}` / `{notes}` → an `rcf` request (`product_type` defaults to `rcf`; a supplied `api` → 422 while retired). readonly / staff → 403 |
+| `POST` | `/v1/numbers/{did}/request-release` | Writer (readonly + support → 403), tenant-scoped | Request release of an assigned DID: `assigned` → `release_requested` (cross-tenant → 404, no existence leak; 409 if not `assigned`) |
+| `POST` | `/v1/numbers/{did}/cancel-release` | Writer, tenant-scoped | Cancel a pending release request: back to `assigned` (also the admin DENY action) |
 
 **Release workflow (request-based):** customers cannot unassign directly. Customer `POST /{did}/request-release` → status `release_requested` → admin approves via `POST /{did}/unassign` (accepts `assigned`, `reserved`, AND `release_requested`) or denies via `POST /{did}/cancel-release`. Status list lives in `34_release_requested_status.sql`.
 
@@ -362,7 +366,7 @@ Scope: admin (`customer_id` param picks the customer), tenant `user` (own custom
 | `POST` | `/v1/voicemail/greetings/{id}/playback-token` | tenant | `{url, expires_in}` |
 | `GET`/`HEAD` | `/v1/voicemail/greetings/{id}/audio?t=` | token | as message audio |
 | `POST` | `/v1/voicemail/customers/{id}/crypto-erase` | **admin** | `{confirm: "ERASE <id>"}` → counts (transcripts deleted in the erase transaction) |
-| `GET` | `/v1/voicemail/messages/{id}/transcript` | tenant (incl. readonly) | `{message_id, status, language, model, confidence, text, segments, completed_at, can_retry}`; text only when `done`, decrypted under 4 per-process slots (2 s wait → 503) and returned only after a committed `transcript_view` audit (audit failure → 503, no text); integrity → 500; KMS down → 503 + Retry-After; does NOT mark read; `Cache-Control: no-store` |
+| `GET` | `/v1/voicemail/messages/{id}/transcript` | tenant (incl. readonly) | `{message_id, status, language, model, confidence, text, segments, completed_at, can_retry}` — `model` (speech-model name, hints at the vendor) for **admins only**, absent for tenants (`transcripts.STAFF_ONLY_TRANSCRIPT_KEYS`); text only when `done`, decrypted under 4 per-process slots (2 s wait → 503) and returned only after a committed `transcript_view` audit (audit failure → 503, no text); integrity → 500; KMS down → 503 + Retry-After; does NOT mark read; `Cache-Control: no-store` |
 | `POST` | `/v1/voicemail/messages/{id}/transcript/retry` | writer (`force` **admin**) | optional `{force}` → 202 `{message_id, status:"pending"}`; 409 sentences (unavailable / mailbox off / trashed / in progress / already done) |
 | `GET` | `/v1/voicemail/mailboxes/{id}/transcript-snippets?ids=` | tenant | ≤ 50 ids → `{items:[{message_id, status, snippet}], unavailable}`; foreign ids omitted; one `transcript_view` audit per batch; never 5xx (failures → `snippet:null`, `unavailable:true`); `no-store` |
 | `POST` | `/v1/voicemail/mailboxes/{id}/transcripts/backfill` | **admin** (O2) | 202 `{queued}` — newest 200 stored, untrashed messages: missing → `pending`, `disabled` → `pending`; 409 unavailable / mailbox off |

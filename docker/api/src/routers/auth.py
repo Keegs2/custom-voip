@@ -14,6 +14,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+#: A real bcrypt hash (cost 12, the cost `hash_password` uses) of a throwaway
+#: string that is no one's password. Login checks an unknown email's password
+#: against it so an unknown email costs the same bcrypt work as a known one
+#: (no timing oracle for which emails have accounts).
+_TIMING_EQUALISER_HASH = "$2b$12$LbdmK20nY7vsOK2af/aUyO2xem1HhoRn8Bf0Cy33FQlYqHKw8RlMu"
+
+MSG_BAD_LOGIN = "Invalid email or password"
+
+
+def _password_matches(plain: str, hashed: str | None) -> bool:
+    """bcrypt check that treats an unusable stored hash as a mismatch (401)
+    instead of an exception (500)."""
+    try:
+        return bool(hashed) and verify_password(plain, hashed)
+    except ValueError:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -82,7 +99,14 @@ class UserOut(BaseModel):
 
 @router.post("/login")
 async def login(body: LoginRequest):
-    """Authenticate a user and return a JWT access token."""
+    """Authenticate a user and return a JWT access token.
+
+    No account enumeration: the password is verified FIRST. An unknown email
+    and a wrong password (whatever the account's status) get the same 401
+    "Invalid email or password", and an unknown email still runs one bcrypt
+    check (``_TIMING_EQUALISER_HASH``) so both take about as long. Only a
+    caller who proved the password learns that the account is disabled (403).
+    """
     row = await db.fetch_one(
         """SELECT u.id, u.email, u.password_hash, u.role, u.customer_id, u.name, u.status,
                   c.name AS customer_name, c.account_type, c.ucaas_enabled
@@ -92,15 +116,16 @@ async def login(body: LoginRequest):
         body.email,
     )
     if not row:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        _password_matches(body.password, _TIMING_EQUALISER_HASH)
+        raise HTTPException(status_code=401, detail=MSG_BAD_LOGIN)
 
     user = dict(row)
 
+    if not _password_matches(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail=MSG_BAD_LOGIN)
+
     if user["status"] != "active":
         raise HTTPException(status_code=403, detail="Account is disabled")
-
-    if not verify_password(body.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
 
     # Update last_login timestamp
     await db.execute(

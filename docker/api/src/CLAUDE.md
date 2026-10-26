@@ -11,7 +11,8 @@ src/
   auth/
     __init__.py
     security.py              # JWT creation/validation, bcrypt password hashing
-    dependencies.py          # FastAPI Depends functions: get_current_user, require_admin
+    dependencies.py          # FastAPI Depends functions: get_current_user, require_admin, require_support_or_admin, require_writer, get_customer_filter, get_support_read_filter
+    user_status.py           # users.status re-check for session JWTs (per-process 30 s TTL cache; fail OPEN when the DB can't answer) — called by JWTAuthMiddleware
     ingest.py                # require_ingest_secret — X-Ingest-Secret for FreeSWITCH voicemail /fs/ endpoints (fail-closed 503 when INGEST_SHARED_SECRET unset/short)
     playback.py              # mint/verify 120 s playback tokens (separate key, aud+typ 'vm-playback', bound to kind+object id; kinds message | greeting | ivr_prompt)
   middleware/
@@ -67,7 +68,7 @@ src/
 
 ## Retired / removed products (2026-09)
 
-- **API Calling — RETIRED, code kept, OFF.** One flag: `config.api_calling_enabled()` — ON only when env `API_CALLING_ENABLED` is exactly `true` (trimmed, case-insensitive), read live on every call (tests use `monkeypatch.setenv`). While OFF: `main.py` does not mount `routers/calls.py` (`/v1/calls`, `/calls` → 404) and the router carries `Depends(require_api_calling_enabled)` as defense in depth; `GET /tiers/api` → 404 and tier validators reject `tier_type='api'`; `CustomerCreate` rejects `account_type='api'` (422; `hybrid` = RCF + SIP Trunking stays allowed); `compute_billing_estimate` emits no api line for any account_type; `/customers/me` returns `counts.api_dids = 0` (key kept); `AssignRequest` / `NumberRequest` reject `product_type='api'` (422; listing/reconcile/unassign of existing api rows unchanged); onboarding `ProductsPayload` rejects any `'api'` selection or block (422). All 422 messages start with `config.API_CALLING_RETIRED_MESSAGE` ("API Calling is retired"). Adding a new API-Calling surface? Gate it on `api_calling_enabled()` (read at request/validation time, not import time — except router mounting in main.py). Tests: `tests/test_api_calling_retired.py` (flag off, hermetic) + `tests/test_api_calls.py` (kept code, flag on, ephemeral PG).
+- **API Calling — RETIRED, code kept, OFF.** One flag: `config.api_calling_enabled()` — ON only when env `API_CALLING_ENABLED` is exactly `true` (trimmed, case-insensitive), read live on every call (tests use `monkeypatch.setenv`). While OFF: `main.py` does not mount `routers/calls.py` (`/v1/calls`, `/calls` → 404) and the router carries `Depends(require_api_calling_enabled)` as defense in depth; `GET /tiers/api` → 404 and tier validators reject `tier_type='api'`; `CustomerCreate` rejects `account_type='api'` (422; `hybrid` = RCF + SIP Trunking stays allowed); `compute_billing_estimate` emits no api line for any account_type; `/customers/me` returns `counts.api_dids = 0` (key kept; a TENANT gets 0 even with the flag on — only staff see the real count); `AssignRequest` / `NumberRequest` reject `product_type='api'` (422; listing/reconcile/unassign of existing api rows unchanged); onboarding `ProductsPayload` rejects any `'api'` selection or block (422). All 422 messages start with `config.API_CALLING_RETIRED_MESSAGE` ("API Calling is retired"). Adding a new API-Calling surface? Gate it on `api_calling_enabled()` (read at request/validation time, not import time — except router mounting in main.py). Tests: `tests/test_api_calling_retired.py` (flag off, hermetic) + `tests/test_api_calls.py` (kept code, flag on, ephemeral PG).
 - **Payments demo — REMOVED.** `routers/payments.py`, `services/payments/`, `services/demo_seed.py`, `services/auto_recharge.py` and `PAYMENTS_DEMO_*` are gone. The demo-only branches of `calls.py` (x402 pay-per-call with a simulated facilitator that accepted any signature, ledger-posted per-call fee, `PAYMENTS_DEMO_FAKE_ORIGINATE`) went with it; calls.py is the former flag-off legacy flow. Migrations 37/38 and their tables are untouched.
 
 ## Tenant redaction (customers never see how we bill/rate)
@@ -115,6 +116,26 @@ Staff shapes are unchanged. Everything lives in `services/tenant_redaction.py`:
 - **Adding a tenant-reachable endpoint that returns call data?** Route tenant
   rows through `redact_cdr_row()` / `redact_summary_row()` and add a case to
   `tests/test_tenant_redaction.py` (asserts the full denylist recursively).
+- **Customer records (allowlist).** `TENANT_CUSTOMER_FIELDS` = `id, name,
+  account_type, status, ucaas_enabled, created_at` is the ONLY set a tenant
+  gets from a customer record: `GET /v1/customers` tenant rows
+  (`redact_customer_row`) and `GET /v1/customers/me` (`redact_my_customer`:
+  the record allowlist + `counts` limited to `TENANT_CUSTOMER_COUNT_KEYS`
+  `rcf, api_dids, trunks, numbers`, with `api_dids` forced to 0). The
+  `/me` tenant SELECT does not even read `traffic_grade, daily_limit,
+  cpm_limit`. `FORBIDDEN_TENANT_CUSTOMER_KEYS` (`traffic_grade`,
+  `daily_limit`, `cpm_limit`, `fraud_*`, `balance`, `credit_limit`) is the
+  test denylist and what `redact_customer_fields` strips from customer-JOINED
+  rows (`GET /v1/rcf/{did}`). `ucaas_enabled` stays on the allowlist: it is
+  the customer's own add-on flag (not an internal) and My Account reads it
+  from `/customers/me`. Staff (admin incl. "View as Customer", support) keep
+  the full `/me` shape.
+- **Other tenant shapes.** `GET /v1/numbers/my`: rows rebuilt from
+  `number_inventory.TENANT_MY_NUMBER_KEYS` (no `notes` — the free-text audit
+  trail carries staff-written notes; not selected) and api rows hidden in
+  both arms. `GET /v1/voicemail/messages/{id}/transcript`: `model` (the
+  speech-model name hints at the vendor) is admin-only
+  (`transcripts.STAFF_ONLY_TRANSCRIPT_KEYS`).
 - **Deliberately NOT redacted:** `/customers/me/billing` (the customer's own
   contracted plan line items — qty × unit_price), `/trunks/call-paths`
   (package `monthly_fee` list prices), the `POST /calls` `per_call_fee`
@@ -212,8 +233,11 @@ the `numbers` filter), the dashboard (via `/reports/my-numbers`),
 - **`HIDDEN_PRODUCTS = ("api",)`** — API Calling is retired: hidden from every
   customer-facing list and the admin counts regardless of
   `API_CALLING_ENABLED` (the arm stays in the view — FS must 603 it — and in
-  `/numbers/my` + `/search/did`). It is pruned at plan time (constant-false
-  arm), so `api_dids` is not even read.
+  the STAFF `/numbers/my` + `/search/did`). It is pruned at plan time
+  (constant-false arm), so `api_dids` is not even read. The tenant
+  `/numbers/my` reads product columns directly and applies it with
+  `not_hidden_sql(column)` (NULL-safe: an inventory row with no product
+  passes) on both arms and on the `NOT IN` shadow subquery.
 - **`PRECEDENCE`** (rcf, api, trunk, voicemail, ivr) = FreeSWITCH's STEP-1 order:
   a DID in two product tables is listed once, the earlier product wins; also
   the display order of every `by_product` object (unknown products after, by
@@ -306,8 +330,9 @@ Handles authentication and user management. Contains inline Pydantic models:
 - Login queries the `users` table with a JOIN to `customers` for account_type/ucaas info
 - JWT claims: `sub` (user ID as string), `email`, `role`, `customer_id`
 - Registration is admin-only (`require_admin` dependency)
-- Roles: `admin`, `user`, `readonly`
-- Statuses: `active`, `disabled`
+- Roles: `admin`, `support` (migration 39; platform-wide read-only staff), `user`, `readonly` (tenant reads only — every mutation 403 via `require_writer` / `vm_writer` / `ivr_writer`)
+- Statuses: `active`, `disabled`. A disabled user's live tokens stop working within 30 s (middleware `users.status` re-check, `auth/user_status.py`)
+- **Login does not enumerate accounts:** the password is verified FIRST; an unknown email and a wrong password (any status) both get the same 401 `Invalid email or password`, and an unknown email still runs one bcrypt check against `_TIMING_EQUALISER_HASH` (cost 12, like `hash_password`) so it takes about as long. Only the correct password on a disabled account gets 403 `Account is disabled`. An unusable stored hash is a 401, not a 500
 - UCaaS access computed from `account_type` + `ucaas_enabled` flag
 
 ### health.py
@@ -316,7 +341,7 @@ Two endpoints, no auth. Both check DB (`SELECT 1`) and Redis (`ping`). Returns `
 ### customers.py
 CRUD for the `customers` table. Account types: `rcf`, `api` (RETIRED — create → 422 unless `API_CALLING_ENABLED`), `trunk`, `hybrid` (= RCF + SIP Trunking), `ucaas`.
 - **Billing estimate** (`compute_billing_estimate`, `/me/billing` + `/{id}/billing`): RCF line (by provisioned rcf_numbers count), SIP Trunking line (trunk/hybrid), API Calling line ONLY when `API_CALLING_ENABLED` — retired ⇒ hybrid (Granite Telephony) shows rcf + trunk only.
-- **`/me` counts**: `{rcf, api_dids, trunks, numbers}` — `api_dids` is 0 (not queried) while API Calling is retired; `numbers = {total, by_product}` is product-agnostic (`customer_numbers.count_by_product_sql` + `numbers_count`; zero-count products omitted, api hidden even with the flag on).
+- **`/me` counts**: `{rcf, api_dids, trunks, numbers}` — `api_dids` is 0 (not queried) while API Calling is retired, and ALWAYS 0 for a tenant (only staff with the flag on get the real count); `numbers = {total, by_product}` is product-agnostic (`customer_numbers.count_by_product_sql` + `numbers_count`; zero-count products omitted, api hidden even with the flag on). Tenants get the allowlisted shape (`tenant_redaction.redact_my_customer`; see Tenant redaction).
 - **Voicemail billing:** NO estimate line (decision D5 / owner decision O1); the commented-out block in `compute_billing_estimate` shows the shape if it is ever priced (count live boxes only).
 - Delete is transactional: wraps cascading deletes of `rcf_numbers`, `api_dids`, `trunk_dids`, `trunk_auth_ips`, `sip_trunks`, `api_credentials` in a single `conn.transaction()`.
 - Delete refuses (409, never a FK 500) a customer with a live voicemail mailbox or active voicemail key ("Erase their voicemail first") and, after a crypto-erase, a customer whose erased key row is the permanent tombstone (migration 54 `ON DELETE RESTRICT`). Guarded by `voicemail_schema_present` so it works before 54 is applied.
@@ -324,8 +349,9 @@ CRUD for the `customers` table. Account types: `rcf`, `api` (RETIRED — create 
 
 ### rcf.py
 RCF (Remote Call Forwarding) number provisioning. The core RCF product.
-- **Authorization** (mirrors trunks.py): reads (`GET` list + by-DID) are tenant-scoped via `get_customer_filter` — non-admins only see their own customer's entries (the list endpoint force-overrides any `customer_id` query param; by-DID cross-tenant returns 404, never 403, so existence is not leaked). Create and delete are admin-only (`require_admin`) — provisioning flows; customer number release goes through `/numbers/{did}/unassign`. Update (PUT/PATCH) is customer self-service, tenant-scoped, with `max_channels` admin-only.
-- E.164 validation for DIDs, flexible validation for forward destinations (E.164 or 3-6 digit local extensions for PBX/Zoiper testing)
+- **Authorization** (mirrors trunks.py): reads (`GET` list + by-DID) are tenant-scoped via `get_customer_filter` — non-admins only see their own customer's entries (the list endpoint force-overrides any `customer_id` query param; by-DID cross-tenant returns 404, never 403, so existence is not leaked). Create and delete are admin-only (`require_admin`) — provisioning flows; customer number release goes through `/numbers/{did}/request-release`. Update (PUT/PATCH) is customer self-service for WRITERS (`require_writer`: admin + user; `readonly` / `support` → 403 before any DB access), tenant-scoped, with `max_channels` admin-only.
+- `failover_to` is stored, validated and editable here but NOTHING routes on it (`inbound_router.lua` never reads it) — an open product decision, deliberately left as is.
+- E.164 validation for DIDs, flexible validation for forward destinations (E.164 or 3-6 ASCII-digit local extensions for PBX/Zoiper testing). **Tenant writes may not set an extension:** `forward_to` that `phone.is_local_extension` → 422 `Use a 10-digit US number or E.164.` for non-admins (FreeSWITCH dials an extension as `user/<ext>@domain`, the internal directory); admins unchanged; existing rows untouched (the rule only fires when a tenant sends `forward_to`). `failover_to` keeps accepting extensions (it routes nothing)
 - `ring_timeout` validated between 5-120 seconds
 - Update/Delete accept both numeric ID and E.164 DID string as the `{identifier}` path param
 - On update, still deletes the Redis `rcf:{did}` key (harmless legacy). FreeSWITCH no longer reads that cache — it looks up PostgreSQL on every call (`inbound_router.lua`), so a change applies on the next call regardless
@@ -346,6 +372,7 @@ SIP trunk management with call path packages.
 - Trunk auth types: `ip`, `credential`, `both`
 - Call path packages: predefined capacity tiers stored in `call_path_packages` table, assigned via `PUT /{trunk_id}/call-paths`
 - Sub-resources: `/{trunk_id}/ips` for IP ACL management, `/{trunk_id}/dids` for DID assignment
+- Auth-IP add/remove are owner self-service for WRITERS (`require_writer` before `get_customer_filter`; readonly / support → 403). `TrunkIP` validates in the model (422, never the `::inet` / VARCHAR(100) 500): `ip_address` = ONE IPv4/IPv6 host (`ipaddress`, stored `str(ip)` canonical; CIDR / zone suffix / junk refused — the INET column would take a CIDR, but Kamailio matches `ip_address = '$si'` and FS routes to `host(ip_address)`, so a range never authenticates), `description` ≤ 100 chars (`TRUNK_IP_DESCRIPTION_MAX`). The admin-only `POST /trunks` `auth_ips` list is unchanged (its `::inet` failure is caught as a 422 that echoes the DB error)
 - `GET /{trunk_id}/stats`: real-time channel count via ESL `show channels as json`, plus last-hour CDR aggregates (ASR, avg duration, cost). Tenants get `avg_duration_minutes` and no cost (see Tenant redaction); admins keep `avg_duration_sec` + `total_cost`.
 - Cache invalidation on IP delete (`trunk_ip:{ip}`)
 
@@ -381,7 +408,7 @@ Complete DID lifecycle management backed by the `did_inventory` table.
 - **Admin endpoints**: `GET /inventory` (paginated, filterable — incl. `carrier=`, matching the COALESCEd attribution so `carrier=bandwidth` also finds legacy NULL rows), `GET /stats` (counts by status/product/state/carrier), `POST /sync` (upsert from Bandwidth API, then reconciles product tables), `POST /reconcile` (reconcile `did_inventory` against rcf/api/trunk product tables without calling Bandwidth — internal `_reconcile_product_tables()`; never touches `source`/`carrier_trunk_id`), `POST /add` (manual DID intake), `PUT /{did}/carrier-trunk` (re-associate/clear attribution), `POST /{did}/assign`, `POST /{did}/unassign`
 - **Manual intake + carrier attribution (migrations 41 + 42)**: every row carries `source` (`bandwidth_sync`|`manual`), nullable `carrier_trunk_id` FK → `carrier_trunks`, and a first-class `carrier` column (42; NULL = legacy implicit Bandwidth). Item/filter/stats carrier is `COALESCE(d.carrier, ct.carrier, 'bandwidth')` (`_CARRIER_COALESCE`; the item shape folds it in Python via `_shape_item` — d.* already emits a `carrier` column, and `dict(asyncpg.Record)` resolves duplicate names to the FIRST occurrence, so a SQL alias would silently return the raw NULL). `POST /add` takes `{dids: [1..500], carrier (REQUIRED, lowercased), carrier_trunk_id?, notes?}`: the carrier must have ≥1 ENABLED trunk row (404 "unknown carrier" otherwise — a carrier with only disabled trunks counts as unknown); the optional trunk must belong to that carrier and be enabled (422 otherwise — body-consistency, unlike the 404-able carrier). Normalizes via the shared `utils.phone` E.164 helper, dedupes in-batch, `ON CONFLICT DO NOTHING`, inserts `carrier` + nullable `carrier_trunk_id`, and returns the EXACT envelope `{"added": [e164], "skipped_existing": [e164], "invalid": [raw], "count": n}` (TED UI codes against it). Added DIDs land `available`/`manual` and flow through the existing assign path unchanged. **Sync ownership guard**: `POST /sync` only manages `source='bandwidth_sync'` rows (`_compute_sync_sets()`) — manual rows never appear in its report-only `removed` list and are never metadata-updated, even when their DID shows up in the Bandwidth feed (sync-inserted rows leave `carrier` NULL → render 'bandwidth'). `PUT /{did}/carrier-trunk` accepts a disabled trunk (attribution is metadata; only NEW intake demands an enabled one); setting a trunk also syncs `d.carrier` to that trunk's carrier, clearing (null) drops only the trunk and leaves `d.carrier` as-is; returns the full inventory-item shape.
 - **Owned numbers**: `GET /owned` (admin) — counts from `number_routing` via `customer_numbers.owned_counts_sql` / `shape_owned_counts` (`did_inventory` lags: `POST /rcf` and `POST /trunks/{id}/dids` never write it). `/stats` stays the inventory/lifecycle view.
-- **Customer endpoints**: `GET /available` (browse available DIDs), `GET /my` (customer's assigned numbers, includes `status`; `did_inventory` rows UNION ONE `number_routing` fallback arm with the same `NOT IN did_inventory` predicates as before — every product incl. voicemail/api, fallback-only rows `assigned_at: null`), `POST /{did}/request` (reserve a number for admin review), `POST /{did}/request-release`, `POST /{did}/cancel-release`
+- **Customer endpoints**: `GET /available` (browse available DIDs), `GET /my` (customer's assigned numbers, includes `status`; `did_inventory` rows UNION ONE `number_routing` fallback arm with the same `NOT IN did_inventory` predicates as before — every product incl. voicemail, fallback-only rows `assigned_at: null`; TENANT rows = `TENANT_MY_NUMBER_KEYS` (no `notes`) with api hidden via `customer_numbers.not_hidden_sql`; staff unchanged incl. api + notes), `POST /{did}/request` (reserve a number for admin review; `user` role only; the body is OPTIONAL — `Body(None)`, none / `{}` / `{notes}` = `product_type` `rcf`, because the deployed portal's `requestDid` sends no body or only `{notes}`), `POST /{did}/request-release`, `POST /{did}/cancel-release` (both `require_writer`: readonly / support → 403)
 - **Release workflow (request-based)**: customers cannot unassign directly. `POST /{did}/request-release` (tenant-scoped: non-admins only their own DIDs, cross-tenant → 404 no-leak; 409 unless status is 'assigned') sets `assigned` → `release_requested` and appends an audit line to `notes`. Admin approves via `POST /{did}/unassign` (its status guard accepts 'assigned', 'reserved', and 'release_requested') or denies via `POST /{did}/cancel-release` (back to 'assigned'; the customer can use it to withdraw). The `release_requested` status is added to the CHECK constraint by `34_release_requested_status.sql`; `GET /my` includes it in its status filters so pending-release numbers still show for the customer.
 - Assign creates the product record (e.g., `rcf_numbers` row for RCF) inside a transaction
 - **IVR (`product_type: "ivr"`, optional `name`; contract §8.3):** `services/ivr/store.assign_number` — one transaction: lock the inventory row (available/reserved), refuse a DID `number_routing` already routes (409), INSERT `ivr_numbers`, assign `did_inventory` (`product_ref_id` = ivr_numbers.id) and set `customers.ivr_enabled = true` if it was false (the voicemail side-effect rule). Unassign deletes the `ivr_numbers` row (the customer's flows stay, unbound) and frees the DID; reconcile has an `ivr` arm (`by_product.ivr`). Voicemail assign still takes `label`; only ivr takes `name`.
@@ -396,7 +423,7 @@ Encrypted voicemail product API (contract `docs/ENCRYPTED_VOICEMAIL_INTERFACES.m
 - **FS routes** `/fs/mailbox/{id}`, `/fs/greetings/{id}/audio`, `/fs/deposit` are JWT-exempt and carry `Depends(require_ingest_secret)`. Deposit (`services/voicemail/deposit.py`): strict X-VM-Meta (`meta.py`), 10 MB cap (Content-Length 413 before reading + streamed counter), 5 concurrent per worker (503 + Retry-After 2), lenient-size WAV parse (`wav.py`, mirrors FS `wav_duration_ms`), `pending` row FIRST with a fencing token + lease (`deposit_attempt_id`/`deposit_lease_until`, migration 54), idempotent on msg_uuid (stored → 200 same id; live lease → 503; failed/expired → takeover; purged → 409), 11 s deadline WITHOUT cancelling the seal (late seals finalize in the background under a renewed lease), `deposit` audit in the same transaction as `stored`.
 - **Playback**: `POST …/playback-token` (body optional) → `{url: /api/v1/voicemail/{kind}s/{id}/audio?t=…, expires_in: 120}`; marks read. `GET/HEAD …/audio?t=` (JWT-exempt): decrypt once per token per worker into `audio.PLAYBACK_CACHE` (64 MB), audit `play`/`download`/`greeting_play` once per token across workers (`uq_vm_access_log_playback_jti` + ON CONFLICT DO NOTHING) BEFORE serving (audit failure → 503), Range/206/416, HEAD from `size_bytes`, `Cache-Control: no-store`.
 - **Lifecycle**: `services/voicemail/mailboxes.create_mailbox` (KMS key ensured BEFORE the claim transaction; DID claim + box + `voicemail_enabled=true` + audit atomic) and `delete_mailbox` (deleted + DID available + audit, then purge objects→rows; leftovers → retention) are shared with `number_inventory.py`; `erase_customer` destroys the KMS key first. Retention (`retention.py`) runs in every worker under `pg_try_advisory_xact_lock`; `VOICEMAIL_RETENTION_ENABLED=false` disables it.
-- **Transcription v1.1** (contract `docs/VOICEMAIL_TRANSCRIPTION_PLAN.md` §10/§13; owner decisions §0.1 win — O2 = admin-only switch). Logic in `services/voicemail/transcripts.py`; the router only scopes. Every Message carries `transcript {status, confidence}` via `LEFT JOIN voicemail_transcripts t ON t.message_id = m.id` (`vmt.SUMMARY_COLUMNS`/`SUMMARY_JOIN`) — the list stays one query and never decrypts; no row → `pending` if the mailbox transcribes else `disabled`. Mailboxes carry `transcription_enabled`/`transcription_language` (`MAILBOX_SELECT`/`MAILBOX_FIELDS`); PATCH of either from a non-admin → 403, off→on while `transcription.config.available()` is false → 409, bad language → 422, `false` flips that mailbox's `pending` rows to `disabled` in the PATCH transaction. `GET /messages/{id}/transcript` decrypts through `vmt.SLOTS` (4 per process, 2 s wait → 503; a slot is held until KMS returns even if the reader leaves — that bounds the shared vm-io pool) and commits a `transcript_view` audit BEFORE returning text (fail-closed 503); snippets share the slots with one 2 s budget, one audit row per batch and never 5xx. Retry (writer; `force` admin), backfill (admin), status + requeue (admin). Mailbox delete and crypto-erase delete transcripts in their transactions (plan §9). Never log transcript text — ids and exception class names only. Gotcha: never bound an `UPDATE … WHERE id IN (SELECT … LIMIT n FOR UPDATE SKIP LOCKED)` — a rescanned subquery skips rows the same command already updated and the UPDATE exceeds n; use a `WITH pick AS MATERIALIZED (…)` CTE (`vmt.REQUEUE_SQL`).
+- **Transcription v1.1** (contract `docs/VOICEMAIL_TRANSCRIPTION_PLAN.md` §10/§13; owner decisions §0.1 win — O2 = admin-only switch). Logic in `services/voicemail/transcripts.py`; the router only scopes. Every Message carries `transcript {status, confidence}` via `LEFT JOIN voicemail_transcripts t ON t.message_id = m.id` (`vmt.SUMMARY_COLUMNS`/`SUMMARY_JOIN`) — the list stays one query and never decrypts; no row → `pending` if the mailbox transcribes else `disabled`. Mailboxes carry `transcription_enabled`/`transcription_language` (`MAILBOX_SELECT`/`MAILBOX_FIELDS`); PATCH of either from a non-admin → 403, off→on while `transcription.config.available()` is false → 409, bad language → 422, `false` flips that mailbox's `pending` rows to `disabled` in the PATCH transaction. `GET /messages/{id}/transcript` (`model` admin-only: `vmt.read_transcript` drops `STAFF_ONLY_TRANSCRIPT_KEYS` for non-admins) decrypts through `vmt.SLOTS` (4 per process, 2 s wait → 503; a slot is held until KMS returns even if the reader leaves — that bounds the shared vm-io pool) and commits a `transcript_view` audit BEFORE returning text (fail-closed 503); snippets share the slots with one 2 s budget, one audit row per batch and never 5xx. Retry (writer; `force` admin), backfill (admin), status + requeue (admin). Mailbox delete and crypto-erase delete transcripts in their transactions (plan §9). Never log transcript text — ids and exception class names only. Gotcha: never bound an `UPDATE … WHERE id IN (SELECT … LIMIT n FOR UPDATE SKIP LOCKED)` — a rescanned subquery skips rows the same command already updated and the UPDATE exceeds n; use a `WITH pick AS MATERIALIZED (…)` CTE (`vmt.REQUEUE_SQL`).
 - Tests: `tests/test_voicemail_api.py`, `test_voicemail_deposit.py` (incl. the REAL FS Lua encoder via `lua`), `test_voicemail_retention.py`, `test_voicemail_billing.py`, `test_voicemail_transcription_api.py` (shared harness `tests/voicemail_api_harness.py`; `Harness.seed_transcript` seals real transcripts with the local KMS).
 
 ### ivr.py
@@ -494,7 +521,13 @@ Module-level `client` variable. All convenience functions check `if not client: 
 FastAPI `Depends` functions:
 - `get_current_user(request)` -- reads `request.state.user` (set by middleware), raises 401 if missing
 - `require_admin(request)` -- calls `get_current_user`, checks `role == "admin"`, raises 403 if not
-- `get_customer_filter(request)` -- returns `customer_id` for row-level filtering (None for admins)
+- `require_support_or_admin(request)` -- admin or support (whitelisted READ endpoints only)
+- `require_writer(request)` -- `WRITER_ROLES` = admin + user; `readonly` → 403 "Read-only accounts can't change this.", `support` → 403 "Support accounts can't change this.", anything else → 403 (fail closed). Put it on EVERY tenant-reachable mutation, BEFORE the tenant scope dependency (it does not scope). Same semantics as voicemail `vm_writer` / IVR `ivr_writer`
+- `get_customer_filter(request)` -- returns `customer_id` for row-level filtering (None for admins; a non-admin without a customer → 403 "No customer scope")
+- `get_support_read_filter(request)` -- like `get_customer_filter` but admin AND support get None (whitelisted read-only endpoints only)
+
+### user_status.py
+`session_user_active(claims)` — the middleware's `users.status` re-check. `sub` must be a users.id (1..2^31-1) else refused without a lookup; `SELECT status FROM users WHERE id = $1::int`; allowed iff `'active'`. Per-process cache `{uid: (expires, allowed)}`: `STATUS_TTL_S` 30 s (disabled / deleted / re-enabled take effect within it), bounded at `MAX_ENTRIES`. DB failure / no pool / no answer within `LOOKUP_TIMEOUT_S` (2 s) → allowed (fail open), cached `FAIL_OPEN_TTL_S` (5 s), WARNING at most once per `WARN_INTERVAL_S` (60 s; exception class name only). `_clock` is a module attribute so tests drive the TTLs; `reset()` clears it (`tests/conftest.py` resets it before every test — the cache is process-wide and each module has its own DB). Tests: `tests/test_user_status.py` (hermetic), `tests/test_tenant_write_guards.py` (real users table).
 
 ## Middleware Module (middleware/)
 
@@ -507,6 +540,8 @@ Starlette `BaseHTTPMiddleware`. Exempt paths are hardcoded in `EXEMPT_PATHS` set
 - `/ws/*` paths (WebSocket auth handled via query params)
 - Encrypted voicemail (`is_voicemail_exempt`, evaluated on `scope["path"]`; control chars / dot segments never exempt): prefixes `/v1/voicemail/fs/` + `/voicemail/fs/` (every route there MUST `Depends(require_ingest_secret)`), and GET/HEAD `^/(v1/)?voicemail/(messages|greetings)/\d+/audio$` (route verifies the `?t=` playback token)
 - Visual IVR prompt audio (`is_ivr_exempt`, same rules): GET/HEAD `^/(v1/)?ivr/prompts/\d+/audio$` only (route verifies the `?t=` token of kind `ivr_prompt`)
+
+After a token decodes (signature, expiry, `typ`), `user_status.session_user_active(claims)` must also pass (users.status re-check, see auth/user_status.py) before `request.state.user` is set; exempt paths return before either check.
 
 On auth failure, returns a `JSONResponse(status_code=401)` directly (never raises HTTPException from middleware).
 
@@ -642,6 +677,13 @@ async def admin_endpoint(admin: dict = Depends(require_admin)):
 async def filtered_endpoint(customer_filter: int | None = Depends(get_customer_filter)):
     if customer_filter is not None:
         query += " AND customer_id = $1"
+
+# Tenant-reachable WRITE: writer gate first (readonly/support -> 403), then scope
+async def tenant_write(
+    _writer: dict = Depends(require_writer),
+    customer_filter: int | None = Depends(get_customer_filter),
+):
+    ...
 ```
 
 ### Pydantic V2 Conventions

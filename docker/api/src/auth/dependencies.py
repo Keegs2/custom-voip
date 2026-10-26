@@ -40,6 +40,38 @@ async def require_support_or_admin(request: Request) -> dict:
     return user
 
 
+#: Roles that may make changes on the tenant-reachable write routes. Mirrors
+#: the voicemail ``vm_writer`` / IVR ``ivr_writer`` semantics: ``admin`` and
+#: the customer ``user`` write; ``readonly`` never writes; ``support`` is
+#: platform-wide READ-ONLY staff and never writes either. Unknown or missing
+#: roles fail closed.
+WRITER_ROLES = frozenset({"admin", "user"})
+MSG_READONLY_WRITE = "Read-only accounts can't change this."
+MSG_SUPPORT_WRITE = "Support accounts can't change this."
+MSG_WRITE_NOT_ALLOWED = "Your account can't change this."
+
+
+async def require_writer(request: Request) -> dict:
+    """Require a role that may write (``admin`` or ``user``); 403 otherwise.
+
+    Use on every tenant-reachable mutation, BEFORE the tenant scope
+    dependency, so a ``readonly`` login gets the read-only sentence. It does
+    not scope anything: ownership stays with ``get_customer_filter`` / the
+    route's own tenant predicate. Returns the user dict.
+    """
+    user = await get_current_user(request)
+    role = user.get("role")
+    if role in WRITER_ROLES:
+        return user
+    if role == "readonly":
+        detail = MSG_READONLY_WRITE
+    elif role == "support":
+        detail = MSG_SUPPORT_WRITE
+    else:
+        detail = MSG_WRITE_NOT_ALLOWED
+    raise HTTPException(status_code=403, detail=detail)
+
+
 async def get_customer_filter(request: Request) -> int | None:
     """
     Return the customer_id the current user is scoped to.

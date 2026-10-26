@@ -45,7 +45,8 @@ Shared test vectors (all layers must produce these)
 
 import re
 
-__all__ = ["normalize_e164", "normalize_forward_destination", "is_valid_e164"]
+__all__ = ["normalize_e164", "normalize_forward_destination", "is_local_extension",
+           "is_valid_e164"]
 
 # Cosmetic separators that carry no routing meaning and are dropped when
 # collecting the significant digits: '+', space, '-', '(', ')', '.'. We do NOT
@@ -55,8 +56,10 @@ __all__ = ["normalize_e164", "normalize_forward_destination", "is_valid_e164"]
 _SEPARATORS = frozenset("+ -().")
 
 # A 3-6 digit local PBX extension (e.g. 1001) — valid ONLY as a forward/failover
-# destination, never as an ownable DID.
-_EXTENSION_RE = re.compile(r"\d{3,6}")
+# destination, never as an ownable DID. ASCII digits only, like the TS
+# (/^\d{3,6}$/ — ASCII in JS) and Lua (%d) twins: Python's \d would also match
+# e.g. Arabic-Indic digits and store them verbatim as an "extension".
+_EXTENSION_RE = re.compile(r"[0-9]{3,6}")
 
 
 def _digits(s: str) -> str:
@@ -152,6 +155,14 @@ def normalize_forward_destination(raw: str) -> str:
     if _EXTENSION_RE.fullmatch(s):
         return s
     return normalize_e164(s)
+
+
+def is_local_extension(value: str) -> bool:
+    """True iff ``value`` is a bare 3-6 digit local extension — the only
+    non-E.164 shape :func:`normalize_forward_destination` lets through.
+    FreeSWITCH dials such a forward_to as ``user/<ext>@domain`` (the internal
+    directory), so routers refuse it on TENANT writes."""
+    return isinstance(value, str) and _EXTENSION_RE.fullmatch(value) is not None
 
 
 def is_valid_e164(raw: str) -> bool:
