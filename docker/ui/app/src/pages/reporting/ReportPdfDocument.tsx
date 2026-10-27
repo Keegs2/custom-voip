@@ -34,7 +34,10 @@ import {
 } from './reportFormat';
 
 export interface ReportPdfInput {
+  /** The title's account — "All customers" on a staff all-customers report. */
   customerName: string | null;
+  /** Staff "All customers" report: the numbers table gains a Customer column. */
+  allCustomers?: boolean;
   rangeLabel: string;
   tz: string;
   sentence: string;
@@ -120,6 +123,7 @@ export function ReportDocument({ input }: { input: ReportPdfInput }) {
   const reasons = [...overview.missed_reasons].filter((r) => r.calls > 0).sort((a, b) => b.calls - a.calls);
   const numberRows = numbers?.numbers ?? [];
   const showForward = numberRows.some((r) => r.product === 'rcf');
+  const showCustomer = input.allCustomers === true;
   const hasVoicemail = numberRows.some((r) => r.product === 'voicemail');
 
   const cells: Array<[string, string]> = [
@@ -235,10 +239,29 @@ export function ReportDocument({ input }: { input: ReportPdfInput }) {
 
         {numberRows.length > 0 && (
           <View style={s.section}>
-            <Text style={s.h2}>Your numbers</Text>
+            <Text style={s.h2}>{showCustomer ? 'Numbers, every customer' : 'Your numbers'}</Text>
             <Table
               cols={
-                showForward
+                showCustomer
+                  ? showForward
+                    ? [
+                        { label: 'Number', width: '24%' },
+                        { label: 'Customer', width: '18%' },
+                        { label: 'Currently forwards to', width: '16%' },
+                        { label: 'Calls', width: '9%', align: 'right' },
+                        { label: 'Answered', width: '13%', align: 'right' },
+                        { label: 'Minutes', width: '10%', align: 'right' },
+                        { label: 'Quality', width: '10%' },
+                      ]
+                    : [
+                        { label: 'Number', width: '32%' },
+                        { label: 'Customer', width: '22%' },
+                        { label: 'Calls', width: '11%', align: 'right' },
+                        { label: 'Answered', width: '13%', align: 'right' },
+                        { label: 'Minutes', width: '11%', align: 'right' },
+                        { label: 'Quality', width: '11%' },
+                      ]
+                  : showForward
                   ? [
                       { label: 'Number', width: '30%' },
                       { label: 'Currently forwards to', width: '20%' },
@@ -262,8 +285,15 @@ export function ReportDocument({ input }: { input: ReportPdfInput }) {
                 const quality = r.grade === 'none' ? '–' : GRADE_WORD[r.grade];
                 const answered = r.calls > 0 ? fmtPct(r.answer_rate_pct) : '–';
                 const minutes = r.calls > 0 ? fmtCount(r.minutes) : '–';
+                const forwards = r.forwards_to ? fmtPhone(r.forwards_to) : '–';
+                const customer = r.customer_name || (r.customer_id !== undefined ? `Customer #${r.customer_id}` : '–');
+                if (showCustomer) {
+                  return showForward
+                    ? [label, customer, forwards, fmtCount(r.calls), answered, minutes, quality]
+                    : [label, customer, fmtCount(r.calls), answered, minutes, quality];
+                }
                 return showForward
-                  ? [label, r.forwards_to ? fmtPhone(r.forwards_to) : '–', fmtCount(r.calls), answered, minutes, quality]
+                  ? [label, forwards, fmtCount(r.calls), answered, minutes, quality]
                   : [label, fmtCount(r.calls), answered, minutes, quality];
               })}
             />

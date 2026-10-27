@@ -17,6 +17,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Spinner } from '../../components/ui/Spinner';
+import { Select, type SelectOption } from '../../components/ui/Select';
 import { Reveal } from '../../components/fx/Reveal';
 import { ShowMoreButton, useShowMore } from '../../components/layout/kit';
 import { useAuth } from '../../contexts/AuthContext';
@@ -79,6 +80,10 @@ function DidFilterBar({
   compact = false,
 }: DidFilterBarProps) {
   const hasActive = filters.npa || filters.nxx || filters.state || filters.search;
+  const stateOptions = useMemo<SelectOption[]>(
+    () => [{ value: '', label: 'All', pinned: true }, ...availableStates.map((st) => ({ value: st, label: st }))],
+    [availableStates],
+  );
 
   // Inline toolbar label — same voice as the Numbers-tab NPA filter.
   const labelStyle: React.CSSProperties = {
@@ -177,18 +182,17 @@ function DidFilterBar({
       {/* State */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         <label style={labelStyle}>STATE</label>
-        <select
+        <Select
           className="rcf-input"
           value={filters.state}
-          onChange={(e) => onFiltersChange({ ...filters, state: e.target.value })}
+          onChange={(state) => onFiltersChange({ ...filters, state })}
+          options={stateOptions}
           aria-label="Filter by state"
-          style={{ padding: '9px 32px 9px 12px', minWidth: 96, fontSize: '0.8rem' }}
-        >
-          <option value="">All</option>
-          {availableStates.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+          // Right padding = where the native chevron sat (the Select draws its own there).
+          style={{ padding: '9px 12px', minWidth: 96, fontSize: '0.8rem' }}
+          menuMinWidth={150}
+          searchPlaceholder="Search states…"
+        />
       </div>
 
       {/* Result count pill — azure only when a filter narrows the set */}

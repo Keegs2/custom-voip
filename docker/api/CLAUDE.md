@@ -305,16 +305,17 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | `GET` | `/v1/cdrs/{uuid}` | User | Get single CDR with full RTP metrics |
 | `POST` | `/v1/cdrs/{uuid}/rate` | User | Manually trigger CDR rating |
 
-### Reports (customer reporting — tenant-scoped; staff must pass `customer_id`)
+### Reports (customer reporting — tenant-scoped; staff pass `customer_id` or `all_customers=true`)
 Read-only ELI5 reports over `cdrs`; whole minutes only, no costs/seconds/internals. Contract: `docs/CUSTOMER_REPORTING_DESIGN.md`; details in `src/CLAUDE.md` → Reporting.
+**Staff "All customers"** (`all_customers=true`, admin + support only — tenants: ignored like `customer_id`): the same endpoints over every customer's calls (unattributed `customer_id = 0` CDRs excluded). `/overview` + `/trend` shapes unchanged; `/numbers`, `/calls`, `/my-numbers` rows add `customer_id` + `customer_name`; `/calls.csv` adds a leading `Customer` column. 422 "Pick one customer or all customers, not both." with `customer_id`; 422 "Number filters need one customer." with `numbers`. One-customer SQL and responses are byte-identical (sha256-pinned in `tests/test_reports.py`).
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/reports/overview` | Totals, previous period, quality grade, busiest day/hour, missed reasons |
 | `GET` | `/v1/reports/trend` | Zero-filled day/week/month buckets |
-| `GET` | `/v1/reports/numbers` | Per-number totals for the customer's own numbers, every product (rcf/trunk/voicemail/future; max 500) |
-| `GET` | `/v1/reports/calls` | Paginated call list (start time only, `length_minutes`, `product`; a voicemail-answered call is `answered` labelled "Answered by voicemail") |
-| `GET` | `/v1/reports/calls.csv` | Streaming CSV (cap 100k, `X-Report-Truncated`; same columns, Outcome = `outcome_label`) |
-| `GET` | `/v1/reports/my-numbers` | The customer's numbers, every product — Reporting picker AND dashboard numbers card: `{numbers: [{number, name, product, enabled, forwards_to}]}` (`forwards_to` rcf only) |
+| `GET` | `/v1/reports/numbers` | Per-number totals for the customer's own numbers, every product (rcf/trunk/voicemail/future; max 500). All customers: + `customer_id`, `customer_name` per row (a row counts only its owner's calls) |
+| `GET` | `/v1/reports/calls` | Paginated call list (start time only, `length_minutes`, `product`; a voicemail-answered call is `answered` labelled "Answered by voicemail"). All customers: + `customer_id`, `customer_name` per row |
+| `GET` | `/v1/reports/calls.csv` | Streaming CSV (cap 100k, `X-Report-Truncated`; same columns, Outcome = `outcome_label`). All customers: leading `Customer` column |
+| `GET` | `/v1/reports/my-numbers` | The customer's numbers, every product — Reporting picker AND dashboard numbers card: `{numbers: [{number, name, product, enabled, forwards_to}]}` (`forwards_to` rcf only). Staff `all_customers=true`: every customer's numbers + `customer_id`, `customer_name` (max 5,000) |
 
 "The customer's numbers" (every surface above, plus `/customers/me` `counts.numbers`, `/numbers/owned`, `/numbers/my`, `/search/did`) = `src/services/customer_numbers.py` over the `number_routing` view — see `src/CLAUDE.md` → Customer numbers (incl. the product-enrollment checklist).
 
@@ -403,6 +404,7 @@ Scope: admin (`?customer_id=`; admin JWT with `customer_id` null and no param �
 | `POST` | `/v1/ivr/prompts/{id}/playback-token` | tenant (incl. readonly) | `{url, expires_in: 120}` |
 | `GET`/`HEAD` | `/v1/ivr/prompts/{id}/audio?t=` | token | canonical `audio/wav`, `no-store` (JWT-exempt) |
 | `GET` | `/v1/ivr/voices` | tenant | `[{id, label, gender, license}]` from the sidecar (cached 5 min) |
+| `GET` | `/v1/ivr/admin/overview` | **admin** | "All customers": `{customers: [{customer_id, name, status, ivr_enabled, flows_total, flows_published, numbers_bound, last_published_at}]}` — every customer with `ivr_enabled` OR ≥ 1 flow, by name (case-insensitive). `flows_published` = flows with a live version (`published_version_id` set); `numbers_bound` = `ivr_numbers` with `flow_id` set (any state); `last_published_at` = newest live version's `published_at` (ISO) or null. One read-only query (`services/ivr/store.py` `ADMIN_OVERVIEW_SQL`) |
 | `GET` | `/v1/ivr/admin/customers/{id}` | **admin** | `{ivr_enabled, ivr_assist_enabled, numbers, flows}` (`ivr_assist_enabled` absent before migration 61 — TED then hides its Flow assistant switch) |
 | `PUT` | `/v1/ivr/admin/customers/{id}/entitlement` | **admin** | `{enabled?, assist_enabled?}` (at least one; explicit null → 422) → `{ivr_enabled, ivr_assist_enabled}` (IVR off ⇒ every IVR number 603 at FS, data kept; turning IVR off leaves the assist opt-in as it is). A body with only `enabled` is the pre-assistant request and still works; `assist_enabled` before migration 61 → 503 |
 | `PUT` | `/v1/ivr/admin/numbers/{id}` | **admin** | `{enabled?, max_channels? 1-500, name? (null clears)}` → `IvrNumber` (the kill switch) |

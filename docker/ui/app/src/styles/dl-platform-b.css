@@ -265,10 +265,11 @@
   font-size: 0.8rem;
 }
 
-.cqf-field select.dl-input {
-  padding-right: 28px;
-  background-position: right 10px center;
-  text-overflow: ellipsis;
+/* The dropdowns are themed Select buttons (components/ui/Select): the
+   chevron is the component's, a flex child on the right padding — 10px in,
+   where this row's native chevron sat. */
+.cqf-field .dl-input.ui-select-trigger {
+  padding-right: 10px;
 }
 
 .cqf-field input[type="text"].dl-input { padding-right: 10px; }

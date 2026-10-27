@@ -4,12 +4,13 @@
  * store's `updateConfig` (undoable; typing in one field is one undo step).
  * Read-only viewers see the same forms with controls disabled.
  */
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarX2, Copy, Plus, X } from 'lucide-react';
-import type { DayKey, IvrConfigMap, MenuDigit, TimeRange } from '../../types/ivr';
+import type { DayKey, IvrConfigMap, IvrTimezone, MenuDigit, TimeRange } from '../../types/ivr';
+import { Select, type SelectOption } from '../../components/ui/Select';
 import { fmt } from '../../utils/format';
-import { DAY_KEYS, DAY_LABELS, DIGIT_ORDER, LIMITS, TIMEZONES, sortDigits } from '../model/blocks';
+import { BLOCKS, DAY_KEYS, DAY_LABELS, DIGIT_ORDER, LIMITS, TIMEZONES, sortDigits } from '../model/blocks';
 import { blockTitle } from '../model/summary';
 import { callerValueProblem, normalizeCallerValue } from '../compile/policy';
 import { useBuilderData } from '../BuilderData';
@@ -19,6 +20,16 @@ import { PromptListField } from './PromptListField';
 import { TransferPicker } from './TransferPicker';
 import { ProductGlyph } from './ProductGlyph';
 import { findOwnNumber, orderedGroups } from './destinations';
+
+/**
+ * Every dropdown here is the themed Select (docker/ui/CLAUDE.md §8) in the
+ * field skin. `nokey`: React Flow ignores its Delete / Backspace shortcut
+ * while a `.nokey` element has focus — the native <select> it replaced was
+ * ignored as an input, a <button> trigger isn't.
+ */
+const FIELD_SELECT = 'dl-input vm-input-full nokey';
+
+const TIMEZONE_OPTIONS: readonly SelectOption<IvrTimezone>[] = TIMEZONES.map((t) => ({ value: t.id, label: t.label }));
 
 type Patch<T extends keyof IvrConfigMap> = (patch: Partial<IvrConfigMap[T]>, key?: string) => void;
 
@@ -50,6 +61,8 @@ export function PlayForm({ node, config, update, readOnly }: FormProps<'play'>) 
 /* ─── Menu ────────────────────────────────────────────────── */
 
 const RETRY_WORDS = ['Don’t ask again', 'Ask once more', 'Ask 2 more times', 'Ask 3 more times', 'Ask 4 more times', 'Ask 5 more times'];
+/** Retries 0–5 as Select options (values are the count as a string). */
+const RETRY_OPTIONS: readonly SelectOption[] = RETRY_WORDS.map((w, i) => ({ value: String(i), label: w }));
 
 export function MenuForm({ node, config, update, readOnly }: FormProps<'menu'>) {
   const { prompts } = useBuilderData();
@@ -119,19 +132,14 @@ export function MenuForm({ node, config, update, readOnly }: FormProps<'menu'>) 
           <label className="ivr-label" htmlFor={ids.retries}>
             If no key or a wrong key
           </label>
-          <select
+          <Select
             id={ids.retries}
-            className="dl-input vm-input-full"
-            value={config.retries}
+            className={FIELD_SELECT}
+            value={String(config.retries)}
             disabled={readOnly}
-            onChange={(e) => update({ retries: Number(e.target.value) })}
-          >
-            {RETRY_WORDS.map((w, i) => (
-              <option key={w} value={i}>
-                {w}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => update({ retries: Number(v) })}
+            options={RETRY_OPTIONS}
+          />
         </div>
       </div>
       <p className="dl-help ivr-help-tight">
@@ -199,19 +207,14 @@ export function ScheduleForm({ node, config, update, readOnly }: FormProps<'sche
         <label className="ivr-label" htmlFor={ids.tz}>
           Time zone
         </label>
-        <select
+        <Select<IvrTimezone>
           id={ids.tz}
-          className="dl-input vm-input-full"
+          className={FIELD_SELECT}
           value={config.tz}
           disabled={readOnly}
-          onChange={(e) => update({ tz: e.target.value as IvrConfigMap['schedule']['tz'] })}
-        >
-          {TIMEZONES.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.label}
-            </option>
-          ))}
-        </select>
+          onChange={(tz) => update({ tz })}
+          options={TIMEZONE_OPTIONS}
+        />
       </div>
       <div className="ivr-field">
         <div className="ivr-label-row">
@@ -571,26 +574,30 @@ export function GotoForm({ node, config, update, readOnly }: FormProps<'goto'>) 
   const nodes = useFlow((s) => s.nodes);
   const store = useFlowStoreApi();
   const id = useId();
-  const choices = nodes.filter((n) => n.id !== node.id && n.type !== 'entry' && n.type !== 'goto');
+  const options = useMemo<SelectOption[]>(
+    () =>
+      nodes
+        .filter((n) => n.id !== node.id && n.type !== 'entry' && n.type !== 'goto')
+        // The block type rides along as a hint, so two blocks named alike stay apart.
+        .map((n) => ({ value: n.id, label: blockTitle(n), hint: n.data.label?.trim() ? BLOCKS[n.type].label : undefined })),
+    [nodes, node.id],
+  );
   return (
     <div className="ivr-field">
       <label className="ivr-label" htmlFor={id}>
         Go back to
       </label>
-      <select
+      <Select
         id={id}
-        className="dl-input vm-input-full"
+        className={FIELD_SELECT}
         value={config.targetNodeId}
         disabled={readOnly}
-        onChange={(e) => update({ targetNodeId: e.target.value })}
-      >
-        <option value="">Choose a block…</option>
-        {choices.map((n) => (
-          <option key={n.id} value={n.id}>
-            {blockTitle(n)}
-          </option>
-        ))}
-      </select>
+        onChange={(targetNodeId) => update({ targetNodeId })}
+        options={options}
+        placeholder="Choose a block…"
+        searchPlaceholder="Search blocks…"
+        emptyText={options.length === 0 ? 'No other blocks yet' : undefined}
+      />
       {config.targetNodeId && (
         <button type="button" className="vm-linkbtn ivr-linkbtn" onClick={() => store.getState().focusBlock(config.targetNodeId)}>
           Show that block

@@ -3,6 +3,8 @@
 Customer-facing **Reporting** page (sidebar: directly above **Guides**). Goal: an
 insanely easy, ELI5 view of a customer's own calls — built from the platform's own
 `cdrs` table (NOT the Equinox/FileMage export, which carries billing internals).
+A report is about one customer; **staff can also view all customers**
+(`all_customers=true`, see "Staff: all customers" below).
 
 ## Hard rules
 
@@ -19,12 +21,15 @@ insanely easy, ELI5 view of a customer's own calls — built from the platform's
    (`rate_cdr()` may overwrite it with billing increments). Rounding rules are
    unchanged (per call ≥1 if answered; totals rounded once).
 2. **Tenant scoping** exactly like `/v1/cdrs`: `get_support_read_filter`. Tenants
-   are forced to their own `customer_id`; staff (admin/support) must pass
-   `customer_id` (422 if missing — a report is always about one customer).
+   are forced to their own `customer_id` (the `customer_id` and `all_customers`
+   params are ignored for them); staff (admin/support) pass `customer_id` for one
+   customer **or** `all_customers=true` for every customer (422 if neither, 422
+   if both).
 3. **No routing internals**: no carrier, PoP, SBC, FS node, network address,
    SIP codes in customer-facing fields (a plain-English outcome label only).
 4. Reporting is **read-only** and must never slow call routing: queries hit
-   `cdrs` via the `(customer_id, start_time DESC)` index, bounded date ranges
+   `cdrs` via the `(customer_id, start_time DESC)` index (staff all-customers:
+   the hypertable's `start_time` index — no customer predicate), bounded date ranges
    (max 366 days), no Timescale-only functions (portable `date_trunc(... AT TIME
    ZONE tz)`), LIMITs everywhere.
 5. **One row per call.** Every report scan carries `leg IS DISTINCT FROM 'B'`:
@@ -39,7 +44,8 @@ insanely easy, ELI5 view of a customer's own calls — built from the platform's
 | `end` | `YYYY-MM-DD` | required, inclusive, local date in `tz`; `end >= start`; span ≤ 366 days |
 | `tz` | IANA name | default `America/New_York`; validated against `pg_timezone_names` (422 if unknown) |
 | `numbers` | comma list | optional; restrict to these of the customer's own numbers (any not owned → ignored, never an oracle) |
-| `customer_id` | int | staff only (required for staff; ignored for tenants) |
+| `customer_id` | int | staff only (required for staff unless `all_customers=true`; ignored for tenants) |
+| `all_customers` | bool | staff only, default `false`: `true` = every customer (with `customer_id` → 422 "Pick one customer or all customers, not both."; with `numbers` → 422 "Number filters need one customer."); ignored for tenants |
 
 "The customer's number on a call" = `destination` for inbound, `caller_id` for
 outbound — canonicalize like `31_did_canonicalize.sql` — matched against **the
@@ -81,6 +87,38 @@ and `no_media` calls (migration 51: < 10 % in AND < 50 % out — no audio either
 not graded ("Not rated"). `avg_mos` = mean `call_mos` over graded calls that have one;
 `pct_good_or_better` = share of graded calls with grade great/good. An aggregate whose
 graded calls were all one-way audio is `poor` (never `none`).
+
+## Staff: all customers (`all_customers=true`)
+
+Admin and support (the roles that may choose a `customer_id`) can report on
+**every customer at once** — the admin customer pickers offer "All customers" at
+the top. Tenants can't: the flag is ignored for them, exactly like `customer_id`.
+
+- **Same endpoints, same shapes**, aggregated over all customers:
+  `/overview` and `/trend` are unchanged in shape; `/numbers`, `/calls` and
+  `/my-numbers` rows each gain `customer_id` and `customer_name` (the owning
+  customer) — only in this mode; `/calls.csv` gains a leading **`Customer`**
+  column (the customer's name; `Customer #<id>` if the customer row is gone),
+  the other columns unchanged. The one-customer responses and CSV are
+  byte-identical to before (pinned by sha256 in `tests/test_reports.py`).
+- **Not allowed:** `customer_id` together with `all_customers=true` → 422 "Pick
+  one customer or all customers, not both."; the `numbers` filter → 422 "Number
+  filters need one customer." (a blank `numbers` is no filter).
+- **Whose calls:** every CDR attributed to a customer. Unattributed CDRs
+  (`customer_id` 0 — the ingest default when FreeSWITCH sent no customer; NULL
+  can't be stored, `cdrs.customer_id` is NOT NULL) belong to no customer and are
+  never counted. `data_available_from` = the oldest retained attributed CDR.
+- **Numbers** = every customer's numbers (the same `number_routing` definition,
+  api hidden, a DID listed once). A number row counts only its OWNER's calls
+  (matched on customer AND number), so the all-customers rows are exactly the
+  per-customer rows put together; top 500 by calls. `/my-numbers` is capped at
+  5,000 rows (ordered by number).
+- **Same redaction:** minutes only, no costs/seconds/answer-end times/routing
+  internals — `customer_id`/`customer_name` are the only additions.
+- **Cost:** no customer predicate, so the scan is the date range on the
+  hypertable's `start_time` index and its cost is the platform's call volume
+  in that range; the same `REPORT_STATEMENT_TIMEOUT_MS` guard applies (503
+  "This report is taking too long. Try a shorter date range.").
 
 ## Endpoints (router `routers/reports.py`, mounted at `/v1/reports` and `/reports`)
 
@@ -186,9 +224,9 @@ These pin down behaviour the contract above left implicit; the shapes are unchan
   Max 500 entries (422 beyond).
 - **Per-call `quality`** is `none` for unrated calls. `from`/`to` are the raw
   CDR caller/destination; `number` is canonical +E.164.
-- **`/reports/my-numbers`** takes only `customer_id` (staff: required, 422
-  otherwise; tenants: ignored). Max 5,000 rows. "Numbers" = every product the
-  account owns (`services/customer_numbers.py` over `number_routing`; `api`
+- **`/reports/my-numbers`** takes only `customer_id` / `all_customers` (staff:
+  exactly one of them, 422 otherwise; tenants: both ignored). Max 5,000 rows.
+  "Numbers" = every product the account owns (`services/customer_numbers.py` over `number_routing`; `api`
   hidden; deleted mailboxes excluded; disabled/suspended included with
   `enabled: false`).
 - **`/reports/numbers`** `name` for a trunk DID is its trunk's name; for a
@@ -203,7 +241,9 @@ These pin down behaviour the contract above left implicit; the shapes are unchan
   prefixed with `'` (spreadsheet formula-injection guard). CORS exposes
   `Content-Disposition` + `X-Report-Truncated`.
 - **Errors:** 422 for bad dates / span > 366 days / unknown tz / bad
-  bucket/outcome/direction/limit; **503** "This report is taking too long.
+  bucket/outcome/direction/limit; staff 422 for no `customer_id` and no
+  `all_customers=true`, for both, and for `numbers` with `all_customers=true`;
+  **503** "This report is taking too long.
   Try a shorter date range." when a report query hits its statement timeout
   (`REPORT_STATEMENT_TIMEOUT_MS`, default 15 s).
 - `tz` is matched case-insensitively and echoed in PostgreSQL's spelling.
@@ -211,7 +251,8 @@ These pin down behaviour the contract above left implicit; the shapes are unchan
 ## UI (`/reporting`)
 
 Visible to every signed-in customer (rcf / trunk / hybrid) and to admins (with a
-customer picker); hidden for support. Sidebar entry directly above Guides.
+customer picker whose first entry, "All customers", maps to `all_customers=true` —
+no number filter there); hidden for support. Sidebar entry directly above Guides.
 
 - Header sentence built client-side from `overview`: "You got **1,204 calls** in
   August. **96 of every 100** were answered. Call quality was **great**."

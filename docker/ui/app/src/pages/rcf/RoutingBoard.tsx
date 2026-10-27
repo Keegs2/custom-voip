@@ -22,10 +22,11 @@
  * always on screen at 100+ numbers; on a phone the board is its natural
  * height. An opened row scrolls itself into view; paging returns to the top.
  */
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { RcfEntry } from '../../types/rcf';
 import { fmt } from '../../utils/format';
 import { Spinner } from '../../components/ui/Spinner';
+import { Select, type SelectOption } from '../../components/ui/Select';
 import { useViewportFit } from '../../components/layout/kit';
 import { RowEditor } from './RowEditor';
 import { PaginationControls } from './PaginationControls';
@@ -245,6 +246,7 @@ export function RoutingBoard({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [openId, setOpenId] = useState<number | null>(null);
+  const sortId = useId();
   const boardRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Writes --lk-md-top on the board, so CSS can end it at the bottom of the
@@ -260,6 +262,12 @@ export function RoutingBoard({
     const t = window.setTimeout(() => setIntro('done'), 900);
     return () => window.clearTimeout(t);
   }, [intro]);
+
+  // "Most calls this week" needs the week's figures.
+  const sortOptions = useMemo<SelectOption<SortKey>[]>(
+    () => SORT_OPTIONS.map((o) => ({ value: o.id, label: o.label, disabled: o.id === 'calls' && stats.state !== 'ready' })),
+    [stats.state],
+  );
 
   const counts = useMemo(() => {
     const on = entries.filter((e) => e.enabled).length;
@@ -347,22 +355,19 @@ export function RoutingBoard({
             ))}
           </div>
 
-          <label className="rcfd-sort">
-            <span>Sort by</span>
-            <select
+          <div className="rcfd-sort">
+            <label htmlFor={sortId}>Sort by</label>
+            <Select<SortKey>
+              id={sortId}
+              className="rcfd-sort-select"
               value={sortKey}
-              onChange={(e) => {
-                setSortKey(e.target.value as SortKey);
+              onChange={(key) => {
+                setSortKey(key);
                 resetPaging();
               }}
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.id} value={o.id} disabled={o.id === 'calls' && stats.state !== 'ready'}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={sortOptions}
+            />
+          </div>
         </div>
 
         {/* Never collapsed: the list is incomplete (GET /rcf returns 100 rows). */}

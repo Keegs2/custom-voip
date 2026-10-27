@@ -13,8 +13,15 @@ Hard rules (see the design doc + services/tenant_redaction.py):
   * One row per call: every scan carries `leg IS DISTINCT FROM 'B'` (carrier
     B-leg rows never reach a report; there is no leg param).
   * Scoping: `get_support_read_filter`. Tenants are forced to their own
-    customer_id (any `customer_id` param ignored); staff (admin/support) must
-    pass `customer_id` (422 otherwise).
+    customer_id (any `customer_id` / `all_customers` param ignored); staff
+    (admin/support) must pass `customer_id` OR `all_customers=true` (422 if
+    neither, 422 if both). All customers = `ReportScope.customer_id is None`:
+    the same shapes aggregated over every customer (unattributed
+    `customer_id = 0` CDRs excluded), per-row `customer_id` + `customer_name`
+    on /numbers, /calls, /my-numbers and a leading "Customer" CSV column; the
+    `numbers` filter needs one customer (422). Its SQL is DERIVED from the
+    per-customer SQL by checked substitutions (`_variant`), so the
+    per-customer strings stay byte-identical (tests pin their sha256).
   * `numbers` only ever NARROWS: requested numbers are intersected with the
     customer's own numbers in SQL (unknown / not-owned -> silently dropped).
   * "The customer's numbers" is services/customer_numbers.py — the ONE
@@ -28,7 +35,11 @@ Performance / safety (this runs on the East primary next to CDR ingest):
   * Every cdrs scan is `customer_id = $1 AND start_time >= lo AND start_time
     < hi` (the `(customer_id, start_time DESC)` index); lo/hi are the local
     dates converted to timestamptz in SQL (`date::timestamp AT TIME ZONE tz`)
-    — stable expressions of bind params, so the index range is used.
+    — stable expressions of bind params, so the index range is used. The
+    staff all-customers scan has no customer predicate: it range-scans the
+    hypertable's `start_time` index (chunk exclusion on the same bounds),
+    so its cost is the PLATFORM's call volume in range — the statement
+    timeout below bounds it like any other report.
   * ≤ 2 queries per endpoint, aggregated in SQL, everything LIMITed.
   * Each endpoint runs its queries in ONE short `BEGIN READ ONLY` transaction
     with `SET LOCAL statement_timeout` — SET LOCAL is transaction-scoped, so
@@ -76,6 +87,10 @@ def _env_int(name: str, default: int, lo: int, hi: int) -> int:
 REPORT_STATEMENT_TIMEOUT_MS = _env_int("REPORT_STATEMENT_TIMEOUT_MS", 15_000, 1_000, 60_000)
 #: CSV keyset chunk size.
 CSV_CHUNK_ROWS = 5_000
+
+MSG_STAFF_NEEDS_CUSTOMER = "customer_id is required for staff (a report is about one customer)"
+MSG_ONE_OR_ALL = "Pick one customer or all customers, not both."
+MSG_NUMBERS_NEED_CUSTOMER = "Number filters need one customer."
 
 # ---------------------------------------------------------------------------
 # SQL building blocks (fixed fragments only — user values are ALWAYS binds)
@@ -144,17 +159,87 @@ _MINUTES = tr.call_minutes_sql("talk_ms")
 
 
 # ---------------------------------------------------------------------------
+# Staff "all customers" variants (ReportScope.customer_id is None)
+# ---------------------------------------------------------------------------
+# Derived FROM the per-customer SQL by checked substitutions (`_variant`:
+# each `old` must occur exactly once or the module refuses to import), so
+#   * the per-customer strings are never edited — tenant reports stay
+#     byte-identical (tests/test_reports.py pins the sha256 of the SQL every
+#     per-customer request runs, and of its response);
+#   * a metric added to a per-customer query reaches the all-customers one.
+# Bind layout: the SAME $1..$5 (+ endpoint extras). $1 (customer) and $5
+# (numbers) are always bound NULL here and appear only in fail-closed guards
+# (`$1::int IS NULL`, `$5::text[] IS NULL`): this SQL returns NOTHING if a
+# customer id or a number filter ever reaches it, and PostgreSQL can still
+# type every bind. asyncpg's unnamed statements are planned with the bound
+# values, so both guards fold to constants.
+# Unattributed CDRs — `customer_id = 0`, the ingest default when FreeSWITCH
+# sent no customer — are nobody's calls and are excluded (cdrs.customer_id is
+# NOT NULL in 05; a NULL would be excluded too, `NULL <> 0` is not true).
+# `<> 0` is not a range on (customer_id, start_time): the scan is the
+# start_time range on the hypertable's start_time index.
+def _variant(sql: str, *swaps: tuple[str, str]) -> str:
+    for old, new in swaps:
+        hits = sql.count(old)
+        if hits != 1:
+            raise RuntimeError(f"reports: all-customers substitution matched {hits}x "
+                               f"(want exactly 1): {old[:80]!r}")
+        sql = sql.replace(old, new)
+    return sql
+
+
+def _all_customers_sql(alias: str) -> str:
+    """Row predicate of the all-customers variant (see above)."""
+    return f"$1::int IS NULL AND {alias}.customer_id <> 0"
+
+
+#: base (+ the row's customer_id, minus the customer predicate) and f (no
+#: number filter: refused upstream, and guarded here).
+_ALL_BASE_CTE = _variant(
+    _BASE_CTE,
+    (f"{_NUMBER_SQL} AS number\n      FROM cdrs c\n     WHERE c.customer_id = $1::int\n",
+     f"{_NUMBER_SQL} AS number,\n           c.customer_id\n      FROM cdrs c\n"
+     f"     WHERE {_all_customers_sql('c')}\n"),
+    ("     WHERE ($5::text[] IS NULL OR number IN (SELECT number FROM sel))\n",
+     "     WHERE $5::text[] IS NULL\n"),
+)
+_ALL_WITH = f"WITH {_ALL_BASE_CTE}"
+
+#: EVERY customer's numbers (customer_numbers.owned_numbers_sql(None): the
+#: same view, api hidden, one row per DID — FreeSWITCH precedence across
+#: customers too). Columns as `owned` + the owning customer_id.
+_ALL_OWNED_CTES = f"""
+owned AS ({cn.owned_numbers_sql(None)}
+)"""
+
+#: Keys an all-customers row adds to the per-customer row (/numbers, /calls,
+#: /my-numbers). Staff-only mode; nothing else is added.
+ALL_CUSTOMERS_ROW_KEYS = ("customer_id", "customer_name")
+
+
+def _prelude(s: "ReportScope") -> str:
+    return _ALL_WITH if s.all_customers else _WITH
+
+
+# ---------------------------------------------------------------------------
 # Scope (common params) + DB helpers
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class ReportScope:
-    customer_id: int
+    #: The one customer reported on; None = every customer (staff only —
+    #: `all_customers=true`; `numbers` is then always None).
+    customer_id: Optional[int]
     period: rp.Period
     tz: str
     numbers: Optional[list[str]]
 
+    @property
+    def all_customers(self) -> bool:
+        return self.customer_id is None
+
     def args(self, start=None, end=None) -> list[Any]:
-        """The standard $1..$5 bind list (optionally overriding the range)."""
+        """The standard $1..$5 bind list (optionally overriding the range).
+        All customers: the same layout with $1 (and $5) bound NULL."""
         return [self.customer_id, start or self.period.start,
                 end or self.period.end, self.tz, self.numbers]
 
@@ -176,30 +261,50 @@ async def _canonical_tz(tz: str) -> Optional[str]:
     return names.get(tz.lower())
 
 
+def _scope_customer(customer_filter: Optional[int], customer_id: Optional[int],
+                    all_customers: bool) -> Optional[int]:
+    """Who a report is about: a tenant's own customer (their `customer_id` /
+    `all_customers` params are ignored, exactly like before); for staff, the
+    chosen `customer_id`, or None for `all_customers=true`. Staff must pick
+    exactly one of the two (422)."""
+    if customer_filter is not None:
+        return int(customer_filter)
+    if all_customers:
+        if customer_id is not None:
+            raise HTTPException(422, MSG_ONE_OR_ALL)
+        return None
+    if customer_id is None:
+        raise HTTPException(422, MSG_STAFF_NEEDS_CUSTOMER)
+    return int(customer_id)
+
+
 async def report_scope(
     start: Optional[str] = Query(None, description="YYYY-MM-DD, inclusive, local date in tz"),
     end: Optional[str] = Query(None, description="YYYY-MM-DD, inclusive, local date in tz"),
     tz: str = Query(rp.DEFAULT_TZ, description="IANA time zone"),
     numbers: Optional[str] = Query(None, description="comma list of your own numbers"),
-    customer_id: Optional[int] = Query(None, ge=0, description="staff only (required for staff)"),
+    customer_id: Optional[int] = Query(
+        None, ge=0, description="staff only (required for staff unless all_customers=true)"),
+    all_customers: bool = Query(
+        False, description="staff only: report on every customer (no customer_id, no numbers)"),
     customer_filter: Optional[int] = Depends(get_support_read_filter),
 ) -> ReportScope:
-    """Common report params. Tenants are hard-scoped; staff must choose."""
-    if customer_filter is not None:
-        cid = customer_filter           # tenant: any customer_id param ignored
-    elif customer_id is None:
-        raise HTTPException(422, "customer_id is required for staff (a report is about one customer)")
-    else:
-        cid = customer_id
+    """Common report params. Tenants are hard-scoped; staff choose one
+    customer or all customers."""
+    cid = _scope_customer(customer_filter, customer_id, all_customers)
     try:
         period = rp.parse_period(start, end)
         nums = rp.parse_numbers_filter(numbers)
     except rp.ReportValidationError as e:
         raise HTTPException(422, str(e)) from e
+    if cid is None and nums is not None:
+        # Numbers belong to a customer; "all customers" has no owned set to
+        # intersect a filter with (and the all-customers SQL refuses one).
+        raise HTTPException(422, MSG_NUMBERS_NEED_CUSTOMER)
     canon_tz = await _canonical_tz(tz)
     if canon_tz is None:
         raise HTTPException(422, "unknown time zone")
-    return ReportScope(int(cid), period, canon_tz, nums)
+    return ReportScope(cid, period, canon_tz, nums)
 
 
 async def _run(queries: list[tuple[str, list[Any]]]) -> list[list[asyncpg.Record]]:
@@ -263,6 +368,16 @@ SELECT GROUPING(d, h, hc) AS gset, d, h, hc,
 # GROUPING(d,h,hc) bitmask: (d) -> 0b011=3, (h) -> 0b101=5, (hc) -> 0b110=6
 _GSET_DAY, _GSET_HOUR, _GSET_CAUSE = 3, 5, 6
 
+#: All customers: the same two passes over every customer's calls;
+#: `data_from` = the oldest retained attributed CDR of any customer.
+_ALL_OVERVIEW_TOTALS_SQL = _variant(
+    _OVERVIEW_TOTALS_SQL,
+    (_WITH, _ALL_WITH),
+    ("FROM cdrs c2 WHERE c2.customer_id = $1::int",
+     f"FROM cdrs c2 WHERE {_all_customers_sql('c2')}"),
+)
+_ALL_OVERVIEW_GROUPS_SQL = _variant(_OVERVIEW_GROUPS_SQL, (_WITH, _ALL_WITH))
+
 
 def _summary_grade(rated: int, mos: Optional[float]) -> str:
     """Grade word for an aggregate: from the average MOS of graded calls; when
@@ -285,9 +400,13 @@ def _quality(rated: int, avg_mos: Any, good: int) -> dict:
 
 async def build_overview(s: ReportScope) -> dict:
     prev = s.period.previous()
+    if s.all_customers:
+        totals_sql, groups_sql = _ALL_OVERVIEW_TOTALS_SQL, _ALL_OVERVIEW_GROUPS_SQL
+    else:
+        totals_sql, groups_sql = _OVERVIEW_TOTALS_SQL, _OVERVIEW_GROUPS_SQL
     totals_rows, group_rows = await _run([
-        (_OVERVIEW_TOTALS_SQL, s.args(start=prev.start) + [s.period.start]),
-        (_OVERVIEW_GROUPS_SQL, s.args()),
+        (totals_sql, s.args(start=prev.start) + [s.period.start]),
+        (groups_sql, s.args()),
     ])
     t = totals_rows[0]
     calls, answered = int(t["calls"]), int(t["answered"])
@@ -364,6 +483,7 @@ SELECT gs.d::date AS d,
  ORDER BY 1
  LIMIT 400
 """
+_ALL_TREND_SQL = _variant(_TREND_SQL, (_WITH, _ALL_WITH))
 
 
 async def build_trend(s: ReportScope, bucket: Optional[str]) -> dict:
@@ -371,7 +491,8 @@ async def build_trend(s: ReportScope, bucket: Optional[str]) -> dict:
         unit = rp.choose_bucket(bucket, s.period.days)
     except rp.ReportValidationError as e:
         raise HTTPException(422, str(e)) from e
-    (rows,) = await _run([(_TREND_SQL, s.args() + [unit])])
+    sql = _ALL_TREND_SQL if s.all_customers else _TREND_SQL
+    (rows,) = await _run([(sql, s.args() + [unit])])
     return {
         "bucket": unit,
         "points": [{
@@ -408,14 +529,52 @@ SELECT sel.number, sel.name, sel.product, sel.forwards_to,
  LIMIT {rp.MAX_NUMBERS_ROWS}
 """
 
+#: All customers: every customer's numbers with their OWN calls. Calls are
+#: aggregated per (customer_id, number) first — one hash aggregate over the
+#: range, no per-number subquery — and matched to the owner on BOTH keys, so
+#: a call keeps the per-customer attribution rule (a number that moved
+#: between customers never shows the old owner's calls; the sum of the
+#: per-customer reports == this). Top MAX_NUMBERS_ROWS by calls, like before.
+_ALL_NUMBERS_SQL = f"""WITH {_ALL_OWNED_CTES},{_ALL_BASE_CTE},
+st AS (
+    SELECT customer_id, number,
+           count(*) AS calls,
+           count(*) FILTER (WHERE {_ANSWERED}) AS answered,
+           COALESCE(sum(talk_ms) FILTER (WHERE {_ANSWERED_MS}), 0)::bigint AS answered_ms,
+           avg(mos) FILTER (WHERE grade IS NOT NULL AND mos IS NOT NULL) AS avg_mos,
+           count(*) FILTER (WHERE grade IS NOT NULL) AS rated
+      FROM f
+     WHERE (customer_id, number) IN (SELECT customer_id, number FROM owned)
+     GROUP BY customer_id, number
+)
+SELECT o.number, o.name, o.product, o.forwards_to,
+       COALESCE(st.calls, 0) AS calls, COALESCE(st.answered, 0) AS answered,
+       COALESCE(st.answered_ms, 0)::bigint AS answered_ms,
+       st.avg_mos, COALESCE(st.rated, 0) AS rated,
+       o.customer_id, cu.name AS customer_name
+  FROM owned o
+  JOIN customers cu ON cu.id = o.customer_id
+  LEFT JOIN st ON st.customer_id = o.customer_id AND st.number = o.number
+ ORDER BY 5 DESC, o.number
+ LIMIT {rp.MAX_NUMBERS_ROWS}
+"""
+
+
+def _with_customer(out: dict, r: asyncpg.Record) -> dict:
+    """An all-customers row = the per-customer row + ALL_CUSTOMERS_ROW_KEYS."""
+    out["customer_id"] = r["customer_id"]
+    out["customer_name"] = r["customer_name"]
+    return out
+
 
 async def build_numbers(s: ReportScope) -> dict:
-    (rows,) = await _run([(_NUMBERS_SQL, s.args())])
+    sql = _ALL_NUMBERS_SQL if s.all_customers else _NUMBERS_SQL
+    (rows,) = await _run([(sql, s.args())])
     out = []
     for r in rows:
         calls, answered = int(r["calls"]), int(r["answered"])
         mos = rp.round_mos(r["avg_mos"]) if r["rated"] and r["avg_mos"] is not None else None
-        out.append({
+        row = {
             "number": r["number"],
             "name": r["name"],
             "product": r["product"],
@@ -427,7 +586,8 @@ async def build_numbers(s: ReportScope) -> dict:
             "minutes": tr.aggregate_minutes(r["answered_ms"]),
             "avg_mos": mos,
             "grade": _summary_grade(int(r["rated"]), mos),
-        })
+        }
+        out.append(_with_customer(row, r) if s.all_customers else row)
     return {"numbers": out}
 
 
@@ -436,10 +596,24 @@ SELECT number, name, product, enabled, forwards_to
   FROM owned ORDER BY number LIMIT {rp.MAX_MY_NUMBERS_ROWS}
 """
 
+#: All customers (staff): every customer's numbers + the owner. No binds.
+_ALL_MY_NUMBERS_SQL = f"""WITH {_ALL_OWNED_CTES}
+SELECT o.number, o.name, o.product, o.enabled, o.forwards_to,
+       o.customer_id, cu.name AS customer_name
+  FROM owned o
+  JOIN customers cu ON cu.id = o.customer_id
+ ORDER BY o.number LIMIT {rp.MAX_MY_NUMBERS_ROWS}
+"""
 
-async def build_my_numbers(customer_id: int) -> dict:
+
+async def build_my_numbers(customer_id: Optional[int]) -> dict:
     """The customer's numbers, every product (shared by the Reporting picker
-    and the dashboard): {number, name, product, enabled, forwards_to}."""
+    and the dashboard): {number, name, product, enabled, forwards_to}.
+    `customer_id` None (staff, all customers): every customer's numbers, each
+    row + {customer_id, customer_name}."""
+    if customer_id is None:
+        (rows,) = await _run([(_ALL_MY_NUMBERS_SQL, [])])
+        return {"numbers": [_with_customer(cn.shape_number(r), r) for r in rows]}
     (rows,) = await _run([(_MY_NUMBERS_SQL, [customer_id])])
     return {"numbers": [cn.shape_number(r) for r in rows]}
 
@@ -473,6 +647,20 @@ def _call_filter(outcome: str, direction: str) -> str:
     return _OUTCOME_SQL[outcome] + _DIRECTION_SQL[direction]
 
 
+def _calls_sql(s: ReportScope, cond: str, tail: str) -> str:
+    """One page of calls (`cond` = outcome/direction filter, `tail` = keyset
+    predicate + ORDER BY + LIMIT/OFFSET). Per customer: byte-identical to the
+    original SQL. All customers: the same page in a `page` CTE, THEN joined to
+    customers for the name — at most one page of rows is ever joined."""
+    if not s.all_customers:
+        return f"{_WITH} SELECT {_CALL_COLS} FROM f WHERE TRUE{cond} {tail}"
+    return (f"{_ALL_WITH}, page AS (SELECT {_CALL_COLS}, customer_id FROM f "
+            f"WHERE TRUE{cond} {tail}) "
+            "SELECT page.*, cu.name AS customer_name FROM page "
+            "LEFT JOIN customers cu ON cu.id = page.customer_id "
+            "ORDER BY page.start_time DESC, page.id DESC")
+
+
 def _shape_call(r: asyncpg.Record) -> dict:
     answered = bool(r["answered"])
     out = {
@@ -493,34 +681,40 @@ def _shape_call(r: asyncpg.Record) -> dict:
     return out
 
 
+def _shape_any_call(s: ReportScope, r: asyncpg.Record) -> dict:
+    out = _shape_call(r)
+    return _with_customer(out, r) if s.all_customers else out
+
+
 async def build_calls(s: ReportScope, outcome: str, direction: str,
                       limit: int, offset: int) -> dict:
     cond = _call_filter(outcome, direction)
     n = len(s.args())
     count_rows, page_rows = await _run([
-        (f"{_WITH} SELECT count(*) AS total FROM f WHERE TRUE{cond}", s.args()),
-        (f"{_WITH} SELECT {_CALL_COLS} FROM f WHERE TRUE{cond} "
-         f"ORDER BY start_time DESC, id DESC LIMIT ${n + 1}::int OFFSET ${n + 2}::int",
+        (f"{_prelude(s)} SELECT count(*) AS total FROM f WHERE TRUE{cond}", s.args()),
+        (_calls_sql(s, cond, f"ORDER BY start_time DESC, id DESC "
+                             f"LIMIT ${n + 1}::int OFFSET ${n + 2}::int"),
          s.args() + [limit, offset]),
     ])
     return {"total": int(count_rows[0]["total"]),
-            "calls": [_shape_call(r) for r in page_rows]}
+            "calls": [_shape_any_call(s, r) for r in page_rows]}
 
 
 async def _csv_stream(s: ReportScope, cond: str, cap: int):
     """Yield CSV text: header, then keyset-paginated chunks (each chunk is its
-    own short read-only transaction; nothing is held across client I/O)."""
+    own short read-only transaction; nothing is held across client I/O).
+    All customers: a leading "Customer" column (rp.ALL_CUSTOMERS_CSV_COLUMNS);
+    the per-customer columns and cells are unchanged."""
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\r\n")
-    w.writerow(rp.CSV_COLUMNS)
+    w.writerow(rp.ALL_CUSTOMERS_CSV_COLUMNS if s.all_customers else rp.CSV_COLUMNS)
     yield buf.getvalue()
 
     n = len(s.args())
-    first_sql = (f"{_WITH} SELECT {_CALL_COLS} FROM f WHERE TRUE{cond} "
+    first_sql = _calls_sql(s, cond, f"ORDER BY start_time DESC, id DESC LIMIT ${n + 1}::int")
+    next_sql = _calls_sql(
+        s, cond, f"AND (start_time, id) < (${n + 2}::timestamptz, ${n + 3}::bigint) "
                  f"ORDER BY start_time DESC, id DESC LIMIT ${n + 1}::int")
-    next_sql = (f"{_WITH} SELECT {_CALL_COLS} FROM f WHERE TRUE{cond} "
-                f"AND (start_time, id) < (${n + 2}::timestamptz, ${n + 3}::bigint) "
-                f"ORDER BY start_time DESC, id DESC LIMIT ${n + 1}::int")
     sent, key = 0, None
     while sent < cap:
         size = min(CSV_CHUNK_ROWS, cap - sent)
@@ -535,7 +729,10 @@ async def _csv_stream(s: ReportScope, cond: str, cap: int):
         for r in rows:
             shaped = _shape_call(r)
             shaped["_local"] = r["local_ts"]
-            w.writerow(rp.csv_row(shaped))
+            cells = rp.csv_row(shaped)
+            if s.all_customers:
+                cells = [rp.csv_customer_cell(r["customer_name"], r["customer_id"])] + cells
+            w.writerow(cells)
         yield buf.getvalue()
         sent += len(rows)
         key = (rows[-1]["start_time"], rows[-1]["id"])
@@ -548,7 +745,7 @@ async def build_calls_csv(s: ReportScope, outcome: str, direction: str) -> Strea
     cap = rp.CSV_ROW_CAP
     n = len(s.args())
     (probe,) = await _run([(
-        f"{_WITH} SELECT count(*) AS n FROM "
+        f"{_prelude(s)} SELECT count(*) AS n FROM "
         f"(SELECT 1 FROM f WHERE TRUE{cond} LIMIT ${n + 1}::int) q",
         s.args() + [cap + 1])])
     truncated = int(probe[0]["n"]) > cap
@@ -605,9 +802,8 @@ async def calls_csv(scope: ReportScope = Depends(report_scope),
 
 @router.get("/my-numbers")
 async def my_numbers(customer_id: Optional[int] = Query(None, ge=0),
+                     all_customers: bool = Query(False, description="staff only: every customer"),
                      customer_filter: Optional[int] = Depends(get_support_read_filter)):
     """The customer's numbers, every product (Reporting picker + dashboard).
-    Tenants: own numbers; staff: customer_id required."""
-    if customer_filter is None and customer_id is None:
-        raise HTTPException(422, "customer_id is required for staff (a report is about one customer)")
-    return await build_my_numbers(customer_filter if customer_filter is not None else customer_id)
+    Tenants: own numbers; staff: customer_id or all_customers=true."""
+    return await build_my_numbers(_scope_customer(customer_filter, customer_id, all_customers))

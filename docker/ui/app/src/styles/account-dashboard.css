@@ -314,7 +314,8 @@
    theme (light: today's granite; dark: lifted off the granite canvas by a
    hairline edge and an azure pool). Its two content columns carry
    data-force-theme="dark" (DashboardHeader.tsx), so every token inside —
-   and the native <select> popup — is the dark set whatever the theme. The
+   and the Viewing picker's portaled menu, which copies the pin — is the dark
+   set whatever the theme. The
    --adh-* constants are the band's own: they don't vary by theme. The
    gradient stops among them stay plain colours on purpose: a color-mix()
    stop switches a gradient to float interpolation and shifts its pixels. */
@@ -1658,14 +1659,16 @@ button.ad-kpi { cursor: pointer; }
   flex: 1 1 auto;
 }
 
+/* The trigger is the shared AdminCustomerPicker (a themed Select button,
+   components/ui/Select): its chevron is a flex child on the right padding,
+   so that padding is where the old caret sat (no extra room for a native
+   arrow), recoloured to the band's soft text. */
 .ad-scope-select {
-  appearance: none;
-  -webkit-appearance: none;
   width: 100%;
   min-width: 220px;
   max-width: 320px;
   height: 40px;
-  padding: 0 38px 0 14px;
+  padding: 0 14px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--t-band-text-strong) 16%, transparent);
   background: color-mix(in srgb, var(--t-band-text-strong) 6%, transparent);
@@ -1674,8 +1677,7 @@ button.ad-kpi { cursor: pointer; }
   font-size: 13.5px;
   font-weight: 600;
   color: var(--t-band-text-strong);
-  text-overflow: ellipsis;
-  cursor: pointer;
+  --ui-select-chevron-color: var(--t-band-text-soft);
   transition: border-color var(--rcf-ease), background-color var(--rcf-ease), box-shadow var(--rcf-ease);
 }
 
@@ -1684,25 +1686,13 @@ button.ad-kpi { cursor: pointer; }
   background: color-mix(in srgb, var(--t-band-accent) 10%, transparent);
 }
 
-.ad-scope-select:focus-visible {
+/* Focus — and the open look while the menu's search box holds focus. One
+   class more than select.css's generic open rule (loaded after this sheet). */
+.ad-scope-select:focus-visible,
+.ad-scope-field .ad-scope-select.ui-select-trigger--open {
   outline: none;
   border-color: var(--t-band-accent);
   box-shadow: 0 0 0 3px var(--brand-glow);
-}
-
-/* The native option popup follows the band's forced dark color-scheme. */
-.ad-scope-select option,
-.ad-scope-select optgroup { color: var(--t-text); background: var(--t-surface-raised); }
-
-.ad-scope-caret {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  width: 15px;
-  height: 15px;
-  transform: translateY(-50%);
-  color: var(--t-band-text-soft);
-  pointer-events: none;
 }
 
 /* Customers table */

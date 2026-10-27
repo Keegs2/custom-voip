@@ -31,12 +31,14 @@ interface ReportControlsProps {
   onNumbersChange: (next: string[]) => void;
   numbersLoading: boolean;
   numbersFailed: boolean;
+  /** Number filtering is off (staff "All customers"), with this reason beside the picker. */
+  numbersOffHint?: string;
 }
 
 export function ReportControls(props: ReportControlsProps) {
   const {
     preset, onPresetChange, range, customStart, customEnd, onCustomChange, customError, today, tz,
-    numberOptions, selectedNumbers, onNumbersChange, numbersLoading, numbersFailed,
+    numberOptions, selectedNumbers, onNumbersChange, numbersLoading, numbersFailed, numbersOffHint,
   } = props;
 
   return (
@@ -99,6 +101,7 @@ export function ReportControls(props: ReportControlsProps) {
         onChange={onNumbersChange}
         loading={numbersLoading}
         failed={numbersFailed}
+        offHint={numbersOffHint}
       />
 
       <p className="rpt-tzline" title={`Showing ${fmtRange(range.start, range.end)}. Times are in your time zone (${tz.replace(/_/g, ' ')}).`}>

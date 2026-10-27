@@ -13,12 +13,15 @@
  * Outcome / direction filters are owned by the page (the CSV export sends
  * the same ones); page + page size live here and reset whenever the page
  * remounts this component for a new report scope (keyed by the caller).
+ *
+ * Staff "All customers" (`scope.all_customers`): a compact Customer column
+ * (the row's `customer_name`, clipped, full name in the tooltip).
  */
 import { useRef, useState } from 'react';
 import { ListOrdered } from 'lucide-react';
 import { CdrPaginationBar } from '../calls/CdrPaginationBar';
 import type { DirectionFilter, OutcomeFilter, ReportScope } from '../../types/reports';
-import { CardError, GradeBadge, OutcomeBadge, ReportCard, Skeleton } from './ReportBits';
+import { CardError, CustomerCell, GradeBadge, OutcomeBadge, ReportCard, Skeleton } from './ReportBits';
 import { fmtCallDate, fmtCallLength, fmtCallTime, fmtCount, fmtPhone } from './reportFormat';
 import { useReportCalls } from './useReports';
 
@@ -63,6 +66,7 @@ export function CallList({ scope, enabled, filters, onFiltersChange }: CallListP
 
   const data = query.data;
   const rows = data?.calls ?? [];
+  const showCustomer = scope.all_customers === true;
   const total = data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const paging = query.isFetching && query.isPlaceholderData;
@@ -196,12 +200,13 @@ export function CallList({ scope, enabled, filters, onFiltersChange }: CallListP
                 aria-label="Calls, newest first"
                 tabIndex={0}
               >
-                <table className="rpt-table" style={{ minWidth: 780 }}>
+                <table className="rpt-table" style={{ minWidth: showCustomer ? 950 : 780 }}>
                   <caption className="rpt-sr">Calls, newest first</caption>
                   <thead>
                     <tr>
                       <th className="dl-th" scope="col">Date</th>
                       <th className="dl-th" scope="col">Time</th>
+                      {showCustomer && <th className="dl-th" scope="col">Customer</th>}
                       <th className="dl-th" scope="col">Direction</th>
                       <th className="dl-th" scope="col">From</th>
                       <th className="dl-th" scope="col">To</th>
@@ -215,6 +220,7 @@ export function CallList({ scope, enabled, filters, onFiltersChange }: CallListP
                       <tr key={c.id} className="dl-row">
                         <td style={{ whiteSpace: 'nowrap' }}>{fmtCallDate(c.started_at, scope.tz)}</td>
                         <td style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{fmtCallTime(c.started_at, scope.tz)}</td>
+                        {showCustomer && <CustomerCell name={c.customer_name} id={c.customer_id} />}
                         <td className="rpt-dim">{c.direction === 'inbound' ? 'Incoming' : 'Outgoing'}</td>
                         <td><span className="rpt-mono">{fmtPhone(c.from)}</span></td>
                         <td><span className="rpt-mono">{fmtPhone(c.to)}</span></td>

@@ -10,7 +10,8 @@
  * azure light-line along the bottom edge (account-dashboard.css). The band
  * is dark in BOTH themes: the frame reads the page theme's --t-band-* set,
  * and the two content columns are pinned with data-force-theme="dark" so
- * every token inside (and the native <select> popup) is the dark set. The
+ * every token inside is the dark set — the scope picker's menu too (a
+ * themed Select carries the pin into its portal). The
  * switcher is a segmented pill driven by products.ts: available products are
  * pressable, the rest are dimmed with a "Soon" tag (aria-disabled, still
  * focusable so the roadmap is discoverable by keyboard). A product with its

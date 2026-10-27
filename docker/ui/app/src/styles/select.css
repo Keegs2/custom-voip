@@ -1,0 +1,468 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   SELECT — the one dropdown (components/ui/Select.tsx). Prefix `ui-select-`.
+   Contract + rules: docker/ui/CLAUDE.md §8 "`Select` (all dropdowns)".
+
+   Colour: theme tokens declared on :root only (--t-*, --dl-*, and the
+   --ui-select-* roles below), never a page's scope-keyed palette (--vm-*,
+   --dlx-*): the menu is portaled out of every page scope, and it carries
+   the trigger's `data-force-theme`, which re-declares exactly the :root
+   families (§18.1). No colour literals (check-theme-tokens --literals).
+
+   Import site — main.tsx, AFTER index.css / theme.css / app-shell.css /
+   layout-kit.css, on purpose (§20.8 "CSS order"):
+     • ONE global sheet, present before any page — eager or lazy — renders
+       a Select, so the portaled menu looks the same everywhere and never
+       depends on which page loaded first.
+     • Last of the globals, so the menu and default-skin rules win the
+       equal-specificity ties against index.css (the unlayered `*` reset,
+       the global `:focus-visible` ring).
+     • The ONE place where a page must win — the trigger's look — is kept
+       weak instead: the trigger's structural reset sits in
+       `@layer components`, below every unlayered rule. So a page's own
+       class (`dl-input vm-scope-select`, eager or lazy CSS) and Tailwind
+       utilities restyle the trigger whatever the load order. A page that
+       restyles the MENU (`menuClassName`) needs one class more than the
+       rule it overrides (`.ui-select-menu.my-menu`) if its CSS is eager.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Same order as Tailwind's own statement (index.css). A no-op when it has
+   already run; if this sheet were ever loaded first it keeps `components`
+   above `base` (preflight) instead of creating it below. */
+@layer theme, base, components, utilities;
+
+/* ─── Roles (§18.3 rule 2 shape: :root + force-theme pins) ──────────────
+   On light the highlight is the daylight row hover (--t-tint-hover, as
+   .rcf-didpick-opt); on dark --t-tint-hover is a hair off the raised
+   surface, so the dark highlight is an azure-bright wash instead. The
+   selected row is the .rcf-didpick-opt-on accent-line wash, a step
+   stronger while it is also highlighted. */
+:root,
+[data-force-theme='light'] {
+  --ui-select-hl: var(--t-tint-hover);
+  --ui-select-on: color-mix(in srgb, var(--t-accent-line) 6%, transparent);
+  --ui-select-on-hl: color-mix(in srgb, var(--t-accent-line) 11%, transparent);
+}
+
+:root[data-theme='dark'],
+:root[data-landing],
+[data-force-theme='dark'] {
+  --ui-select-hl: color-mix(in srgb, var(--t-accent-line) 14%, transparent);
+  --ui-select-on: color-mix(in srgb, var(--t-accent-line) 9%, transparent);
+  --ui-select-on-hl: color-mix(in srgb, var(--t-accent-line) 20%, transparent);
+}
+
+/* ─── Trigger: structure only, and WEAK (see the header) ────────────────
+   A <button> wearing the page's field class. Everything that makes it look
+   like a field (border, background, padding, radius, font, height) comes
+   from that class — or from .ui-select-default below. */
+@layer components {
+  .ui-select-trigger {
+    -webkit-appearance: none;
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    text-align: start;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .ui-select-trigger:disabled {
+    cursor: not-allowed;
+  }
+}
+
+/* The value cell: the shown label + invisible copies of the longest labels
+   in ONE grid cell, so the trigger is as wide as a native select (its
+   longest option) yet truncates with an ellipsis when the page narrows it. */
+.ui-select-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ui-select-text {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-select-sizer {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.ui-select-placeholder {
+  color: var(--t-field-placeholder);
+}
+
+/* The --dl-select-chevron glyph (11 × 7, --t-text-dim) as a flex child: it
+   sits on the page's right padding (where a native select.dl-input drew it,
+   12px in) and no `background` shorthand on a page hover rule can drop it.
+   Recolour per page with --ui-select-chevron-color. */
+.ui-select-chevron {
+  flex: none;
+  width: 11px;
+  height: 7px;
+  color: var(--ui-select-chevron-color, var(--t-text-dim));
+  transition: transform 0.18s ease;
+}
+
+.ui-select-trigger--open .ui-select-chevron {
+  transform: rotate(180deg);
+}
+
+.ui-select-trigger:disabled .ui-select-chevron {
+  color: var(--t-text-faint);
+}
+
+/* A searchable menu holds focus in its search box; the trigger keeps the
+   field's focus look meanwhile. Pages with their own focus look (the
+   granite band, the amber banner) override `.their-class.ui-select-trigger--open`. */
+.ui-select-trigger--open:not(:focus) {
+  border-color: var(--t-focus);
+  box-shadow: var(--t-focus-halo);
+}
+
+/* invalid → aria-invalid. Specificity beats .dl-input / .dl-input:hover… /
+   .dl-input:focus, so the danger edge survives hover and focus. */
+.ui-select-trigger[aria-invalid='true'],
+.ui-select-trigger[aria-invalid='true']:hover:not(:focus):not(:disabled) {
+  border-color: var(--t-danger-solid);
+}
+
+.ui-select-trigger[aria-invalid='true']:focus,
+.ui-select-trigger--open[aria-invalid='true'] {
+  border-color: var(--t-danger-solid);
+  box-shadow: 0 0 0 3px var(--t-danger-bg);
+}
+
+/* ─── Default skin (no className) = .dl-input ────────────────────────── */
+.ui-select-default {
+  box-sizing: border-box;
+  background: var(--t-field-bg);
+  border: 1px solid var(--t-field-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--t-text);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ui-select-default:hover:not(:focus):not(:disabled) {
+  border-color: var(--t-field-border-hover);
+}
+
+.ui-select-default:focus {
+  border-color: var(--t-focus);
+  box-shadow: var(--t-focus-halo);
+}
+
+.ui-select-default:disabled {
+  background: var(--t-field-disabled-bg);
+  color: var(--t-text-faint);
+}
+
+/* sm — compact controls ("50 per page"). */
+.ui-select-default--sm {
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 0.76rem;
+  gap: 7px;
+}
+
+/* ─── Menu ───────────────────────────────────────────────────────────────
+   .ui-select-pop is the positioned box (position: fixed, placed by
+   Select.tsx — min/max width, left/top|bottom, --ui-select-max-h are set
+   inline). The visible panel is .ui-select-menu inside it, so the entry
+   animation's transform never skews the placement measurements. */
+.ui-select-pop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  /* Above dialogs (VmDialog / DashboardOverlay / CallTraceModal at 1200,
+     the IVR assistant sheet at 1100, Modal at 50), below toasts (9999). */
+  z-index: 1300;
+  width: max-content;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+@keyframes ui-select-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ui-select-menu {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  max-height: var(--ui-select-max-h, 320px);
+  margin: 0;
+  padding: 4px;
+  overflow: hidden;
+  background: var(--t-surface-raised);
+  border: 1px solid var(--dl-ctl-border);
+  border-radius: 10px;
+  box-shadow: var(--dl-pop-shadow);
+  color: var(--t-text);
+  /* the app's body size (body: 14px); the portal may land in a host with
+     other text settings, so the inheritable ones are reset here */
+  font-size: 0.875rem;
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-align: start;
+  text-transform: none;
+  white-space: normal;
+  cursor: default;
+  transform-origin: top center;
+  animation: ui-select-in 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ui-select-pop[data-placement='top'] .ui-select-menu {
+  transform-origin: bottom center;
+}
+
+/* Search box — a small .dl-input with a search glyph. */
+.ui-select-searchbox {
+  position: relative;
+  flex: none;
+  margin: 0;
+  padding: 2px 2px 6px;
+}
+
+.ui-select-search-icon {
+  position: absolute;
+  left: 12px;
+  top: calc(50% - 2px);
+  transform: translateY(-50%);
+  color: var(--t-text-faint);
+  pointer-events: none;
+}
+
+.ui-select-menu .ui-select-search {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 6px 10px 6px 29px;
+  background: var(--t-field-bg);
+  border: 1px solid var(--t-field-border);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--t-text);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ui-select-menu .ui-select-search::placeholder {
+  color: var(--t-field-placeholder);
+}
+
+.ui-select-menu .ui-select-search:hover:not(:focus) {
+  border-color: var(--t-field-border-hover);
+}
+
+.ui-select-menu .ui-select-search:focus {
+  border-color: var(--t-focus);
+  box-shadow: var(--t-focus-halo);
+}
+
+/* The scrolling part (rows + status). Positioned, so rows' offsetTop is
+   measured from it and the visually-hidden status stays inside (§18.7). */
+.ui-select-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ui-select-listbox {
+  margin: 0;
+  padding: 0;
+  outline: none;
+}
+
+/* ─── Rows ─── */
+.ui-select-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 7px;
+  color: var(--t-text);
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ui-select-opt-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-select-opt-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  color: var(--t-text-dim);
+}
+
+/* A slot on every row, so hints line up whether or not the row is selected. */
+.ui-select-opt-check {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--t-accent-text);
+}
+
+.ui-select-opt--active {
+  background: var(--ui-select-hl);
+}
+
+.ui-select-opt--selected {
+  background: var(--ui-select-on);
+  font-weight: 600;
+}
+
+.ui-select-opt--selected.ui-select-opt--active {
+  background: var(--ui-select-on-hl);
+}
+
+.ui-select-opt--disabled,
+.ui-select-opt--disabled .ui-select-opt-hint {
+  color: var(--t-text-faint);
+  cursor: not-allowed;
+}
+
+/* ─── Groups + dividers (hairlines) ─── */
+.ui-select-grp {
+  margin: 0;
+  padding: 0;
+}
+
+.ui-select-group {
+  margin: 0;
+  padding: 8px 10px 4px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-text-dim);
+  user-select: none;
+}
+
+.ui-select-listbox > .ui-select-grp:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--t-line);
+}
+
+/* A divider row right above a group is already its hairline. */
+.ui-select-listbox > .ui-select-divider + .ui-select-grp {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.ui-select-divider {
+  height: 1px;
+  margin: 4px 6px;
+  padding: 0;
+  background: var(--t-line);
+}
+
+/* ─── Loading / empty / match count ─── */
+.ui-select-statusbox {
+  margin: 0;
+  padding: 0;
+}
+
+.ui-select-status {
+  margin: 0;
+  padding: 9px 10px;
+  font-size: 0.82rem;
+  color: var(--t-text-dim);
+}
+
+.ui-select-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ─── Compact menu (size="sm") ─── */
+.ui-select-menu--sm {
+  font-size: 0.8rem;
+}
+
+.ui-select-menu--sm .ui-select-opt {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+/* ─── Phones / touch: 40px rows; 16px search text (no iOS focus zoom) ─── */
+@media (max-width: 640px), (pointer: coarse) {
+  .ui-select-menu .ui-select-opt {
+    min-height: 40px;
+  }
+}
+
+@media (pointer: coarse) {
+  .ui-select-menu .ui-select-search {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-select-menu {
+    animation: none;
+  }
+
+  .ui-select-chevron,
+  .ui-select-default,
+  .ui-select-menu .ui-select-search {
+    transition: none;
+  }
+}

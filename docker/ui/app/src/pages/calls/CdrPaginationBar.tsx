@@ -24,10 +24,11 @@
  * At narrow widths a hand-written @media swaps the number strip for a
  * compact "6 / 85" indicator (never Tailwind md:* — see CLAUDE.md).
  */
-import type { ChangeEvent } from 'react';
+import { Select, type SelectOption } from '../../components/ui/Select';
 
 /** Selectable page sizes — all comfortably under the API's 1000-row cap. */
 const PAGE_SIZES = [50, 100, 250, 500];
+const PAGE_SIZE_OPTIONS: readonly SelectOption[] = PAGE_SIZES.map((n) => ({ value: String(n), label: String(n) }));
 
 /** How many page numbers to show on each side of the current page. */
 const SIBLINGS = 2;
@@ -110,10 +111,6 @@ export function CdrPaginationBar({
 }: CdrPaginationBarProps) {
   const atFirst = page <= 1;
   const atLast = pageCount != null ? page >= pageCount : !hasNext;
-
-  const handleSizeChange = (e: ChangeEvent<HTMLSelectElement>) => {
-    onPageSizeChange(Number(e.target.value));
-  };
 
   return (
     <nav className="dlx4-pager" aria-label={ariaLabel}>
@@ -211,22 +208,19 @@ export function CdrPaginationBar({
         )}
       </div>
 
-      <label className="dlx4-pgsize-label">
-        <select
+      {/* A span, not a wrapping <label>: the trigger is a <button>, named by aria-label. */}
+      <span className="dlx4-pgsize-label">
+        <Select
           className="dlx4-pgsize"
-          value={pageSize}
+          size="sm"
+          value={String(pageSize)}
           disabled={busy}
           aria-label="Rows per page"
-          onChange={handleSizeChange}
-        >
-          {PAGE_SIZES.map((size) => (
-            <option key={size} value={size}>
-              {size}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => onPageSizeChange(Number(v))}
+          options={PAGE_SIZE_OPTIONS}
+        />
         per page
-      </label>
+      </span>
     </nav>
   );
 }

@@ -305,6 +305,19 @@ def csv_safe(value: Any) -> str:
     return s
 
 
+#: Staff "all customers" CSV: a leading Customer column, then CSV_COLUMNS
+#: unchanged (the per-customer file keeps CSV_COLUMNS exactly).
+ALL_CUSTOMERS_CSV_COLUMNS = ("Customer",) + CSV_COLUMNS
+
+
+def csv_customer_cell(name: Any, customer_id: Any) -> str:
+    """The Customer cell: the customer's name (free text, so formula-guarded),
+    or "Customer #<id>" when the customer row no longer exists."""
+    if name:
+        return csv_safe(name)
+    return f"Customer #{int(customer_id)}"
+
+
 def csv_row(row: dict) -> list[str]:
     """A shaped call (see routers/reports.py `_shape_call`) -> CSV cells."""
     local = row["_local"]

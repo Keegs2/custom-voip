@@ -21,13 +21,14 @@
  * transcribe earlier messages. Tenants (`user` and `readonly`) get a
  * read-only line while it is on, and no panel at all while it is off.
  */
-import { useId, useState, type FormEvent } from 'react';
+import { useId, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileText, KeyRound, PauseCircle, PlayCircle, Trash2 } from 'lucide-react';
 import type { Mailbox, MailboxUpdate, TranscriptionLanguage } from '../../types/voicemail';
 import { TRANSCRIPTION_LANGUAGES } from '../../types/voicemail';
 import { backfillTranscripts, deleteMailbox, setMailboxPin, updateMailbox } from '../../api/voicemail';
 import { useToast } from '../../components/ui/ToastContext';
+import { Select, type SelectOption } from '../../components/ui/Select';
 import { BalancedGrid, Disclosure } from '../../components/layout/kit';
 import { invalidateVoicemail, transcriptErrorText, vmErrorText, type VoicemailScope } from './voicemailData';
 import { invalidateAccountNumbers } from '../dashboard/accountData';
@@ -142,6 +143,13 @@ function DetailsPanel({ mailbox, canEdit, className }: { mailbox: Mailbox; canEd
   const [timezone, setTimezone] = useState(mailbox.timezone);
   const labelId = useId();
   const tzId = useId();
+  // A zone outside our list (set elsewhere) is kept as a choice, so the form never drops it.
+  const zoneOptions = useMemo<SelectOption[]>(() => {
+    const zones = TIMEZONES.some((z) => z.id === mailbox.timezone)
+      ? TIMEZONES
+      : [...TIMEZONES, { id: mailbox.timezone, label: mailbox.timezone }];
+    return zones.map((z) => ({ value: z.id, label: z.label }));
+  }, [mailbox.timezone]);
 
   const save = useMutation({
     mutationFn: (body: MailboxUpdate) => updateMailbox(mailbox.id, body),
@@ -155,9 +163,6 @@ function DetailsPanel({ mailbox, canEdit, className }: { mailbox: Mailbox; canEd
 
   const trimmed = label.trim();
   const dirty = trimmed !== mailbox.label || timezone !== mailbox.timezone;
-  const zones = TIMEZONES.some((z) => z.id === mailbox.timezone)
-    ? TIMEZONES
-    : [...TIMEZONES, { id: mailbox.timezone, label: mailbox.timezone }];
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -195,13 +200,7 @@ function DetailsPanel({ mailbox, canEdit, className }: { mailbox: Mailbox; canEd
               <label className="dl-flabel" htmlFor={tzId}>
                 Timezone
               </label>
-              <select id={tzId} className="dl-input vm-input-full" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-                {zones.map((z) => (
-                  <option key={z.id} value={z.id}>
-                    {z.label}
-                  </option>
-                ))}
-              </select>
+              <Select id={tzId} className="dl-input vm-input-full" value={timezone} onChange={setTimezone} options={zoneOptions} />
             </div>
             <button type="submit" className="dl-btn dl-btn-primary vm-btn-sm vm-field-action" disabled={!dirty || trimmed.length === 0 || save.isPending}>
               {save.isPending ? 'Saving…' : 'Save'}
@@ -221,7 +220,7 @@ function DetailsPanel({ mailbox, canEdit, className }: { mailbox: Mailbox; canEd
           </div>
           <div className="dl-kv">
             <span className="dl-kv-label">Timezone</span>
-            <span className="dl-kv-value">{zones.find((z) => z.id === mailbox.timezone)?.label ?? mailbox.timezone}</span>
+            <span className="dl-kv-value">{TIMEZONES.find((z) => z.id === mailbox.timezone)?.label ?? mailbox.timezone}</span>
           </div>
         </div>
       )}
@@ -285,9 +284,11 @@ function TranscriptionPanel({
   // ── Derived (after all hooks) ──
   const dirty = on !== savedOn || language !== savedLanguage;
   const paused = savedOn && !available;
-  const languages = TRANSCRIPTION_LANGUAGES.some((l) => l.id === savedLanguage)
-    ? TRANSCRIPTION_LANGUAGES
-    : [...TRANSCRIPTION_LANGUAGES, { id: savedLanguage, label: savedLanguage }];
+  const languageOptions: SelectOption<TranscriptionLanguage>[] = (
+    TRANSCRIPTION_LANGUAGES.some((l) => l.id === savedLanguage)
+      ? TRANSCRIPTION_LANGUAGES
+      : [...TRANSCRIPTION_LANGUAGES, { id: savedLanguage, label: savedLanguage }]
+  ).map((l) => ({ value: l.id, label: l.label }));
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -346,19 +347,14 @@ function TranscriptionPanel({
               <label className="dl-flabel" htmlFor={langId}>
                 Language
               </label>
-              <select
+              <Select<TranscriptionLanguage>
                 id={langId}
                 className="dl-input vm-input-full"
                 value={language}
-                onChange={(e) => setLanguage(e.target.value as TranscriptionLanguage)}
+                onChange={setLanguage}
+                options={languageOptions}
                 disabled={save.isPending}
-              >
-                {languages.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
             <button type="submit" className="dl-btn dl-btn-primary vm-btn-sm vm-field-action" disabled={!dirty || save.isPending}>
               {save.isPending ? 'Saving…' : 'Save'}
