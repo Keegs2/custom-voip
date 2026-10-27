@@ -487,7 +487,9 @@
   color: var(--rcf-ink-dim);
 }
 
-.rcfd-sort select {
+/* The sort Select's trigger (a <button> — components/ui/Select, which draws
+   the chevron on the right padding). */
+.rcfd-sort .rcfd-sort-select {
   height: 36px;
   padding: 0 10px;
   border: 1px solid var(--rcf-line);
@@ -499,7 +501,7 @@
   cursor: pointer;
 }
 
-.rcfd-sort select:focus-visible { outline: none; border-color: var(--t-focus); box-shadow: var(--rcfd-focus); }
+.rcfd-sort .rcfd-sort-select:focus-visible { outline: none; border-color: var(--t-focus); box-shadow: var(--rcfd-focus); }
 
 /* Route rows — one grid template shared by the column header and rows. */
 .rcfd-routes-cols,

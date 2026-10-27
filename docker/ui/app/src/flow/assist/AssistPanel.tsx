@@ -29,6 +29,7 @@ import { composeBlockedReason, type ProposalTurnState, type Turn } from './conve
 import { DISCLOSURE } from './guide';
 import { KeywordGuide, type GuideNumber } from './KeywordGuide';
 import { useAssist } from './useFlowAssistant';
+import { Select, type SelectOption } from '../../components/ui/Select';
 
 const PRODUCT_WORD: Record<string, string> = {
   rcf: 'Call forwarding',
@@ -58,6 +59,7 @@ function Elapsed({ since }: { since: number }) {
 export function VoicePicker({ compact = false }: { compact?: boolean }) {
   const a = useAssist();
   const id = useId();
+  const options = useMemo<SelectOption[]>(() => a.voices.map((v) => ({ value: v.id, label: voiceLabel(v) })), [a.voices]);
   if (a.voicesFailed) {
     return <p className="dl-help ivr-asst-voice-off">Text to speech is unavailable right now, so new messages can’t be read aloud.</p>;
   }
@@ -66,20 +68,18 @@ export function VoicePicker({ compact = false }: { compact?: boolean }) {
       <label className="ivr-asst-voice-label" htmlFor={id}>
         {compact ? 'Voice' : 'Voice for new messages'}
       </label>
-      <select
+      {/* `nokey`: React Flow's Delete / Backspace must not delete a block while this trigger has focus. */}
+      <Select
         id={id}
-        className="dl-input ivr-asst-voice-select"
+        className="dl-input ivr-asst-voice-select nokey"
+        size="sm"
         value={a.voice}
-        onChange={(e) => a.setVoice(e.target.value)}
+        onChange={a.setVoice}
+        options={options}
+        placeholder={a.voicesLoading ? 'Loading voices…' : undefined}
         disabled={a.voices.length === 0}
-      >
-        {a.voicesLoading && <option value="">Loading voices…</option>}
-        {a.voices.map((v) => (
-          <option key={v.id} value={v.id}>
-            {voiceLabel(v)}
-          </option>
-        ))}
-      </select>
+        searchPlaceholder="Search voices…"
+      />
     </div>
   );
 }
