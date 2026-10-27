@@ -1,14 +1,20 @@
 /**
- * CustomerPreviewPicker — the "which customer am I previewing?" select an
+ * CustomerPreviewPicker — the "which customer am I previewing?" picker an
  * admin uses in "View as Customer" mode. Rendered in the sidebar's amber
  * customer-view banner (`tone="dark"`) and on customer pages that need a
- * pick before they can show anything (`tone="light"`).
+ * pick before they can show anything (`tone="light"`, PreviewPrompt).
+ *
+ * The shared AdminCustomerPicker (themed Select, searchable, account type
+ * on each row) — with NO "All customers": previewing shows the app exactly
+ * as ONE customer sees it, so there is no "all" to preview. Keep it that
+ * way (docker/ui/CLAUDE.md §8 "Admin customer pickers").
  *
  * Choosing a customer sets AuthContext.previewCustomer; every customer page
  * keys on that id, so it remounts on the new account.
  */
 import { useId } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { AdminCustomerPicker } from '../AdminCustomerPicker';
 import { toEffectiveCustomer, usePreviewCustomers } from './usePreviewCustomers';
 
 export interface CustomerPreviewPickerProps {
@@ -21,37 +27,33 @@ export function CustomerPreviewPicker({ tone, label = 'Previewing' }: CustomerPr
   // ALL hooks unconditionally at the top (React #310).
   const { previewCustomer, setPreviewCustomer } = useAuth();
   const { customers, isLoading, isError } = usePreviewCustomers();
-  const selectId = useId();
-
-  const value = previewCustomer ? String(previewCustomer.id) : '';
-  // Keep the current pick selectable even before the list arrives.
-  const listed = previewCustomer ? customers.some((c) => c.id === previewCustomer.id) : true;
+  const pickerId = useId();
 
   return (
     <div className={`cvp cvp--${tone}`}>
-      <label className="cvp-label" htmlFor={selectId}>{label}</label>
-      <select
-        id={selectId}
+      <label className="cvp-label" htmlFor={pickerId}>
+        {label}
+      </label>
+      <AdminCustomerPicker
+        id={pickerId}
         className="cvp-select"
-        value={value}
-        disabled={isLoading && !previewCustomer}
-        onChange={(e) => {
-          const next = customers.find((c) => String(c.id) === e.target.value);
-          if (next) setPreviewCustomer(toEffectiveCustomer(next));
+        // One customer at a time — never "All customers" (see the header).
+        includeAll={false}
+        searchable
+        value={previewCustomer?.id ?? null}
+        // The current pick keeps its name even before (or without) the list.
+        valueLabel={previewCustomer?.name}
+        onChange={(next) => {
+          if (next === 'all') return;
+          const picked = customers.find((c) => c.id === next);
+          if (picked) setPreviewCustomer(toEffectiveCustomer(picked));
         }}
-      >
-        {!previewCustomer && (
-          <option value="" disabled>
-            {isLoading ? 'Loading customers…' : isError ? 'Customers couldn’t load' : 'Pick a customer…'}
-          </option>
-        )}
-        {previewCustomer && !listed && <option value={value}>{previewCustomer.name}</option>}
-        {customers.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+        customers={customers}
+        loading={isLoading}
+        error={isError}
+        placeholder={isLoading ? 'Loading customers…' : isError ? 'Customers couldn’t load' : 'Pick a customer…'}
+        disabled={isLoading && !previewCustomer}
+      />
     </div>
   );
 }

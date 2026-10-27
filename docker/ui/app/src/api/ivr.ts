@@ -12,6 +12,8 @@
  * admin without one gets 400 `customer_id required`, which the UI never
  * provokes (it shows the PreviewPrompt / a customer picker instead). Every
  * function therefore takes the scope's `customerId` (undefined = tenant).
+ * The one exception is the admin roll-up `GET /admin/overview` (no
+ * customer — it IS every customer).
  *
  * Publishing sends `{ revision }` ONLY — the server compiles the stored draft
  * at that revision. Compiled output never leaves the browser.
@@ -29,6 +31,7 @@ import type {
   FlowUpdate,
   FlowVersion,
   FlowVersionDetail,
+  IvrAdminOverview,
   IvrGraph,
   IvrNumber,
   IvrSummary,
@@ -56,6 +59,16 @@ function scoped(path: string, customerId: number | undefined): string {
 
 export function getIvrSummary(customerId?: number): Promise<IvrSummary> {
   return apiRequest('GET', scoped(`${BASE}/summary`, customerId));
+}
+
+/* ─── Admin: every customer (the "All customers" view) ────── */
+
+/**
+ * Platform admin only (403 otherwise). The one IVR route that takes no
+ * `customer_id`: a per-customer roll-up, sorted by name.
+ */
+export function getIvrAdminOverview(): Promise<IvrAdminOverview> {
+  return apiRequest('GET', `${BASE}/admin/overview`);
 }
 
 /* ─── Flows ───────────────────────────────────────────────── */

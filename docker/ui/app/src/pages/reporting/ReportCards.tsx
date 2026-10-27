@@ -170,11 +170,12 @@ export function TrendCard({ trend, className }: { trend: QueryState<ReportTrend>
 
 /* ═══ Busiest day & hour ════════════════════════════════════════════════ */
 
-export function BusiestCard({ overview }: { overview: QueryState<ReportOverview> }) {
+/** `allCustomers`: a staff all-customers report — the title drops the "Your". */
+export function BusiestCard({ overview, allCustomers = false }: { overview: QueryState<ReportOverview>; allCustomers?: boolean }) {
   const data = overview.data;
   return (
     <ReportCard
-      title="Your busiest times"
+      title={allCustomers ? 'Busiest times' : 'Your busiest times'}
       icon={<CalendarClock size={16} />}
       explainer={
         <>

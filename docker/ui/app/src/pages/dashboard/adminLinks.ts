@@ -3,10 +3,11 @@
  *
  * Every staff page that is about "one customer" takes the same
  * `?customer=<id>` query param (`?customer=all` where All customers is a
- * choice). The dashboard and the /rcf console read it today; Calls &
- * Quality and Reporting still open on their own picker, so the link copy
- * says so. When one of them starts reading the param, flip its flag below —
- * the hrefs already carry it and the copy follows the flag.
+ * choice — every admin customer picker has it pinned on top). The dashboard
+ * reads absent as All customers; the prompt-first pages (the /rcf console,
+ * Voicemail, Reporting, IVR) read absent as "nothing chosen yet" and show a
+ * "Select a customer" prompt, so a link that means All customers must say
+ * `?customer=all`. Calls & Quality reads `?customer=<id>`.
  */
 
 /** Pages that pre-select the customer from `?customer=`. */
@@ -34,7 +35,7 @@ export function rcfConsoleHref(scope: CustomerScopeParam): string {
   return withCustomer('/rcf', scope);
 }
 
-/** The admin Visual Voicemail console, scoped (`/voicemail?customer=<id>`). */
+/** The admin Visual Voicemail console, scoped (`/voicemail?customer=<id>` | `?customer=all`). */
 export function voicemailConsoleHref(scope: CustomerScopeParam): string {
   return withCustomer('/voicemail', scope);
 }
@@ -44,7 +45,7 @@ export function callsHref(customerId: number | null): string {
   return withCustomer('/cdrs', customerId);
 }
 
-/** Reporting (one customer per report). */
+/** Reporting, one customer (`/reporting?customer=all` is the all-customers report). */
 export function reportingHref(customerId: number | null): string {
   return withCustomer('/reporting', customerId);
 }

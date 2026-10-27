@@ -8,11 +8,15 @@
  * "Currently forwards to" column only appears when at least one number is a
  * call-forwarding (rcf) number; a number of any other product names it
  * under the number ("Front desk · Voicemail").
+ *
+ * Staff "All customers" (`allCustomers`): every customer's numbers, with a
+ * compact Customer column (the row's `customer_name`, clipped, full name in
+ * the tooltip) and wording for many customers.
  */
 import { Hash } from 'lucide-react';
 import { ShowMoreButton, useShowMore } from '../../components/layout/kit';
 import type { ReportNumbers } from '../../types/reports';
-import { CardError, GradeBadge, ReportCard, Skeleton } from './ReportBits';
+import { CardError, CustomerCell, GradeBadge, ReportCard, Skeleton } from './ReportBits';
 import { nameWithProduct } from '../../config/products';
 import { fmtCount, fmtMinutes, fmtPct, fmtPhone } from './reportFormat';
 import { T } from '../../styles/theme';
@@ -26,26 +30,31 @@ interface NumbersTableProps {
     error: unknown;
     refetch: () => void;
   };
+  /** Staff "All customers" report: a Customer column + wording for many customers. */
+  allCustomers?: boolean;
 }
 
 const NO_ROWS: ReportNumbers['numbers'] = [];
 
-export function NumbersTable({ numbers }: NumbersTableProps) {
+export function NumbersTable({ numbers, allCustomers = false }: NumbersTableProps) {
   // ALL hooks unconditionally at the top (React #310 prevention).
   const rows = numbers.data?.numbers ?? NO_ROWS;
   const more = useShowMore(rows, INITIAL_ROWS);
   const showForward = rows.some((r) => r.product === 'rcf');
+  const showCustomer = allCustomers;
+  const minWidth = (showForward ? 760 : 620) + (showCustomer ? 170 : 0);
 
   return (
     <ReportCard
-      title="Your numbers"
+      title={allCustomers ? 'Numbers, every customer' : 'Your numbers'}
       icon={<Hash size={16} />}
       headExtra={numbers.data ? <span className="dl-count">{fmtCount(rows.length)}</span> : undefined}
       explainer={
         <>
           <p>
-            Each of your phone numbers, with how many calls it had in this period, how many of those were answered,
-            the total time on the phone and how clear the calls sounded.
+            {allCustomers
+              ? 'Every customer’s phone numbers, with the customer each belongs to, how many calls it had in this period, how many of those were answered, the total time on the phone and how clear the calls sounded.'
+              : 'Each of your phone numbers, with how many calls it had in this period, how many of those were answered, the total time on the phone and how clear the calls sounded.'}
           </p>
           {showForward && (
             <p>
@@ -70,11 +79,12 @@ export function NumbersTable({ numbers }: NumbersTableProps) {
       {numbers.data && rows.length > 0 && (
         <div className="dl-panel" style={{ boxShadow: 'none' }}>
           <div className={more.expanded ? 'dlx4-tablewrap rpt-tablewrap-cap' : 'dlx4-tablewrap'}>
-            <table className="rpt-table" style={{ minWidth: showForward ? 760 : 620 }}>
+            <table className="rpt-table" style={{ minWidth }}>
               <caption className="rpt-sr">Calls per number</caption>
               <thead>
                 <tr>
                   <th className="dl-th" scope="col">Number</th>
+                  {showCustomer && <th className="dl-th" scope="col">Customer</th>}
                   {showForward && <th className="dl-th" scope="col">Currently forwards to</th>}
                   <th className="dl-th rpt-num" scope="col">Calls</th>
                   <th className="dl-th rpt-num" scope="col">Answered</th>
@@ -91,6 +101,7 @@ export function NumbersTable({ numbers }: NumbersTableProps) {
                       <span className="rpt-mono" style={{ color: T.accentText, fontWeight: 600 }}>{fmtPhone(r.number)}</span>
                       {subline && <span className="rpt-subline">{subline}</span>}
                     </td>
+                    {showCustomer && <CustomerCell name={r.customer_name} id={r.customer_id} />}
                     {showForward && (
                       <td>
                         {r.forwards_to ? <span className="rpt-mono">{fmtPhone(r.forwards_to)}</span> : <span className="rpt-dim">—</span>}

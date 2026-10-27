@@ -11,6 +11,11 @@
  *   "You had 40 calls so far in September (31 coming in, 9 going out).
  *    Every call was answered. …"
  *   "No calls yet in this period."
+ *
+ * Staff "All customers" (`audience: 'all'`) reads for many customers:
+ *   "All customers together got 18,204 calls in August. 96 of every 100
+ *    were answered. …"
+ *   "No customer had a call so far in October."
  */
 import type { ReportOverview } from '../../types/reports';
 import {
@@ -30,33 +35,41 @@ export interface SentenceSegment {
 /** Below this many calls, "N of every 100" reads oddly — use "2 of 3". */
 const SMALL_SAMPLE = 20;
 
+/** Who the report is about: one account ("You got …") or every customer (staff "All customers"). */
+export type SentenceAudience = 'own' | 'all';
+
 export function buildSummarySentence(
   overview: ReportOverview,
   preset: PeriodPreset,
   range: DateRange,
   filteredToNumbers: boolean,
+  audience: SentenceAudience = 'own',
 ): SentenceSegment[] {
   const { totals, quality } = overview;
   const when = periodPhrase(preset, range);
   const out: SentenceSegment[] = [];
+  const subject = audience === 'all' ? 'All customers together' : 'You';
 
   if (totals.calls === 0) {
     out.push({
-      text: filteredToNumbers
-        ? `No calls yet on the numbers you picked ${when}.`
-        : `No calls yet ${when}.`,
+      text:
+        audience === 'all'
+          ? `No customer had a call ${when}.`
+          : filteredToNumbers
+            ? `No calls yet on the numbers you picked ${when}.`
+            : `No calls yet ${when}.`,
     });
     return out;
   }
 
   // ── How many ──
   if (totals.outbound === 0) {
-    out.push({ text: 'You got ' }, { text: plural(totals.calls, 'call', 'calls'), strong: true }, { text: ` ${when}.` });
+    out.push({ text: `${subject} got ` }, { text: plural(totals.calls, 'call', 'calls'), strong: true }, { text: ` ${when}.` });
   } else if (totals.inbound === 0) {
-    out.push({ text: 'You made ' }, { text: plural(totals.calls, 'call', 'calls'), strong: true }, { text: ` ${when}.` });
+    out.push({ text: `${subject} made ` }, { text: plural(totals.calls, 'call', 'calls'), strong: true }, { text: ` ${when}.` });
   } else {
     out.push(
-      { text: 'You had ' },
+      { text: `${subject} had ` },
       { text: plural(totals.calls, 'call', 'calls'), strong: true },
       { text: ` ${when} (${totals.inbound.toLocaleString()} coming in, ${totals.outbound.toLocaleString()} going out).` },
     );

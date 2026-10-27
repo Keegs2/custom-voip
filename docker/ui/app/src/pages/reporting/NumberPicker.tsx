@@ -6,6 +6,11 @@
  * option carries a product tag (config/products.ts). Closes on Escape,
  * outside click, or focus leaving the picker; the button reflects the
  * current selection.
+ *
+ * `offHint` replaces it with a line of text — staff "All customers"
+ * reports can't filter by number (the API 422s it), so the bar reads
+ * "NUMBERS  All · pick one customer to filter by number" instead of a
+ * control that can't do anything.
  */
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
@@ -20,9 +25,11 @@ interface NumberPickerProps {
   onChange: (next: string[]) => void;
   loading: boolean;
   failed: boolean;
+  /** Replaces the picker with "All · <this reason>" (number filtering is off). */
+  offHint?: string;
 }
 
-export function NumberPicker({ options, selected, onChange, loading, failed }: NumberPickerProps) {
+export function NumberPicker({ options, selected, onChange, loading, failed, offHint }: NumberPickerProps) {
   // ALL hooks unconditionally at the top (React #310 prevention).
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');
@@ -75,6 +82,17 @@ export function NumberPicker({ options, selected, onChange, loading, failed }: N
   } else summary = `${selected.length} numbers`;
 
   const disabled = loading || failed || options.length <= 1;
+
+  if (offHint) {
+    return (
+      <div className="rpt-numpick">
+        <span className="dl-flabel" id={labelId}>Numbers</span>
+        <span className="rpt-numpick-off">
+          <strong>All</strong> · {offHint}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div

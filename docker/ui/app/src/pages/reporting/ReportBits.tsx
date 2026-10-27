@@ -33,6 +33,21 @@ export function Explainer({ children, label = 'What does this mean?' }: { childr
   );
 }
 
+/**
+ * Staff "All customers" tables: the customer a row belongs to — clipped to
+ * one compact column (§20), the full name in the tooltip.
+ */
+export function CustomerCell({ name, id }: { name?: string | null; id?: number }) {
+  const text = name || (id !== undefined ? `Customer #${id}` : '—');
+  return (
+    <td className="rpt-custcell">
+      <span className="rpt-custname" title={text}>
+        {text}
+      </span>
+    </td>
+  );
+}
+
 export function Skeleton({ width = '100%', height = 14, style }: { width?: number | string; height?: number; style?: React.CSSProperties }) {
   return <span className="rpt-skel" aria-hidden="true" style={{ width, height, ...style }} />;
 }

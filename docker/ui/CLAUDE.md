@@ -125,8 +125,10 @@ QueryClient defaults:
 /api-dids                 ApiDidsPage — RETIRED: ProductHomeRedirect while API_CALLING_ENABLED=false
 /trunks                   TrunksPage
 /voicemail                VisualVoicemailPage (lazy) — Visual Voicemail (§17): tenant inbox, admin preview,
-                          admin console (?customer=ID | All customers); support → productHome
-/reporting                ReportingPage (lazy; RequireReportingAccess — rcf/trunk/hybrid + admin)
+                          admin console (no param = pick prompt | ?customer=all | ?customer=ID);
+                          support → productHome
+/reporting                ReportingPage (lazy; RequireReportingAccess — rcf/trunk/hybrid + admin);
+                          staff: no param = pick prompt | ?customer=all | ?customer=ID
 /docs/guides/:product?    GuidesPage        (/documentation, /docs/rcf redirect here)
 /docs/api/:product?       ApiDocsPage       (/docs/integration redirects here)
 /call-quality             CallsPage (tenant-reachable; cost/fleet UI hidden for non-staff)
@@ -136,7 +138,8 @@ QueryClient defaults:
 ── full-screen, outside AppLayout, RequireAuth ──
 /troubleshooting          TroubleshootingPage      (renders its own Sidebar)
 /ivr, /ivr/flows/:id      IvrPage (lazy; renders its own Sidebar) — Visual IVR: numbers,
-                          flows, messages; the builder is a second lazy chunk (§19)
+                          flows, messages; the builder is a second lazy chunk (§19);
+                          admin: no param = pick prompt | ?customer=all (overview) | ?customer=ID
 
 *                         → redirect to /
 ```
@@ -203,13 +206,15 @@ second login on the same tab was served the previous tenant's data.
 `customer_id = null` / `account_type = null`, so customer pages must never read
 `user.customer_id` — they read `effectiveCustomer`. The sidebar's amber
 customer-view banner carries `components/preview/CustomerPreviewPicker`
-(GET /customers, key `['customers-dropdown']`); entering customer view with no
+(the shared `AdminCustomerPicker` with NO "All customers" — previewing is one
+customer, §8 "Admin customer pickers"; GET /customers, key
+`['customers-dropdown']`); entering customer view with no
 pick defaults to the admin's own account, else the first rcf/hybrid customer by
 name. Customer pages key their view component on `effectiveCustomer.id` so a
 switch remounts (no hook-order change). The admin is still STAFF to the API, so
 customer pages swap self-scoped endpoints for the admin ones (see
-`pages/dashboard/accountData.ts`). With no pick yet, /dashboard and /rcf show
-`PreviewPrompt` (same picker).
+`pages/dashboard/accountData.ts`). With no pick yet, /dashboard, /rcf,
+/voicemail, /ivr and /reporting show `PreviewPrompt` (same picker).
 
 **`utils/productHome.ts`** — signed-in home: admin → `/dashboard` (the admin
 dashboard, All customers), support →
@@ -291,9 +296,9 @@ return { items: raw.items ?? [], total: raw.total ?? raw.items?.length ?? 0 };
 | `apiDids.ts` | `/api-dids` | CRUD + filter |
 | `carriers.ts` | `/carriers` | CRUD + `testCarrier` |
 | `cdrs.ts` | `/cdrs` | `searchCdrs`, `getCdr`, `rateCdr`, `getCdrSummary`, `getCdrActivity`, customer-scoped helpers. `product_type` may be `'all'` (= no product filter; `/cdrs/activity` defaults to rcf when omitted); `number` = one of the customer's own numbers (inbound destination OR outbound caller ID), sent only when set |
-| `reports.ts` | `/reports` | Reporting endpoints; `getMyNumbers(customerId?)` = the customer's numbers, EVERY product — also the dashboard's numbers list (§7) |
+| `reports.ts` | `/reports` | Reporting endpoints; `getMyNumbers(customerId? \| 'all')` = the customer's numbers, EVERY product — also the dashboard's numbers list (§7). Staff "All customers": `ReportScope.all_customers` → `reportQuery` sends `all_customers=true` and never `customer_id` / `numbers` (the API 422s either); rows then carry `customer_id` / `customer_name` (`ReportRowOwner`), the CSV a leading Customer column |
 | `rates.ts` | `/rates` | CRUD + `getMarginsData`, `lookupRate` |
-| `ivr.ts` | `/v1/ivr` | Visual IVR, typed 1:1 to `docs/IVR_INTERFACES.md` §8.2: summary, flows (CRUD, validate, publish `{revision}`, versions, restore, simulate), numbers, destinations, prompts (TTS, multipart upload, rename, delete, tts-preview, playback URL), voices. Plus the Flow assistant (`docs/IVR_ASSIST_INTERFACES.md` §5): `startAssist` (202 `{job_id, conversation_id}`), `getAssistJob`, `postAssistOutcome`, `simulate` with `assist_job_id`. Staff pass `customer_id` on EVERY route (§19) |
+| `ivr.ts` | `/v1/ivr` | Visual IVR, typed 1:1 to `docs/IVR_INTERFACES.md` §8.2: summary, flows (CRUD, validate, publish `{revision}`, versions, restore, simulate), numbers, destinations, prompts (TTS, multipart upload, rename, delete, tts-preview, playback URL), voices. Plus the Flow assistant (`docs/IVR_ASSIST_INTERFACES.md` §5): `startAssist` (202 `{job_id, conversation_id}`), `getAssistJob`, `postAssistOutcome`, `simulate` with `assist_job_id`. Staff pass `customer_id` on EVERY route (§19) — except `getIvrAdminOverview()` (`GET /v1/ivr/admin/overview`, admin only: one roll-up row per customer, the "All customers" IVR view) |
 | `documents.ts` | `/documents` | folders CRUD, document upload/download/update/delete, stats |
 | `sipp.ts` | `/sipp` | `listSippPresets`, `runSipp` |
 | `health.ts` | `/health` | `getHealth`, `getDetailedHealth` |
@@ -415,7 +420,8 @@ switch remounts instead of changing hook order.
   Also used by the admin `/rcf` console. **Dark in both themes:** the band's
   frame reads `--t-band-*`, and its two content columns (`.ad-header-id`,
   `.ad-header-tools`) carry `data-force-theme="dark"`, so every token inside
-  — and the native `<select>` popup — is the dark set on the light theme
+  — and the scope picker's menu (a themed `Select` carries the pin into its
+  portal) — is the dark set on the light theme
   too; band-only constants are `--adh-*` (§18.5).
 - **Holistic (every product).** The account view's numbers card, Numbers
   KPI, every call card and the Call activity overlay cover every product on
@@ -478,8 +484,10 @@ switch remounts instead of changing hook order.
   `voicemailConsoleHref(id)` while voicemail is on) / `adminPlatformActions`
   — see below).
 - **Admin dashboard** (`AdminDashboard.tsx`, admin in normal view). Same look,
-  "Viewing" dropdown in the header (All customers default | each call
-  forwarding customer; a deep-linked customer of another type is added).
+  "Viewing" dropdown in the header (`AdminScopeSelect` = the shared
+  `AdminCustomerPicker` in the band's dark-glass `.ad-scope-select` skin, §8:
+  All customers pinned on top and the default | each call forwarding
+  customer; a deep-linked customer of another type is added).
   Scope in the URL: `?customer=<id>`, absent = All customers (push history, so
   Back works; an unknown id → "We couldn't find customer #id"). Helpers in
   `adminLinks.ts` (`parseCustomerParam`, `dashboardHref`, `rcfConsoleHref`,
@@ -504,8 +512,11 @@ switch remounts instead of changing hook order.
     read-only team; quick actions View as this customer · Numbers console ·
     Call activity · Calls & Quality (`/cdrs?customer=ID`) · Reporting
     (`/reporting?customer=ID`) · Troubleshooting. No "Request numbers".
-  - `/cdrs` and `/reporting` do NOT read `?customer=` yet — their action
-    sub-lines say "pick X in Customer" until `READS_CUSTOMER_PARAM` flips.
+  - `/cdrs` reads `?customer=<id>` (pre-selects the Customer filter);
+    `/reporting`, `/voicemail` and `/ivr` read `?customer=all|<id>` (absent =
+    the "Select a customer" prompt). `voicemailConsoleHref('all')` =
+    `/voicemail?customer=all`; the sidebar's plain `/voicemail` lands on the
+    prompt.
 - Data (`accountData.ts`) — tenant vs staff:
   account `GET /customers/me` vs `GET /customers/{id}` (identity fields only —
   the admin row carries financials, never copied); team `GET /auth/team` vs
@@ -566,7 +577,7 @@ the preview can't break hook order):
 - **Admin / support**: the Administrative Call Forwarding Console (`RcfConsole`),
   in the dashboard's look: `.rcf-scope.ad-scope.rcfc` + `.ad-shell`. The granite
   `DashboardHeader` is ONE row: kicker + Staff/Support tag, title, "Viewing X"
-  on the left; the `AdminScopeSelect` dropdown (incl. All customers) and "Open
+  on the left; the `AdminScopeSelect` dropdown (All customers pinned on top) and "Open
   dashboard" (→ `/dashboard?customer=…`) on the right. The segmented tab rail
   (Numbers / Call activity / DID management; WAI-ARIA tabs, arrow keys) shares
   its row with the view's figures (Forwards — "100+" at the cap — /
@@ -590,8 +601,23 @@ the board and the console fetch once and page in the browser, and say so at
 persona (an RCF-only account with 130 numbers) where the harness has it.
 
 **`ReportingPage`** (`/reporting`, lazy)
-Staff pick a customer; an admin in customer view reports on the sidebar's
-preview customer (no page picker; the page is keyed on it). "Your numbers"
+Staff pick in the header's **Customer** menu (`AdminCustomerPicker`, §8 —
+reportable accounts, All customers pinned on top); the pick IS the URL
+(`?customer=<id>` | `?customer=all`; absent = the `AdminScopePrompt` "Select a
+customer to see their report", nothing loads). The number pick and call-list
+filters are stored with the scope they were made in, so a new customer
+(picker, Back, a link) starts from "all numbers". **All customers**
+(`?customer=all`): every `/reports/*` call sends `all_customers=true` and no
+`customer_id`; crumb "All customers"; KPIs / trend / missed reasons as-is;
+the summary sentence reads "All customers together had …"; the Numbers
+picker is replaced by "All · pick one customer to filter by number" (the API
+422s numbers there; `/my-numbers` isn't called); "Numbers, every customer"
+and Every call gain a compact Customer column (`CustomerCell`, clipped +
+tooltip); the CSV comes with the server's Customer column; the PDF is titled
+"All customers – calls" and its numbers table gains a Customer column. An
+admin in customer view reports on the sidebar's
+preview customer (no page picker; the page is keyed on it; `PreviewPrompt`
+until one is picked). "Your numbers"
 and the number picker list EVERY product's numbers (`/reports/my-numbers`,
 `/reports/numbers`): the picker tags each option with its product when the
 list spans more than one; the table / PDF sub-line adds the product for
@@ -815,7 +841,12 @@ current status, nothing we don't want customers to know".
 
 **`CallsPage`** (`/call-quality` and `/cdrs`, `pages/calls/`) — Calls & Quality
 The merged CDR search + voice-quality page. Top composition (2026-10 rework):
-- **Search row** (`CallsFilterBar`) — ONE centred row at ≥1366px: Customer
+- **Search row** (`CallsFilterBar`) — every dropdown is a themed `Select`
+  wearing `dl-input` (the Customer one = `AdminCustomerPicker`, All customers
+  pinned on top = `customer_id: ''`, the filter / URL semantics unchanged;
+  Trunk, Product, Direction, Time range and Zone are non-searchable `Select`s;
+  `.cqf-field .dl-input.ui-select-trigger` keeps the 10px chevron inset; a
+  Zone pick inside "More" leaves the popover open). ONE centred row at ≥1366px: Customer
   (staff) · Trunk · Product (+ Voicemail: always for staff, for others while
   Visual Voicemail is on — sidebar's summary key) · Direction · Dest. prefix · Time range (select;
   From/To appear inline only for "Custom range") · **More** popover (staff:
@@ -1216,14 +1247,49 @@ longer exist, and `TrunkCard` / `ApiDidCard` are imported nowhere
 (TrunksPage / ApiDidsPage don't use them) and were NOT converted to theme
 tokens (§18.8).
 
-### `AdminCustomerSelector`
+### Admin customer pickers (`AdminCustomerPicker`)
 
-Dropdown that lets admins filter portal pages by customer. Only renders when
-`isAdmin` is true. Loads up to 500 customers and can filter by `accountTypes`.
-Currently imported nowhere and NOT themed (still hex literals — convert to
-tokens before reusing it). The
-admin dashboard and `/rcf` console use `pages/dashboard/AdminScopeSelect`
-(granite header dropdown) instead.
+**Every staff customer picker is `src/components/AdminCustomerPicker.tsx`**
+— the themed `Select` with **"All customers" pinned on top** (stays while
+searching, hairline under it), then the customers sorted by name
+(case-insensitive) with the account type as the row hint ("SIP Trunking",
+"SIP Trunking · Suspended" when not active) and the id as a search keyword.
+`searchable='auto'` (a search box past 10 rows).
+- **Contract:** `value: number | 'all' | null` (null = placeholder "Select a
+  customer…"), `onChange(next: number | 'all')`, `customers` = the page's own
+  list (`useAdminCustomers().data`, or a subset — the dashboard / RCF console
+  list call forwarding customers, Reporting the reportable ones; the raw
+  `Customer` fits too), `loading` (a "Loading…" row), `error` (a disabled
+  "Customers couldn't load" row; All still works), `includeAll` (default
+  true — false ONLY where "all" means nothing, e.g. a new mailbox's owner),
+  `valueLabel` (names a value that isn't in the list; default "Customer
+  #<id>", so `?customer=999` stays selectable), and the `Select` trigger
+  props (`id`, `className` — the page's FULL trigger skin — `title`, aria).
+  The visible label stays the page's own (`<label htmlFor={id}>`).
+- **Where:** dashboard + RCF console band (`AdminScopeSelect`,
+  `.ad-scope-select`, "Viewing"), Calls & Quality (`dl-input`, "Customer";
+  All = `customer_id: ''`), Reporting (`dl-input rpt-headpick-select`,
+  "Customer"), Voicemail (`dl-input vm-scope-select`, "Viewing"), IVR
+  (`dl-input ivr-scope-select`, "Customer").
+- **Prompt-first pages** — RCF console, Voicemail, Reporting, IVR: no
+  `?customer` → the header with the picker on the placeholder and a "Select a
+  customer to see their …" card (nothing loads); `?customer=all` → the
+  All customers view; `?customer=<id>` → that customer. Voicemail, Reporting
+  and IVR share `components/AdminScopePrompt.tsx` (the daylight `dl-panel` +
+  `dl-center` page state, `asp-` in `styles/admin-scope.css`; it names the
+  page's picker label); the RCF console keeps its `ad-prompt` card (the
+  granite dashboard family). The dashboard has no prompt: All customers is
+  its default.
+- **The "View as Customer" picker** (`components/preview/CustomerPreviewPicker`,
+  sidebar banner `cvp--dark` + `PreviewPrompt` `cvp--light`) is the same
+  component with `includeAll={false}`, `searchable`: previewing is always ONE
+  customer — never add "All customers" there.
+- Trigger skins re-keyed for the `<button>`: `.ad-scope-select` (padding `0
+  14px`, chevron `--t-band-text-soft`, the old `.ad-scope-caret` deleted),
+  `.cvp-select` (padding `0 9px`, no background chevron; banner chevron
+  `--t-sb-banner-field-focus`, light `--t-accent-text`); both override
+  `.x.ui-select-trigger--open` with their own focus look (one class more than
+  select.css, which loads after them).
 
 ---
 
@@ -1585,8 +1651,12 @@ dial-in).
   `CustomerVoicemail` (own account; `readonly` = play + download only);
   admin in customer view → same view on the PREVIEW customer with staff
   controls (`PreviewPrompt` until one is picked); admin normal view →
-  `AdminVoicemailConsole` (`?customer=<id>`, absent = All customers, a
-  "Viewing" select); support → productHome. Views are keyed by scope.
+  `AdminVoicemailConsole`, prompt-first like RCF / Reporting / IVR: no
+  `?customer` → the header ("Viewing" `AdminCustomerPicker` on its
+  placeholder) + the `AdminScopePrompt` "Select a customer to see their
+  voicemail" (nothing loads); `?customer=all` → every customer's mailboxes
+  (`staffScope('all')`); `?customer=<id>` → that customer; support →
+  productHome. Views are keyed by scope.
 - **Body** `pages/voicemail/VoicemailWorkspace.tsx` (layout kit, §20):
   `CompactHeader` in one row (crumb · Voicemail + `EncryptionBadge` ·
   admin "Viewing" picker · Unread / Messages / Mailboxes · New mailbox for
@@ -2091,8 +2161,7 @@ only these kinds (anything else is a bug):
 - **The landing** (always dark, its own palette): `styles/landing.css`,
   `components/layout/HaArchitectureViz.tsx` (and `pages/DashboardPage.tsx`).
 - **Not rendered, not converted** (convert before reviving any of them):
-  `pages/TrunkCard.tsx`, `pages/ApiDidCard.tsx`,
-  `components/AdminCustomerSelector.tsx`, the orphaned `pages/LoginPage.tsx`
+  `pages/TrunkCard.tsx`, `pages/ApiDidCard.tsx`, the orphaned `pages/LoginPage.tsx`
   + `components/layout/AnimatedGridBackground.tsx`, and the unimported
   `styles/onboarding-brief.css` / `styles/dl-customer360.css`;
   `styles/dl-api-calling.css` belongs to the retired `ApiDidsPage`
@@ -2112,7 +2181,8 @@ validation and the "what callers hear" preview, never sent (plan D2).
 
 | Where | What |
 |---|---|
-| `pages/IvrPage.tsx` | Route entry (lazy, full-bleed OUTSIDE AppLayout with its own `Sidebar` + `SidebarCollapseTab`, like Troubleshooting; `.dl-scope.ivr-canvas`). Picks the persona and provides `IvrWorkspaceContext`; inner routes `/ivr` and `/ivr/flows/:id` (the builder is a second lazy chunk, `flow/FlowBuilderRoute`). **Focus mode:** inside the builder the app sidebar starts collapsed — session-only state, the saved `sidebar_collapsed` preference is never touched. |
+| `pages/IvrPage.tsx` | Route entry (lazy, full-bleed OUTSIDE AppLayout with its own `Sidebar` + `SidebarCollapseTab`, like Troubleshooting; `.dl-scope.ivr-canvas`). Picks the persona and provides `IvrWorkspaceContext`; inner routes `/ivr` and `/ivr/flows/:id` (the builder is a second lazy chunk, `flow/FlowBuilderRoute`). Admin console: no `?customer` → header + `AdminScopePrompt`; `?customer=all` → `IvrAllCustomers`; `?customer=<id>` → the workspace (any inner path without a customer redirects to `/ivr`, with `all` to `/ivr?customer=all`). **Focus mode:** inside the builder the app sidebar starts collapsed — session-only state, the saved `sidebar_collapsed` preference is never touched. |
+| `pages/ivr/IvrAllCustomers.tsx` | The admin "All customers" view (`/ivr?customer=all`): `GET /v1/ivr/admin/overview` (key `['ivr','admin-overview']`) → `CompactHeader` (Customers · IVR on · Flows · Numbers on IVR) + ONE compact table — Customer (+ amber status tag when not active) · IVR On/Off · Flows "2 of 3 published" · Numbers on IVR · Last published (relative, absolute in the tooltip). The name is a link and the row a click target to `?customer=<id>`; 10 rows, then "Show all N" in a capped scroll with sticky heads; loading / error (403 wording) / empty states. Styles `ivr-ov-*` in `ivr.css`. |
 | `pages/ivr/IvrContext.ts` | `{ scope, viewer: tenant\|preview\|admin, staff, canEdit, customerName, href() }` — no IVR component reads `user` / `effectiveCustomer` itself. `href()` keeps the admin console's `?customer=`. |
 | `pages/ivr/ivrData.ts` | Scope (tenant `self:<id>` / staff `c:<id>`, like voicemail), query keys `['ivr', key, …]`, hooks, and `readIvrError` / `ivrErrorText` (flattens `stale_revision` + `current_revision`, `invalid_flow` + `errors`, `prompt_in_use` + `flows`, `flow_in_use`, `ivr_not_enabled`, whether FastAPI puts them top-level or under `detail`). |
 | `pages/ivr/IvrHome.tsx`, `IvrIntro.tsx`, `IvrDialogs.tsx`, `format.ts` | `/ivr`: not entitled → `IvrIntro`; entitled, no numbers → build now + "ask for a number"; else numbers (flow, live/not published, last publish; choose flow / rename), flows (status, used by, open, rename, delete → `flow_in_use`), messages. Layout below ("The /ivr page"). |
@@ -2131,9 +2201,13 @@ Tenant `user` edits; tenant `readonly` gets the same page and a VIEW-ONLY
 builder (no palette, no publish, Outline tab first; test calls disabled —
 `/simulate` is a POST). Admin in "View as Customer" works on the preview
 customer as staff (`PreviewPrompt` until one is picked, same as voicemail).
-Admin in normal view gets a console with a customer picker (`?customer=ID`)
-— there is no "all customers" IVR view, because every §8.2 route needs a
-customer (the API answers 400 `customer_id required`). Support → product home.
+Admin in normal view gets a console with the **Customer** picker
+(`AdminCustomerPicker`, All customers pinned on top), prompt-first: no
+`?customer` → "Select a customer to see their IVR"; `?customer=all` → the
+All customers overview (`IvrAllCustomers`, the one admin roll-up route —
+every other §8.2 route still needs a customer, 400 `customer_id required`);
+`?customer=<id>` → that customer's IVR, builder included
+(`/ivr/flows/:id?customer=`). Support → product home.
 
 ### The /ivr page (layout, §20)
 

@@ -9,8 +9,12 @@
  *                                        customer, with the staff controls
  *                                        (New mailbox, suspend/resume, delete)
  *                                     → PreviewPrompt until one is picked
- *   admin (normal view)               → AdminVoicemailConsole: All customers
- *                                        or one (`?customer=<id>`)
+ *   admin (normal view)               → AdminVoicemailConsole, prompt-first
+ *                                        like the RCF console, Reporting and IVR:
+ *        no ?customer                   the header's "Viewing" picker + "Select a
+ *                                        customer to see their voicemail" (nothing loads)
+ *        ?customer=all                  every customer's mailboxes
+ *        ?customer=<id>                 that customer
  *   support / login with no account   → their productHome (the API answers
  *                                        403 for support)
  *
@@ -18,15 +22,21 @@
  * styles are `vm-*` in styles/dl-voicemail.css on the daylight `dl-*` system,
  * themed light / dark through the `--t-*` tokens (docker/ui/CLAUDE.md §18).
  */
-import { useCallback, useId, useMemo } from 'react';
+import { useCallback, useId, useMemo, type ReactNode } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
+import { AdminCustomerPicker, type AdminCustomerValue } from '../components/AdminCustomerPicker';
+import { AdminScopePrompt } from '../components/AdminScopePrompt';
+import { CompactHeader } from '../components/layout/kit';
 import { useAuth, type EffectiveCustomer } from '../contexts/AuthContext';
 import { productHome } from '../utils/productHome';
 import { PreviewPrompt } from './dashboard/PreviewPrompt';
 import { useAdminCustomers, type CustomerRow } from './dashboard/adminData';
+import { EncryptionBadge } from './voicemail/EncryptionBadge';
 import { VoicemailWorkspace } from './voicemail/VoicemailWorkspace';
 import { staffScope, tenantScope } from './voicemail/voicemailData';
 import '../styles/dl-voicemail.css';
+
+const SUBTITLE = 'Listen to messages, set your greeting, and keep every mailbox tidy — from any browser.';
 
 export function VisualVoicemailPage() {
   const { user, isAdmin, isActualAdmin, isSupport, customerViewMode, effectiveCustomer } = useAuth();
@@ -70,11 +80,12 @@ function CustomerVoicemail({ customer, staff }: { customer: EffectiveCustomer; s
 
 /* ─── Admin console (normal view) ─────────────────────────── */
 
-/** `?customer=` → 'all' (absent / 'all' / junk) or a customer id. */
-function parseScope(raw: string | null): number | 'all' {
-  if (!raw || !/^\d{1,9}$/.test(raw)) return 'all';
+/** `?customer=` → null (absent / junk: nothing chosen yet), 'all', or a customer id. */
+function parseScope(raw: string | null): AdminCustomerValue {
+  if (raw === 'all') return 'all';
+  if (!raw || !/^\d{1,9}$/.test(raw)) return null;
   const id = Number(raw);
-  return id > 0 ? id : 'all';
+  return id > 0 ? id : null;
 }
 
 function AdminVoicemailConsole() {
@@ -82,14 +93,12 @@ function AdminVoicemailConsole() {
   const [params, setParams] = useSearchParams();
   const customers = useAdminCustomers(true);
   const value = parseScope(params.get('customer'));
-  const scope = useMemo(() => staffScope(value), [value]);
 
   const select = useCallback(
     (next: number | 'all') => {
       setParams((prev) => {
         const p = new URLSearchParams(prev);
-        if (next === 'all') p.delete('customer');
-        else p.set('customer', String(next));
+        p.set('customer', String(next));
         return p;
       });
     },
@@ -97,12 +106,29 @@ function AdminVoicemailConsole() {
   );
 
   // ── Derived (after all hooks) ──
-  const name =
-    typeof value === 'number' ? (customers.data?.find((c) => c.id === value)?.name ?? `Customer #${value}`) : null;
+  const listed = typeof value === 'number' ? customers.data?.find((c) => c.id === value) : undefined;
+  const name = typeof value === 'number' ? (listed?.name ?? `Customer #${value}`) : null;
+  const picker = (
+    <ScopePicker value={value} onChange={select} customers={customers.data} loading={customers.isLoading} error={customers.isError} />
+  );
+
+  if (value === null) return <VoicemailScopePrompt picker={picker} />;
 
   return (
+    <AdminVoicemailWorkspace
+      key={value === 'all' ? 'all' : `c-${value}`}
+      value={value}
+      name={name}
+      picker={picker}
+    />
+  );
+}
+
+/** One scope's workspace — keyed by the caller, so a switch remounts it. */
+function AdminVoicemailWorkspace({ value, name, picker }: { value: number | 'all'; name: string | null; picker: ReactNode }) {
+  const scope = useMemo(() => staffScope(value), [value]);
+  return (
     <VoicemailWorkspace
-      key={scope.key}
       scope={scope}
       viewer="admin"
       canEdit
@@ -111,15 +137,34 @@ function AdminVoicemailConsole() {
       tag="Staff"
       createFor={typeof value === 'number' && name ? { id: value, name } : null}
       showCustomer={value === 'all'}
-      tools={
-        <ScopePicker
-          value={value}
-          onChange={select}
-          customers={customers.data ?? []}
-          loading={customers.isLoading}
-        />
-      }
+      tools={picker}
     />
+  );
+}
+
+/** Nothing chosen yet: the workspace's header (with the picker) over the prompt card. Nothing loads. */
+function VoicemailScopePrompt({ picker }: { picker: ReactNode }) {
+  return (
+    <div className="dl-scope vm-scope">
+      <div className="dl-shell vm-shell">
+        <CompactHeader
+          className="vm-header fx-load"
+          crumb={
+            <>
+              <span>Visual Voicemail</span>
+              <span className="vm-staff-tag">Staff</span>
+            </>
+          }
+          title="Voicemail"
+          titleAside={<EncryptionBadge />}
+          subtitle={SUBTITLE}
+          tools={picker}
+        />
+        <div className="vm-body fx-load fx-load-d1">
+          <AdminScopePrompt title="Select a customer to see their voicemail" pickerLabel="Viewing" />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -128,35 +173,29 @@ function ScopePicker({
   onChange,
   customers,
   loading,
+  error,
 }: {
-  value: number | 'all';
+  value: AdminCustomerValue;
   onChange: (next: number | 'all') => void;
-  customers: readonly CustomerRow[];
+  customers: readonly CustomerRow[] | undefined;
   loading: boolean;
+  error: boolean;
 }) {
   const id = useId();
-  const listed = value === 'all' || customers.some((c) => c.id === value);
   return (
     <div className="vm-scope-pick">
       <label className="dl-flabel" htmlFor={id}>
         Viewing
       </label>
-      <select
+      <AdminCustomerPicker
         id={id}
         className="dl-input vm-scope-select"
-        value={String(value)}
-        onChange={(e) => onChange(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-      >
-        <option value="all">All customers</option>
-        {!listed && typeof value === 'number' && <option value={value}>{`Customer #${value}`}</option>}
-        {loading && customers.length === 0 && <option disabled>Loading customers…</option>}
-        {customers.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-            {c.status !== 'active' ? ` (${c.status})` : ''}
-          </option>
-        ))}
-      </select>
+        value={value}
+        onChange={onChange}
+        customers={customers}
+        loading={loading}
+        error={error}
+      />
     </div>
   );
 }

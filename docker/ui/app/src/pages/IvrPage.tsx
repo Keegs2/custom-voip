@@ -13,8 +13,13 @@
  *   tenant (user / readonly)          → own account (readonly = view only)
  *   admin in "View as Customer"       → the preview customer, staff controls
  *                                     → PreviewPrompt until one is picked
- *   admin (normal view)               → console: pick a customer (?customer=ID);
- *                                       IVR has no "all customers" view
+ *   admin (normal view)               → console, prompt-first like the RCF console,
+ *                                       Voicemail and Reporting:
+ *        no ?customer                     the header's Customer picker + "Select a
+ *                                         customer to see their IVR" (nothing loads)
+ *        ?customer=all                    every customer at a glance (IvrAllCustomers,
+ *                                         GET /ivr/admin/overview); a row opens one
+ *        ?customer=<id>                   that customer's IVR, builder included
  *   support / no account              → their productHome
  *
  * Routes inside: /ivr (numbers, flows, messages) and /ivr/flows/:flowId
@@ -22,6 +27,9 @@
  */
 import { lazy, Suspense, useCallback, useId, useMemo, useState, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useMatch, useParams, useSearchParams } from 'react-router-dom';
+import { AdminCustomerPicker, type AdminCustomerValue } from '../components/AdminCustomerPicker';
+import { AdminScopePrompt } from '../components/AdminScopePrompt';
+import { CompactHeader } from '../components/layout/kit';
 import { Sidebar } from '../components/layout/Sidebar';
 import { SidebarCollapseTab } from '../components/layout/SidebarCollapse';
 import { useSidebarCollapse } from '../components/layout/useSidebarCollapse';
@@ -31,6 +39,7 @@ import { productHome } from '../utils/productHome';
 import { cn } from '../utils/cn';
 import { PreviewPrompt } from './dashboard/PreviewPrompt';
 import { useAdminCustomers, type CustomerRow } from './dashboard/adminData';
+import { IvrAllCustomers } from './ivr/IvrAllCustomers';
 import { IvrHome } from './ivr/IvrHome';
 import { IvrWorkspaceContext, useIvrWorkspace, type IvrWorkspace } from './ivr/IvrContext';
 import { ivrStaffScope, ivrTenantScope } from './ivr/ivrData';
@@ -109,26 +118,29 @@ function CustomerIvr({ customer, staff, readonly }: { customer: EffectiveCustome
 
 /* ─── Admin console (normal view) ─────────────────────────── */
 
-/** `?customer=` → a customer id, or null (absent / junk). */
-function parseCustomer(raw: string | null): number | null {
+/** `?customer=` → null (absent / junk: nothing chosen yet), 'all', or a customer id. */
+function parseScope(raw: string | null): AdminCustomerValue {
+  if (raw === 'all') return 'all';
   if (!raw || !/^\d{1,9}$/.test(raw)) return null;
   const id = Number(raw);
   return id > 0 ? id : null;
 }
 
+const IVR_SUBTITLE = 'Design what callers hear when they dial your IVR numbers — menus, business hours and transfers.';
+
 function AdminIvrConsole() {
   // ── ALL hooks unconditionally at the top (React #310) ──
   const [params, setParams] = useSearchParams();
   const customers = useAdminCustomers(true);
-  const customerId = parseCustomer(params.get('customer'));
+  const value = parseScope(params.get('customer'));
+  const customerId = typeof value === 'number' ? value : null;
   const pickerId = useId();
 
   const select = useCallback(
-    (next: number | null) => {
+    (next: number | 'all') => {
       setParams((prev) => {
         const p = new URLSearchParams(prev);
-        if (next === null) p.delete('customer');
-        else p.set('customer', String(next));
+        p.set('customer', String(next));
         return p;
       });
     },
@@ -156,29 +168,29 @@ function AdminIvrConsole() {
   const picker = (
     <CustomerPicker
       id={pickerId}
-      value={customerId}
+      value={value}
       onChange={select}
-      customers={customers.data ?? []}
+      customers={customers.data}
       loading={customers.isLoading}
+      error={customers.isError}
     />
   );
 
-  if (!workspace) {
+  if (value === null) {
+    // Nothing chosen yet: header + prompt; any inner path (an old builder link) lands here.
     return (
-      <div className="dl-shell">
-        <section className="dl-panel ivr-pick" aria-labelledby={`${pickerId}-title`}>
-          <div className="ivr-pick-body">
-            <h1 id={`${pickerId}-title`} className="ivr-pick-title">
-              Choose a customer
-            </h1>
-            <p className="dl-sub">
-              IVR flows, numbers and messages belong to one customer. Pick whose IVR to look at — you can edit it
-              exactly as they would.
-            </p>
-            {picker}
-          </div>
-        </section>
-      </div>
+      <Routes>
+        <Route index element={<IvrScopePrompt picker={picker} />} />
+        <Route path="*" element={<Navigate to="/ivr" replace />} />
+      </Routes>
+    );
+  }
+  if (value === 'all' || !workspace) {
+    return (
+      <Routes>
+        <Route index element={<IvrAllCustomers picker={picker} />} />
+        <Route path="*" element={<Navigate to="/ivr?customer=all" replace />} />
+      </Routes>
     );
   }
   return (
@@ -188,41 +200,58 @@ function AdminIvrConsole() {
   );
 }
 
+/** The /ivr header (crumb · title · the Customer picker) over the "pick a customer" card. Nothing loads. */
+function IvrScopePrompt({ picker }: { picker: ReactNode }) {
+  return (
+    <div className="dl-shell ivr-shell">
+      <CompactHeader
+        className="ivr-header fx-load"
+        crumb={
+          <>
+            <span>IVR</span>
+            <span className="vm-staff-tag">Staff</span>
+          </>
+        }
+        title="IVR"
+        subtitle={IVR_SUBTITLE}
+        tools={picker}
+      />
+      <div className="ivr-sections fx-load fx-load-d1">
+        <AdminScopePrompt title="Select a customer to see their IVR" pickerLabel="Customer" />
+      </div>
+    </div>
+  );
+}
+
 function CustomerPicker({
   id,
   value,
   onChange,
   customers,
   loading,
+  error,
 }: {
   id: string;
-  value: number | null;
-  onChange: (next: number | null) => void;
-  customers: readonly CustomerRow[];
+  value: AdminCustomerValue;
+  onChange: (next: number | 'all') => void;
+  customers: readonly CustomerRow[] | undefined;
   loading: boolean;
+  error: boolean;
 }) {
-  const listed = value === null || customers.some((c) => c.id === value);
   return (
     <div className="ivr-scope-pick">
       <label className="ivr-label" htmlFor={id}>
         Customer
       </label>
-      <select
+      <AdminCustomerPicker
         id={id}
         className="dl-input ivr-scope-select"
-        value={value === null ? '' : String(value)}
-        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-      >
-        <option value="">Choose a customer…</option>
-        {!listed && value !== null && <option value={value}>{`Customer #${value}`}</option>}
-        {loading && customers.length === 0 && <option disabled>Loading customers…</option>}
-        {customers.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-            {c.status !== 'active' ? ` (${c.status})` : ''}
-          </option>
-        ))}
-      </select>
+        value={value}
+        onChange={onChange}
+        customers={customers}
+        loading={loading}
+        error={error}
+      />
     </div>
   );
 }
