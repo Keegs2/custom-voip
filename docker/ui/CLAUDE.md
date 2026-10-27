@@ -1057,10 +1057,9 @@ never re-implement it.
 
 **Rule: never render a native `<select>`.** Its popup is drawn by the OS
 (macOS paints its own light menu over the dark theme) and no CSS reaches
-it. Every dropdown is `<Select>`. ESLint warns on `<select>`
-(`no-restricted-syntax` in `eslint.config.js`; exempt: `Select.tsx` and the
-landing's own `pages/landing/LandingSelect.tsx`); it becomes an error once
-the page migration lands.
+it. Every dropdown is `<Select>`. ESLint fails the lint on `<select>`
+(`no-restricted-syntax`, `error`, in `eslint.config.js`; exempt: `Select.tsx`
+and the landing's own `pages/landing/LandingSelect.tsx`).
 
 **Contract** (`V extends string`; numbers go in as `String(id)` and come back
 out with `Number(v)`):

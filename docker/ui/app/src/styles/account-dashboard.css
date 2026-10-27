@@ -314,7 +314,8 @@
    theme (light: today's granite; dark: lifted off the granite canvas by a
    hairline edge and an azure pool). Its two content columns carry
    data-force-theme="dark" (DashboardHeader.tsx), so every token inside —
-   and the native <select> popup — is the dark set whatever the theme. The
+   and the Viewing picker's portaled menu, which copies the pin — is the dark
+   set whatever the theme. The
    --adh-* constants are the band's own: they don't vary by theme. The
    gradient stops among them stay plain colours on purpose: a color-mix()
    stop switches a gradient to float interpolation and shifts its pixels. */
