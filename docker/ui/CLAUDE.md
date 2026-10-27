@@ -101,7 +101,9 @@ StrictMode
 Global CSS, in order: `index.css` (Tailwind, `@theme`, brand tokens, base
 rules, the daylight console primitives + their `--dl-*` page palette — §18.5),
 `styles/theme.css` (the `--t-*` theme tokens),
-`styles/app-shell.css` (canvas, sidebar, collapse tab, theme toggle).
+`styles/app-shell.css` (canvas, sidebar, collapse tab, theme toggle),
+`styles/layout-kit.css` (§20), `styles/select.css` (the `Select` dropdown,
+§8 — last on purpose).
 `index.html` carries a tiny inline script that sets the theme before first
 paint (§18).
 
@@ -994,7 +996,8 @@ See section 4 above.
 | `Button` | `variant: 'primary'\|'ghost'\|'danger'\|'success'`, `size: 'xs'\|'sm'\|'default'`, `loading: boolean`, `icon: ReactNode` |
 | `Badge` | `variant: BadgeVariant` — covers status, account types, directions, traffic grades, SIPp verdicts |
 | `Modal` | `open`, `onClose`, `title`, `children`, `footer`, `maxWidth`. Closes on Escape, traps body scroll |
-| `FormField` | Polymorphic: `as: 'input'\|'select'\|'textarea'`. Renders label, field, hint, error. Passes all native HTML attributes through |
+| `Select` | THE dropdown — every select in the app. See "`Select` (all dropdowns)" below |
+| `FormField` | Polymorphic: `as: 'input'\|'select'\|'textarea'`. Renders label, field, hint, error. Passes all native HTML attributes through (its `select` branch is still native — use `Select` instead) |
 | `Card` / `CardTitle` | Raised theme panel (`.glass-surface` = `--t-panel-bg` + hairline + `--t-shadow-card`), lifts on hover |
 | `StatCard` | Displays a single large metric with label and optional background icon |
 | `TabBar` | Horizontal tab bar with underline active indicator, optional count badges |
@@ -1016,6 +1019,150 @@ so they read right in both themes; `Modal` is elevation 2 (raised surface,
 `--t-shadow-modal`, `--t-scrim` backdrop, azure keyline on dark).
 `ThemeToggle` (`components/layout/`) is the one theme switch — reuse it,
 never re-implement it.
+
+### `Select` (all dropdowns)
+
+`src/components/ui/Select.tsx` + `src/styles/select.css` (`ui-select-*`).
+
+**Rule: never render a native `<select>`.** Its popup is drawn by the OS
+(macOS paints its own light menu over the dark theme) and no CSS reaches
+it. Every dropdown is `<Select>`. ESLint warns on `<select>`
+(`no-restricted-syntax` in `eslint.config.js`; exempt: `Select.tsx` and the
+landing's own `pages/landing/LandingSelect.tsx`); it becomes an error once
+the page migration lands.
+
+**Contract** (`V extends string`; numbers go in as `String(id)` and come back
+out with `Number(v)`):
+
+```ts
+interface SelectOption<V> {
+  value: V; label: string;   // label = trigger text + row
+  hint?: string;             // dimmer text on the row ("Suspended", "SIP Trunking")
+  disabled?: boolean;        // shown, never picked, skipped by the keyboard
+  group?: string;            // consecutive options sharing it go under one uppercase header
+  keywords?: string;         // extra text for search + type-ahead (e.g. bare digits)
+  pinned?: boolean;          // stays at the top while searching ("All customers")
+  divider?: boolean;         // hairline AFTER this row
+}
+<Select
+  value={v /* V | '' */} onChange={(v: V) => …} options={opts}
+  placeholder id aria-label aria-labelledby aria-describedby
+  disabled invalid required name        // name → a hidden <input> (FormData)
+  searchable /* 'auto' (> 10 options) | true | false */ searchPlaceholder emptyText loading
+  className /* TRIGGER class */ menuClassName size /* 'sm' | 'md' */ menuMinWidth align /* 'start' | 'end' */
+  style title data-*                    // extensions: trigger inline style, tooltip, data-* (e.g. data-autofocus)
+/>
+```
+
+- `value` '' or a value no option has → the placeholder (in
+  `--t-field-placeholder`). An option whose value IS '' ("All products") is a
+  real option and shows its label.
+- `onChange` fires only when the value changes (like a native change event).
+- `required` sets `aria-required` only — it does not block native form
+  submission (every form here validates in JS).
+- Converting: `<option value="" disabled>Pick…</option>` → `placeholder`;
+  `<optgroup label>` → `group` on its options; option text → `label` (move a
+  " · SIP Trunking" / "(suspended)" suffix into `hint`). Memoise big option
+  lists (`useMemo`).
+
+**Keeping the page's closed look — `className`.** Pass the class the native
+select had (`className="dl-input vm-scope-select"`): the closed control looks
+as before (border, background, padding, radius, font, height — verified equal
+for `dl-input`, `dl-input vm-scope-select`, `rcf-input`, `ad-scope-select` in
+both themes). `className` REPLACES the default skin (`.ui-select-default` =
+the `.dl-input` look, used only when no class is passed), so pass the full
+skin, never just a layout class. The trigger's own reset sits in
+`@layer components`, so any page class or Tailwind utility wins. Things that
+change because the trigger is a `<button>`:
+- **Element-keyed selectors no longer match:** `select.dl-input`,
+  `select.rcf-input`, `select.form-control`, `.cqf-field select.dl-input`,
+  `.rcfd-sort select`, `.x option` / `optgroup`. Re-key them on the class
+  (`.cqf-field .dl-input.ui-select-trigger`). `select.dl-input`'s
+  `appearance`, `cursor`, `padding-right: 32px` and chevron are rebuilt by
+  the component, so it needs nothing.
+- **The chevron is the component's,** a flex child (the `--dl-select-chevron`
+  glyph, `--t-text-dim`) sitting on the trigger's right padding — 12px in on
+  `.dl-input`, exactly where the native one sat. A class that reserved room
+  for a background chevron (`padding-right: 28–38px`, inline
+  `padding: '4px 28px 4px 8px'`) should set its right padding to the old
+  `background-position` offset. Remove the class's `background-image`
+  chevron (`.cvp-select`) and any sibling caret element (`.ad-scope-caret`)
+  or there will be two. Recolour it with `--ui-select-chevron-color` on the
+  class (e.g. `var(--t-accent-text)` for the `--t-chevron` look).
+- **Width:** like a native select, as wide as its longest option (hidden
+  sizer copies of the longest labels + the placeholder); the page's width
+  rules win and the label truncates with an ellipsis.
+- **States:** disabled = `:disabled` (page `.x:disabled` rules apply);
+  `invalid` = `aria-invalid` + `--t-danger-solid` border (beats `.dl-input`
+  hover/focus); while a SEARCHABLE menu is open, focus is in its search box,
+  so the trigger shows the field focus look via `.ui-select-trigger--open`
+  (a page with its own focus look — the granite band, the amber banner —
+  overrides `.its-class.ui-select-trigger--open`). `size="sm"` only shrinks
+  the default skin and the menu rows.
+
+**The menu.** Raised panel (`--t-surface-raised`, 1px `--dl-ctl-border`,
+`--dl-pop-shadow`, 10px radius, 4px padding), rows in `--t-text` at the body
+size (14px), hints `--t-text-dim`, highlight `--ui-select-hl`, selected = the
+`.rcf-didpick-opt-on` accent-line wash + a `Check`, disabled
+`--t-text-faint`, group headers / dividers `--t-line` hairlines. Rows
+truncate with the full text in `title`. ≥ 40px rows on phones / touch.
+- **Portal + position:** `position: fixed`, z-index 1300 (above every
+  dialog at ≤ 1200, below toasts at 9999), portaled to `<body>` — or, when the
+  trigger is inside an `aria-modal="true"` dialog, INTO that dialog (an
+  aria-modal dialog hides everything outside it from assistive tech). It is
+  placed from the trigger's rect: at least the trigger's width, up to 420px
+  for long labels (`menuMinWidth` raises the floor, `align="end"` lines up
+  the right edges), ≤ 320px tall with the highlighted row kept in view,
+  flipped up when there is more room above, clamped 8px inside the
+  viewport. It follows scroll (any scroller) and resize, re-places after a
+  dialog's entry animation (a transformed host is corrected for), and closes
+  once the trigger scrolls out of the viewport or out of its card /
+  ScrollArea.
+- **Forced theme:** the menu carries the trigger's nearest
+  `data-force-theme` (the granite `DashboardHeader` columns pin `dark`), so a
+  menu opened from the band is dark on the light theme. It therefore uses
+  ONLY tokens declared on `:root` + `[data-force-theme]` (`--t-*`, `--dl-*`,
+  its own `--ui-select-*`); `menuClassName` rules must not use scope-keyed
+  page tokens (`--vm-*`, `--dlx-*`) — they don't exist out there (§18.7).
+  It also copies the trigger's font family.
+- **Presses inside the menu never reach the page** (pointerdown / mousedown
+  / click stop at the menu): an enclosing popover's outside-click handler
+  (CallsFilterBar's "More") doesn't close, a clickable card doesn't fire —
+  the same as a native select's OS menu. Focus never moves into the list.
+- **Dialogs:** Esc with the menu open closes only the menu (stopped before
+  `Modal` / `VmDialog` / overlay `document` listeners); Esc with it closed
+  reaches the dialog. Tab from the search box puts focus back on the
+  trigger first, so the dialog's Tab trap sees focus inside the dialog.
+  `data-autofocus` is forwarded, so VmDialog autofocuses the trigger.
+
+**Keyboard (ARIA APG select-only combobox).** The trigger is
+`<button role="combobox" aria-haspopup="listbox">`; focus stays on it with
+`aria-activedescendant`. Closed: ↓ / ↑ / Enter / Space / Alt+↓ open on the
+selected option, Home / End open on the first / last, a printable key opens
+on its type-ahead match. Open: ↑ / ↓ (no wrap, disabled rows skipped), Home /
+End, PageUp / PageDown (10), Enter / Space pick (a Space inside a type-ahead
+word is part of it), Alt+↑ picks, Esc closes (focus stays), Tab closes and
+moves on, letters type-ahead (label or keyword prefix; "ccc" cycles).
+Pointer: click toggles, a row click picks, an outside press closes.
+
+**Searchable** (`searchable`, default `'auto'` = more than 10 options; the
+500-customer list stays smooth). Opening moves focus into a search box
+(`role="combobox"`, `aria-controls` the listbox, `aria-activedescendant`).
+Typing filters label + hint + keywords, case-insensitive substring;
+**pinned** options stay at the top while searching (the rest of the list in
+its own order below them), then the matches; "No matches" (`emptyText`)
+shows when none match, under any pinned rows, and the match count is
+announced. The first real (non-pinned) match is highlighted, so
+Enter picks it; ↑ / ↓ / PageUp / PageDown move. Typing on a closed searchable
+trigger opens it with that key in the box. On close (pick, Esc, Tab, outside
+press) focus returns to the trigger. `loading` adds a "Loading…" row under
+whatever options are already there.
+
+**CSS order (§20.8):** `select.css` is imported once in `main.tsx`, after
+the other global sheets, so the menu wins ties against them on every page
+(eager or lazy). The trigger's reset is layered, so the page class wins
+whatever the order. A `menuClassName` rule in EAGER page CSS needs one class
+more than the rule it overrides (`.ui-select-menu.x-menu`).
 
 ### SIP Ladder (`src/components/sip-ladder/`)
 
@@ -1557,8 +1704,9 @@ Sources of truth: tokens `src/styles/theme.css` · typed names + helpers
   re-declares that theme's whole token set (and `color-scheme`) on it, so
   the subtree renders in that theme whatever `<html>` says. Use it for
   surfaces that are one theme by design: the granite `DashboardHeader`
-  band's two content columns (`data-force-theme="dark"` keeps its native
-  `<select>` and every token-based child dark on the light theme), a
+  band's two content columns (`data-force-theme="dark"` keeps its scope
+  dropdown and every token-based child dark on the light theme — a `Select`
+  menu, though portaled, carries the pin, §8), a
   print/PDF preview (`"light"`). `--rcf-*` aliases and the `:root`-declared
   page palettes (`--dl-*`, `--cq-*`… §18.5) are re-declared there too;
   scope-keyed ones (`--vm-*`, `--dlx-*`) are not (§18.7).
@@ -1865,6 +2013,7 @@ existing name before inventing one.
 | `--rpt-*` | `dl-reporting.css`, `dl-trend-chart.css` | Skeleton highlight, popover shadow, the trend chart's tick + grid ink (`--rpt-chart-tick`/`-grid`, painted via `style`). |
 | `--qtc-tip-shadow` | `dl-trend-chart.css` | The chart tooltip's lift. |
 | `--ladder-*` | `components/sip-ladder/sipLadder.css` | BYE + loopback arrow hues, card + panel shadows (read by `LADDER_COLORS`). |
+| `--ui-select-*` | `styles/select.css` (on `:root` + `[data-force-theme]`) | The `Select` menu's row highlight (`-hl`: `--t-tint-hover` on light, an azure-bright wash on dark, where tint-hover vanishes on the raised surface), selected wash (`-on`, `-on-hl`). All aliases / `color-mix()` of `--t-*`. Per-trigger knob (not a palette): `--ui-select-chevron-color`. |
 | `--vm-*` | `dl-voicemail.css`, on `.vm-scope` (page root AND the `VmDialog` portal root) | Voicemail roles (select tint, amber, labels, thumb, dialog bg, player line/bg, danger fill/glow, elevation, scrim) + light-only shades re-pointed in the DARK block `:root[data-theme='dark'] .vm-scope`. |
 | `--ivr-*` | `ivr.css` (on `:root` + `[data-force-theme]`) | One hue per IVR block (`--ivr-entry|play|menu|schedule|condition|dial|voicemail|goto|hangup`) and its text ink (`--ivr-<type>-ink`), canvas ground/dots, edge colours, keycap face/edge, `--ivr-key-on`. ALL aliases of `--t-*` tokens (voicemail = a `color-mix()` of violet + red), so there are no literals; dark marks ≥ 3:1, inks ≥ 4.5:1 in both themes. The MiniMap reads the same hues RESOLVED (`flow/canvas/useBlockHues.ts`). |
 | `--dlx-*` | `dl-docs.css` (`.dlx-docs`: inline-code chip, admin tag line, warn ink; `.dlx-code`: the code theme), `dl-portal-pages.css` (`.dlx-trunks`: warn ink, disabled-DID dot) | Docs / code blocks / SIP Trunking page roles. The `--dlx-code-*` syntax colours are a code theme, the SAME in both themes (§18.8). |

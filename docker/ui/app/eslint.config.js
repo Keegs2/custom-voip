@@ -20,4 +20,19 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // One themed dropdown for the whole app (docker/ui/CLAUDE.md §8 "Select").
+    // `warn` while the page migration lands; it becomes `error` after.
+    files: ['**/*.{ts,tsx}'],
+    ignores: ['src/components/ui/Select.tsx', 'src/pages/landing/LandingSelect.tsx'],
+    rules: {
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: 'JSXOpeningElement[name.name="select"]',
+          message: "Use <Select> from components/ui/Select — native <select> popups can't be themed.",
+        },
+      ],
+    },
+  },
 ])

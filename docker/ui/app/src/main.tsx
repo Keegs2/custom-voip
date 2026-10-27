@@ -11,6 +11,11 @@ import './styles/theme.css';
 import './styles/app-shell.css';
 // Layout kit (components/layout/kit) — see docker/ui/CLAUDE.md "Layout".
 import './styles/layout-kit.css';
+// The one dropdown (components/ui/Select) — LAST of the globals on purpose:
+// its portaled menu must win ties against the sheets above, while the
+// trigger's reset sits in @layer components so page classes always win
+// (header of select.css; docker/ui/CLAUDE.md §8 "Select").
+import './styles/select.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
