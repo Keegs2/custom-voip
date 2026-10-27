@@ -9,7 +9,10 @@
  *   (* staff only)
  *
  * Every control is a uniform 36px; labels sit above in the shared `dl-flabel`
- * treatment so baselines line up and the row reads as one strip. The staff
+ * treatment so baselines line up and the row reads as one strip. Every
+ * dropdown is the themed `Select` wearing `dl-input` (the Customer one is the
+ * shared AdminCustomerPicker — "All customers" pinned on top, searchable;
+ * the rest are short fixed lists, not searchable). The staff
  * power filters that rarely change — Zone, the Rows row model (Calls / All
  * legs / Carrier legs — the CDR A/B leg split, docs/CDR_LEG_SPLIT_CONTRACT.md)
  * and Rated only — live behind "More" (a small anchored popover) with a
@@ -40,11 +43,13 @@
  *
  * React #310: every hook is called unconditionally at the top.
  */
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Download, Search, SlidersHorizontal, X } from 'lucide-react';
 import { listCustomers } from '../../api/customers';
 import { listTrunks } from '../../api/trunks';
+import { AdminCustomerPicker } from '../../components/AdminCustomerPicker';
+import { Select, type SelectOption } from '../../components/ui/Select';
 import { API_CALLING_ENABLED } from '../../config/features';
 import { useAuth } from '../../contexts/AuthContext';
 import { staffScope, tenantScope, useVoicemailSummary } from '../voicemail/voicemailData';
@@ -58,17 +63,28 @@ import {
 import type { CallsFilters, CdrRangePreset } from './callsFilters';
 
 /** Select order for the time-range control. */
-const RANGE_OPTIONS: ReadonlyArray<{ id: CdrRangePreset; label: string }> = [
+const RANGE_OPTIONS: ReadonlyArray<SelectOption<CdrRangePreset>> = [
   ...(Object.keys(PRESET_LABELS) as Array<Exclude<CdrRangePreset, 'custom'>>).map((p) => ({
-    id: p as CdrRangePreset,
+    value: p as CdrRangePreset,
     label: PRESET_LABELS[p],
   })),
-  { id: 'custom', label: 'Custom range' },
+  { value: 'custom', label: 'Custom range' },
 ];
 
-function isRangePreset(value: string): value is CdrRangePreset {
-  return RANGE_OPTIONS.some((o) => o.id === value);
-}
+/** '' = no filter: a real option, so the trigger shows "All", never a placeholder. */
+const DIRECTION_OPTIONS: ReadonlyArray<SelectOption<string>> = [
+  { value: '', label: 'All' },
+  { value: 'inbound', label: 'Inbound' },
+  { value: 'outbound', label: 'Outbound' },
+];
+
+/** Static zones — each is a self-contained SIP stack. Per-SBC granularity stays in the call-detail modal. */
+const ZONE_OPTIONS: ReadonlyArray<SelectOption<string>> = [
+  { value: '', label: 'All zones' },
+  { value: 'east', label: 'East' },
+  { value: 'west', label: 'West' },
+  { value: 'central', label: 'Central' },
+];
 
 interface CallsFilterBarProps {
   filters: CallsFilters;
@@ -103,7 +119,7 @@ export function CallsFilterBar({
       : tenantScope(effectiveCustomer.id)
     : staffScope('all');
   const voicemailSummary = useVoicemailSummary(voicemailScope, !isStaff && effectiveCustomer !== null);
-  const { data: customersData } = useQuery({
+  const customers = useQuery({
     queryKey: ['customers-all'],
     queryFn: () => listCustomers({ limit: 500 }),
     staleTime: 5 * 60 * 1000,
@@ -121,6 +137,29 @@ export function CallsFilterBar({
       }),
     staleTime: 2 * 60 * 1000,
   });
+
+  const trunkOptions = useMemo<SelectOption<string>[]>(
+    () => [
+      { value: '', label: 'All trunks' },
+      ...(trunksData?.items ?? []).map((t) => ({ value: String(t.id), label: t.trunk_name })),
+    ],
+    [trunksData],
+  );
+
+  // Keep "Voicemail" while it is the selected filter, so the control never shows a value it can't name.
+  const showVoicemail =
+    isStaff || voicemailSummary.data?.enabled === true || filters.product_type === 'voicemail';
+  const productOptions = useMemo<SelectOption<string>[]>(
+    () => [
+      { value: '', label: 'All' },
+      { value: 'rcf', label: 'RCF' },
+      // API Calling is retired — its product filter only shows while enabled.
+      ...(API_CALLING_ENABLED ? [{ value: 'api', label: 'API' }] : []),
+      { value: 'trunk', label: 'Trunk' },
+      ...(showVoicemail ? [{ value: 'voicemail', label: 'Voicemail' }] : []),
+    ],
+    [showVoicemail],
+  );
 
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement | null>(null);
@@ -169,9 +208,8 @@ export function CallsFilterBar({
     (filters.zone ? 1 : 0) + (filters.rows !== 'calls' ? 1 : 0) + (filters.rated_only ? 1 : 0);
   const activeRows = ROWS_MODE_OPTIONS.find((o) => o.id === filters.rows) ?? ROWS_MODE_OPTIONS[0];
   const showCallChip = isStaff && filters.call_id !== '';
-  // Keep the option while it is the selected filter, so the select never shows a value it can't name.
-  const showVoicemail =
-    isStaff || voicemailSummary.data?.enabled === true || filters.product_type === 'voicemail';
+  // '' (no customer filter) = All customers; the URL / filter semantics are unchanged.
+  const customerValue: number | 'all' = /^\d+$/.test(filters.customer_id) ? Number(filters.customer_id) : 'all';
 
   /* ── Mutators ────────────────────────────────────────────────────── */
 
@@ -211,64 +249,52 @@ export function CallsFilterBar({
           {isStaff && (
             <div className="cqf-field cqf-w-customer">
               <label className="dl-flabel" htmlFor="cdr-f-customer">Customer</label>
-              <select
+              <AdminCustomerPicker
                 id="cdr-f-customer"
                 className="dl-input"
-                value={filters.customer_id}
-                onChange={(e) => setCustomer(e.target.value)}
-              >
-                <option value="">All customers</option>
-                {(customersData?.items ?? []).map((c) => (
-                  <option key={c.id} value={String(c.id)}>{c.name}</option>
-                ))}
-              </select>
+                value={customerValue}
+                onChange={(next) => setCustomer(next === 'all' ? '' : String(next))}
+                customers={customers.data?.items}
+                loading={customers.isLoading}
+                error={customers.isError}
+              />
             </div>
           )}
 
           <div className="cqf-field cqf-w-trunk">
             <label className="dl-flabel" htmlFor="cdr-f-trunk">Trunk</label>
-            <select
+            <Select
               id="cdr-f-trunk"
               className="dl-input"
               value={filters.trunk_id}
-              onChange={(e) => set('trunk_id', e.target.value)}
-            >
-              <option value="">All trunks</option>
-              {(trunksData?.items ?? []).map((t) => (
-                <option key={t.id} value={String(t.id)}>{t.trunk_name}</option>
-              ))}
-            </select>
+              onChange={(v) => set('trunk_id', v)}
+              options={trunkOptions}
+              searchable={false}
+            />
           </div>
 
           <div className="cqf-field cqf-w-product">
             <label className="dl-flabel" htmlFor="cdr-f-product">Product</label>
-            <select
+            <Select
               id="cdr-f-product"
               className="dl-input"
               value={filters.product_type}
-              onChange={(e) => set('product_type', e.target.value)}
-            >
-              <option value="">All</option>
-              <option value="rcf">RCF</option>
-              {/* API Calling is retired — its product filter only shows while enabled. */}
-              {API_CALLING_ENABLED && <option value="api">API</option>}
-              <option value="trunk">Trunk</option>
-              {showVoicemail && <option value="voicemail">Voicemail</option>}
-            </select>
+              onChange={(v) => set('product_type', v)}
+              options={productOptions}
+              searchable={false}
+            />
           </div>
 
           <div className="cqf-field cqf-w-direction">
             <label className="dl-flabel" htmlFor="cdr-f-direction">Direction</label>
-            <select
+            <Select
               id="cdr-f-direction"
               className="dl-input"
               value={filters.direction}
-              onChange={(e) => set('direction', e.target.value)}
-            >
-              <option value="">All</option>
-              <option value="inbound">Inbound</option>
-              <option value="outbound">Outbound</option>
-            </select>
+              onChange={(v) => set('direction', v)}
+              options={DIRECTION_OPTIONS}
+              searchable={false}
+            />
           </div>
 
           <div className="cqf-field cqf-w-dest">
@@ -287,18 +313,14 @@ export function CallsFilterBar({
 
           <div className="cqf-field cqf-w-range">
             <label className="dl-flabel" htmlFor="cdr-f-range">Time range</label>
-            <select
+            <Select<CdrRangePreset>
               id="cdr-f-range"
               className="dl-input"
               value={filters.range_preset}
-              onChange={(e) => {
-                if (isRangePreset(e.target.value)) selectPreset(e.target.value);
-              }}
-            >
-              {RANGE_OPTIONS.map((o) => (
-                <option key={o.id} value={o.id}>{o.label}</option>
-              ))}
-            </select>
+              onChange={selectPreset}
+              options={RANGE_OPTIONS}
+              searchable={false}
+            />
           </div>
 
           {isCustom && (
@@ -354,19 +376,17 @@ export function CallsFilterBar({
                   <div className="cqf-pop-body">
                     <div className="cqf-pop-field">
                       <label className="dl-flabel" htmlFor="cdr-f-zone">Zone</label>
-                      {/* Static options; each zone is a self-contained SIP stack.
-                          Per-SBC granularity stays in the call-detail modal. */}
-                      <select
+                      {/* Its menu is portaled out of this popover; presses inside the
+                          menu stop there, so the popover's outside-press close
+                          doesn't fire (components/ui/Select). */}
+                      <Select
                         id="cdr-f-zone"
                         className="dl-input"
                         value={filters.zone}
-                        onChange={(e) => set('zone', e.target.value)}
-                      >
-                        <option value="">All zones</option>
-                        <option value="east">East</option>
-                        <option value="west">West</option>
-                        <option value="central">Central</option>
-                      </select>
+                        onChange={(v) => set('zone', v)}
+                        options={ZONE_OPTIONS}
+                        searchable={false}
+                      />
                     </div>
 
                     <div className="cqf-pop-field">

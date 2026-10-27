@@ -685,7 +685,10 @@
 
 /* Customer-preview picker (components/preview/CustomerPreviewPicker.tsx).
    `cvp--dark` = the sidebar banner tone, `cvp--light` = on a page. Both
-   follow the theme; the names are the component's shipped prop values. */
+   follow the theme; the names are the component's shipped prop values.
+   The trigger is a themed Select button (components/ui/Select): its
+   chevron is a flex child sitting on the right padding (where the old
+   background chevron sat, 9px in), recoloured per tone. */
 .cvp {
   display: flex;
   flex-direction: column;
@@ -703,17 +706,12 @@
   width: 100%;
   min-width: 0;
   height: 30px;
-  padding: 0 28px 0 9px;
+  padding: 0 9px;
   border-radius: 7px;
   font: inherit;
   font-size: 0.76rem;
   font-weight: 600;
-  text-overflow: ellipsis;
   cursor: pointer;
-  appearance: none;
-  background-repeat: no-repeat;
-  background-position: right 9px center;
-  background-size: 10px 10px;
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
@@ -724,19 +722,20 @@
 .cvp--dark .cvp-select {
   color: var(--t-sb-banner-field-text);
   background-color: var(--t-sb-banner-field-bg);
-  background-image: var(--t-sb-banner-chevron);
   border: 1px solid var(--t-sb-banner-field-border);
+  --ui-select-chevron-color: var(--t-sb-banner-field-focus);
 }
 
 .cvp--dark .cvp-select:hover { border-color: var(--t-sb-banner-field-border-hover); }
 
-.cvp--dark .cvp-select:focus-visible {
+/* Focus — and the open look while the menu's search box holds focus (one
+   class more than select.css's generic open rule, which loads later). */
+.cvp--dark .cvp-select:focus-visible,
+.cvp--dark .cvp-select.ui-select-trigger--open {
   outline: none;
   border-color: var(--t-sb-banner-field-focus);
   box-shadow: 0 0 0 3px var(--t-sb-banner-field-halo);
 }
-
-.cvp-select option { color: var(--t-text); background: var(--t-surface-raised); }
 
 .cvp--light .cvp-label { color: var(--t-text-soft); font-size: 0.78rem; }
 
@@ -745,14 +744,15 @@
   font-size: 0.85rem;
   color: var(--t-text);
   background-color: var(--t-field-bg);
-  background-image: var(--t-chevron);
   border: 1px solid var(--t-line);
   box-shadow: var(--t-shadow-xs);
+  --ui-select-chevron-color: var(--t-accent-text);
 }
 
 .cvp--light .cvp-select:hover { border-color: var(--t-accent-border); }
 
-.cvp--light .cvp-select:focus-visible {
+.cvp--light .cvp-select:focus-visible,
+.cvp--light .cvp-select.ui-select-trigger--open {
   outline: none;
   border-color: var(--t-focus);
   box-shadow: var(--t-focus-halo);

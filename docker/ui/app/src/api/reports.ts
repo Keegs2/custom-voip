@@ -26,12 +26,19 @@ import type {
  * Common query params. `numbers` is sorted so the same selection always
  * serializes identically (stable cache keys, stable URLs); `customer_id` is
  * only ever present for staff — callers pass `undefined` for tenants.
+ *
+ * Staff "All customers": `all_customers=true` and NEVER `customer_id` or
+ * `numbers` (the API 422s either combination), whatever the scope carries.
  */
 export function reportQuery(scope: ReportScope): URLSearchParams {
   const query = new URLSearchParams();
   query.set('start', scope.start);
   query.set('end', scope.end);
   query.set('tz', scope.tz);
+  if (scope.all_customers) {
+    query.set('all_customers', 'true');
+    return query;
+  }
   if (scope.numbers.length > 0) {
     query.set('numbers', [...scope.numbers].sort().join(','));
   }
@@ -76,9 +83,12 @@ export function getReportCalls(scope: ReportScope, params: ReportCallsParams): P
 /**
  * The number picker's options. Takes only the staff customer id — the list
  * is the customer's numbers, independent of the period being viewed.
+ * `'all'` (staff) = every customer's numbers, each row carrying its
+ * `customer_id` / `customer_name`.
  */
-export function getMyNumbers(customerId?: number): Promise<MyNumbers> {
-  const qs = customerId !== undefined ? `?customer_id=${customerId}` : '';
+export function getMyNumbers(customerId?: number | 'all'): Promise<MyNumbers> {
+  const qs =
+    customerId === 'all' ? '?all_customers=true' : customerId !== undefined ? `?customer_id=${customerId}` : '';
   return apiRequest('GET', `/reports/my-numbers${qs}`);
 }
 

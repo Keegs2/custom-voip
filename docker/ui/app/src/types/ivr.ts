@@ -216,6 +216,30 @@ export interface IvrSummary {
   assist?: AssistAvailability;
 }
 
+/**
+ * `GET /v1/ivr/admin/overview` (platform admin only) — one row per customer
+ * with IVR on or any flow, sorted by name. The admin "All customers" IVR
+ * view; every other IVR route still needs a `customer_id` for admins.
+ */
+export interface IvrAdminOverviewRow {
+  customer_id: number;
+  name: string;
+  /** The account's status ('active' | 'suspended' | 'closed'). */
+  status: string;
+  /** The account's IVR entitlement (`customers.ivr_enabled`, set in TED). */
+  ivr_enabled: boolean;
+  flows_total: number;
+  flows_published: number;
+  /** The account's numbers bound to a flow. */
+  numbers_bound: number;
+  /** Newest publish across the account's flows; null = never published. */
+  last_published_at: string | null;
+}
+
+export interface IvrAdminOverview {
+  customers: IvrAdminOverviewRow[];
+}
+
 export type PromptKind = 'tts' | 'upload' | 'recording';
 
 export interface Prompt {

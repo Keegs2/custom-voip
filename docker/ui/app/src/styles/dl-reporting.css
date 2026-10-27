@@ -101,6 +101,19 @@
   font-weight: 600;
 }
 
+/* Staff "All customers": number filtering is off — the picker becomes a
+   line of text ("All · pick one customer to filter by number"), so the bar
+   keeps one row. */
+.rpt-numpick-off {
+  font-size: 0.74rem;
+  color: var(--t-text-dim);
+}
+
+.rpt-numpick-off strong {
+  font-weight: 700;
+  color: var(--t-text-soft);
+}
+
 .rpt-dl-btn { white-space: nowrap; }
 
 /* ─── Scope bar — ONE slim row: period · numbers · the range in words ─── */
@@ -543,6 +556,18 @@
 }
 
 .rpt-dim { color: var(--t-text-dim); }
+
+/* Staff "All customers": the row's customer, one compact clipped column. */
+.rpt-custname {
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-weight: 600;
+  color: var(--t-text-soft);
+}
 
 .rpt-subline {
   display: block;

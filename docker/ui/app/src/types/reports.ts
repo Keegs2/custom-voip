@@ -51,10 +51,13 @@ export interface ReportScope {
   end: IsoDate;
   /** IANA timezone name — the browser's own zone. */
   tz: string;
-  /** Restrict to these of the customer's own numbers; empty = all numbers. */
+  /** Restrict to these of the customer's own numbers; empty = all numbers.
+   *  Must be empty with `all_customers` (the API 422s "Number filters need one customer."). */
   numbers: string[];
   /** Staff only — tenants never send it (the API ignores it for them anyway). */
   customer_id?: number;
+  /** Staff only — every customer at once. Never together with `customer_id`. */
+  all_customers?: boolean;
 }
 
 /* ─── GET /reports/overview ─────────────────────────────────────────────── */
@@ -147,7 +150,13 @@ export interface ReportTrend {
 
 /* ─── GET /reports/numbers ──────────────────────────────────────────────── */
 
-export interface ReportNumberRow {
+/** Owner fields the API adds to rows on an `all_customers=true` report (absent otherwise). */
+export interface ReportRowOwner {
+  customer_id?: number;
+  customer_name?: string | null;
+}
+
+export interface ReportNumberRow extends ReportRowOwner {
   number: string;
   name: string | null;
   product: ReportProduct;
@@ -176,7 +185,7 @@ export interface ReportCallsParams {
   offset: number;
 }
 
-export interface ReportCallRow {
+export interface ReportCallRow extends ReportRowOwner {
   id: string;
   /** ISO 8601 with the `tz` offset, start time only. */
   started_at: string;
@@ -214,7 +223,7 @@ export interface ReportCalls {
  * `enabled` / `forwards_to` are absent on APIs that predate the holistic
  * numbers change — callers treat a row without `enabled` as the old shape.
  */
-export interface MyNumber {
+export interface MyNumber extends ReportRowOwner {
   number: string;
   /** Customer-safe label (rcf name, mailbox label, trunk name), or null. */
   name: string | null;

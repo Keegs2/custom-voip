@@ -12,25 +12,39 @@
  *   ┌ Words on this page ⌄ (collapsed) ──────────────────────────────────────────────────┐
  *
  * Every card's "What does this mean?" is a collapsed disclosure. Staff pick
- * the customer in the header (a report is always about ONE customer — the
- * API 422s a staff request without customer_id); an admin in "View as
- * Customer" reports on the sidebar's preview customer (named in the crumb
- * with an amber "Staff preview" tag, no picker). Tenants never see a picker
- * and never send customer_id. The downloads are the header's actions.
+ * in the header's Customer menu (AdminCustomerPicker — "All customers"
+ * pinned on top), and the pick lives in the URL like the other staff pages:
+ *
+ *   no ?customer     prompt-first — "Select a customer to see their report"
+ *   ?customer=<id>   that customer (the API needs customer_id from staff)
+ *   ?customer=all    every customer together: every /reports/* call sends
+ *                    all_customers=true and no customer_id; the number
+ *                    filter is off ("Pick one customer to filter by number" —
+ *                    the API 422s numbers there); the numbers table and the
+ *                    call list gain a Customer column; the CSV gets one from
+ *                    the server; the PDF is titled "All customers".
+ *
+ * An admin in "View as Customer" reports on the sidebar's preview customer
+ * (named in the crumb with an amber "Staff preview" tag, no picker;
+ * PreviewPrompt until one is picked). Tenants never see a picker and never
+ * send customer_id. The downloads are the header's actions.
  *
  * Scope model: ONE `ReportScope` object (dates + browser tz + numbers +
- * staff customer) feeds every query and both exports, so the page, the CSV
- * and the PDF always describe the identical slice of calls.
+ * staff customer / all customers) feeds every query and both exports, so
+ * the page, the CSV and the PDF always describe the identical slice of
+ * calls. The number pick and the call-list filters belong to one scope:
+ * they are stored with the scope they were made in and read back only for
+ * it, so a new customer (picker, Back, a link) starts from "all numbers".
  *
  * React #310: every hook is called unconditionally at the top.
  */
 import { useCallback, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
+import { AdminCustomerPicker, type AdminCustomerValue } from '../../components/AdminCustomerPicker';
+import { AdminScopePrompt } from '../../components/AdminScopePrompt';
 import { BalancedGrid, CompactHeader } from '../../components/layout/kit';
 import { useAuth } from '../../contexts/AuthContext';
-import { listCustomers } from '../../api/customers';
 import { downloadReportCsv, reportQuery } from '../../api/reports';
 import { ApiError } from '../../api/client';
 import { useToast } from '../../components/ui/Toast';
@@ -53,23 +67,43 @@ import {
 } from './reportFormat';
 import { buildSummarySentence, sentenceText } from './summarySentence';
 import { useMyNumbers, useReportNumbers, useReportOverview, useReportTrend } from './useReports';
+import { PreviewPrompt } from '../dashboard/PreviewPrompt';
+import { useAdminCustomers } from '../dashboard/adminData';
 import '../../styles/dl-admin.css';
 import '../../styles/dl-platform-b.css';
 import '../../styles/dl-reporting.css';
-import { T } from '../../styles/theme';
 
 /** Customers whose accounts have Reporting (mirrors utils/reportingAccess). */
 const REPORTABLE_TYPES = ['rcf', 'trunk', 'hybrid'];
 
 const DEFAULT_FILTERS: CallListFilters = { outcome: 'all', direction: 'all' };
+const NO_NUMBERS: string[] = [];
+
+const ALL_NUMBERS_ONLY = 'pick one customer to filter by number';
+
+/** `?customer=` → null (absent / junk: nothing chosen yet), 'all', or a customer id. */
+function parseStaffScope(raw: string | null): AdminCustomerValue {
+  if (raw === 'all') return 'all';
+  if (!raw || !/^\d{1,9}$/.test(raw)) return null;
+  const id = Number(raw);
+  return id > 0 ? id : null;
+}
+
+/** A value remembered together with the report scope it belongs to. */
+interface ScopedValue<T> {
+  owner: string;
+  value: T;
+}
 
 /**
  * Route entry. Keyed on the previewed customer so an admin switching the
  * sidebar preview starts a fresh report (numbers, filters) — a remount, not
- * a hook-order change.
+ * a hook-order change. An admin in "View as Customer" with nothing picked
+ * yet gets the PreviewPrompt, like every other customer page.
  */
 export function ReportingPage() {
-  const { customerViewMode, effectiveCustomer } = useAuth();
+  const { isActualAdmin, customerViewMode, effectiveCustomer } = useAuth();
+  if (isActualAdmin && customerViewMode && !effectiveCustomer) return <PreviewPrompt />;
   const key = customerViewMode ? `preview-${effectiveCustomer?.id ?? 'none'}` : 'own';
   return <ReportingView key={key} />;
 }
@@ -86,39 +120,32 @@ function ReportingView() {
   const [today] = useState(() => toIsoDate(new Date()));
   const [tz] = useState(browserTimeZone);
 
-  // `?customer=ID` (admin dashboard links) pre-selects the staff customer.
-  const [searchParams] = useSearchParams();
-  const [pickedCustomerId, setStaffCustomerId] = useState<number | undefined>(() => {
-    const raw = searchParams.get('customer');
-    return isStaffViewer && raw && /^\d+$/.test(raw) ? Number(raw) : undefined;
-  });
   // An admin in "View as Customer" reports on the customer picked in the
-  // sidebar; otherwise staff pick here.
+  // sidebar; otherwise staff pick in the header, and the pick is the URL's
+  // `?customer=` (dashboard links deep-link it; Back steps through picks).
   const previewCustomer = isStaffViewer && customerViewMode ? effectiveCustomer : null;
-  const staffCustomerId = previewCustomer?.id ?? pickedCustomerId;
+  const staffPicks = isStaffViewer && !previewCustomer;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const staffValue: AdminCustomerValue = staffPicks ? parseStaffScope(searchParams.get('customer')) : null;
+  const allMode = staffValue === 'all';
+
   const [preset, setPreset] = useState<PeriodPreset>('this_month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [customRange, setCustomRange] = useState<DateRange | null>(null);
-  const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
-  const [listFilters, setListFilters] = useState<CallListFilters>(DEFAULT_FILTERS);
+  const [numbersPick, setNumbersPick] = useState<ScopedValue<string[]>>({ owner: '', value: NO_NUMBERS });
+  const [filtersPick, setFiltersPick] = useState<ScopedValue<CallListFilters>>({ owner: '', value: DEFAULT_FILTERS });
   const [csvBusy, setCsvBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [csvTruncated, setCsvTruncated] = useState(false);
 
-  const { data: customersData, isLoading: customersLoading } = useQuery({
-    queryKey: ['customers-all'],
-    queryFn: () => listCustomers({ limit: 500 }),
-    staleTime: 5 * 60 * 1000,
-    enabled: isStaffViewer,
-  });
-  const staffCustomers = useMemo(
-    () =>
-      (customersData?.items ?? [])
-        .filter((c) => REPORTABLE_TYPES.includes(c.account_type))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [customersData],
-  );
+  const customers = useAdminCustomers(staffPicks);
+  // Reportable accounts, plus a deep-linked customer of another type so the
+  // menu can still name it.
+  const staffCustomers = useMemo(() => {
+    const all = customers.data ?? [];
+    return all.filter((c) => REPORTABLE_TYPES.includes(c.account_type) || c.id === staffValue);
+  }, [customers.data, staffValue]);
 
   const range: DateRange = useMemo(() => {
     if (preset === 'custom') {
@@ -127,28 +154,46 @@ function ReportingView() {
     return presetRange(preset, new Date(`${today}T12:00:00`));
   }, [preset, customRange, today]);
 
-  const customerId = isStaffViewer ? staffCustomerId : undefined;
-  const scopeReady = !isStaffViewer || staffCustomerId !== undefined;
+  const customerId = !isStaffViewer
+    ? undefined
+    : (previewCustomer?.id ?? (typeof staffValue === 'number' ? staffValue : undefined));
+  const scopeReady = !isStaffViewer || customerId !== undefined || allMode;
+  // Whose report this is — the number pick and the call-list filters belong to it.
+  const scopeOwner = allMode ? 'all' : String(customerId ?? 'self');
+  const selectedNumbers = !allMode && numbersPick.owner === scopeOwner ? numbersPick.value : NO_NUMBERS;
+  const listFilters = filtersPick.owner === scopeOwner ? filtersPick.value : DEFAULT_FILTERS;
 
   const scope: ReportScope = useMemo(
-    () => ({ start: range.start, end: range.end, tz, numbers: selectedNumbers, customer_id: customerId }),
-    [range, tz, selectedNumbers, customerId],
+    () =>
+      allMode
+        ? { start: range.start, end: range.end, tz, numbers: NO_NUMBERS, all_customers: true }
+        : { start: range.start, end: range.end, tz, numbers: selectedNumbers, customer_id: customerId },
+    [allMode, range, tz, selectedNumbers, customerId],
   );
   const scopeKey = reportQuery(scope).toString();
 
   const overview = useReportOverview(scope, scopeReady);
   const trend = useReportTrend(scope, scopeReady);
   const numbers = useReportNumbers(scope, scopeReady);
-  const myNumbers = useMyNumbers(customerId, scopeReady);
+  // No number picker on All customers, so no number list either.
+  const myNumbers = useMyNumbers(customerId, scopeReady && !allMode);
 
   const sentence = useMemo(
-    () => (overview.data ? buildSummarySentence(overview.data, preset, range, selectedNumbers.length > 0) : null),
-    [overview.data, preset, range, selectedNumbers.length],
+    () =>
+      overview.data
+        ? buildSummarySentence(overview.data, preset, range, selectedNumbers.length > 0, allMode ? 'all' : 'own')
+        : null,
+    [overview.data, preset, range, selectedNumbers.length, allMode],
   );
 
-  const customerName = isStaffViewer
-    ? (previewCustomer?.name ?? staffCustomers.find((c) => c.id === staffCustomerId)?.name ?? null)
-    : (user?.customer_name ?? null);
+  const customerName = !isStaffViewer
+    ? (user?.customer_name ?? null)
+    : allMode
+      ? 'All customers'
+      : (previewCustomer?.name ??
+        (customerId !== undefined
+          ? (customers.data?.find((c) => c.id === customerId)?.name ?? `Customer #${customerId}`)
+          : null));
 
   const customError = preset === 'custom' ? validateRange(customStart, customEnd) : null;
 
@@ -178,18 +223,32 @@ function ReportingView() {
     }
   }, []);
 
-  const handleCustomerChange = useCallback((value: string) => {
-    setStaffCustomerId(value ? Number(value) : undefined);
-    // Numbers belong to a customer — a new customer starts from "all numbers".
-    setSelectedNumbers([]);
-    setListFilters(DEFAULT_FILTERS);
-    setCsvTruncated(false);
-  }, []);
+  // A new customer starts from "all numbers" and default filters on its own:
+  // those picks are stored with the scope they were made in.
+  const handleCustomerChange = useCallback(
+    (next: number | 'all') => {
+      setSearchParams((prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('customer', String(next));
+        return p;
+      });
+      setCsvTruncated(false);
+    },
+    [setSearchParams],
+  );
 
-  const handleNumbersChange = useCallback((next: string[]) => {
-    setSelectedNumbers(next);
-    setCsvTruncated(false);
-  }, []);
+  const handleNumbersChange = useCallback(
+    (next: string[]) => {
+      setNumbersPick({ owner: scopeOwner, value: next });
+      setCsvTruncated(false);
+    },
+    [scopeOwner],
+  );
+
+  const handleFiltersChange = useCallback(
+    (next: CallListFilters) => setFiltersPick({ owner: scopeOwner, value: next }),
+    [scopeOwner],
+  );
 
   async function handleDownloadCsv(): Promise<void> {
     setCsvBusy(true);
@@ -218,6 +277,7 @@ function ReportingView() {
       const { renderReportPdf } = await import('./reportPdf');
       const blob = await renderReportPdf({
         customerName,
+        allCustomers: allMode,
         rangeLabel: fmtRange(range.start, range.end),
         tz,
         sentence: sentenceText(sentence),
@@ -248,33 +308,28 @@ function ReportingView() {
     refetch: () => void overview.refetch(),
   };
 
-  const crumbTail = previewCustomer?.name ?? 'Granite CRAG';
+  // The crumb names whose report it is (staff); tenants keep the brand.
+  const crumbTail = (isStaffViewer ? customerName : null) ?? 'Granite CRAG';
   const staffTag = isStaffViewer ? (customerViewMode ? 'Staff preview' : 'Staff') : null;
 
   // Staff (not previewing a sidebar customer) pick the customer in the header.
-  const customerPicker =
-    isStaffViewer && !previewCustomer ? (
-      <div className="rpt-headpick">
-        <label className="dl-flabel" htmlFor="rpt-customer">
-          {customerViewMode ? 'Previewing' : 'Customer'}
-        </label>
-        <select
-          id="rpt-customer"
-          className="dl-input rpt-headpick-select"
-          value={staffCustomerId ?? ''}
-          onChange={(e) => handleCustomerChange(e.target.value)}
-          disabled={customersLoading}
-          title="A report always covers one customer. Customers see this page for their own account only."
-        >
-          <option value="">{customersLoading ? 'Loading customers…' : 'Pick a customer…'}</option>
-          {staffCustomers.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.account_type.toUpperCase()})
-            </option>
-          ))}
-        </select>
-      </div>
-    ) : undefined;
+  const customerPicker = staffPicks ? (
+    <div className="rpt-headpick">
+      <label className="dl-flabel" htmlFor="rpt-customer">
+        Customer
+      </label>
+      <AdminCustomerPicker
+        id="rpt-customer"
+        className="dl-input rpt-headpick-select"
+        value={staffValue}
+        onChange={handleCustomerChange}
+        customers={staffCustomers}
+        loading={customers.isLoading}
+        error={customers.isError}
+        title="A report covers one customer, or all customers together. Customers see this page for their own account only."
+      />
+    </div>
+  ) : undefined;
 
   return (
     <div className="dl-scope rpt-scope">
@@ -290,7 +345,11 @@ function ReportingView() {
             </>
           }
           title="Reporting"
-          subtitle="A simple picture of your calls — how many you had, when they came in, how many were answered and how clear they sounded."
+          subtitle={
+            allMode
+              ? 'Every customer’s calls in one picture — how many there were, when they came in, how many were answered and how clear they sounded.'
+              : 'A simple picture of your calls — how many you had, when they came in, how many were answered and how clear they sounded.'
+          }
           tools={customerPicker}
           actions={
             scopeReady ? (
@@ -307,15 +366,7 @@ function ReportingView() {
 
         <div className="dl-stack rpt-body fx-load fx-load-d1">
           {!scopeReady ? (
-            <section className="dl-panel">
-              <div className="dl-center">
-                <div className="dl-center-icon"><Info size={26} aria-hidden="true" /></div>
-                <p style={{ margin: 0, fontWeight: 700, color: T.text }}>Pick a customer to see their report</p>
-                <p style={{ margin: 0, fontSize: '0.8rem', color: T.textDim }}>
-                  Reports are always about one customer’s own calls. Customers see this page for their own account only.
-                </p>
-              </div>
-            </section>
+            <AdminScopePrompt title="Select a customer to see their report" pickerLabel="Customer" />
           ) : (
             <>
               <ReportControls
@@ -333,6 +384,7 @@ function ReportingView() {
                 onNumbersChange={handleNumbersChange}
                 numbersLoading={myNumbers.isLoading}
                 numbersFailed={myNumbers.isError}
+                numbersOffHint={allMode ? ALL_NUMBERS_ONLY : undefined}
               />
 
               {csvTruncated && (
@@ -359,7 +411,11 @@ function ReportingView() {
               {noHistoryAtAll && (
                 <div className="dl-note" role="note">
                   <Info size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
-                  <span>There’s no call history on this account yet. Once calls start, they’ll show up here.</span>
+                  <span>
+                    {allMode
+                      ? 'There’s no call history on any customer’s numbers yet. Once calls start, they’ll show up here.'
+                      : 'There’s no call history on this account yet. Once calls start, they’ll show up here.'}
+                  </span>
                 </div>
               )}
 
@@ -373,16 +429,17 @@ function ReportingView() {
 
               {/* Row 2 — three insight cards, one height. */}
               <BalancedGrid columns="repeat(3, minmax(0, 1fr))" stackBelow="lg" gap="var(--rcf-stack)">
-                <BusiestCard overview={overviewState} />
+                <BusiestCard overview={overviewState} allCustomers={allMode} />
                 <MissedCard overview={overviewState} />
                 <QualityCard overview={overviewState} />
               </BalancedGrid>
 
               <NumbersTable
                 numbers={{ data: numbers.data, isLoading: numbers.isLoading, error: numbers.error, refetch: () => void numbers.refetch() }}
+                allCustomers={allMode}
               />
 
-              <CallList key={scopeKey} scope={scope} enabled={scopeReady} filters={listFilters} onFiltersChange={setListFilters} />
+              <CallList key={scopeKey} scope={scope} enabled={scopeReady} filters={listFilters} onFiltersChange={handleFiltersChange} />
 
               <Glossary />
             </>
