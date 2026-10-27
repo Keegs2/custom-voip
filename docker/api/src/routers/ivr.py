@@ -1017,6 +1017,17 @@ class AdminNumberUpdate(BaseModel):
     name: Optional[str] = None
 
 
+@router.get("/admin/overview")
+async def admin_overview(admin: dict = Depends(require_admin)):
+    """Admin "All customers": every customer with IVR on or at least one flow
+    -> ``{customers: [{customer_id, name, status, ivr_enabled, flows_total,
+    flows_published, numbers_bound, last_published_at}]}`` (store.py defines
+    each count). Read-only, one query."""
+    pool = await _pool()
+    async with pool.acquire() as conn:
+        return {"customers": await store.admin_overview(conn)}
+
+
 @router.get("/admin/customers/{customer_id}")
 async def admin_customer(customer_id: int, admin: dict = Depends(require_admin)):
     pool = await _pool()

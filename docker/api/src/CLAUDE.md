@@ -154,11 +154,37 @@ Tests: `tests/test_reports.py` (ephemeral PG 16).
   Common params `start`/`end` (inclusive local `YYYY-MM-DD`, span ≤ 366 days),
   `tz` (IANA, default America/New_York, validated case-insensitively against
   `pg_timezone_names`, cached 24h per process), `numbers` (comma list),
-  `customer_id` (staff only). Parsed once by the `report_scope` dependency.
+  `customer_id` / `all_customers` (staff only). Parsed once by the
+  `report_scope` dependency (`_scope_customer` also serves `/my-numbers`).
 - **Scoping:** `get_support_read_filter`. Tenants forced to their own customer
-  (the `customer_id` param is ignored); staff (admin/support) MUST pass
-  `customer_id` (422). Staff and tenants get the SAME redacted shape — there is
-  no staff-only variant of a report.
+  (the `customer_id` and `all_customers` params are ignored); staff
+  (admin/support) MUST pass `customer_id` OR `all_customers=true` (422 for
+  neither — the original message — and 422 "Pick one customer or all
+  customers, not both."). Staff and tenants get the SAME redacted shape for one
+  customer — there is no staff-only variant of a one-customer report.
+- **Staff "all customers"** (`ReportScope.customer_id is None`,
+  `scope.all_customers`): the same endpoints over every customer's calls.
+  Shapes: `/overview` + `/trend` unchanged; `/numbers`, `/calls`, `/my-numbers`
+  rows + `ALL_CUSTOMERS_ROW_KEYS` (`customer_id`, `customer_name`); CSV header
+  `rp.ALL_CUSTOMERS_CSV_COLUMNS` (leading `Customer`, cell
+  `rp.csv_customer_cell`). The `numbers` filter → 422 "Number filters need one
+  customer." Unattributed CDRs (`customer_id = 0`, the ingest default) are
+  excluded everywhere (`_all_customers_sql`). **SQL:** every `_ALL_*` string is
+  DERIVED from the per-customer one by `_variant` (checked substitutions —
+  each `old` must match exactly once or the module fails to import), so the
+  per-customer SQL is never edited: `test_per_customer_sql_and_responses_unchanged`
+  pins the sha256 of the SQL (+ bind types) and of the response of every
+  per-customer request — never update those pins for an all-customers change.
+  Same bind layout; `$1`/`$5` are bound NULL and referenced only by fail-closed
+  guards (`$1::int IS NULL`, `$5::text[] IS NULL` — the variant returns nothing
+  if a customer id or a filter reaches it; `test_all_customers_sql_fails_closed`).
+  `/numbers` aggregates per (customer_id, number) and joins the owner on BOTH
+  keys (= the per-customer rows put together; owned set =
+  `owned_numbers_sql(None)`); `/calls` + CSV select the page in a `page` CTE and
+  only then join `customers` for the name; `/my-numbers` all = no binds.
+  Plan: the `start_time` range on the hypertable's `cdrs_start_time_idx`, never
+  `idx_cdrs_customer_time` (`test_all_customers_scan_uses_start_time_index`);
+  cost ∝ platform volume in range, same statement-timeout 503.
 - **One row per call:** the `base` CTE (and the `data_from` probe) carry
   `c.leg IS DISTINCT FROM 'B'`; no report has a `leg` param.
 - **Redaction:** minutes only via `tenant_redaction` — TALK time: `base` selects
@@ -194,7 +220,8 @@ Tests: `tests/test_reports.py` (ephemeral PG 16).
   binds, so the `(customer_id, start_time DESC)` index range is used
   (`test_report_scan_uses_customer_time_index` asserts it via EXPLAIN). Local
   bucketing is `date_trunc(unit, start_time AT TIME ZONE tz)` (portable — no
-  Timescale `time_bucket`); trend zero-fill is `generate_series`. Overview is 2
+  Timescale `time_bucket`); trend zero-fill is `generate_series`. (All
+  customers: `WITH base, f` only, same layout — see above.) Overview is 2
   queries (totals+previous-period in one FILTERed pass; day/hour/cause in one
   `GROUPING SETS` pass), calls 2 (count + page), others 1. All LIMITed.
 - **Statement timeout:** every endpoint runs its queries in ONE
@@ -436,7 +463,7 @@ Visual IVR product API (contract `docs/IVR_INTERFACES.md` §8.2 customer / §8.3
 - **Prompts:** TTS (`POST /prompts/tts`, sidecar render -> canonical 8 kHz WAV) or upload (`multipart` `file` + `name` [+ `kind` upload|recording]; Content-Length required, <= 24 MB raw, any PCM16 WAV 8-48 kHz mono/stereo -> canonical, else 422). Limits under the advisory lock: <= 100 live prompts, <= 50 MB distinct audio per customer. `DELETE` -> 409 `prompt_in_use {flows:[{id,name}]}` while any DRAFT uses it; soft delete (audio kept) while a published version plays it; otherwise the row is deleted and its audio garbage-collected once no prompt row and no version plan references the sha (audio row locked FIRST, then the checks). Playback: `POST /prompts/{id}/playback-token` -> `{url: /api/v1/ivr/prompts/{id}/audio?t=…, expires_in: 120}` (auth/playback kind `ivr_prompt`, `VOICEMAIL_PLAYBACK_SECRET`); `GET/HEAD …/audio` is JWT-exempt (middleware `is_ivr_exempt`) and serves the canonical WAV, `no-store`. `POST /prompts/tts-preview` (writers) renders without storing; 30 / minute / user (Redis fixed window shared by every worker; in-process sliding window when Redis is down — then per worker) -> 429 + Retry-After.
 - **TTS render cache:** `sha256(engine_version|voice|text)` (engine_version = the sidecar's per-voice `version`) -> canonical sha, in-process LRU + Redis `ivr:tts:<key>` (30 days), used only while that audio row still exists. Piper (VITS) adds sampling noise, so two renders of the same text are NOT bit-identical: the cache is what makes the same text reuse one audio row.
 - **Destinations** (`GET /destinations`): the customer's numbers from `customer_numbers` grouped rcf / voicemail / ivr / trunk with a human `detail` ("Forwards to +1 774-404-5256", "Mailbox: …", "IVR: <flow>", "SIP trunk: …").
-- **Admin (TED, `require_admin`):** `GET /admin/customers/{id}` (+ `ivr_assist_enabled` once migration 61 exists), `PUT /admin/customers/{id}/entitlement {enabled?, assist_enabled?}` (at least one; one transaction; → `{ivr_enabled, ivr_assist_enabled}`; `{enabled}` alone is the unchanged pre-assistant request), `PUT /admin/numbers/{id} {enabled?, max_channels? (1-500), name? (null clears)}` (the kill switch), `GET /admin/flows/{id}/versions[/{v}]` (read-only). Tenants never see a staff publisher's email on `GET /flows/{id}/versions` (`published_by_email: null`).
+- **Admin (TED + the CRAG admin UI, `require_admin`; support/tenants 403 "Admin access required"):** `GET /admin/overview` (the "All customers" view — `{customers: [{customer_id, name, status, ivr_enabled, flows_total, flows_published, numbers_bound, last_published_at}]}` for every customer with `ivr_enabled` OR ≥ 1 flow, sorted `lower(name), id`; one read-only query `store.ADMIN_OVERVIEW_SQL`, whose comment defines each count; tests `tests/test_ivr_admin_overview.py`), `GET /admin/customers/{id}` (+ `ivr_assist_enabled` once migration 61 exists), `PUT /admin/customers/{id}/entitlement {enabled?, assist_enabled?}` (at least one; one transaction; → `{ivr_enabled, ivr_assist_enabled}`; `{enabled}` alone is the unchanged pre-assistant request), `PUT /admin/numbers/{id} {enabled?, max_channels? (1-500), name? (null clears)}` (the kill switch), `GET /admin/flows/{id}/versions[/{v}]` (read-only). Tenants never see a staff publisher's email on `GET /flows/{id}/versions` (`published_by_email: null`).
 - **Flow assistant hooks** (the assistant itself is `ivr_assist.py`): `GET /summary` adds `assist: {available}` (`assist_jobs.available(customer_flags)` — never says why); `POST /flows/{id}/simulate` takes `assist_job_id` (draft_graph ignored; the job's stored proposal is compiled by `assist.pipeline.compile_proposal` = the real context + one synthetic `PromptRef` per new message, so `says` shows the new messages by name). `assist_jobs.customer_flags` is the one reader of `ivr_enabled` / `ivr_assist_enabled` for summary and admin; before 61 it returns `ivr_assist_enabled: None` and nothing references the missing column.
 - Tests: `tests/test_ivr_api.py` (ephemeral PG, real routers + middleware, fake sidecar; `IvrHarness.IVR_MIGRATIONS` = 59, 60, 61), `test_ivr_compiler.py` (golden fixtures `tests/fixtures/ivr/`), `test_ivr_policy.py`, `test_ivr_simulator.py`, `test_ivr_audio.py`, `test_ivr_migration.py`.
 

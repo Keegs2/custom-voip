@@ -396,6 +396,7 @@ All paths are under `/v1`. JSON request and response bodies use snake_case. Erro
 - `PUT /ivr/admin/customers/{customer_id}/entitlement` `{ enabled: bool }` → `{ ivr_enabled }`. Turning it off makes every number 603 at FS (via `number_routing` / `ivr_fs_number`); data is kept.
 - `PUT /ivr/admin/numbers/{id}` `{ enabled?, max_channels?, name? }` → `IvrNumber` (the kill switch)
 - `GET /ivr/admin/flows/{id}/versions` and `GET /ivr/admin/flows/{id}/versions/{v}`: read-only.
+- `GET /ivr/admin/overview` → `{ customers: [{ customer_id, name, status, ivr_enabled, flows_total, flows_published, numbers_bound, last_published_at }] }` — the CRAG admin "All customers" view (added 2026-10-27, additive): every customer with `ivr_enabled` OR ≥ 1 flow, sorted by name case-insensitively. `flows_published` = flows with `published_version_id` set; `numbers_bound` = `ivr_numbers` with `flow_id` set (any state); `last_published_at` = newest live version's `published_at` (ISO) or null.
 - **Inventory:** the existing `POST /v1/numbers/assign` (`number_inventory.py`) gains `product_type: "ivr"` with an optional `name`.
   - It creates an `ivr_numbers` row, sets `did_inventory` to assigned with `product_type='ivr'`, and sets `customers.ivr_enabled=true` if it was false. That is the same side-effect rule as voicemail at `:914`.
   - Unassign removes the `ivr_numbers` row and frees the DID.

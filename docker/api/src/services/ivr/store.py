@@ -121,6 +121,71 @@ async def list_flows(conn: Any, customer_id: int) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Admin all-customers overview (GET /admin/overview) — one read-only query
+# ---------------------------------------------------------------------------
+#: One row per customer that is entitled (customers.ivr_enabled) OR has at
+#: least one flow, sorted by name case-insensitively (then id). Per customer:
+#:   flows_total       call_flows rows.
+#:   flows_published   flows with a live published version
+#:                     (published_version_id set — the same test as
+#:                     IvrNumber.published; publish is its only writer and
+#:                     nothing unpublishes).
+#:   numbers_bound     ivr_numbers rows bound to a flow (flow_id set),
+#:                     whatever the number's / flow's / entitlement state.
+#:   last_published_at newest published_at of the customer's LIVE versions =
+#:                     its most recent publish (publish always flips the flow
+#:                     to the version it just inserted; a deleted flow's
+#:                     versions go with it). NULL = never published.
+#: Each aggregate is one GROUP BY pass (call_flows + the live version by PK;
+#: ivr_numbers via idx_ivr_numbers_flow's predicate), then hash-joined.
+ADMIN_OVERVIEW_SQL = """
+WITH fl AS (
+    SELECT f.customer_id,
+           count(*)::int                      AS flows_total,
+           count(f.published_version_id)::int AS flows_published,
+           max(v.published_at)                AS last_published_at
+      FROM call_flows f
+      LEFT JOIN call_flow_versions v ON v.id = f.published_version_id
+     GROUP BY f.customer_id
+),
+nb AS (
+    SELECT n.customer_id, count(*)::int AS numbers_bound
+      FROM ivr_numbers n
+     WHERE n.flow_id IS NOT NULL
+     GROUP BY n.customer_id
+)
+SELECT c.id AS customer_id, c.name, c.status, c.ivr_enabled,
+       COALESCE(fl.flows_total, 0)     AS flows_total,
+       COALESCE(fl.flows_published, 0) AS flows_published,
+       COALESCE(nb.numbers_bound, 0)   AS numbers_bound,
+       fl.last_published_at
+  FROM customers c
+  LEFT JOIN fl ON fl.customer_id = c.id
+  LEFT JOIN nb ON nb.customer_id = c.id
+ WHERE c.ivr_enabled OR fl.customer_id IS NOT NULL
+ ORDER BY lower(c.name), c.id
+"""
+
+
+def admin_overview_out(row: Any) -> dict:
+    published = row["last_published_at"]
+    return {
+        "customer_id": row["customer_id"],
+        "name": row["name"],
+        "status": row["status"],
+        "ivr_enabled": bool(row["ivr_enabled"]),
+        "flows_total": row["flows_total"],
+        "flows_published": row["flows_published"],
+        "numbers_bound": row["numbers_bound"],
+        "last_published_at": published.isoformat() if published is not None else None,
+    }
+
+
+async def admin_overview(conn: Any) -> list[dict]:
+    return [admin_overview_out(r) for r in await conn.fetch(ADMIN_OVERVIEW_SQL)]
+
+
+# ---------------------------------------------------------------------------
 # Compile context (prompts + current numbers + this flow's own numbers)
 # ---------------------------------------------------------------------------
 async def load_context(conn: Any, *, customer_id: int, flow_id: int,

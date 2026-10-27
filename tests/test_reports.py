@@ -27,6 +27,13 @@ Covers:
       - tz day boundaries (23:30 Boise lands on the Boise date)
       - zero-filled trend buckets (day / week / auto month)
       - unknown tz 422; CSV header / escaping / truncation header
+  * Per-customer byte identity: the sha256 of the SQL (+ bind types) every
+    one-customer request runs, and of its response, pinned at RCF-V1 202f51b.
+  * Staff "all customers" (all_customers=true): every endpoint over A + B,
+    unattributed customer_id 0 rows (z01-z03) never counted, rows carry
+    customer_id + customer_name, the CSV's leading Customer column, tenants
+    ignore the flag, both-params / numbers-filter 422s, the fail-closed
+    $1/$5 guards and the start_time-index plan shape.
 
 Run:  python -m pytest -q -p no:cacheprovider tests/test_reports.py
 """
@@ -176,6 +183,7 @@ class _ReportsPG(_EphemeralPG):
 
 
 _LOOP = asyncio.new_event_loop()
+_PG: dict = {}
 
 
 def _run(coro):
@@ -184,6 +192,7 @@ def _run(coro):
 
 BOISE = ZoneInfo("America/Boise")
 CID_A, CID_B = 101, 202
+CID_NONE = 0          # cdrs.customer_id of an unattributed call (ingest default)
 TRUNK_A = 71
 A_MAIN = "+16175550101"     # rcf, "Main line"
 A_TRUNK = "+16175550202"    # trunk DID on trunk 'alpha'
@@ -196,7 +205,7 @@ B_MAIN = "+12085550900"     # tenant B rcf
 
 # Seeded durations: none of these ms values (nor 95 s) may appear anywhere
 # in a report response.
-SEEDED_MS = {20_000, 30_000, 60_000, 95_000, 155_000, 195_000, 215_000}
+SEEDED_MS = {20_000, 30_000, 40_000, 60_000, 95_000, 155_000, 195_000, 215_000}
 
 
 def _utc(y, mo, d, h, mi, s=0):
@@ -226,7 +235,15 @@ CDRS = [
     # tenant B — including a CDR whose destination is one of A's numbers
     ("b01", CID_B, (2026, 8, 14, 12, 0), "inbound", "+12085559999", B_MAIN, 60_000, True, "NORMAL_CLEARING", 4.4, None),
     ("b02", CID_B, (2026, 8, 14, 12, 5), "inbound", "+12085559998", A_MAIN, 60_000, True, "NORMAL_CLEARING", 4.4, None),
+    # UNATTRIBUTED rows (customer_id 0 = the CDR ingest default when FS sent
+    # no customer): no customer's report — not even staff "all customers" —
+    # may count them. z01 even dials A's number; z03 is older than every
+    # attributed call (it would move "data_available_from").
+    ("z01", CID_NONE, (2026, 8, 14, 10, 45), "inbound", "+12085550771", A_MAIN, 40_000, True, "NORMAL_CLEARING", 4.4, None),
+    ("z02", CID_NONE, (2026, 8, 20, 9, 0), "inbound", "+12085550772", "+13125550000", 0, False, "NO_ANSWER", None, None),
+    ("z03", CID_NONE, (2026, 7, 1, 8, 0), "inbound", "+12085550773", B_MAIN, 20_000, True, "NORMAL_CLEARING", None, None),
 ]
+_UNATTRIBUTED_CALLERS = ("+12085550771", "+12085550772", "+12085550773")
 
 
 #: Voicemail CDRs (2026-09-15 Boise — outside AUG, so the August
@@ -257,6 +274,7 @@ def reports_db():
     if PG_BIN is None:
         pytest.skip("no local PostgreSQL binaries; set TEST_PG_BIN to run")
     pg = _ReportsPG(PG_BIN)
+    _PG["pg"] = pg          # owner connections for the plan-shape tests
     try:
         pg.start()
     except Exception as e:  # noqa: BLE001
@@ -477,21 +495,23 @@ _RAW_CAUSES = ("NO_ANSWER", "ORIGINATOR_CANCEL", "USER_BUSY", "UNALLOCATED_NUMBE
                "NORMAL_CLEARING", "bandwidth", "east-fs", "east-sbc", "203.0.113")
 
 
-def assert_report_safe(obj, path="$"):
+def assert_report_safe(obj, path="$", allow=frozenset()):
     """No forbidden key (tenant denylist + timestamps/causes), no seconds-ish
-    key, no seeded exact duration value, anywhere in the body."""
+    key, no seeded exact duration value, anywhere in the body. `allow` lifts
+    named keys off the denylist (the staff all-customers rows carry
+    `customer_id`); everything else still applies."""
     if isinstance(obj, dict):
         keys = set(obj)
-        hit = (tr.FORBIDDEN_TENANT_CDR_KEYS | _EXTRA_FORBIDDEN_KEYS) & keys
+        hit = ((tr.FORBIDDEN_TENANT_CDR_KEYS | _EXTRA_FORBIDDEN_KEYS) & keys) - allow
         assert not hit, f"forbidden keys at {path}: {sorted(hit)}"
         for k in keys:
             low = k.lower()
             assert not any(s in low for s in _FORBIDDEN_SUBSTRINGS), f"bad key {path}.{k}"
         for k, v in obj.items():
-            assert_report_safe(v, f"{path}.{k}")
+            assert_report_safe(v, f"{path}.{k}", allow)
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
-            assert_report_safe(v, f"{path}[{i}]")
+            assert_report_safe(v, f"{path}[{i}]", allow)
     elif isinstance(obj, bool) or obj is None:
         return
     elif isinstance(obj, (int, float)):
@@ -1027,3 +1047,361 @@ def test_summary_grade_one_way_only_is_poor_not_unrated():
     assert reports._summary_grade(2, 4.35) == "great"
     assert reports._quality(2, None, 0) == {"rated_calls": 2, "avg_mos": None,
                                             "grade": "poor", "pct_good_or_better": 0.0}
+
+
+# ---------------------------------------------------------------------------
+# Per-customer reports are byte-identical to RCF-V1 202f51b (before the staff
+# all-customers mode): the SQL each request runs (+ its bind layout) and the
+# response bytes are pinned by sha256. The all-customers SQL is built
+# separately; a change here means a TENANT report changed — never update the
+# pins without a deliberate per-customer contract change.
+# ---------------------------------------------------------------------------
+PER_CUSTOMER_REQUESTS = {
+    "overview": ("overview", AUG),
+    "overview_numbers": ("overview", {**AUG, "numbers": A_TRUNK}),
+    "trend": ("trend", AUG),
+    "trend_week": ("trend", {**AUG, "bucket": "week"}),
+    "numbers": ("numbers", AUG),
+    "numbers_filter": ("numbers", {**AUG, "numbers": f"{A_TRUNK},{B_MAIN}"}),
+    "my_numbers": ("my-numbers", {}),
+    "calls": ("calls", AUG),
+    "calls_filtered": ("calls", {**AUG, "outcome": "missed", "direction": "inbound",
+                                 "limit": 5, "offset": 2}),
+    "calls_csv": ("calls.csv", AUG),
+    "calls_csv_filtered": ("calls.csv", {**AUG, "outcome": "answered",
+                                         "direction": "outbound"}),
+}
+
+#: sha256 of each request's executed SQL + bind types (captured at RCF-V1 202f51b).
+PER_CUSTOMER_SQL_SHA256: dict[str, str] = {
+    "overview": "f46a917bdf3a30b8d24afa0841a47bc93e5157c9f4c260e6d5399b85913a2305",
+    "overview_numbers": "2b014502197cd7a91eb92070cbe78d1c3028ca85b89ff08505a3a83dcc3657ba",
+    "trend": "0f5c1680e4818d5e925662364d1f38fc8603933c4ca64b24f703f0a3816a4d2c",
+    "trend_week": "0f5c1680e4818d5e925662364d1f38fc8603933c4ca64b24f703f0a3816a4d2c",
+    "numbers": "796126b4b6565f0d6a1ee97bd00a09a36de4eb34c7c4037d6e94feb20a856b0c",
+    "numbers_filter": "fddf8c06cd75d1748701059941fcfa4e753bb76b56faed88e40693c8cad3beb6",
+    "my_numbers": "6ffa56e6385d0a511ca64954a62090cc6387742cca0402087ccf0d8b605a4abf",
+    "calls": "84a0e5b0a37e6787a1f909ba015d0dda3c55066d18851986ae53f18c45df6487",
+    "calls_filtered": "44880dcb7fd0c1b6cd0b0fdd694df6e41b138147ce8d8e98cdc9b0be457a015c",
+    "calls_csv": "7e0b26d3f72ec80520fadfaadc02cd5690e6e6dfcd9c5485aa80aab6f2a2d86c",
+    "calls_csv_filtered": "0a6e736f6eab69282a1f8141df5c6edf993eb859cce1b68e10d6f05b8172100a",
+}
+#: sha256 of each response body (captured at RCF-V1 202f51b).
+PER_CUSTOMER_BODY_SHA256: dict[str, str] = {
+    "overview": "5e1cc416e924e184fe8f542bc4cae53f0c4bf5948ae1af8562f02bf8e602aec0",
+    "overview_numbers": "f7d4f1be99b15a7359151d5ec333c444533b48ae57a08427d2b3c31a660506bb",
+    "trend": "baeced8eb6bb89636502d094d6df82e5967d6397b85eef4873133d125e956db9",
+    "trend_week": "729d5bb4bb97ba3e421eafc38e0e8fb1810bbcfa7ee317c7edac99e535f9895f",
+    "numbers": "a3da4a83936e39f0010c2b7ec3e3cc2e46716ab211be2e5061851508e3bda713",
+    "numbers_filter": "785e7cd70e1d570e77ccd8da32b5a0dc6026f2a1dbf2dcabb55dbd28b350fa31",
+    "my_numbers": "6f3f0362426088280acf8bb58cdf72757657a0fd4d6a0729738df2838f6fde28",
+    "calls": "f414b3710e247b9cc3fc77a988ff701509ab4f9d74ef8ff2851833d9ff398609",
+    "calls_filtered": "f6978e9ca554b45c5acd278fcadc6d70b4211ffb8e7dccfaa72821e3257b3966",
+    "calls_csv": "a4708fc3c4e8067e97895b291ca0fb4120d7c312f1ecba02b1813fe709733934",
+    "calls_csv_filtered": "a1df8861aca4866d11f059776dc5778ba09f67c972a895725903e087066536ef",
+}
+
+
+def _sql_fingerprint(queries) -> str:
+    import hashlib
+    text = "\n--\n".join(
+        f"{[type(a).__name__ for a in args]}|{sql}" for sql, args in queries)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def test_per_customer_sql_and_responses_unchanged(client, tokens, monkeypatch):
+    import hashlib
+    from routers import reports
+    monkeypatch.setattr(reports, "CSV_CHUNK_ROWS", 5)       # exercise the keyset page SQL
+    real_run = reports._run
+    seen: list = []
+
+    async def recording_run(queries):
+        seen.extend(queries)
+        return await real_run(queries)
+
+    monkeypatch.setattr(reports, "_run", recording_run)
+    got_sql, got_body = {}, {}
+    for label, (path, params) in PER_CUSTOMER_REQUESTS.items():
+        seen.clear()
+        resp = _get(client, tokens, "user_a", path, **params)
+        assert resp.status_code == 200, (label, resp.text)
+        got_sql[label] = _sql_fingerprint(seen)
+        got_body[label] = hashlib.sha256(resp.content).hexdigest()
+        # staff choosing the customer runs the SAME SQL and gets the same bytes
+        seen.clear()
+        staff = _get(client, tokens, "admin", path, customer_id=CID_A, **params)
+        assert staff.content == resp.content, label
+        assert _sql_fingerprint(seen) == got_sql[label], label
+    assert got_sql == PER_CUSTOMER_SQL_SHA256
+    assert got_body == PER_CUSTOMER_BODY_SHA256
+
+
+# ---------------------------------------------------------------------------
+# Staff "all customers" (all_customers=true)
+# ---------------------------------------------------------------------------
+ALL = {**AUG, "all_customers": "true"}
+_ALL_ALLOW = frozenset({"customer_id"})
+_NAMES = {CID_A: "Tenant A", CID_B: "Tenant B"}
+
+
+def _strip_customer(row):
+    return {k: v for k, v in row.items() if k not in ("customer_id", "customer_name")}
+
+
+def _assert_no_unattributed(text):
+    for caller in _UNATTRIBUTED_CALLERS:
+        assert caller not in text, f"unattributed call {caller} leaked"
+
+
+@pytest.mark.parametrize("who", ["admin", "support"])
+def test_all_customers_overview_aggregates_every_customer(client, tokens, who):
+    body = _ok(_get(client, tokens, who, "overview", **ALL))
+    assert_report_safe(body)
+    # same shape as a one-customer overview
+    assert set(body) == {"period", "data_available_from", "totals", "previous_period",
+                         "quality", "busiest_day", "busiest_hour", "missed_reasons"}
+    # A's 14 August calls + B's 2; the unattributed z01/z02 (customer_id 0)
+    # are nobody's: not counted
+    assert body["totals"] == {
+        "calls": 16, "inbound": 14, "outbound": 2, "answered": 9, "missed": 7,
+        "answer_rate_pct": 56.3,     # 9 / 16 = 56.25, half-up
+        # answered talk: A 215 s + B 120 s = 335 s -> 5.58 -> 6 (rounded ONCE)
+        "minutes": 6,
+        "avg_minutes": 1.1,          # (8 + 1 + 1) / 9
+    }
+    # z03 (07-01, unattributed) is older than every attributed call: the
+    # oldest data is still A's a01 (07-15), so the July comparison is unknown
+    assert body["data_available_from"] == "2026-07-15"
+    assert body["previous_period"]["calls"] is None
+    # graded: A's 5 + B's 2; MOS mean over the 6 with one = 23.9 / 6
+    assert body["quality"] == {"rated_calls": 7, "avg_mos": 3.98, "grade": "fair",
+                               "pct_good_or_better": 57.1}
+    # 08-14: A 3 + B 2 (z01 on that day too, not counted -> would be 6)
+    assert body["busiest_day"] == {"date": "2026-08-14", "calls": 5}
+    # hour 10: A's 4 (z01 at 10:45 not counted -> would be 5)
+    assert body["busiest_hour"] == {"hour": 10, "calls": 4}
+    # z02 (NO_ANSWER, unattributed) does not add a missed call
+    assert body["missed_reasons"][0] == {"key": "no_answer", "label": "Nobody picked up",
+                                         "calls": 2}
+    assert sum(m["calls"] for m in body["missed_reasons"]) == 7
+
+
+def test_all_customers_trend(client, tokens):
+    body = _ok(_get(client, tokens, "admin", "trend", **ALL))
+    assert_report_safe(body)
+    by = {p["date"]: p for p in body["points"]}
+    assert len(body["points"]) == 31
+    assert by["2026-08-14"] == {"date": "2026-08-14", "calls": 5, "answered": 4,
+                                "missed": 1, "minutes": 4}   # 115 s + 120 s -> 4
+    assert by["2026-08-20"]["calls"] == 1                    # a07; z02 not counted
+    assert sum(p["calls"] for p in body["points"]) == 16
+
+
+def test_all_customers_numbers_rows_carry_the_customer(client, tokens):
+    body = _ok(_get(client, tokens, "admin", "numbers", **ALL))
+    assert_report_safe(body, allow=_ALL_ALLOW)
+    rows = body["numbers"]
+    assert [r["number"] for r in rows] == [A_MAIN, A_TRUNK, B_MAIN, A_SPARE, A_VM, A_VM_OFF]
+    for r in rows:
+        assert tuple(r)[-2:] == ("customer_id", "customer_name")
+        assert r["customer_name"] == _NAMES[r["customer_id"]]
+    by = {r["number"]: r for r in rows}
+    # B's own call to its own number; b02 (B's call to A's number) counts for
+    # no number row, z01 (unattributed, to A_MAIN) neither
+    assert by[B_MAIN] == {
+        "number": B_MAIN, "name": "B line", "product": "rcf", "forwards_to": "+17745559999",
+        "calls": 1, "answered": 1, "missed": 0, "answer_rate_pct": 100.0, "minutes": 1,
+        "avg_mos": 4.4, "grade": "great", "customer_id": CID_B, "customer_name": "Tenant B"}
+    # every row == that customer's own one-customer row (same attribution)
+    for cid in (CID_A, CID_B):
+        own = _ok(_get(client, tokens, "admin", "numbers", customer_id=cid, **AUG))["numbers"]
+        assert [_strip_customer(r) for r in rows if r["customer_id"] == cid] == own
+
+
+def test_all_customers_calls_span_customers_and_skip_unattributed(client, tokens):
+    body = _ok(_get(client, tokens, "admin", "calls", limit=500, **ALL))
+    assert_report_safe(body, allow=_ALL_ALLOW)
+    assert body["total"] == 16 and len(body["calls"]) == 16
+    ids = {c["id"] for c in body["calls"]}
+    assert {_uuid("b01"), _uuid("b02"), _uuid("a04")} <= ids
+    assert not ids & {_uuid("z01"), _uuid("z02"), _uuid("z03")}
+    assert {c["customer_id"] for c in body["calls"]} == {CID_A, CID_B}
+    starts = [datetime.fromisoformat(c["started_at"]) for c in body["calls"]]
+    assert starts == sorted(starts, reverse=True)
+    for c in body["calls"]:
+        assert c["customer_name"] == _NAMES[c["customer_id"]]
+    # each row == the one-customer row + customer_id/customer_name
+    own_a = {c["id"]: c for c in _ok(_get(client, tokens, "user_a", "calls",
+                                          limit=500, **AUG))["calls"]}
+    for c in body["calls"]:
+        if c["customer_id"] == CID_A:
+            assert _strip_customer(c) == own_a[c["id"]]
+    b02 = next(c for c in body["calls"] if c["id"] == _uuid("b02"))
+    assert (b02["customer_id"], b02["customer_name"], b02["number"]) == (CID_B, "Tenant B", A_MAIN)
+    _assert_no_unattributed(_get(client, tokens, "admin", "calls", limit=500, **ALL).text)
+    # filters + pagination work the same way
+    missed = _ok(_get(client, tokens, "admin", "calls", outcome="missed", **ALL))
+    assert missed["total"] == 7
+    page = _ok(_get(client, tokens, "admin", "calls", limit=5, offset=5, **ALL))
+    assert page["total"] == 16 and [c["id"] for c in page["calls"]] == \
+        [c["id"] for c in body["calls"][5:10]]
+
+
+def test_all_customers_csv_has_a_customer_column(client, tokens, monkeypatch):
+    from routers import reports
+    monkeypatch.setattr(reports, "CSV_CHUNK_ROWS", 3)       # several keyset pages
+    resp = _get(client, tokens, "support", "calls.csv", **ALL)
+    rows = _csv(resp)
+    assert resp.headers["x-report-truncated"] == "false"
+    assert rows[0] == ["Customer", "Date", "Time", "Direction", "From", "To", "Your number",
+                       "Outcome", "Length (minutes, rounded)", "Call quality"]
+    data = rows[1:]
+    assert len(data) == 16
+    assert {r[0] for r in data} == {"Tenant A", "Tenant B"}
+    assert ["Tenant A", "2026-08-14", "10:02", "Inbound", "+12085550100", A_MAIN, A_MAIN,
+            "Answered", "1", "Fair"] in data
+    assert ["Tenant B", "2026-08-14", "12:05", "Inbound", "+12085559998", A_MAIN, A_MAIN,
+            "Answered", "1", "Great"] in data
+    # the rest of each row is exactly the one-customer CSV row
+    own_a = _csv(_get(client, tokens, "user_a", "calls.csv", **AUG))[1:]
+    assert [r[1:] for r in data if r[0] == "Tenant A"] == own_a
+    _assert_no_unattributed(resp.text)
+    for raw in _RAW_CAUSES:
+        assert raw not in resp.text
+    monkeypatch.setattr(rp, "CSV_ROW_CAP", 4)
+    capped = _get(client, tokens, "admin", "calls.csv", **ALL)
+    assert capped.headers["x-report-truncated"] == "true"
+    assert _csv(capped)[1:] == data[:4]
+
+
+def test_all_customers_my_numbers(client, tokens):
+    body = _ok(_get(client, tokens, "admin", "my-numbers", all_customers="true"))
+    assert_report_safe(body, allow=_ALL_ALLOW)
+    rows = body["numbers"]
+    assert [r["number"] for r in rows] == sorted(
+        [A_MAIN, A_TRUNK, A_SPARE, A_VM, A_VM_OFF, B_MAIN])      # api + deleted box hidden
+    for r in rows:
+        assert tuple(r) == ("number", "name", "product", "enabled", "forwards_to",
+                            "customer_id", "customer_name")
+    for cid in (CID_A, CID_B):
+        own = _ok(_get(client, tokens, "admin", "my-numbers", customer_id=cid))["numbers"]
+        assert sorted((_strip_customer(r) for r in rows if r["customer_id"] == cid),
+                      key=lambda r: r["number"]) == own
+        assert {r["customer_name"] for r in rows if r["customer_id"] == cid} == {_NAMES[cid]}
+    assert _get(client, tokens, "support", "my-numbers", all_customers="true").json() == body
+
+
+@pytest.mark.parametrize("path", ENDPOINTS + ("my-numbers",))
+def test_tenant_all_customers_flag_is_ignored(client, tokens, path):
+    params = {} if path == "my-numbers" else AUG
+    mine = _get(client, tokens, "user_a", path, **params)
+    for spoof in ({"all_customers": "true"},
+                  {"all_customers": "true", "customer_id": CID_B}):
+        r = _get(client, tokens, "user_a", path, **params, **spoof)
+        assert r.status_code == 200 and r.content == mine.content
+        ro = _get(client, tokens, "readonly_a", path, **params, **spoof)
+        assert ro.status_code == 200 and ro.content == mine.content
+    assert B_MAIN not in mine.text
+    # a tenant's own number filter keeps working with the (ignored) flag
+    if path != "my-numbers":
+        flt = {**params, "numbers": A_TRUNK}
+        assert _get(client, tokens, "user_a", path, all_customers="true", **flt).content == \
+            _get(client, tokens, "user_a", path, **flt).content
+
+
+@pytest.mark.parametrize("who", ["admin", "support"])
+@pytest.mark.parametrize("path", ENDPOINTS + ("my-numbers",))
+def test_all_customers_and_customer_id_is_422(client, tokens, who, path):
+    params = {} if path == "my-numbers" else AUG
+    r = _get(client, tokens, who, path, all_customers="true", customer_id=CID_A, **params)
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Pick one customer or all customers, not both."
+    # all_customers=false is the default: still "pick a customer"
+    assert _get(client, tokens, who, path, all_customers="false", **params).status_code == 422
+
+
+@pytest.mark.parametrize("path", ENDPOINTS)
+def test_all_customers_numbers_filter_is_422(client, tokens, path):
+    r = _get(client, tokens, "admin", path, numbers=A_MAIN, **ALL)
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Number filters need one customer."
+    # even a filter that would narrow to nothing
+    assert _get(client, tokens, "admin", path, numbers="junk", **ALL).status_code == 422
+    # a blank numbers param is "no filter"
+    assert _get(client, tokens, "admin", path, numbers=" ", **ALL).status_code == 200
+
+
+def test_all_customers_sql_never_carries_a_customer_predicate():
+    from routers import reports
+    for name in ("_ALL_WITH", "_ALL_OVERVIEW_TOTALS_SQL", "_ALL_OVERVIEW_GROUPS_SQL",
+                 "_ALL_TREND_SQL", "_ALL_NUMBERS_SQL", "_ALL_MY_NUMBERS_SQL"):
+        sql = getattr(reports, name)
+        assert "customer_id = $1" not in sql, name
+        assert "customer_id <> 0" in sql or name == "_ALL_MY_NUMBERS_SQL", name
+    with pytest.raises(RuntimeError):
+        reports._variant("a b a", ("a", "c"))               # 2 matches: refused
+    with pytest.raises(RuntimeError):
+        reports._variant("a b", ("z", "c"))                 # 0 matches: refused
+
+
+def test_all_customers_sql_fails_closed(reports_db):
+    """The all-customers SQL answers ONLY when $1 (customer) and $5 (numbers)
+    are NULL — a customer id or a number filter reaching it returns nothing."""
+    from routers import reports
+    period = rp.Period(date(2026, 8, 1), date(2026, 8, 31))
+    base = reports.ReportScope(None, period, "America/Boise", None).args()
+
+    async def total(args):
+        async with reports_db.pool.acquire() as conn:
+            return await conn.fetchval(
+                f"{reports._ALL_WITH} SELECT count(*) FROM f", *args)
+    assert _run(total(base)) == 16
+    assert _run(total([CID_A] + base[1:])) == 0
+    assert _run(total(base[:4] + [[A_MAIN]])) == 0
+
+
+def test_all_customers_scan_uses_start_time_index(reports_db):
+    """All customers has no customer predicate: the cdrs scan is the
+    start_time range on the hypertable's start_time index (TimescaleDB's
+    default `cdrs_start_time_idx`, created by create_hypertable in 05), never
+    the (customer_id, start_time) index."""
+    from routers import reports
+    pg = _PG["pg"]
+    period = rp.Period(date(2026, 8, 1), date(2026, 8, 31))
+    args = reports.ReportScope(None, period, "America/Boise", None).args()
+    n = len(args)
+    queries = {
+        "overview_totals": (reports._ALL_OVERVIEW_TOTALS_SQL, args + [period.start]),
+        "overview_groups": (reports._ALL_OVERVIEW_GROUPS_SQL, args),
+        "trend": (reports._ALL_TREND_SQL, args + ["day"]),
+        "numbers": (reports._ALL_NUMBERS_SQL, args),
+        "calls_page": (reports._calls_sql(
+            reports.ReportScope(None, period, "America/Boise", None), "",
+            f"ORDER BY start_time DESC, id DESC LIMIT ${n + 1}::int OFFSET ${n + 2}::int"),
+            args + [50, 0]),
+    }
+
+    async def plans():
+        conn = await asyncpg.connect(host=pg.sock, port=pg.port, user="postgres",
+                                     database="postgres", statement_cache_size=0)
+        try:
+            out = {}
+            tx = conn.transaction()
+            await tx.start()
+            try:
+                await conn.execute("CREATE INDEX cdrs_start_time_idx ON cdrs (start_time DESC)")
+                await conn.execute("ANALYZE cdrs")
+                await conn.execute("SET LOCAL enable_seqscan = off")
+                for label, (sql, a) in queries.items():
+                    rows = await conn.fetch("EXPLAIN " + sql, *a)
+                    out[label] = "\n".join(r[0] for r in rows)
+            finally:
+                await tx.rollback()       # the index exists only for this test
+            return out
+        finally:
+            await conn.close()
+    for label, text in _run(plans()).items():
+        assert "cdrs_start_time_idx" in text, (label, text)
+        assert "idx_cdrs_customer_time" not in text, (label, text)
+        assert "start_time >=" in text and "start_time <" in text, (label, text)
