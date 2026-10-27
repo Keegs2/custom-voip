@@ -3,6 +3,7 @@
  * (contract §4.1 POST /mailboxes, design change 5: tenants never create).
  *
  *   Customer   fixed (preview customer / console scope) or picked here
+ *              (a searchable Select of ONE owner — no "All customers")
  *   Number     GET /available-numbers?q= (digits) → pick one
  *   Name · Timezone · optional PIN (masked, 4–10 digits, confirmed)
  *   Transcription (v1.1, only while available): "Transcribe new messages"
@@ -13,7 +14,7 @@
  * 409 means someone took the number first (the list refreshes), or that
  * transcription stopped being available (the checkbox goes away).
  */
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import type { Mailbox, TranscriptionLanguage } from '../../types/voicemail';
@@ -22,6 +23,7 @@ import { createMailbox } from '../../api/voicemail';
 import { ApiError } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 import { Spinner } from '../../components/ui/Spinner';
+import { Select, type SelectOption } from '../../components/ui/Select';
 import { useAdminCustomers } from '../dashboard/adminData';
 import { VmDialog } from './VmDialog';
 import { invalidateVoicemail, isUnavailable, useAvailableNumbers, vmErrorText, vmKeys } from './voicemailData';
@@ -35,6 +37,17 @@ export interface NewMailboxDialogProps {
   transcriptionAvailable: boolean;
   onClose: () => void;
   onCreated: (mailbox: Mailbox) => void;
+}
+
+const TIMEZONE_OPTIONS: readonly SelectOption[] = TIMEZONES.map((z) => ({ value: z.id, label: z.label }));
+const LANGUAGE_OPTIONS: readonly SelectOption<TranscriptionLanguage>[] = TRANSCRIPTION_LANGUAGES.map((l) => ({
+  value: l.id,
+  label: l.label,
+}));
+
+/** "suspended" → "Suspended" (the row hint for a customer that isn't active). */
+function statusWord(status: string): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 /**
@@ -78,6 +91,17 @@ export function NewMailboxDialog({ customer, transcriptionAvailable, onClose, on
   }, [search]);
 
   const numbers = useAvailableNumbers(query, true);
+
+  const customerOptions = useMemo<SelectOption[]>(
+    () =>
+      (customers.data ?? []).map((c) => ({
+        value: String(c.id),
+        label: c.name,
+        hint: c.status === 'active' ? undefined : statusWord(c.status),
+        keywords: String(c.id),
+      })),
+    [customers.data],
+  );
 
   const create = useMutation({
     mutationFn: () => {
@@ -161,23 +185,20 @@ export function NewMailboxDialog({ customer, transcriptionAvailable, onClose, on
             <label className="dl-flabel" htmlFor={ids.customer}>
               Customer
             </label>
-            <select
+            {/* The mailbox's OWNER: one customer, never "All customers". Searchable (up to 500). */}
+            <Select
               id={ids.customer}
               className="dl-input vm-input-full"
-              value={customerId ?? ''}
-              onChange={(e) => setCustomerId(e.target.value ? Number(e.target.value) : null)}
+              value={customerId === null ? '' : String(customerId)}
+              onChange={(v) => setCustomerId(v ? Number(v) : null)}
+              options={customerOptions}
+              placeholder={customers.isLoading ? 'Loading customers…' : customers.isError ? 'Customers couldn’t load' : 'Pick a customer…'}
+              loading={customers.isLoading}
+              emptyText={customers.isError ? 'Customers couldn’t load' : 'No matches'}
+              searchable
+              searchPlaceholder="Search customers…"
               data-autofocus
-            >
-              <option value="" disabled>
-                {customers.isLoading ? 'Loading customers…' : customers.isError ? 'Customers couldn’t load' : 'Pick a customer…'}
-              </option>
-              {(customers.data ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {c.status !== 'active' ? ` (${c.status})` : ''}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         )}
 
@@ -232,13 +253,7 @@ export function NewMailboxDialog({ customer, transcriptionAvailable, onClose, on
             <label className="dl-flabel" htmlFor={ids.tz}>
               Timezone
             </label>
-            <select id={ids.tz} className="dl-input vm-input-full" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-              {TIMEZONES.map((z) => (
-                <option key={z.id} value={z.id}>
-                  {z.label}
-                </option>
-              ))}
-            </select>
+            <Select id={ids.tz} className="dl-input vm-input-full" value={timezone} onChange={setTimezone} options={TIMEZONE_OPTIONS} />
           </div>
         </div>
 
@@ -299,19 +314,14 @@ export function NewMailboxDialog({ customer, transcriptionAvailable, onClose, on
                 <label className="dl-flabel" htmlFor={ids.txLanguage}>
                   Language
                 </label>
-                <select
+                <Select<TranscriptionLanguage>
                   id={ids.txLanguage}
                   className="dl-input vm-input-full"
                   value={txLanguage}
                   disabled={!transcribe}
-                  onChange={(e) => setTxLanguage(e.target.value as TranscriptionLanguage)}
-                >
-                  {TRANSCRIPTION_LANGUAGES.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setTxLanguage}
+                  options={LANGUAGE_OPTIONS}
+                />
               </div>
             </div>
             <p className="dl-help">

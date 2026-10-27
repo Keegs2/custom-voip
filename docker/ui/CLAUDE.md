@@ -997,7 +997,7 @@ See section 4 above.
 | `Badge` | `variant: BadgeVariant` — covers status, account types, directions, traffic grades, SIPp verdicts |
 | `Modal` | `open`, `onClose`, `title`, `children`, `footer`, `maxWidth`. Closes on Escape, traps body scroll |
 | `Select` | THE dropdown — every select in the app. See "`Select` (all dropdowns)" below |
-| `FormField` | Polymorphic: `as: 'input'\|'select'\|'textarea'`. Renders label, field, hint, error. Passes all native HTML attributes through (its `select` branch is still native — use `Select` instead) |
+| `FormField` | Polymorphic: `as: 'input'\|'select'\|'textarea'`. Renders label, field, hint, error. Input / textarea pass native HTML attributes through; `as="select"` is the themed `Select` (`value`, `onChange(value)`, `options`, `placeholder`… — not `<option>` children), with `error` → `invalid` and `required` → aria-required |
 | `Card` / `CardTitle` | Raised theme panel (`.glass-surface` = `--t-panel-bg` + hairline + `--t-shadow-card`), lifts on hover |
 | `StatCard` | Displays a single large metric with label and optional background icon |
 | `TabBar` | Horizontal tab bar with underline active indicator, optional count badges |
@@ -1157,6 +1157,23 @@ Enter picks it; ↑ / ↓ / PageUp / PageDown move. Typing on a closed searchabl
 trigger opens it with that key in the box. On close (pick, Esc, Tab, outside
 press) focus returns to the trigger. `loading` adds a "Loading…" row under
 whatever options are already there.
+
+**Action menus** (a pick DOES something instead of setting a value — the
+IVR "Add a message…" list): `value=""` + `placeholder` = the prompt; every
+pick fires `onChange` and the trigger reads the prompt again. Give its
+placeholder the trigger's own colour (`.ivr-add-select
+.ui-select-placeholder { color: inherit }`) so it reads as a label, like
+the native first option did.
+
+**Inside the IVR builder (React Flow)** add **`nokey`** to the trigger's
+class (`"dl-input vm-input-full nokey"`). React Flow's document-level
+Delete / Backspace (delete the selected block) and Space / Shift handlers
+skip inputs, selects and `.nokey` elements — a native `<select>` was
+skipped as an input, a `<button>` trigger is not, so without `nokey`
+Backspace on a focused dropdown deletes the block whose panel it sits in.
+The builder's own shortcuts (Esc deselect, ⌘Z) skip `role="combobox"`
+(`isTyping` in `FlowBuilder.tsx`). Searchable menus need nothing more
+(focus is in their search `<input>`).
 
 **CSS order (§20.8):** `select.css` is imported once in `main.tsx`, after
 the other global sheets, so the menu wins ties against them on every page
@@ -1590,8 +1607,9 @@ dial-in).
 - **Body** `pages/voicemail/VoicemailWorkspace.tsx` (layout kit, §20):
   `CompactHeader` in one row (crumb · Voicemail + `EncryptionBadge` ·
   admin "Viewing" picker · Unread / Messages / Mailboxes · New mailbox for
-  staff), a slim one-row mailbox bar (grouped by customer on All
-  customers), suspended banner, tabs **Messages** (`InboxView` =
+  staff), a slim one-row mailbox bar (a `Select`: "Front desk · (617)
+  555-0134" rows with "3 new" / "Suspended" as the row hint, grouped under
+  each customer's name on All customers), suspended banner, tabs **Messages** (`InboxView` =
   `MasterDetail`: Inbox/Saved/Trash with counts over the scrolling
   `MessageList` | `ReadingPane` — caller + Played/New badge, ONE inline
   meta row Received · Length · Mailbox, a one-row `Player`, the transcript
@@ -1621,7 +1639,9 @@ dial-in).
   (`?label=&activate=`). `audio/wav.ts` is pure; its self-test runs with
   `node src/pages/voicemail/audio/wav.assert.ts` (Node type stripping).
 - **Admin create** (`NewMailboxDialog.tsx`): customer fixed (preview / console
-  customer) or picked; DID from `GET /available-numbers?q=`; name, timezone,
+  customer) or picked (the mailbox's OWNER — a searchable `Select` of single
+  customers, autofocused, NO "All customers" row; non-active ones carry
+  their status as the hint); DID from `GET /available-numbers?q=`; name, timezone,
   optional PIN. 409 = number taken (list refreshes); 503 = nothing created.
 - **Transcription (v1.1)** — everything keys off `summary.transcription_available`
   (platform flag on + valid config), read once in `VoicemailWorkspace`.
@@ -2184,8 +2204,11 @@ customer (the API answers 400 `customer_id required`). Support → product home.
   kit's `useOpenState`; a convenience only).
 - **Keyboard:** blocks are focusable (Tab), Enter/Space selects — selecting
   a block opens its panel (click, keyboard, Outline or an issue link alike).
-  Every exit has a "Where each choice goes" `<select>` (existing block,
-  NEW block of any type, or nothing). ⌘Z / Ctrl+Z, ⇧⌘Z / Ctrl+Y, Esc
+  Every exit has a "Where each choice goes" `Select` (existing block,
+  NEW block of any type, or nothing; a choice that would loop is listed
+  disabled with the reason as its hint; searchable past 10 choices). Every
+  builder dropdown carries `nokey` (§8 "`Select`") so Delete / Backspace on
+  it never deletes the block. ⌘Z / Ctrl+Z, ⇧⌘Z / Ctrl+Y, Esc
   deselects, Delete removes (never Start). Focus rings are restored on
   React Flow nodes.
 - **Rules kept by the store:** one edge per exit; nothing into Start; no

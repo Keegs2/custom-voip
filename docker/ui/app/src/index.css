@@ -301,12 +301,10 @@ body {
   color: var(--t-field-placeholder);
 }
 
-.form-control option {
-  background: var(--t-surface-raised);
-  color: var(--t-text);
-}
-
-select.form-control {
+/* A Select (components/ui/Select) wearing the legacy skin: its trigger is a
+   <button>, so the old `select.form-control` / `.form-control option` rules
+   could never match it. The menu is the Select's own (select.css). */
+.form-control.ui-select-trigger {
   cursor: pointer;
 }
 

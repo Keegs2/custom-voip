@@ -970,6 +970,10 @@ button.ivr-issue-btn:disabled { cursor: default; }
 .ivr-pitem-tools { display: flex; gap: 3px; }
 .ivr-pitem-tools .ivr-mini-btn { width: 24px; height: 24px; }
 .dl-input.ivr-add-select { width: 100%; font-size: 0.78rem; padding-top: 7px; padding-bottom: 7px; }
+/* An action menu whose value is always '' — its "Add a message…" prompt reads
+   as the control's label (as the native select's first option did), not as a
+   dim placeholder. Inherits, so the disabled ("Up to 10 messages") colour holds. */
+.ivr-add-select .ui-select-placeholder { color: inherit; }
 
 /* Transfer destination card */
 .ivr-destcard {

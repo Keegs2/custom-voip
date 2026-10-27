@@ -15,6 +15,7 @@ import { Mic, Type, Upload, Volume2 } from 'lucide-react';
 import { createTtsPrompt, previewTts, uploadPrompt } from '../../../api/ivr';
 import type { Prompt } from '../../../types/ivr';
 import { useToast } from '../../../components/ui/ToastContext';
+import { Select, type SelectOption } from '../../../components/ui/Select';
 import { VmDialog } from '../../voicemail/VmDialog';
 import { Player } from '../../voicemail/Player';
 import { AudioCapturePanel } from '../../voicemail/AudioCapturePanel';
@@ -71,6 +72,7 @@ export function PromptDialog({ onClose, onCreated, forWhat }: PromptDialogProps)
   );
 
   const voiceList = useMemo(() => voices.data ?? [], [voices.data]);
+  const voiceOptions = useMemo<SelectOption[]>(() => voiceList.map((v) => ({ value: v.id, label: voiceLabel(v) })), [voiceList]);
   const chosenVoice = voice || voiceList[0]?.id || '';
   // No voice list (the TTS sidecar is down): Type text is unavailable, Record is the default.
   const ttsUnavailable = voices.isError || (voices.isSuccess && voiceList.length === 0);
@@ -207,20 +209,17 @@ export function PromptDialog({ onClose, onCreated, forWhat }: PromptDialogProps)
               <label className="ivr-label" htmlFor={ids.voice}>
                 Voice
               </label>
-              <select
+              {/* `nokey`: opened from the IVR builder, React Flow must not take Delete / Backspace from it. */}
+              <Select
                 id={ids.voice}
-                className="dl-input vm-input-full"
+                className="dl-input vm-input-full nokey"
                 value={chosenVoice}
-                onChange={(e) => setVoice(e.target.value)}
+                onChange={setVoice}
+                options={voiceOptions}
+                placeholder={voices.isLoading ? 'Loading voices…' : undefined}
                 disabled={voiceList.length === 0}
-              >
-                {voices.isLoading && <option value="">Loading voices…</option>}
-                {voiceList.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {voiceLabel(v)}
-                  </option>
-                ))}
-              </select>
+                searchPlaceholder="Search voices…"
+              />
             </div>
             <button
               type="button"

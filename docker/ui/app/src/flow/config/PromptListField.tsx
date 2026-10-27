@@ -4,10 +4,11 @@
  * them in order, or make a new one inline (PromptDialog) — it is added to
  * the block as soon as it's saved. Order is the order callers hear.
  */
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, X } from 'lucide-react';
 import { getPromptPlaybackUrl } from '../../api/ivr';
 import type { Prompt, PromptId } from '../../types/ivr';
+import { Select, type SelectOption } from '../../components/ui/Select';
 import { Player } from '../../pages/voicemail/Player';
 import { PromptDialog } from '../../pages/ivr/prompts/PromptDialog';
 import { useIvrWorkspace } from '../../pages/ivr/IvrContext';
@@ -35,8 +36,17 @@ export function PromptListField({ label, help, value, prompts, onChange, forWhat
   const [creating, setCreating] = useState(false);
   const id = useId();
 
+  const addOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: NEW, label: '＋ New message (type, record or upload)' },
+      ...(prompts ?? [])
+        .filter((p) => !value.includes(p.id))
+        .map((p) => ({ value: String(p.id), label: p.name, hint: formatLength(p.duration_ms), group: 'Your messages' })),
+    ],
+    [prompts, value],
+  );
+
   const byId = new Map((prompts ?? []).map((p) => [p.id, p]));
-  const available = (prompts ?? []).filter((p) => !value.includes(p.id));
   const full = value.length >= LIMITS.promptsPerBlock;
 
   const move = (index: number, delta: number) => {
@@ -112,29 +122,23 @@ export function PromptListField({ label, help, value, prompts, onChange, forWhat
         </ol>
       )}
       {!readOnly && (
-        <select
-          className="dl-input ivr-add-select"
+        // An ACTION menu: value stays '' (the placeholder shows), so every pick
+        // fires — it adds the message (or opens the new-message dialog) and the
+        // trigger reads "Add another message…" again. `nokey`: React Flow
+        // ignores Delete / Backspace while it has focus.
+        <Select
+          className="dl-input ivr-add-select nokey"
           aria-label={`Add a message to ${label.toLowerCase()}`}
           value=""
+          placeholder={full ? 'Up to 10 messages' : value.length ? 'Add another message…' : 'Add a message…'}
           disabled={full}
-          onChange={(e) => {
-            const v = e.target.value;
+          onChange={(v) => {
             if (v === NEW) setCreating(true);
             else if (v) onChange([...value, Number(v)]);
           }}
-        >
-          <option value="">{full ? 'Up to 10 messages' : value.length ? 'Add another message…' : 'Add a message…'}</option>
-          <option value={NEW}>＋ New message (type, record or upload)</option>
-          {available.length > 0 && (
-            <optgroup label="Your messages">
-              {available.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({formatLength(p.duration_ms)})
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
+          options={addOptions}
+          searchPlaceholder="Search messages…"
+        />
       )}
       {help && <p className="dl-help">{help}</p>}
       {creating && (

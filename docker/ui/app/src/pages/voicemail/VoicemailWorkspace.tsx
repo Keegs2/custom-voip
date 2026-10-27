@@ -25,6 +25,7 @@ import { Plus, RefreshCw } from 'lucide-react';
 import type { Mailbox } from '../../types/voicemail';
 import { IconVoicemail } from '../../components/icons/ProductIcons';
 import { Spinner } from '../../components/ui/Spinner';
+import { Select, type SelectOption } from '../../components/ui/Select';
 import { isUnavailable, UNAVAILABLE_TEXT, useMailboxes, useVoicemailSummary, type VoicemailScope } from './voicemailData';
 import { InboxView } from './InboxView';
 import { MailboxSettings } from './MailboxSettings';
@@ -84,14 +85,24 @@ export function VoicemailWorkspace({
   // a deleted mailbox or a scope switch falls back without an effect.
   const mailbox = list.find((m) => m.id === mailboxSel) ?? list[0] ?? null;
 
-  const grouped = useMemo(() => {
-    if (!showCustomer) return null;
-    const groups = new Map<string, Mailbox[]>();
-    for (const m of [...list].sort((a, b) => a.customer_name.localeCompare(b.customer_name) || a.label.localeCompare(b.label))) {
-      const key = m.customer_name || `Customer #${m.customer_id}`;
-      groups.set(key, [...(groups.get(key) ?? []), m]);
-    }
-    return [...groups.entries()];
+  // One row per mailbox: "Front desk · (617) 555-0134", with "3 new" / "Suspended"
+  // as the dimmer hint. All customers: grouped under each customer's name
+  // (consecutive rows sharing a `group`), which is searchable too.
+  const mailboxOptions = useMemo<SelectOption[]>(() => {
+    const ordered = showCustomer
+      ? [...list].sort((a, b) => a.customer_name.localeCompare(b.customer_name) || a.label.localeCompare(b.label))
+      : list;
+    return ordered.map((m) => {
+      const customerName = m.customer_name || `Customer #${m.customer_id}`;
+      const notes = [m.unread_count > 0 ? `${m.unread_count} new` : '', m.status === 'suspended' ? 'Suspended' : ''];
+      return {
+        value: String(m.id),
+        label: `${m.label} · ${formatPhone(m.did)}`,
+        hint: notes.filter(Boolean).join(' · ') || undefined,
+        keywords: `${m.did}${showCustomer ? ` ${customerName}` : ''}`,
+        group: showCustomer ? customerName : undefined,
+      };
+    });
   }, [list, showCustomer]);
 
   const onCreated = useCallback((mb: Mailbox) => {
@@ -116,8 +127,6 @@ export function VoicemailWorkspace({
     viewer === 'tenant' &&
     list.length === 0 &&
     (summary.data?.enabled === false || (summary.error instanceof ApiError && summary.error.status === 404));
-  const optionText = (m: Mailbox) =>
-    `${m.label} · ${formatPhone(m.did)}${m.unread_count > 0 ? ` · ${m.unread_count} new` : ''}${m.status === 'suspended' ? ' · suspended' : ''}`;
 
   let body: ReactNode;
   // A tenant with no mailboxes needs the summary too (intro vs. empty).
@@ -184,30 +193,14 @@ export function VoicemailWorkspace({
               Mailbox
             </label>
             {list.length > 1 ? (
-              <select
+              <Select
                 id={selectId}
                 className="dl-input vm-mbar-select"
-                value={mailbox.id}
-                onChange={(e) => {
-                  setMailboxSel(Number(e.target.value));
-                }}
-              >
-                {grouped
-                  ? grouped.map(([customerName, boxes]) => (
-                      <optgroup key={customerName} label={customerName}>
-                        {boxes.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {optionText(m)}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))
-                  : list.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {optionText(m)}
-                      </option>
-                    ))}
-              </select>
+                value={String(mailbox.id)}
+                onChange={(v) => setMailboxSel(Number(v))}
+                options={mailboxOptions}
+                searchPlaceholder="Search mailboxes…"
+              />
             ) : (
               <span id={selectId} className="vm-mbar-single">
                 {mailbox.label}

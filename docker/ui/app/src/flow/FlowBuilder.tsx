@@ -94,9 +94,18 @@ export function FlowBuilder({ flow, maxBlocks, assistAvailable = false }: FlowBu
 /** `assist-sim` = Test call on the Flow assistant's proposal (closing it returns to the assistant). */
 type Sheet = 'publish' | 'history' | 'sim' | 'assist' | 'assist-sim' | null;
 
+/**
+ * A field has the keys: text inputs, and every dropdown — the themed Select's
+ * trigger is a <button role="combobox">, so Esc on a closed one (or ⌘Z) stays
+ * with it, as it did with the native <select> it replaced.
+ */
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+  return (
+    target.isContentEditable ||
+    ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) ||
+    target.getAttribute('role') === 'combobox'
+  );
 }
 
 /** The server's findings on a proposal, pinned to its blocks like the draft's. */

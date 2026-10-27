@@ -1,4 +1,7 @@
+import { Select, type SelectOption } from '../../components/ui/Select';
 import { INK_DIM, INK_FAINT, INK_SOFT, PAGE_SIZE_OPTIONS } from './theme';
+
+const PAGE_SIZE_SELECT: readonly SelectOption[] = PAGE_SIZE_OPTIONS.map((n) => ({ value: String(n), label: String(n) }));
 
 // ─── PaginationControls ───────────────────────────────────────────────────────
 // Shared by the Numbers tab and the Call Activity "Recent calls" table.
@@ -58,16 +61,16 @@ export function PaginationControls({
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <span style={{ fontSize: '0.7rem', color: INK_FAINT }}>Per page:</span>
-          <select
+          <Select
             className="rcf-input"
-            value={pageSize}
-            onChange={(e) => { onPageSizeChange(Number(e.target.value)); onPageChange(1); }}
-            style={{ fontSize: '0.75rem', padding: '4px 28px 4px 8px' }}
-          >
-            {PAGE_SIZE_OPTIONS.map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
+            size="sm"
+            value={String(pageSize)}
+            onChange={(v) => { onPageSizeChange(Number(v)); onPageChange(1); }}
+            options={PAGE_SIZE_SELECT}
+            aria-label="Rows per page"
+            // Right padding = where the native chevron sat (the Select draws its own there).
+            style={{ fontSize: '0.75rem', padding: '4px 12px 4px 8px' }}
+          />
         </div>
       </div>
 
