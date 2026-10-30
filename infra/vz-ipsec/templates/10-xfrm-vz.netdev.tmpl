@@ -1,0 +1,13 @@
+# Rendered by install.sh -> /etc/systemd/network/10-xfrm-vz.netdev
+# IP-unnumbered XFRM interface the SAs are bound to (plan §3.2 "IP unnumbered").
+# Independent=yes: not tied to ens4, so systemd-networkd never has to manage ens4 (the GCE guest DHCP path stays untouched).
+# Equivalent one-shot: ip link add xfrm-vz type xfrm if_id ${VZ_IF_ID}
+
+[NetDev]
+Name=xfrm-vz
+Kind=xfrm
+MTUBytes=1400
+
+[Xfrm]
+InterfaceId=${VZ_IF_ID}
+Independent=yes
