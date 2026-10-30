@@ -1,0 +1,15 @@
+# Installed verbatim by install.sh -> /etc/systemd/network/10-xfrm-vz.network
+# Brings xfrm-vz UP at MTU 1400 with NO address (plan §3.2 "MTU 1400", "IP unnumbered").
+# Matches ONLY xfrm-vz — networkd must not touch ens4 (guest-agent/DHCP owns it).
+
+[Match]
+Name=xfrm-vz
+
+[Link]
+MTUBytes=1400
+RequiredForOnline=no
+
+[Network]
+LinkLocalAddressing=no
+IPv6AcceptRA=no
+ConfigureWithoutCarrier=yes

@@ -1,0 +1,11 @@
+# Rendered by install.sh -> /etc/systemd/system/prometheus-node-exporter.service.d/vz.conf
+# Debian's unit runs `/usr/bin/prometheus-node-exporter $ARGS` (ARGS from /etc/default/prometheus-node-exporter).
+# This drop-in replaces ExecStart to add (plan §3.5):
+#   --collector.xfrm                  native kernel xfrm counters (XfrmInStateSeqError = replay drops, XfrmOutNoStates = black hole)
+#   --collector.textfile.directory    where vz-healthd writes vz_ipsec.prom
+#   --web.listen-address              NIC IP only — this VM owns a PUBLIC IKE IP on ens4; never expose :9100 on it
+# $ARGS is kept so distro defaults still apply.
+
+[Service]
+ExecStart=
+ExecStart=/usr/bin/prometheus-node-exporter --collector.xfrm --collector.textfile.directory=/var/lib/node_exporter/textfile_collector --web.listen-address=${VZ_NIC_IP}:9100 $ARGS

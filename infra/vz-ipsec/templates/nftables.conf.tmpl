@@ -1,0 +1,51 @@
+#!/usr/sbin/nft -f
+# Rendered by install.sh -> /etc/nftables.conf   (loaded by nftables.service at boot)
+# Stateless 1:1 NAT for the Verizon tunnel — plan §3.3, reproduced rule-for-rule.
+#
+# HOW THIS WORKS (read before touching): there is NO conntrack and NO `nat` chain type on this box.
+# `notrack` + `snat`/`dnat` does not work — nft NAT statements run inside the conntrack NAT engine, which skips
+# untracked packets. The stateless primitive is PAYLOAD MANGLING in filter-type chains (`ip daddr set` / `ip saddr set`);
+# the kernel recomputes the IPv4 header checksum and the UDP/TCP pseudo-header checksum itself (kernel 6.1 / nft 1.0.6).
+# Rules are IP-only — no port match — so non-first UDP fragments are translated identically to the first (§3.3).
+# `counter` on each rule is the only addition to §3.3 (vz-status.sh reads them); it changes nothing about matching.
+#
+# INVARIANTS (check.sh enforces): no `ct`, no `nat`, no `masquerade`, no `redirect` anywhere in this file;
+# nf_conntrack is blacklisted (modprobe.d/vz-no-conntrack.conf) and Docker is forbidden on the gateway.
+
+flush ruleset
+
+table ip vz {
+
+    # Inbound from Verizon (inner packet after decap, re-injected on xfrm-vz): rewrite the destination
+    # BEFORE routing so the forward lookup already sees the VPC address. priority raw = earliest hook point.
+    chain vz_pre {
+        type filter hook prerouting priority raw; policy accept;
+        iifname "xfrm-vz" ip daddr ${VZ_ZONE_SIP} counter ip daddr set ${VZ_SBC_VIP}   # zone SIP IP -> SBC Verizon VIP (.251)
+        iifname "xfrm-vz" ip daddr ${VZ_FS1_PUB}  counter ip daddr set ${VZ_FS1_NIC}   # FS-1 public (media) -> FS-1 NIC
+        iifname "xfrm-vz" ip daddr ${VZ_FS2_PUB}  counter ip daddr set ${VZ_FS2_NIC}   # FS-2 public (media) -> FS-2 NIC
+    }
+
+    # Forward: default DROP. Only tunnel<->platform flows pass, and only for Verizon's declared prefixes.
+    # The MSS clamp is non-terminal and runs first so both directions get TCP-MSS 1350 (§3.2 "TCP-MSS 1350", §3.4).
+    chain vz_fwd {
+        type filter hook forward priority filter; policy drop;
+        tcp flags syn counter tcp option maxseg size set 1350
+        iifname "xfrm-vz" ip saddr ${VZ_PREFIX_SET} ip daddr { ${VZ_SBC_VIP}, ${VZ_FS1_NIC}, ${VZ_FS2_NIC} } counter accept
+        iifname "ens4"    ip daddr ${VZ_PREFIX_SET} ip saddr { ${VZ_SBC_VIP}, ${VZ_SBC1_IP}, ${VZ_SBC2_IP}, ${VZ_FS1_NIC}, ${VZ_FS2_NIC} } counter accept
+    }
+
+    # Outbound to Verizon: rewrite the source AFTER routing (oif = xfrm-vz) and BEFORE xfrm encapsulation
+    # (priority 100 = after srcnat position; the encap happens when the packet leaves xfrm-vz).
+    # The SBC may send from the VIP or from either SBC's own IP (ACK/BYE/replies) — all three become the zone SIP IP.
+    chain vz_post {
+        type filter hook postrouting priority 100; policy accept;
+        oifname "xfrm-vz" ip saddr { ${VZ_SBC_VIP}, ${VZ_SBC1_IP}, ${VZ_SBC2_IP} } counter ip saddr set ${VZ_ZONE_SIP}
+        oifname "xfrm-vz" ip saddr ${VZ_FS1_NIC} counter ip saddr set ${VZ_FS1_PUB}
+        oifname "xfrm-vz" ip saddr ${VZ_FS2_NIC} counter ip saddr set ${VZ_FS2_PUB}
+    }
+}
+
+# Accepted limitation (§3.3): ICMP errors' embedded inner headers are not translated; a Verizon-originated ICMP error
+# naming the zone SIP IP reaches the SBC unmatched and is ignored.
+# Verify on the box: `nft --debug=netlink list table ip vz` shows csum_flags 0x1 on the payload writes;
+# `tcpdump -vv` shows `cksum ... (correct)` on both sides.
