@@ -128,7 +128,7 @@ GCP external protocol forwarding (forwarding rule → `target-instance`, `L3_DEF
 | Clear DF | `children.vz.copy_df = no` |
 | MTU 1400 | XFRM interface `xfrm-vz` `mtu 1400` |
 | TCP-MSS 1350 | nftables MSS clamp on forward (§3.3) |
-| Anti-replay | ▲ `replay_window = 128` (per-child; the default 32 is one RTP reorder burst away from drops under ECMP). `esn = no` |
+| Anti-replay | ▲ `replay_window = 128` (per-child; the default 32 is one RTP reorder burst away from drops under ECMP). No ESN: `noesn` is the proposal default — there is NO `esn` child option (charon 5.9.8 discards the whole connection on it; caught in verification 2026-10-30) |
 | General IKE-ID | `local id = <IKE_IP>`, `remote id = <Verizon peer IP>` — **confirm with Verizon** |
 | IP unnumbered | `ip link add xfrm-vz type xfrm if_id 42` (persist via systemd-networkd `.netdev` `Kind=xfrm`, `InterfaceId=42`, `Independent=yes`), no address; `children.vz.if_id_in = 42`, `if_id_out = 42` |
 | Static routes | ▲ `charon.install_routes = no`, `install_virtual_ip = no`. Manual: `ip route add <VZ_PREFIX> dev xfrm-vz` **plus** `ip route add blackhole <VZ_PREFIX> metric 200` (if `xfrm-vz` drops, packets die locally instead of looping default-route → ILB → same gateway). `/32` host routes for Verizon's IKE peer IPs via `ens4` in case they sit inside a declared prefix. GCP: static routes → next-hop ILB |
@@ -142,22 +142,22 @@ GCP external protocol forwarding (forwarding rule → `target-instance`, `L3_DEF
 
 ```
 table ip vz {
-  chain pre  { type filter hook prerouting priority raw; policy accept;      # before routing
+  chain vz_pre  { type filter hook prerouting priority raw; policy accept;   # before routing
     iifname "xfrm-vz" ip daddr ZONE_SIP ip daddr set 10.X.0.251
     iifname "xfrm-vz" ip daddr FS1_PUB  ip daddr set FS1_NIC
     iifname "xfrm-vz" ip daddr FS2_PUB  ip daddr set FS2_NIC }
-  chain fwd  { type filter hook forward priority filter; policy drop;
+  chain vz_fwd  { type filter hook forward priority filter; policy drop;      # 'fwd' alone is a reserved nft keyword (verified: parse error)
     tcp flags syn tcp option maxseg size set 1350
     iifname "xfrm-vz" ip saddr { VZ_PREFIXES } ip daddr { 10.X.0.251, FS1_NIC, FS2_NIC } accept
     iifname "ens4"    ip daddr { VZ_PREFIXES } ip saddr { 10.X.0.251, SBC1, SBC2, FS1_NIC, FS2_NIC } accept }
-  chain post { type filter hook postrouting priority 100; policy accept;     # after routing, before xfrm encap
+  chain vz_post { type filter hook postrouting priority 100; policy accept;  # after routing, before xfrm encap
     oifname "xfrm-vz" ip saddr { 10.X.0.251, SBC1, SBC2 } ip saddr set ZONE_SIP
     oifname "xfrm-vz" ip saddr FS1_NIC ip saddr set FS1_PUB
     oifname "xfrm-vz" ip saddr FS2_NIC ip saddr set FS2_PUB } }
 ```
 - **conntrack must never load:** no `ct`/`nat` expressions, `blacklist nf_conntrack` in modprobe.d, and **no Docker on the gateways** (Docker loads conntrack + iptables NAT). The gateways deploy by `git pull` + a plain install script, not compose.
 - Accepted limitation: ICMP errors' embedded inner headers aren't translated; Verizon-originated ICMP errors naming ZONE_SIP reach the SBC unmatched and are ignored.
-- Verify: `nft --debug=netlink` shows `csum_flags 0x1` on the payload writes; tcpdump `-vv` shows `cksum ... (correct)` both sides.
+- Verify: `nft --debug=netlink` shows `csum_flags 0x1` on the payload writes; tcpdump `-vv` shows `cksum ... (correct)` both sides. Ruleset verified 2026-10-30 with nft 1.0.6 in a Debian 12 container (`nft -c -f`, loaded, 6 csum-fixing payload writes). Implementation: `infra/vz-ipsec/` (PR `feat/vz-ipsec-gateways`).
 
 ### 3.4 MTU — the real fix is on the SBCs and FSes ▲
 Arithmetic: inner 1400 → 20 (outer IP) + 8 (SPI/seq) + 8 (GCM IV) + 1404 (padded) + 16 (ICV) = **1456 ≤ 1460** (VPC MTU). Four bytes of margin — which is why "no NAT-T" is load-bearing (UDP encap adds 8 → every full-size packet becomes two outer fragments). Don't touch the VPC MTU.
