@@ -43,11 +43,28 @@ local aliases = {
     ["206.146.98.26"]  = "Sinch-Atlanta-LD",  -- TG ATLNGAQSGR2_7214 (INT LD)
     ["206.146.100.26"] = "Sinch-Denver-TF",   -- TG DNVTCOZIGR2_3282 (OSAO 8YY)
 
+    -- Verizon IPsec trunks (docs/VERIZON_IPSEC_TRUNKS_PLAN.md §2.2 / §4.1).
+    -- Our side only — Verizon's SIP Gateway / ATF-IP / media IPs are not
+    -- assigned yet; add them here as "Verizon-<name>" (that prefix is the
+    -- carrier family in the API mirror, homer_pcap.py CARRIER_NAME_PREFIXES)
+    -- once Verizon provides the prefixes. Our own Vz* entries are PLATFORM
+    -- nodes (gateways, reserved source IPs), never carrier. The per-zone entries below cover: the
+    -- inside-tunnel SIP IP Verizon sees (1:1 NAT -> the zone's .251 SBC VIP),
+    -- the .251 VIP itself (siptrace reports the bind address for inbound),
+    -- the IKE peer IPs (ESP only — never SIP, listed for completeness so a
+    -- stray packet never renders as a raw IP), and the gateway NIC IPs.
+
     -- =================== EAST ZONE (us-east1-b) ===================
     -- SBC layer (East). Both interfaces of each node collapse to one name
     -- so the node renders as a single ladder column.
     ["34.24.133.82"]   = "SBC-VIP",      -- East NLB VIP
     ["10.142.0.250"]   = "SBC-SigVIP",   -- East signaling ILB VIP (active/standby; update if reservation differs)
+    ["10.142.0.251"]   = "SBC-VzVIP",    -- East SBC Verizon ILB VIP (sbc-verizon-fwd; inbound bind address in siptrace)
+    ["34.148.100.185"] = "VzSIP",       -- east-vz-sip: inside-tunnel SIP IP Verizon sees (1:1 NAT -> 10.142.0.251)
+    ["35.231.206.85"]  = "VzIKE-A",     -- east-vz-ike-a: IKE peer IP (ESP only, never SIP)
+    ["34.26.69.151"]   = "VzIKE-B",     -- east-vz-ike-b: IKE peer IP (ESP only, never SIP)
+    ["192.168.11.2"]   = "VzGW-A",      -- east-vz-gw-a NIC (vz-ipsec-east, us-east1-b)
+    ["192.168.11.3"]   = "VzGW-B",      -- east-vz-gw-b NIC (vz-ipsec-east, us-east1-c)
     ["10.142.0.100"]   = "SBC-1",        -- East SBC-1 internal (VPC)
     ["34.74.71.32"]    = "SBC-1",        -- East SBC-1 public
     ["10.142.0.101"]   = "SBC-2",        -- East SBC-2 internal (VPC)
@@ -71,6 +88,12 @@ local aliases = {
     -- never renders as a raw "UNKNOWN" IP in the ladder.
     ["35.252.214.40"]  = "West-SBC-VIP", -- West NLB VIP
     ["10.138.0.250"]   = "West-SBC-SigVIP", -- West signaling ILB VIP (active/standby; update if reservation differs)
+    ["10.138.0.251"]   = "West-SBC-VzVIP",  -- West SBC Verizon ILB VIP (west-sbc-verizon-fwd; inbound bind address in siptrace)
+    ["136.86.242.57"]  = "West-VzSIP",     -- west-vz-sip: inside-tunnel SIP IP Verizon sees (1:1 NAT -> 10.138.0.251)
+    ["8.231.131.118"]  = "West-VzIKE-A",   -- west-vz-ike-a: IKE peer IP (ESP only, never SIP)
+    ["136.66.170.29"]  = "West-VzIKE-B",   -- west-vz-ike-b: IKE peer IP (ESP only, never SIP)
+    ["192.168.21.2"]   = "West-VzGW-A",    -- west-vz-gw-a NIC (vz-ipsec-west, us-west1-b)
+    ["192.168.21.3"]   = "West-VzGW-B",    -- west-vz-gw-b NIC (vz-ipsec-west, us-west1-c)
     ["10.138.0.100"]   = "West-SBC-1",   -- West SBC-1 internal (VPC)
     ["8.229.41.59"]    = "West-SBC-1",   -- West SBC-1 public
     ["10.138.0.101"]   = "West-SBC-2",   -- West SBC-2 internal (VPC)
@@ -93,6 +116,12 @@ local aliases = {
     -- "Central-*" name so each node is a single ladder column.
     ["35.253.133.230"] = "Central-SBC-VIP", -- Central NLB VIP
     ["10.128.0.250"]   = "Central-SBC-SigVIP", -- Central signaling ILB VIP (active/standby; update if reservation differs)
+    ["10.128.0.251"]   = "Central-SBC-VzVIP",  -- Central SBC Verizon ILB VIP (central-sbc-verizon-fwd; inbound bind address in siptrace)
+    ["35.184.132.124"] = "Central-VzSIP",     -- central-vz-sip: inside-tunnel SIP IP Verizon sees (1:1 NAT -> 10.128.0.251)
+    ["34.68.252.50"]   = "Central-VzIKE-A",   -- central-vz-ike-a: IKE peer IP (ESP only, never SIP)
+    ["34.171.191.175"] = "Central-VzIKE-B",   -- central-vz-ike-b: IKE peer IP (ESP only, never SIP)
+    ["192.168.31.4"]   = "Central-VzGW-A",    -- central-vz-gw-a NIC (vz-ipsec-central, us-central1-a)
+    ["192.168.31.5"]   = "Central-VzGW-B",    -- central-vz-gw-b NIC (vz-ipsec-central, us-central1-f)
     ["10.128.0.100"]   = "Central-SBC-1",   -- Central SBC-1 internal (VPC)
     ["34.41.188.100"]  = "Central-SBC-1",   -- Central SBC-1 public
     ["10.128.0.101"]   = "Central-SBC-2",   -- Central SBC-2 internal (VPC)

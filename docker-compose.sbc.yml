@@ -182,6 +182,42 @@ services:
       # defaults — NO .env edits needed.
       - SINCH_LD2_IP=${SINCH_LD2_IP:-206.146.100.25}
       - SINCH_TF2_IP=${SINCH_TF2_IP:-206.146.98.25}
+      # Verizon SIP Gateway (2-Way) + ATF-IP over the self-built IPsec gateways
+      # (docs/VERIZON_IPSEC_TRUNKS_PLAN.md §8.1, docker/kamailio/CLAUDE.md
+      # §8.15). ALL OPTIONAL, DEFAULT OFF = compiled out: every VERIZON_MODE
+      # block is REMOVED from the rendered kamailio.cfg (byte-identical to the
+      # pre-Verizon config) and the dispatcher group-13 line is a comment.
+      # Every var MUST be listed here or the container never sees it.
+      #   VERIZON_VIP       zone Verizon internal ILB address (10.x.0.251) —
+      #                     BOUND (loopback + listen), never advertised.
+      #   VERIZON_SIP_IP    zone inside-tunnel public SIP IP — ADVERTISED only
+      #                     (East 34.148.100.185 / West 136.86.242.57 /
+      #                     Central 35.184.132.124); the gateways translate it.
+      #   VERIZON_SIP_NETS  comma list of EVERY Verizon signaling source
+      #                     (SIP Gateway + ATF-IP SBCs + OPTIONS monitors):
+      #                     trust, ingress, egress, advertise, scrub gate, MTU.
+      #   VERIZON_TF_IPS    optional ATF-IP (toll-free) sources if distinct
+      #                     from the SIP Gateway ones; unset = mixed class (no
+      #                     toll-free ingress class check for Verizon sources).
+      #   VERIZON_PROBE_IPS optional Verizon SIP Gateway HOST IPs to
+      #                     OPTIONS-probe (dispatcher group 13; primary first —
+      #                     it gets duid verizon-<zone>).
+      #   VERIZON_ZONE      optional east|west|central (default from
+      #                     VERIZON_VIP's second octet, else SBC_ID prefix):
+      #                     duid verizon-<zone> + X-Inbound-PoP <zone>-orig.
+      # PREREQUISITES (entrypoint FORCES OFF with a WARNING otherwise):
+      # SBC_SIGNALING_VIP set (dedicated mode) AND SBC_PEER_INTERNAL_IP set
+      # (peer reply hand-off — all Verizon return traffic lands on the ACTIVE
+      # SBC). Set on BOTH SBCs of a zone. Memory: the VERIZON_VIP UDP listen
+      # forks `children` (16) more workers (each with its own -m 16 pkg
+      # arena); the 2G limit below has headroom — raise it before adding a
+      # further listen.
+      - VERIZON_VIP=${VERIZON_VIP:-}
+      - VERIZON_SIP_IP=${VERIZON_SIP_IP:-}
+      - VERIZON_SIP_NETS=${VERIZON_SIP_NETS:-}
+      - VERIZON_TF_IPS=${VERIZON_TF_IPS:-}
+      - VERIZON_PROBE_IPS=${VERIZON_PROBE_IPS:-}
+      - VERIZON_ZONE=${VERIZON_ZONE:-}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro

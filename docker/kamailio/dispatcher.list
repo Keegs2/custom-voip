@@ -260,7 +260,7 @@ __FS2_DISPATCHER_LINE__
 # ============================================================
 # The OTHER SBC of this zone's active/standby pair (its VPC IP, from
 # SBC_PEER_INTERNAL_IP). NOT a carrier: carrier-monitor's CARRIER_SETIDS
-# ({2,3,6,7,8,9,11,12}) excludes it, and the :5060 port keeps it out of the FS
+# ({2,3,6,7,8,9,11,12,13}) excludes it, and the :5060 port keeps it out of the FS
 # (:5080) event-route match; kamailio.cfg's event routes match it by EXACT
 # URI to maintain peerhealth=>up, the liveness gate of the reply_route peer
 # hand-off (CLAUDE.md §8.12). Same OPTIONS probing as group 1
@@ -275,6 +275,33 @@ __FS2_DISPATCHER_LINE__
 # unset/invalid, entrypoint.sh renders the line below as a comment (no
 # group 10 at all — byte-identical behavior).
 __SBC_PEER_DISPATCHER_LINE__
+
+# ============================================================
+# Group 13: Verizon SIP Gateway (IPsec) — VERIZON mode only (CLAUDE.md §8.15)
+# ============================================================
+# OPTIONS keepalive/health toward the zone's Verizon SIP Gateway host IPs
+# (VERIZON_PROBE_IPS), ONE line per IP, rendered by entrypoint.sh ONLY when
+# Verizon mode is on; otherwise the placeholder below renders as a comment
+# (the same convention as the group-10 peer line above — a socket= on a
+# non-listen is a dispatcher load error, so the line must not exist without
+# the bind).
+# Rendered shape:
+#   13 sip:<ip>:5060 0 0 weight=100;duid=verizon-<zone>;socket=udp:<VERIZON_VIP>:5060;ping_from=sip:ping@<VERIZON_SIP_IP>
+#   - duid=verizon-<zone> (east|west|central) on the FIRST listed IP — the
+#     carrier_trunk_health join key (migration 62 derives 'verizon-' || pop);
+#     further IPs render verizon-<zone>-2, -3, ... List the primary first.
+#   - socket=udp:VERIZON_VIP:5060: the probe egresses the Verizon ILB bind
+#     (a REAL listen in this mode, on lo via entrypoint.sh) whose advertise is
+#     the inside-tunnel SIP IP — the VPC route carries it to the IPsec
+#     gateway, which translates the source to that SIP IP. Replies return to
+#     the SIP IP -> gateway -> VERIZON_VIP -> the NLB-ACTIVE SBC only, so the
+#     STANDBY reads group 13 UP only through the peer reply hand-off
+#     (SBC_PEER_INTERNAL_IP — a documented Verizon prerequisite, §8.12).
+#   - ping_from=sip:ping@VERIZON_SIP_IP: From host = the declared source.
+# Carrier-monitor CARRIER_SETIDS includes 13. NEVER used for call routing —
+# Verizon egress is table-driven (carrier_trunks -> X-Carrier-IP ->
+# route[TO_CARRIER] Step 1b forces the VERIZON_VIP socket).
+__VERIZON_DISPATCHER_LINES__
 
 # ============================================================
 # Notes:

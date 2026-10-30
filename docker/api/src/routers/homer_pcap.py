@@ -106,6 +106,12 @@ HEP_IP_ALIASES: dict[str, str] = {
     # ── EAST ZONE ──
     "34.24.133.82": "SBC-VIP",
     "10.142.0.250": "SBC-SigVIP",
+    "10.142.0.251": "SBC-VzVIP",
+    "34.148.100.185": "VzSIP",
+    "35.231.206.85": "VzIKE-A",
+    "34.26.69.151": "VzIKE-B",
+    "192.168.11.2": "VzGW-A",
+    "192.168.11.3": "VzGW-B",
     "10.142.0.100": "SBC-1",
     "34.74.71.32": "SBC-1",
     "10.142.0.101": "SBC-2",
@@ -118,6 +124,12 @@ HEP_IP_ALIASES: dict[str, str] = {
     # ── WEST ZONE ──
     "35.252.214.40": "West-SBC-VIP",
     "10.138.0.250": "West-SBC-SigVIP",
+    "10.138.0.251": "West-SBC-VzVIP",
+    "136.86.242.57": "West-VzSIP",
+    "8.231.131.118": "West-VzIKE-A",
+    "136.66.170.29": "West-VzIKE-B",
+    "192.168.21.2": "West-VzGW-A",
+    "192.168.21.3": "West-VzGW-B",
     "10.138.0.100": "West-SBC-1",
     "8.229.41.59": "West-SBC-1",
     "10.138.0.101": "West-SBC-2",
@@ -131,6 +143,12 @@ HEP_IP_ALIASES: dict[str, str] = {
     # ── CENTRAL ZONE ──
     "35.253.133.230": "Central-SBC-VIP",
     "10.128.0.250": "Central-SBC-SigVIP",
+    "10.128.0.251": "Central-SBC-VzVIP",
+    "35.184.132.124": "Central-VzSIP",
+    "34.68.252.50": "Central-VzIKE-A",
+    "34.171.191.175": "Central-VzIKE-B",
+    "192.168.31.4": "Central-VzGW-A",
+    "192.168.31.5": "Central-VzGW-B",
     "10.128.0.100": "Central-SBC-1",
     "34.41.188.100": "Central-SBC-1",
     "10.128.0.101": "Central-SBC-2",
@@ -147,7 +165,10 @@ HEP_IP_ALIASES: dict[str, str] = {
 # carrier node — new PoPs of an existing carrier inherit automatically.  A
 # brand-new carrier family must be added HERE (the alias-name drift test
 # fails loudly until it is).
-CARRIER_NAME_PREFIXES: tuple[str, ...] = ("BW-", "Sinch-")
+CARRIER_NAME_PREFIXES: tuple[str, ...] = ("BW-", "Sinch-", "Verizon-")
+# "Verizon-" is reserved for Verizon's own SIP Gateway / ATF-IP / media IPs
+# (not assigned yet). Our Verizon-FACING addresses (Vz* — gateways, IKE peers,
+# the reserved in-tunnel SIP IPs, the .251 SBC VIPs) are platform nodes.
 
 CARRIER_IPS: frozenset[str] = frozenset(
     ip for ip, name in HEP_IP_ALIASES.items()

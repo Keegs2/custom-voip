@@ -481,6 +481,7 @@ Dispatcher groups (10 is the optional peer-SBC liveness group, §8.12):
 | 9 | sip:206.146.100.26:5060 (`__SINCH_TF_IP__`, duid=sinch-denver-tf) | Sinch Denver TF (OSAO 8YY) termination keepalive/health ONLY |
 | 11 | sip:206.146.100.25:5060 (`__SINCH_LD2_IP__`, duid=sinch-denver-ld) | Sinch Denver LD **redundant** termination (DENSBX21) keepalive/health ONLY |
 | 12 | sip:206.146.98.25:5060 (`__SINCH_TF2_IP__`, duid=sinch-atlanta-tf) | Sinch Atlanta TF (OSAO 8YY) **redundant** termination (ATLSBX21) keepalive/health ONLY |
+| 13 | `__VERIZON_DISPATCHER_LINES__` = one `sip:<ip>:5060` per `VERIZON_PROBE_IPS` entry, `duid=verizon-<zone>` (first IP; `verizon-<zone>-2`, … after), `socket=udp:VERIZON_VIP:5060`, `ping_from=sip:ping@VERIZON_SIP_IP` | Verizon SIP Gateway (IPsec) keepalive/health ONLY — **Verizon mode only** (§8.15); renders as a comment otherwise. VERIZON_VIP-sourced probes: replies reach the ACTIVE SBC only, so the standby reads it UP only via the peer reply hand-off (a Verizon prerequisite) |
 
 **Groups 11/12 share their IPs with the 8XX-T TF ORIGINATION trunks** (static
 trust `SINCH_TF_DEN_IP`/`SINCH_TF_ATL_IP`). They are templated exactly like
@@ -499,12 +500,12 @@ may read down (or "up" if Sinch answers 500 — 500 is in
 dispatcher state (checked `infra/monitoring`, `docker/vmalert/rules`), so a
 down probe on a disabled trunk cannot page.
 
-Groups 2-9 and 11-12 are NOT used for call routing (that's route[TO_CARRIER] via $rd/$du —
-Sinch termination egress is table-driven via X-Carrier-IP, §4.3 Step 1a).
+Groups 2-9 and 11-13 are NOT used for call routing (that's route[TO_CARRIER] via $rd/$du —
+Sinch and Verizon termination egress is table-driven via X-Carrier-IP, §4.3 Step 1a/1b).
 They exist solely for:
 - **NAT keepalive**: OPTIONS every 5s keeps GCE's UDP NAT pinhole open.
 - **Health monitoring**: Detects carrier unreachability. The carrier-monitor
-  sidecar reports groups 2, 3, 6-9, 11-12 (`CARRIER_SETIDS` in
+  sidecar reports groups 2, 3, 6-9, 11-13 (`CARRIER_SETIDS` in
   `docker/carrier-monitor/carrier_monitor.py`; `carrier_trunk_health`
   filters the same setids since migration 53) to the East API.
 
@@ -656,6 +657,12 @@ Set in `.env` file on each SBC VM. Passed via `docker-compose.sbc.yml`.
 | `SINCH_TF2_IP` | No (default 206.146.98.25) | — | Sinch Atlanta TF (OSAO 8YY) REDUNDANT termination (ATLSBX21) — dispatcher group 12 ONLY. Validated dotted-quad; garbage ⇒ WARNING + default. Same IP as `SINCH_TF_ATL_IP`. |
 | `TF_TEST_TNS` | No (default empty) | 5595335873,5595335908 | Toll-free ingress test-TN allowlist (§4.6.2): listed non-8YY TNs are admitted from TF orig trunks (rule=tf-test-tn-exempt). Strict 10-digit NANP validation; garbage dropped with WARNING. Delete once real TFNs are live. |
 | `TF_INGRESS_ENFORCE` | No (default on) | off | Toll-free ingress class split (§4.6.2): TF orig trunks accept only 8YY R-URIs, every other carrier accepts no 8YY R-URIs (404). Only exactly `off` disables (compiles out the ingress check; `route[TF_CLASSIFY]` stays for the Step 1a 8YY egress guard). Emergency rollback only — use `TF_TEST_TNS` for test TNs. |
+| `VERIZON_VIP` | No (unset = Verizon mode off, compiled out) | 10.128.0.251 | Verizon mode (§8.15): this zone's Verizon INTERNAL ILB address (third forwarding rule on the SBC active/standby backend). BOUND — loopback add + `listen=udp/tcp:VERIZON_VIP:5060 advertise VERIZON_SIP_IP:5060` + `listen=tcp:VERIZON_VIP:8080` (ILB /healthz) + `alias=`. Validated IPv4, must differ from every existing bind. |
+| `VERIZON_SIP_IP` | No (required for Verizon mode) | 35.184.132.124 | This zone's inside-tunnel public SIP address — ADVERTISE-ONLY, never bound (the IPsec gateways translate it to `VERIZON_VIP`). Every Verizon-visible address (Via from the forced socket, From/PAI/Diversion/Contact hosts, outer Record-Route, the Contact rewritten into FS replies/in-dialog requests) renders it. East 34.148.100.185 / West 136.86.242.57 / Central 35.184.132.124. |
+| `VERIZON_SIP_NETS` | No (required for Verizon mode) | 203.0.113.0/28,198.51.100.7 | Comma list of EVERY Verizon signaling source (SIP Gateway + ATF-IP SBCs + OPTIONS monitors) as IPv4 or IPv4/prefix (bare IPs → /32; invalid entries dropped with WARNING). Static trust (flag 5), carrier-ingress branch, `TO_CARRIER` egress selection, REPLY_HANDLER scrub gate, entrypoint MTU-hint routes (`mtu lock 1400`). |
+| `VERIZON_TF_IPS` | No (unset = MIXED class) | 198.51.100.7 | Optional ATF-IP (toll-free) sources if distinct from the SIP Gateway ones → `#!define VERIZON_TF_SPLIT`: those are the TF ingress class, other Verizon sources non-TF. Unset ⇒ the toll-free ingress class check is SKIPPED for Verizon sources (both products on shared IPs). |
+| `VERIZON_PROBE_IPS` | No (unset = no probe group, WARNING) | 203.0.113.10,203.0.113.11 | Verizon SIP Gateway HOST IPs to OPTIONS-probe — dispatcher group 13, one line per IP, VERIZON_VIP-sourced. List the zone's primary first (it gets `duid=verizon-<zone>`). |
+| `VERIZON_ZONE` | No (default from `VERIZON_VIP` octet: 10.142→east, 10.138→west, 10.128→central; else SBC_ID prefix) | central | Zone label → dispatcher `duid=verizon-<zone>` and `X-Inbound-PoP: <zone>-orig` on Verizon-originated calls (migration 62 `carrier_trunk_health` keys: `'verizon-' \|\| pop` and the `orig_map`). |
 | `VIP_EGRESS` | No (default off) | on | Carrier-bound INVITE egress from the external NLB VIP for INVITEs received on the signaling ILB VIP (`if ($Ri == "SIGNALING_VIP") { $fs = "udp:ADVERTISE_IP:5060"; }` in `route[TO_CARRIER]` Step 9, compiled in via `#!define VIP_EGRESS` + `SBC_SIGVIP_DEDICATED`). on/true/1 = ON, anything else = OFF; entrypoint forces OFF (warning) when `SBC_SIGNALING_VIP` is unset. Direct-IP ingress keeps own-public-IP egress — the 6 SBC public IPs stay whitelisted. BANDWIDTH destinations only: Sinch (any non-Bandwidth) INVITEs always keep own-public-IP egress. Enable on both SBCs of a zone. See "Carrier-bound INVITE egress" in §5 Dispatcher Configuration. |
 
 ## 7. SIP Call Flows
@@ -1279,6 +1286,135 @@ container (From reverts to the RCF DID; no SBC change needed).
 empty and the ingest falls back to intent.
 
 
+### 8.15 Verizon mode — SIP Gateway (2-Way) + ATF-IP over self-built IPsec (`VERIZON_*`, default off)
+
+**Status: SHIPS DARK (2026-10-30).** Implements `docs/VERIZON_IPSEC_TRUNKS_PLAN.md`
+§8.1 items 1-10, 12, 13 (item 11, TCP transport, is a documented follow-up). The
+SBC side of the Verizon interconnect: Verizon's SIP Gateway (DID 2-Way) and ATF-IP
+(toll-free) SBCs reach each zone through two strongSwan gateways; the gateways
+translate, statelessly 1:1, Verizon-side addresses to VPC ones. Two addresses per
+zone, deliberately different in kind:
+
+| | What Verizon sees | What this SBC has | Rendered as |
+|---|---|---|---|
+| SIP signaling | `VERIZON_SIP_IP` (reserved Google IP, never attached anywhere) | `VERIZON_VIP` = the zone's third internal ILB forwarding rule on the SAME active/standby SBC backend (10.x.0.251) | `listen=udp/tcp:VERIZON_VIP:5060 advertise VERIZON_SIP_IP:5060`, `listen=tcp:VERIZON_VIP:8080`, `alias=` for both, `ip addr add VERIZON_VIP/32 dev lo` in the entrypoint |
+| Media | the FS public IPs (unchanged) | nothing on the SBC | no SBC change (plan §8.2) |
+
+**Env contract** (§6; all optional, every var passed through `docker-compose.sbc.yml`):
+`VERIZON_VIP`, `VERIZON_SIP_IP`, `VERIZON_SIP_NETS` (required for ON),
+`VERIZON_TF_IPS`, `VERIZON_PROBE_IPS`, `VERIZON_ZONE` (optional). Mode is ON only
+when the three required vars validate AND `SBC_SIGVIP_MODE=dedicated` AND
+`SBC_PEER_INTERNAL_IP` is set; otherwise the entrypoint FORCES it OFF with a
+WARNING naming every failed prerequisite (same forcing `VIP_EGRESS` gets). Set the
+vars on BOTH SBCs of a zone.
+
+**Compiled out ⇒ byte-identical (stronger than the other toggles).** When OFF, the
+entrypoint deletes the `__VERIZON_MODE_DEFINE__` line and runs an awk pass that
+REMOVES every `#!ifdef VERIZON_MODE … #!endif` block from the rendered
+`kamailio.cfg`, keeping the `#!else` branch verbatim and tracking nested
+`#!ifdef` depth. The rendered config is byte-for-byte the pre-Verizon config —
+render-diffed against the pristine 29fd90f template with the production env
+(dedicated + peer), the legacy env, and both forced-off envs: `cmp` identical.
+`dispatcher.list` differs only by the group-13 comment block (the group-10
+convention). When ON, `#!define VERIZON_MODE` is emitted and Kamailio's own
+preprocessor resolves the blocks (`kamailio -c` clean on 5.8.8). Every new line
+of Verizon logic — including comments — lives inside a `#!ifdef VERIZON_MODE`
+block; sites that CHANGE an existing line carry the old line in `#!else`. Keep
+it that way or the OFF render stops being identical.
+
+**What the blocks do (plan §8.1 item → cfg site):**
+1. *Listen + loopback*: the three `listen=` lines after the `SBC_SIGVIP_DEDICATED`
+   block; aliases after `alias=SIGNALING_VIP:5060`. The UDP listen forks 16 more
+   workers (`children`); `-m 16` per process; the compose 2G limit has headroom.
+2. *Every Verizon-visible address*: `$var(adv_ip)` (per request) and `$avp(adv_ip)`
+   (per transaction, for `onreply_route`). Set at the top of `request_route` from
+   `is_in_subnet($si, VERIZON_SIP_NETS_DEF)` (ipops takes the comma list directly),
+   refined in `route[WITHINDIALOG]` for FS-originated in-dialog requests from the
+   echoed Route set / R-URI host BEFORE `loose_route()`, and set in `TO_CARRIER`
+   Step 1b for Verizon destinations. Consumers: A-leg RR preset outer entry
+   (`record_route_preset("…", "$var(adv_ip):5060;fs=5080;lr")` — 5.8 rr accepts PV
+   args), `TO_CARRIER` `$fd`, Diversion, Contact, PAI, RR preset outer entry, the
+   three WITHINDIALOG Contact rewrites, and the `REPLY_HANDLER` Contact rewrite on
+   FS replies (`$avp(adv_ip)`, else ADVERTISE_IP). Non-Verizon traffic renders the
+   identical ADVERTISE_IP strings.
+3. *Egress*: `TO_CARRIER` Step 1b (right after Step 1a) — validated carrier IP in
+   `VERIZON_SIP_NETS_DEF` ⇒ `$var(vz_dst)=1`; Step 9 (after and outside the
+   `VIP_EGRESS` nest) forces `$fs = "udp:VERIZON_VIP:5060"`, so the Via renders the
+   socket's advertise. **Ingress guard:** `$Ri != "SIGNALING_VIP"` ⇒ immediate
+   `503 Verizon Trunk Requires Signaling VIP` (`t_newtran`+`t_reply`, the 8YY-guard
+   shape) — Verizon replies land on `VERIZON_VIP` = the NLB-ACTIVE SBC, and only
+   signaling-ILB ingress proves this SBC is active; a direct-IP (`SBC_INTERNAL_IP`,
+   127.0.0.1, external-VIP) attempt would strand its replies on the peer. Wider than
+   the plan's `$Ri == SBC_INTERNAL_IP` on purpose. The 422 retry in
+   `failure_route[CARRIER_FAILURE]` re-forces the socket from `$avp(adv_ip)`.
+4. *Peer reply hand-off guard* (`reply_route`): `($Ri == "ADVERTISE_IP" || $Ri ==
+   "VERIZON_VIP")` — the standby's VERIZON_VIP-sourced group-13 probe replies and
+   failback-window INVITE replies are handed to the peer's tm exactly like §8.12.
+   Hence `SBC_PEER_INTERNAL_IP` is a hard prerequisite (forced off without it).
+5. *Static trust* (flag 5): `$var(vz_src) == 1` arm in the trust chain and
+   `|| $var(vz_src) == 1` on the carrier-ingress INVITE condition (parallel
+   conditions — keep in sync). Untrusted OPTIONS are flood-blocked after 20/60 s,
+   so `VERIZON_SIP_NETS` MUST include every Verizon OPTIONS-monitor source.
+6. *Attribution*: `X-Inbound-TC: tc4` (label `verizon`, joins the closed metric
+   enum), `X-Inbound-Carrier: verizon`, `X-Inbound-PoP: <zone>-orig` (substdef
+   `VERIZON_POP`). Dispatcher `duid=verizon-<zone>` on the first probe IP
+   (`verizon-<zone>-2`, … after). Both key migration 62's `carrier_trunk_health`
+   (`'verizon-' || pop`, `orig_map`); the sidecar's `CARRIER_SETIDS` includes 13
+   and `DUID_NAMES` has the three zone duids.
+7. *Toll-free ingress class*: `VERIZON_TF_IPS` set ⇒ `#!define VERIZON_TF_SPLIT`,
+   listed sources `$var(tf_src)=1`, other Verizon sources 0 (ordinary
+   `TF_INGRESS_CHECK`). Unset ⇒ MIXED third class: `$var(tf_skip)=1`, the class
+   check is skipped for Verizon sources (ATF-IP and SIP Gateway share IPs). The
+   FS dialplan still 404s unprovisioned numbers. Plan §8.1 item 7's open question
+   (R-URI user = dialed TFN or translated DNIS) is unchanged by this.
+8. *RFC1918 scrub gate*: `REPLY_HANDLER` carrier-reply scrub has an
+   `else if (is_in_subnet($si, VERIZON_SIP_NETS_DEF))` arm that does nothing —
+   Verizon SDP `c=` lines in private space pass intact (live-verified).
+9. *Dispatcher*: group 13 (`__VERIZON_DISPATCHER_LINES__`, §5), comment when off.
+10. *MTU hint*: entrypoint `ip route replace <net> via <default gw> dev <iface>
+    mtu lock 1400` per `VERIZON_SIP_NETS` entry (idempotent, logged, non-fatal).
+11. *Transport*: UDP only. `VERIZON_TRANSPORT` follow-up documented in the
+    Step 1b comment (`;transport=tcp` on `$du`/RR/Contact, `$fs = tcp:…`, both
+    .251 listens kept, Verizon must accept inbound TCP from `VERIZON_SIP_IP`).
+12. *Self-loop safety nets* (three sites): log the Route set / forced socket; for
+    a Verizon dialog (`$var(vz_dlg)`) answer `481` (drop for ACK) instead of
+    bouncing to `BANDWIDTH_IP_1`. Bandwidth/Sinch dialogs unchanged.
+13. *Caller ID*: PAI host renders `VERIZON_SIP_IP`. `E164_EGRESS` and
+    `RCF_FROM_PASSTHROUGH` are operator gates, not touched here — Verizon commonly
+    expects +1 E.164 and an on-account From/PAI TN; keep `RCF_FROM_PASSTHROUGH`
+    off for Verizon and decide `E164_EGRESS` per zone before turn-up.
+
+**Verified (2026-10-30, Kamailio 5.8.8 image, all peers on `lo`, throwaway
+Postgres):** `kamailio -c` on both ON renders (mixed + split); real boot in ON
+mode with `kamcmd dispatcher.list` showing group 13 on `socket=udp:10.128.0.251:5060`
+and `corex.list_sockets` the .251 bind advertising the SIP IP; 29/29 live SIP
+checks — OPTIONS from a Verizon source 200; inbound 8YY INVITE from a mixed-class
+source delivered to FS :5080 with RR `[SIGNALING_VIP;r2;fs=5080, VERIZON_SIP_IP;fs=5080]`,
+`X-Inbound-Carrier: verizon`, `X-Inbound-PoP: central-orig`, `X-Inbound-TC: tc4`,
+spoofed attribution stripped; FS 200 OK relayed with Contact host = VERIZON_SIP_IP;
+an INVITE from outside the nets not admitted as carrier ingress; B-leg INVITE
+with a Verizon `X-Carrier-IP` leaving from UDP source 10.128.0.251 with Via/From/
+Contact/PAI/Diversion/outer-RR = VERIZON_SIP_IP and internal headers stripped;
+Verizon 200 OK (RFC1918 SDP, `Session-Expires: 30`) relayed to FS with the SDP
+intact, SE normalized to 1800, Contact untouched; the same B-leg via the direct
+SBC IP rejected `503 Verizon Trunk Requires Signaling VIP` and never sent; a
+Bandwidth-bound control B-leg unchanged (VIP-sourced, all ADVERTISE_IP).
+
+**Unverified in the lab (plan §8.6) — prove in the zone before turn-up:**
+U1 FS-side ACK/BYE r2 double-pop forcing the `.251` socket from the advertise-only
+second Route (`kamcmd corex.list_sockets` + Homer trace of an FS-side hangup);
+U2 `.251`-sourced egress into the next-hop-ILB VPC route and ILB delivery of
+gateway-forwarded packets with a Verizon source; U3 Verizon's refresher
+expectation. Also: the ILB VIP-addressed `/healthz` on `VERIZON_VIP:8080` (same
+HC as the signaling ILB, so expected to pass the moment the bind exists).
+
+**Known pre-existing quirk surfaced here (not changed):** a carrier reply the
+peer hands over raw (§8.12) arrives with `$si` = the peer's VPC IP, which
+`route(IS_INTERNAL_SOURCE)` classifies as "from FS" in `REPLY_HANDLER`: its
+Contact is rewritten to our VIP and its SDP scrubbed. For Bandwidth this is
+masked by the self-loop reroute; for a Verizon dialog it would hit the item-12
+481 path. Only the failback window is affected; fix separately.
+
 ## 9. How to Modify
 
 ### Adding a New Carrier IP / Trunk Config
@@ -1311,9 +1447,9 @@ current production IPs). To add a NEW static carrier IP:
    `X-Inbound-Carrier`/`X-Inbound-PoP` attribution arm and (for a non-Bandwidth
    carrier) an `X-Inbound-TC` arm.
 3. Add a dispatcher group in `dispatcher.list` for keepalive (6-9 and 11-12
-   are Sinch, 10 is the peer SBC; next free group is 13):
+   are Sinch, 10 is the peer SBC, 13 is Verizon; next free group is 14):
    ```
-   13 sip:1.2.3.4:5060 0 0 weight=100;duid=carrier-pop
+   14 sip:1.2.3.4:5060 0 0 weight=100;duid=carrier-pop
    ```
    Add the setid to `CARRIER_SETIDS` + a `DUID_NAMES` entry in
    `docker/carrier-monitor/carrier_monitor.py` if it should be reported (and

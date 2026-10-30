@@ -887,7 +887,7 @@ set_var("transfer_ringback", "%(2000,4000,440,480)")
 -- Same contract as inbound_router.lua's RCF termination loop for 8YY:
 --   * selection = lib/term_trunks.lua (same SQL, 60s process-wide cache
 --     shared with inbound_router, per-zone priority via FS_ZONE, STRICT
---     traffic_class='tollfree' filter, 4-trunk cap post-filter);
+--     traffic_class='tollfree' filter, every eligible row — no cap);
 --   * trunk-major attempts {SBC_PROXY_IP, SBC_PROXY_IP_FAILOVER} x trunk,
 --     cached TCP pre-check per attempt, X-Carrier-IP/X-Carrier-Label
 --     selector (Kamailio TO_CARRIER Step 1a validates it against an
