@@ -551,10 +551,12 @@ GCP Project: `rugged-night-193017` (a **shared** project — TED and other teams
 ### East — us-east1-b (holds the PG primary + API + UI + Homer)
 | VM Name | Role | Machine Type | Internal IP | External IP | Subnet | Tags |
 |---------|------|-------------|-------------|-------------|--------|------|
-| `poc-custom-voip` | SBC-1 | n2-standard-4 | 10.142.0.100 | 34.74.71.32 | default | bypass-vpn, custom-voip, lb-health-check, voip-sbc |
-| `kam-g2` | SBC-2 | e2-standard-4 | 10.142.0.101 | 35.243.136.35 | default | bypass-vpn, lb-health-check, voip-sbc |
-| `fs-media-v2` | FreeSWITCH FS-1 (active) + Redis | e2-standard-8 | 192.168.10.2 | 34.139.119.135 | voip-media (192.168.10.0/24) | bypass-vpn, voip-media |
-| `east-fs-2` | FreeSWITCH FS-2 (hot standby) | e2-standard-8 | 192.168.10.3 | 35.196.226.123 | voip-media (192.168.10.0/24) | bypass-vpn, voip-media |
+| `poc-custom-voip` | SBC-1 | n2-standard-4 | 10.142.0.100 | 34.74.71.32 | default | bypass-vpn, custom-voip, lb-health-check, voip-sbc, vz-east |
+| `kam-g2` | SBC-2 | e2-standard-4 | 10.142.0.101 | 35.243.136.35 | default | bypass-vpn, lb-health-check, voip-sbc, vz-east |
+| `fs-media-v2` | FreeSWITCH FS-1 (active) + Redis | e2-standard-8 | 192.168.10.2 | 34.139.119.135 | voip-media (192.168.10.0/24) | bypass-vpn, voip-media, vz-east |
+| `east-fs-2` | FreeSWITCH FS-2 (hot standby) | e2-standard-8 | 192.168.10.3 | 35.196.226.123 | voip-media (192.168.10.0/24) | bypass-vpn, voip-media, vz-east |
+| `east-vz-gw-a` | Verizon IPsec gateway A (dark, no tunnel yet) | n2-standard-2 | 192.168.11.2 | none — IKE 35.231.206.85 via protocol forwarding | vz-ipsec-east (192.168.11.0/28) | bypass-vpn, vz-ipsec |
+| `east-vz-gw-b` | Verizon IPsec gateway B (us-east1-**c**) | n2-standard-2 | 192.168.11.3 | none — IKE 34.26.69.151 via protocol forwarding | vz-ipsec-east | bypass-vpn, vz-ipsec |
 | `services` | Services (PG **primary** + API + UI + Homer + PgBouncer) | e2-highmem-4 (32 GB) | 10.142.0.103 | 34.26.57.37 | default | lb-health-check, voip-services |
 | `east-db-standby` | PG hot standby (HA, us-east1-**c**) | e2-standard-4 | 10.142.0.87 | — | default | bypass-vpn, voip-db-standby |
 
@@ -563,10 +565,12 @@ East NLB VIP `34.24.133.82` (`sbc-vip-udp`/`-tcp`, 5060) · instance group `sbc-
 ### West — us-west1-b
 | VM Name | Role | Machine Type | Internal IP | External IP | Subnet | Tags |
 |---------|------|-------------|-------------|-------------|--------|------|
-| `west-sbc-1` | SBC-1 | e2-standard-4 | 10.138.0.100 | 8.229.41.59 | default | bypass-vpn, lb-health-check, voip-sbc |
-| `west-sbc-2` | SBC-2 | e2-standard-4 | 10.138.0.101 | 136.117.230.166 | default | bypass-vpn, lb-health-check, voip-sbc |
-| `west-fs` | FreeSWITCH FS-1 (active) + Redis | e2-standard-8 | 192.168.20.2 | 8.229.177.165 | voip-media-west (192.168.20.0/24) | bypass-vpn, voip-media |
-| `west-fs-2` | FreeSWITCH FS-2 (hot standby) | e2-standard-8 | 192.168.20.3 | 35.197.95.171 | voip-media-west (192.168.20.0/24) | bypass-vpn, voip-media |
+| `west-sbc-1` | SBC-1 | e2-standard-4 | 10.138.0.100 | 8.229.41.59 | default | bypass-vpn, lb-health-check, voip-sbc, vz-west |
+| `west-sbc-2` | SBC-2 | e2-standard-4 | 10.138.0.101 | 136.117.230.166 | default | bypass-vpn, lb-health-check, voip-sbc, vz-west |
+| `west-fs` | FreeSWITCH FS-1 (active) + Redis | e2-standard-8 | 192.168.20.2 | 8.229.177.165 | voip-media-west (192.168.20.0/24) | bypass-vpn, voip-media, vz-west |
+| `west-fs-2` | FreeSWITCH FS-2 (hot standby) | e2-standard-8 | 192.168.20.3 | 35.197.95.171 | voip-media-west (192.168.20.0/24) | bypass-vpn, voip-media, vz-west |
+| `west-vz-gw-a` | Verizon IPsec gateway A (dark) | n2-standard-2 | 192.168.21.2 | none — IKE 8.231.131.118 via protocol forwarding | vz-ipsec-west (192.168.21.0/28) | bypass-vpn, vz-ipsec |
+| `west-vz-gw-b` | Verizon IPsec gateway B (us-west1-**c**) | n2-standard-2 | 192.168.21.3 | none — IKE 136.66.170.29 via protocol forwarding | vz-ipsec-west | bypass-vpn, vz-ipsec |
 | `west-db` | PG replica + PgBouncer | e2-standard-4 | 10.138.0.2 | 136.118.180.103 | default | bypass-vpn, voip-db-standby |
 | `west-loadtest` | SIPp load-gen (banked harness) | e2-standard-4 | 10.138.0.3 | 104.198.3.25 | default | bypass-vpn, voip-loadtest |
 
@@ -575,10 +579,12 @@ West NLB VIP `35.252.214.40` (`west-sbc-vip-udp`/`-tcp`) · backend service `wes
 ### Central — us-central1-b
 | VM Name | Role | Machine Type | Internal IP | External IP | Subnet | Tags |
 |---------|------|-------------|-------------|-------------|--------|------|
-| `central-sbc-1` | SBC-1 | e2-standard-4 | 10.128.0.100 | 34.41.188.100 | default | bypass-vpn, lb-health-check, voip-sbc |
-| `central-sbc-2` | SBC-2 | e2-standard-4 | 10.128.0.101 | 35.184.151.64 | default | bypass-vpn, lb-health-check, voip-sbc |
-| `central-fs` | FreeSWITCH FS-1 (active) + Redis | e2-standard-8 | 192.168.30.2 | 35.253.103.114 | voip-media-central (192.168.30.0/24) | bypass-vpn, voip-media |
-| `central-fs-2` | FreeSWITCH FS-2 (hot standby) | e2-standard-8 | 192.168.30.3 | 34.63.100.161 | voip-media-central (192.168.30.0/24) | bypass-vpn, voip-media |
+| `central-sbc-1` | SBC-1 | e2-standard-4 | 10.128.0.100 | 34.41.188.100 | default | bypass-vpn, lb-health-check, voip-sbc, vz-central |
+| `central-sbc-2` | SBC-2 | e2-standard-4 | 10.128.0.101 | 35.184.151.64 | default | bypass-vpn, lb-health-check, voip-sbc, vz-central |
+| `central-fs` | FreeSWITCH FS-1 (active) + Redis | e2-standard-8 | 192.168.30.2 | 35.253.103.114 | voip-media-central (192.168.30.0/24) | bypass-vpn, voip-media, vz-central |
+| `central-fs-2` | FreeSWITCH FS-2 (hot standby) | e2-standard-8 | 192.168.30.3 | 34.63.100.161 | voip-media-central (192.168.30.0/24) | bypass-vpn, voip-media, vz-central |
+| `central-vz-gw-a` | Verizon IPsec gateway A (dark; us-central1-**a**) | n2-standard-2 | 192.168.31.4 | none — IKE 34.68.252.50 via protocol forwarding | vz-ipsec-central (192.168.31.0/28) | bypass-vpn, vz-ipsec |
+| `central-vz-gw-b` | Verizon IPsec gateway B (us-central1-**f**) | n2-standard-2 | 192.168.31.5 | none — IKE 34.171.191.175 via protocol forwarding | vz-ipsec-central | bypass-vpn, vz-ipsec |
 | `central-db` | PG replica + PgBouncer | e2-standard-4 | 10.128.0.2 | 34.69.170.41 (ephemeral) | default | bypass-vpn, voip-db-standby |
 
 Central NLB VIP `35.253.133.230` (`central-sbc-vip-tcp`/`-udp`) · backend service `central-sbc-backend` + `central-sbc-group` · signaling ILB VIP `10.128.0.250`. LD egress order: Bandwidth **Dallas** (67.231.2.12, the default) → LA → Sinch backups. `central-db`'s reserved external IP `136.112.210.141` was detached in a 2026-09-01 stop/start; the VM runs on an ephemeral IP (`PRODUCTION_ARCHITECTURE.md` §12 #1).
@@ -588,6 +594,8 @@ Central NLB VIP `35.253.133.230` (`central-sbc-vip-tcp`/`-udp`) · backend servi
 **Homer HEP:** all zones' SBCs + FS send HEP to the East Homer (`10.142.0.103:9060`, allowed by the tag-to-tag `voip-internal` firewall); IP→name aliases in `docker/homer/scripts/ip-alias.lua`.
 
 Static IPs are reserved per node (`{node}-ip`, incl. the FS-2s; FS-2 internal IPs as `{zone}-fs-2-internal` = 192.168.x.3), plus the three external VIPs (`sbc-vip`/`west-sbc-vip`/`central-sbc-vip`) and the three internal signaling-VIP addresses (.250). Note: East VM names are legacy (`poc-custom-voip`, `kam-g2`, `fs-media-v2`); West/Central follow the `{zone}-sbc-N` / `{zone}-fs[-2]` / `{zone}-db` convention. FS-2s are machine-image clones of their FS-1. The fleet is not yet under OpenTofu state (Phase 5 import pending).
+
+**Verizon IPsec gateways (built 2026-10-30, DARK — no tunnels, no routes, no traffic):** per zone, a strongSwan gateway pair with **no external IP** (each owns a reserved IKE address through an L3_DEFAULT protocol-forwarding rule), a UDP all-ports **next-hop ILB** `{zone}-vz-gw-ilb` (East 192.168.11.4 / West 192.168.21.4 / Central 192.168.31.2, gw-a primary, gw-b failover, HTTP :8081 HC), a reserved in-tunnel SIP source IP per zone (East 34.148.100.185 / West 136.86.242.57 / Central 35.184.132.124, never attached), and a third SBC ILB rule at `.251` (`sbc-verizon-fwd` / `west-` / `central-sbc-verizon-fwd`) over the existing SBC groups. SBCs and FSes carry `vz-{zone}` so the Verizon-prefix routes stay zone-local. Design, as-built inventory and the remaining Verizon-dependent steps: `docs/VERIZON_IPSEC_TRUNKS_PLAN.md` (§4.1). Rules: the gateway subnets must never be added to Cloud NAT; the gateways run no Docker and no conntrack; the IPsec PSK lives only in `/etc/swanctl/conf.d/secrets.conf` on each gateway, never in git, OpenTofu or `.env`.
 
 ## Infrastructure as Code
 

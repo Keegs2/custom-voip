@@ -130,6 +130,9 @@ VPC: default
   Subnet: voip-media           192.168.10.0/24  (East FS-1 + FS-2 — Cloud-NAT-excluded)
   Subnet: voip-media-west      192.168.20.0/24  (West FS-1 + FS-2 — Cloud-NAT-excluded)
   Subnet: voip-media-central   192.168.30.0/24  (Central FS-1 + FS-2 — Cloud-NAT-excluded)
+  Subnet: vz-ipsec-east        192.168.11.0/28  (Verizon IPsec gateways + next-hop ILB — Cloud-NAT-excluded, PGA on; 2026-10-30)
+  Subnet: vz-ipsec-west        192.168.21.0/28  (same, West)
+  Subnet: vz-ipsec-central     192.168.31.0/28  (same, Central)
 ```
 (Source: `PRODUCTION_ARCHITECTURE.md` §3.1.)
 
@@ -152,6 +155,9 @@ either a per-region `voip-media-{region}` subnet excluded from Cloud NAT, or the
 | FS-1 (active) | **192.168.10.2** (voip-media) | 192.168.20.2 (voip-media-west) | 192.168.30.2 (voip-media-central) |
 | FS-2 (hot standby) | 192.168.10.3 | 192.168.20.3 | 192.168.30.3 |
 | PG | 10.142.0.103 (**primary**, `services`) + 10.142.0.87 (`east-db-standby`, us-east1-c) | 10.138.0.2 (`west-db` replica) | 10.128.0.2 (`central-db` replica) |
+| SBC Verizon VIP (`.251`, dark) | 10.142.0.251 | 10.138.0.251 | 10.128.0.251 |
+| Verizon gateway ILB (next hop, dark) | 192.168.11.4 | 192.168.21.4 | 192.168.31.2 |
+| Verizon gateways A / B (no external IP) | 192.168.11.2 / .3 | 192.168.21.2 / .3 | 192.168.31.4 / .5 |
 
 > **Note:** The FS VMs sit on the Cloud-NAT-excluded media subnets with the
 > `bypass-vpn` tag, never on the default subnet. The replicas ended up at `.2`,
@@ -849,6 +855,7 @@ Dates are taken only from repo docs and git history.
 | Zone-aware ESL (ESL → FS-2 failover) | ⏳ OPEN | `PRODUCTION_ARCHITECTURE.md` §12 #3 |
 | Logged SBC/FS failover drills | ⏳ OPEN | `PRODUCTION_ARCHITECTURE.md` §12 #14 |
 | Patroni / automatic PG failover | ⏳ NOT STARTED | — |
+| Verizon IPsec gateways + next-hop ILBs + `.251` SBC VIPs, all zones | ✅ BUILT, DARK | 2026-10-30 (`docs/VERIZON_IPSEC_TRUNKS_PLAN.md` §4.1); tunnels, routes and the platform PR wait on Verizon's SE |
 
 The phase write-ups below are the **original plan**, annotated where reality differed.
 

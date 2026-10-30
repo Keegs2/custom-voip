@@ -1740,6 +1740,8 @@ infra/*.tfplan
 | SSL certificates | Let's Encrypt via certbot (Ansible role) |
 | Secrets rotation | Ansible vault or GCP Secret Manager |
 | Application code deploys | Ansible + git |
+| Verizon IPsec gateways (6 VMs, 9 static IPs, 3 subnets, 6 protocol-forwarding rules, 3 next-hop ILBs, 3 `.251` SBC rules, firewall; built by hand 2026-10-30) | Manual today; import into `voip-region` (or a `vz-ipsec` standalone stack) with `prevent_destroy` once the Verizon turn-up is accepted — `docs/VERIZON_IPSEC_TRUNKS_PLAN.md` §4.1 |
+| IPsec PSKs | `/etc/swanctl/conf.d/secrets.conf` on each gateway only — never Tofu, git or `.env` |
 
 This separation is intentional. OpenTofu handles the "what metal exists" question. Ansible handles the "what runs on the metal" question. They meet at the VM: Tofu creates it, Ansible configures it.
 
