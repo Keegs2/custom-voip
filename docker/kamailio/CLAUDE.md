@@ -1013,6 +1013,13 @@ Each zone's SBC pair is active/standby by NLB health check (identical config on 
 
 **Loop safety.** The copy reaches the peer from our `SBC_INTERNAL_IP` ⇒ `IS_INTERNAL_SOURCE` ⇒ the guard cannot fire again (and `$Ri` there is the NIC bind, not the VIP); a peer with no transaction either does today's via2 forward. A `send_data` failure also falls through (WARN).
 
+**Receiver-side classification — `route[REPLY_SRC]` (2026-10-30).** On the owner the handed-off reply arrives with `$si` = the peer's VPC IP, which `route(IS_INTERNAL_SOURCE)` matches (GCE_INTERNAL_NETWORK). Until this fix `onreply_route[REPLY_HANDLER]` therefore treated every handed-off CARRIER reply as an FS reply: Contact rewritten to the VIP, RFC1918 SDP scrubbed to FS_PUBLIC_IP, the Verizon scrub gate (§8.15 item 8) and the `X-Stir-Outcome` hand-back (§8.14) skipped. For Bandwidth this was masked downstream by the WITHINDIALOG self-loop reroute; for a Verizon dialog in the failback window it led to the §8.15 item-12 `481` path. Both onreply routes (`REPLY_HANDLER`, `PBX_REPLY_HANDLER`) now call `route[REPLY_SRC]` first, which sets two per-reply variables, and EVERY direction test in them reads these — `$si` survives only in wire-source xlogs:
+
+- `$var(reply_src)` — the ORIGINAL sender. `$si`, except when `$si == SBC_PEER_IP`: then the transaction's carrier destination — `$avp(carrier_ip)` (transaction-scoped; stamped by `route[TO_CARRIER]` right before `t_relay()` via the same `build_cell()` AVP-list move `$avp(stir_outcome)` relies on, refreshed by `failure_route[CARRIER_FAILURE]` on every PoP flip), else `$T_req($rd)` (tmx: the R-URI host of the transaction's request, evaluated on a per-process copy of `uas.request`) for transactions TO_CARRIER did not create — FS-originated in-dialog re-INVITEs relayed by `route[RELAY]` with r2 VIP egress, the `X-PBX-Dest` leg. A null fallback leaves it `0`: classified as an external carrier of unknown address, never as FS.
+- `$var(reply_internal)` — `1` = `route(IS_INTERNAL_SOURCE)` on `$si`, forced `0` for a hand-off (the sender's guard only hands off replies from an EXTERNAL source, so the peer's VPC IP can never be the real origin).
+
+Consumers: the 183/200 pass-through log guard, the SDP scrub direction (FS → FS_PUBLIC_IP / Verizon → none / carrier → ADVERTISE_IP), the FS Contact rewrite, the narrow FS-ish session-timer exemption (now on `$var(reply_src)`), and both `X-Stir-Outcome` hand-back guards — so a handed-off carrier reply now carries the hand-back too (§8.14 blind spot 2 is closed). A reply from the peer's VPC IP on a transaction this SBC owns can only be a hand-off (the peer's stateless via2 forward goes to FS's Via; group-10 probe replies are local tm transactions with no named onreply route). One INFO line per handed-off reply: `handed-off reply from peer <peer> for carrier <ip>: <code> <reason> for <method> (<callid>)`. The sending side is unchanged. Without `SBC_PEER_HANDOFF` the helper reduces exactly to `$si` / `IS_INTERNAL_SOURCE` and the three `$avp(carrier_ip)` stamps compile out (the helper itself renders in every mode). Harness-verified (2026-10-30, 5.8.8 image, Verizon ON, peer IP on `lo`): a Verizon 200 OK (RFC1918 SDP, `Session-Expires: 30`) delivered from the peer IP is relayed to FS with SDP and Contact intact and SE 1800 — same as the direct case; a handed-off Bandwidth 200 OK is byte-identical (ids canonicalised) to the direct relay; a handed-off 200 to an FS-originated in-dialog re-INVITE resolves the carrier via the `$T_req($rd)` fallback (carrier SE 600 kept, Contact intact). The pre-fix config fails the same checks (Contact → VIP, Verizon SDP scrubbed).
+
 **Dark when unset.** `SBC_PEER_INTERNAL_IP` unset, non-IPv4, or `== SBC_INTERNAL_IP` (WARNING) ⇒ every `#!ifdef SBC_PEER_HANDOFF` block compiles out, no `peerhealth` htable, the group-10 line renders as a comment — byte-identical config (render-diffed against pristine). Works in dedicated AND legacy signaling-VIP modes (the guard keys on the external VIP bind, present in both).
 
 **Verify (passive).** Once live on both SBCs: the STANDBY's `kamcmd dispatcher.list` shows Sinch orig groups 6/7 `AP` (Active) instead of the documented Inactive-forever; group 10 is `AP` on both SBCs. The active logs `peer hand-off: … handed raw to peer` at INFO for INVITE/CANCEL (DBG for OPTIONS). Homer: a handed-off reply is traced twice by design — the stateless-residue `sip_trace()` on the receiver plus `TMCB_RESPONSE_IN` on the owner. Drill: with both SBCs up, a call whose B-leg INVITE was VIP-sourced on the standby (failback window) completes with ONE carrier INVITE — no `VIP_EGRESS tripwire`, no alternate-PoP re-INVITE.
@@ -1244,13 +1251,14 @@ carry NO `X-Stir-Outcome`, so the attempt they end contributes nothing to the CD
    408 (dead SBC / silent carrier — the FS `progress_timeout` case) and every
    `failure_route` `send_reply()` (e.g. the 503 in `CARRIER_FAILURE`) are built by
    tm, not received, so `REPLY_HANDLER` never sees them.
-2. **§8.12 peer-handed-off replies.** A carrier reply that landed on the OTHER
-   SBC during a failback/drain window is `send_data()`-relayed to the owner from
-   the sibling's internal IP; `REPLY_HANDLER`'s `!route(IS_INTERNAL_SOURCE)` guard
-   (correct — it keeps FS-sourced A-leg replies clean) then skips the append, so
-   that reply reaches FS without the header.
+2. **§8.12 peer-handed-off replies — CLOSED 2026-10-30.** A carrier reply that
+   landed on the OTHER SBC during a failback/drain window is `send_data()`-relayed
+   to the owner from the sibling's internal IP; the guard used to be
+   `!route(IS_INTERNAL_SOURCE)` on `$si` and skipped the append. It now reads
+   `$var(reply_internal) == 0` from `route[REPLY_SRC]` (§8.12), which is `0` for a
+   hand-off, so the handed-off reply carries the hand-back like a direct one.
 
-In both cases the CDR keeps the last real outcome (with `stir_outcome_attempt`
+In case 1 the CDR keeps the last real outcome (with `stir_outcome_attempt`
 naming the attempt it came from) or, if no attempt ever handed one back, stays
 empty and the ingest falls back to intent. Fail-soft by design; never affects the
 call.
@@ -1408,12 +1416,15 @@ gateway-forwarded packets with a Verizon source; U3 Verizon's refresher
 expectation. Also: the ILB VIP-addressed `/healthz` on `VERIZON_VIP:8080` (same
 HC as the signaling ILB, so expected to pass the moment the bind exists).
 
-**Known pre-existing quirk surfaced here (not changed):** a carrier reply the
-peer hands over raw (§8.12) arrives with `$si` = the peer's VPC IP, which
-`route(IS_INTERNAL_SOURCE)` classifies as "from FS" in `REPLY_HANDLER`: its
-Contact is rewritten to our VIP and its SDP scrubbed. For Bandwidth this is
-masked by the self-loop reroute; for a Verizon dialog it would hit the item-12
-481 path. Only the failback window is affected; fix separately.
+**Pre-existing quirk surfaced here — FIXED (2026-10-30, §8.12
+`route[REPLY_SRC]`):** a carrier reply the peer hands over raw (§8.12) arrives
+with `$si` = the peer's VPC IP, which `route(IS_INTERNAL_SOURCE)` classified as
+"from FS" in `REPLY_HANDLER`: Contact rewritten to our VIP, SDP scrubbed, the
+item-8 Verizon scrub gate (`is_in_subnet($si, VERIZON_SIP_NETS_DEF)`) never
+matching — for a Verizon dialog in the failback window that meant the item-12
+481 path. The onreply routes now classify by `$var(reply_src)` (the carrier
+destination of the transaction) / `$var(reply_internal)`; the item-8 gate reads
+`$var(reply_src)`. Harness-verified in the §8.12 paragraph (checks 6a-6g).
 
 ## 9. How to Modify
 

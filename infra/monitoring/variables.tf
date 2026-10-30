@@ -54,15 +54,19 @@ variable "ui_https_port" {
 }
 
 variable "instances" {
-  description = "GCE instance names to cover with VM-down / disk / memory / CPU alerts (16 always-on production VMs across the 3 zones incl. the Phase 4c *-fs-2 media-HA hot standbys — apply only AFTER those VMs exist; the idle west-loadtest test box is excluded so it never false-pages when stopped)"
+  description = "GCE instance names to cover with VM-down / disk / memory / CPU alerts (22 always-on production VMs across the 3 zones incl. the Phase 4c *-fs-2 media-HA hot standbys and the six Verizon IPsec gateways *-vz-gw-a/-b (docs/VERIZON_IPSEC_TRUNKS_PLAN.md §4.1, built 2026-10-30) — apply only AFTER those VMs exist; the idle west-loadtest test box is excluded so it never false-pages when stopped)"
   type        = list(string)
   default = [
-    # East (us-east1) — east-fs-2 = media-HA hot standby (Phase 4c)
+    # East (us-east1) — east-fs-2 = media-HA hot standby (Phase 4c);
+    # east-vz-gw-a/-b = Verizon IPsec gateway ILB pair (us-east1-b / -c)
     "poc-custom-voip", "kam-g2", "fs-media-v2", "east-fs-2", "services", "east-db-standby",
+    "east-vz-gw-a", "east-vz-gw-b",
     # West (us-west1) — west-loadtest excluded: idle/banked test box, would false-page when stopped
     "west-sbc-1", "west-sbc-2", "west-fs", "west-fs-2", "west-db",
-    # Central (us-central1)
+    "west-vz-gw-a", "west-vz-gw-b",
+    # Central (us-central1) — gateways landed in us-central1-a / -f (n2 stock)
     "central-sbc-1", "central-sbc-2", "central-fs", "central-fs-2", "central-db",
+    "central-vz-gw-a", "central-vz-gw-b",
   ]
 }
 

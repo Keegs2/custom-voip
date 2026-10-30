@@ -7,7 +7,7 @@ Turns "customers are the monitoring" into GCP-native alerting. Creates:
 | Uptime check: **SIP VIP tcp/5060** (through the NLB) | Inbound call path dark — the page that matters most |
 | Uptime check: **API /health** (`:8088`) | Provisioning/portal API down |
 | Uptime check: **UI https** (`:8443`, self-signed tolerated) | Customer portal down |
-| **VM down** (hypervisor metric absent 5 min) — all 4 VMs | Instance stopped/crashed |
+| **VM down** (hypervisor metric absent 5 min) — all 22 always-on VMs (`var.instances`), incl. the six Verizon IPsec gateways `*-vz-gw-a/-b` | Instance stopped/crashed. Gateway tunnel/datapath health is NOT here — it pages via vmalert (`docker/vmalert/rules/vz_ipsec.yml`, see "vmalert alerts → pages") |
 | **SBC primary UNHEALTHY** (per zone, CRITICAL; NLB health-check transition log) | Zone flipped to its standby SBC (Phase 4b active/standby) — calls continue on the standby, redundancy gone. Health-check truth: catches a dead/hung kamailio container as well as VM death, in ~10-12 s + ≤1 min log→alert. Runbook: `docs/SBC_ACTIVE_STANDBY_RUNBOOK.md` §4 |
 | **SBC standby UNHEALTHY** (per zone, WARNING; same log family) | No traffic impact — but the zone is one failure from a zone outage. Restore promptly (runbook §6) |
 | **Disk > 85%** (per filesystem; needs Ops Agent) | Slot-WAL / ClickHouse / PG disk-fill before it kills PG |
@@ -99,7 +99,10 @@ and syslog shipping (which carries the `revup-alert` lines). On the
 
 vmalert (`voip-vmalert` on the services VM) evaluates the `alert:` rules in
 `docker/vmalert/rules/*.yml` (teardown: `SipByeFailureShare`,
-`FsStaleChannels`, `SbcDialogLeak`) but has no `-notifier.url` and there is
+`FsStaleChannels`, `SbcDialogLeak`; vz_ipsec — the Verizon IPsec gateways:
+`VzIpsecGatewayDown`, `VzIpsecZoneDown` (critical), `VzIpsecDrained`,
+`VzIpsecReplayDrops`, `VzIpsecOutNoStates`, `VzIpsecUdpEncap`,
+`VzIpsecHeartbeatStale`) but has no `-notifier.url` and there is
 no Alertmanager. `scripts/vmalert-pager/` closes that gap by reusing the
 `revup-alert` log-match path above: a 60s systemd timer polls
 `http://127.0.0.1:8880/api/v1/alerts` (the port compose already publishes)
