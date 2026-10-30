@@ -96,7 +96,7 @@ def test_every_alias_name_is_classifiable():
     platform: every name must match a carrier prefix or a known platform
     node pattern, else this fails until homer_pcap.py is consciously
     extended."""
-    platform_pat = re.compile(r"SBC|FreeSWITCH|Services")
+    platform_pat = re.compile(r"SBC|FreeSWITCH|Services|Vz(SIP|IKE|GW)")  # Vz* = our Verizon-facing nodes
     for ip, name in _parse_lua_aliases().items():
         assert (
             name.startswith(hpc.CARRIER_NAME_PREFIXES)

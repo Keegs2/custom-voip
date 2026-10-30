@@ -2407,6 +2407,7 @@ These are applied today, separately from the `voip-region` blueprint above. Each
 | `infra/backups/` | `voip-backups` | `gs://revup-db-backups` (versioned) and the daily disk-snapshot policy on `services` | `infra/backups/README.md`, `docs/runbooks/DB_RESTORE_RUNBOOK.md` |
 | `infra/monitoring/` | `voip-monitoring` | Uptime checks, VM and SBC-failover alert policies, notification channels, prober firewall rules | `infra/monitoring/README.md` |
 | `infra/voicemail/` | `voip-voicemail` | See the notes below the table | `infra/voicemail/README.md`, `docs/runbooks/VOICEMAIL_GCP_SETUP.md` |
+| `infra/vz-ipsec-gcp/` | `voip-vz-ipsec` | The Verizon IPsec objects built by hand with gcloud 2026-10-30, all three zones: 9 reserved IPs (6 IKE peers + 3 inside-tunnel SIP), 3 `vz-ipsec-{zone}` /28 subnets, 6 gateway VMs + target instances + L3_DEFAULT protocol-forwarding rules + unmanaged groups, 3 gateway HC/UDP-backend/next-hop-ILB trios, 3 SBC Verizon VIP (`.251`) backends + rules over the existing SBC groups, 3 `vz-ipsec` firewall rules. **Import-only, acceptance-gated**: `imports.tf` holds 54 import blocks; the plan must read `54 to import, 0 to add/change/destroy`. Verizon-prefix firewall rules + tagged `next_hop_ilb` routes are commented stubs until Verizon's prefixes arrive; the `vz-{zone}` VM tags wait for the Phase 5 VM import. PSKs never here | `infra/vz-ipsec-gcp/README.md`, `docs/VERIZON_IPSEC_TRUNKS_PLAN.md` §4 |
 
 `infra/voicemail/` owns these resources for encrypted voicemail:
 

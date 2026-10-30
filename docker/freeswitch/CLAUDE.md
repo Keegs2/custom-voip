@@ -75,10 +75,20 @@ This solves the GCE hairpin NAT problem: when FreeSWITCH sends packets to its ow
 **IMPORTANT — entrypoint wiring**: The Dockerfile `ENTRYPOINT` is
 `/usr/local/freeswitch/bin/freeswitch` directly (the `ENTRYPOINT` line near the end) — it does NOT invoke
 `entrypoint.sh`. The script is `COPY`'d into the image (`COPY entrypoint.sh`) but is never the
-image default. Therefore the loopback-IP hairpin fix in `entrypoint.sh` is wired
-via a **compose-level entrypoint override** (`docker-compose.media.yml`), not the
-image default. (The "Start FreeSWITCH via entrypoint" comment in the Dockerfile
-above the `ENTRYPOINT` line is misleading — the actual ENTRYPOINT bypasses it.)
+image default. `docker-compose.media.yml` sets **no `entrypoint:` override either**
+(verified 2026-10-30: the freeswitch service has no `entrypoint:`/`command:` keys),
+so in production the loopback-IP hairpin fix in `entrypoint.sh` does not run (and
+nothing today needs it: FS never sends to its own public IP in the multi-VM topology). To activate the script add
+`entrypoint: ["/usr/local/freeswitch/entrypoint.sh"]` to the freeswitch service
+(the image already carries it at that path; the Dockerfile `CMD` flags are passed
+through via `"$@"`), or apply the equivalent `ip addr` / `ip route` on the host.
+(The "Start FreeSWITCH via entrypoint" comment in the Dockerfile above the
+`ENTRYPOINT` line is misleading — the actual ENTRYPOINT bypasses it.)
+
+**No Verizon MTU route on FS (decided 2026-10-30, `docs/VERIZON_IPSEC_TRUNKS_PLAN.md` §3.4):**
+the per-destination `mtu lock 1400` route the IPsec design needs lives on the SBCs only.
+FS sends SIP to the SBC, never to Verizon; the only FS→Verizon traffic is RTP/RTCP,
+which is far below 1400 bytes. So there is nothing for the (non-running) entrypoint to do.
 
 ### CMD flags
 
@@ -120,7 +130,7 @@ FreeSWITCH runs with `network_mode: host` in docker-compose.media.yml. This is r
 | `TEST_MODE` | `false` | When true, plays tone instead of bridging to carrier |
 | `API_CALLING_ENABLED` | `false` | API Calling product (account_type `api`) is **RETIRED**. Only the exact value `true` (case-insensitive, trimmed) re-enables it. Off: api_did inbound (direct or on-net RCF terminal) is hard-rejected `CALL_REJECTED` (603, `lua_routed=true`, no carrier leg, no webhook) and `api_outbound.lua` / `outbound_api.lua` reject `CALL_REJECTED`. RCF/trunk unaffected. See `scripts/CLAUDE.md`. |
 | `IVR_ENABLED` | `false` | Visual IVR (`scripts/CLAUDE.md` "Visual IVR"). Only the exact value `true` (case-insensitive, trimmed) enables it; parsed like `API_CALLING_ENABLED`. Off: an IVR DID (direct or as an on-net terminal) is hard-rejected `CALL_REJECTED` (603, `lua_routed=true`, never answered, no carrier leg). RCF/trunk/voicemail never read it. Passed through `docker-compose.media.yml` (`IVR_ENABLED=${IVR_ENABLED:-false}`); stays unset until the P5 live test, then per zone `.env` + recreate. |
-| `BRIDGE_PROGRESS_TIMEOUT` | `10` | Per-attempt `progress_timeout` (seconds) on carrier bridges — max wait for a provisional response (180/183) before failing over. Do NOT replace with originate_timeout (caps time-to-answer incl. ring). |
+| `BRIDGE_PROGRESS_TIMEOUT` | `10` | Per-attempt `progress_timeout` (seconds) on carrier bridges — max wait for a provisional response (180/183) before failing over. Do NOT replace with originate_timeout (caps time-to-answer incl. ring). With the attempt cap gone (2026-10-30) this is THE knob that bounds a fully-failing sweep (N eligible trunks × attempts-per-trunk × this). |
 
 ## Health Check
 
@@ -165,11 +175,41 @@ Also needs `SYS_NICE` capability for real-time scheduling.
 
 10. **Gateway syntax deprecated**: All outbound bridges use `sofia/external/dest@proxy` instead of `sofia/gateway/carrier/dest`. The gateway syntax produced corrupted Contact headers (`sip:gw+carrier_primary@...`).
 
-11. **Termination traffic-class filter (strict toll-free, 2026-10)**: `inbound_router.lua` filters the cached `carrier_trunks` termination list per call by `classify_destination(forward_to)` (NANP 8YY by NPA → `tollfree`, else `ld`). `ld` → trunks of class `any` or `ld` (none → full list, never strand LD). `tollfree` → ONLY `tollfree` trunks (Sinch OSAO denver-tf); `any`/`ld` (Bandwidth, Sinch atlanta-ld) are never eligible, and with no enabled `tollfree` trunk the call FAILS CLOSED: ERR log, `term_class_blocked=tollfree` (CDR variables), `NO_ROUTE_DESTINATION` (SIP 404) + `lua_routed=true`. The 4-trunk attempt cap applies AFTER the filter (cache bounded at 16 rows), so a 5th outbound row can never truncate the only tollfree trunk. The LEGACY fail-open loop (DB blip / zero rows) is class-blind and can still send 8YY via Bandwidth — deliberate. Prod has no `any` rows (owner relabels them `ld`, migration 52 header). The NPA set must match Kamailio `route[TF_CLASSIFY]` (`TF_INGRESS_ENFORCE`) — pinned by `tests/test_classify_destination.py`; behavior pinned by `tests/lua/onnet_router_harness.lua` [13a-f].
+11. **Termination traffic-class filter (strict toll-free, 2026-10)**: `inbound_router.lua` filters the cached `carrier_trunks` termination list per call by `classify_destination(forward_to)` (NANP 8YY by NPA → `tollfree`, else `ld`). `ld` → trunks of class `any` or `ld` (none → full list, never strand LD). `tollfree` → ONLY `tollfree` trunks (Sinch OSAO denver-tf); `any`/`ld` (Bandwidth, Sinch atlanta-ld) are never eligible, and with no enabled `tollfree` trunk the call FAILS CLOSED: ERR log, `term_class_blocked=tollfree` (CDR variables), `NO_ROUTE_DESTINATION` (SIP 404) + `lua_routed=true`. There is NO attempt cap any more (removed 2026-10-30; the cache's 16-row bound is the only limit), so no number of outbound rows can truncate the only tollfree trunk. The LEGACY fail-open loop (DB blip / zero rows) is class-blind and can still send 8YY via Bandwidth — deliberate. Prod has no `any` rows (owner relabels them `ld`, migration 52 header). The NPA set must match Kamailio `route[TF_CLASSIFY]` (`TF_INGRESS_ENFORCE`) — pinned by `tests/test_classify_destination.py`; behavior pinned by `tests/lua/onnet_router_harness.lua` [13a-f].
 
-12. **Shared termination lib + trunk/API 8YY egress (2026-10, Sinch close-out)**: the carrier_trunks fetch/60s cache/validation, class coercion, `classify_destination`, class filter, post-filter cap, trunk-major attempt builder and the X-Carrier-IP dial-string builder live in `scripts/lib/term_trunks.lua` (loaded via `loadfile`, no Redis). `inbound_router.lua` delegates to it with byte-identical output (vars, dial strings, hangups, log lines — verified against the pre-extraction script); if the lib fails to load, RCF takes the legacy fail-open loop (same as a DB blip). `trunk_outbound.lua` and `api_outbound.lua` (direct-bridge path; webhook calls untouched) send NANP 8YY destinations ONLY over enabled `traffic_class='tollfree'` rows — same SQL, same process-wide cache entry (`term_trunks_<zone>`, shared by all three scripts), per-zone priority (`FS_ZONE`), trunk-major × {`SBC_PROXY_IP`, `SBC_PROXY_IP_FAILOVER`} with the cached TCP pre-check, `X-Carrier-IP`/`X-Carrier-Label`, `carrier_used=<carrier>-<pop>`, `term_trunks_source`. They FAIL CLOSED on every miss — no tollfree row, DB error/zero rows, or lib missing → `term_class_blocked=tollfree` + `NO_ROUTE_DESTINATION` + `lua_routed=true`, never Bandwidth (asymmetric with the RCF legacy fail-open on purpose: these products never had an 8YY route). Non-8YY trunk/API calls never consult carrier_trunks and are byte-identical to before. Ordering with the redundant rows (migration 53): LD = Bandwidth (10/20, west swaps) → sinch/atlanta-ld (30) → sinch/denver-ld (35); 8YY = sinch/denver-tf (40) → sinch/atlanta-tf (45). The redundant rows share source IPs with the inbound 8XX-T orig rows; FS's SELECT filters `direction IN ('outbound','both')` and the cache is an ordered list (never IP-keyed), so nothing collapses. See `scripts/CLAUDE.md` "lib/term_trunks.lua".
+12. **Shared termination lib + trunk/API 8YY egress (2026-10, Sinch close-out)**: the carrier_trunks fetch/60s cache/validation, class coercion, `classify_destination`, class filter, trunk-major attempt builder (no cap since 2026-10-30; carrier `verizon` rows get the signaling-VIP attempt only — see "Verizon IPsec termination" below) and the X-Carrier-IP dial-string builder live in `scripts/lib/term_trunks.lua` (loaded via `loadfile`, no Redis). `inbound_router.lua` delegates to it with byte-identical output (vars, dial strings, hangups, log lines — verified against the pre-extraction script); if the lib fails to load, RCF takes the legacy fail-open loop (same as a DB blip). `trunk_outbound.lua` and `api_outbound.lua` (direct-bridge path; webhook calls untouched) send NANP 8YY destinations ONLY over enabled `traffic_class='tollfree'` rows — same SQL, same process-wide cache entry (`term_trunks_<zone>`, shared by all three scripts), per-zone priority (`FS_ZONE`), trunk-major × {`SBC_PROXY_IP`, `SBC_PROXY_IP_FAILOVER`} with the cached TCP pre-check, `X-Carrier-IP`/`X-Carrier-Label`, `carrier_used=<carrier>-<pop>`, `term_trunks_source`. They FAIL CLOSED on every miss — no tollfree row, DB error/zero rows, or lib missing → `term_class_blocked=tollfree` + `NO_ROUTE_DESTINATION` + `lua_routed=true`, never Bandwidth (asymmetric with the RCF legacy fail-open on purpose: these products never had an 8YY route). Non-8YY trunk/API calls never consult carrier_trunks and are byte-identical to before. Ordering with the redundant rows (migration 53): LD = Bandwidth (10/20, west swaps) → sinch/atlanta-ld (30) → sinch/denver-ld (35); 8YY = sinch/denver-tf (40) → sinch/atlanta-tf (45). The redundant rows share source IPs with the inbound 8XX-T orig rows; FS's SELECT filters `direction IN ('outbound','both')` and the cache is an ordered list (never IP-keyed), so nothing collapses. See `scripts/CLAUDE.md` "lib/term_trunks.lua".
 
 13. **No RTP timer on the sofia profiles (source-derived, 2026-10-23)**: neither `internal.xml` nor `external.xml` sets `rtp-timer-name`. Vanilla FreeSWITCH profiles set it to `soft`, and mod_sofia has no default (at the pinned ref, `sofia.c:5285-5286` is the only assignment). So audio RTP sessions are created without a timer ("Not using a timer", `switch_rtp.c:4594`), and reads are paced by packet arrival. This is harmless for bridged RCF/trunk legs. It matters for anything that **terminates** media: a jitter buffer needs a timer, and so does a silence detector that must keep counting when RTP stops. The voicemail recording leg and the Visual IVR leg are the only such paths: `lib/vm_box.lua` (voicemail, owner decision O6; see `scripts/CLAUDE.md` "Recording jitter buffer") and `lib/media_leg.lua` (IVR, called only by `terminate_ivr`) set `rtp_timer_name=soft` + `jitterbuffer_msec=60:200` per call before the answer. Do NOT add `rtp-timer-name` to a profile to get this: that would change the RTP pacing of every RCF/trunk leg. To verify on a node, an RCF CDR in `/var/log/freeswitch/json_cdr` has no `rtp_use_timer_name`, and a voicemail or IVR CDR has `rtp_use_timer_name=soft`.
+
+## Verizon IPsec termination — FS side (2026-10-30, ships dark)
+
+Plan: `docs/VERIZON_IPSEC_TRUNKS_PLAN.md` §7 / §8.2 / §3.4. Verizon is a `carrier_trunks` LD
+termination carrier (`carrier='verizon'`, priority 50 — below every Bandwidth and Sinch row —
+seeded DISABLED with TEST-NET placeholder IPs by migration 62) reached through the zone's
+`.251` SBC Verizon ILB VIP and the IPsec gateways. Two FS-side changes, both inert until a
+Verizon row is enabled. No sofia profile change and no MTU route on FS (RTP is small; SIP
+goes to the SBC):
+
+1. **Attempt cap removed** (owner decision 2026-10-29). `lib/term_trunks.lua` `M.MAX` and `cap()`
+   and `inbound_router.lua` `TERM_TRUNKS_MAX` are gone; the RCF LD loop and `select_tollfree`
+   (trunk/API 8YY) try EVERY eligible row in `eff_priority` order. The only bound is
+   `M.CACHE_MAX = 16` rows per zone. Why: a post-filter cap silently hid any row below the
+   first four, so Verizon at 50 would never have been reached once denver-ld was enabled.
+   Worst case grows with the list — N eligible rows × attempts-per-row × (`BRIDGE_PROGRESS_TIMEOUT`
+   + ≤1 s TCP probe); the SBC-down case is still fast (cached pre-check skips in <1 s). The knob
+   is `BRIDGE_PROGRESS_TIMEOUT`, not a row cap.
+2. **VIP-only attempts for Verizon rows.** `build_attempts` emits, for a row whose sanitized
+   carrier token is `verizon` (`M.VIP_ONLY_CARRIERS`, case-insensitive), ONLY the `SBC_PROXY_IP`
+   (signaling ILB VIP) attempt — never the `SBC_PROXY_IP_FAILOVER` (SBC-1 direct) one. Every
+   Verizon reply lands on the ACTIVE SBC via the `.251` ILB rule, so an INVITE sent to SBC-1's
+   direct IP while SBC-1 is standby can never see its reply; Kamailio rejects such an INVITE 503
+   immediately (plan §8.1 item 3). Every other carrier is byte-identical (2 attempts per row).
+   Same lib, so trunk/API 8YY would behave the same if a Verizon `tollfree` row ever existed
+   (none planned — 8YY stays on Sinch).
+Enable order (per zone): migration 62 on the East primary → Kamailio Verizon build on both SBCs
+(`SBC_PEER_INTERNAL_IP` set) → tunnels up → `UPDATE carrier_trunks SET source_ip=<real>, enabled=true
+WHERE carrier='verizon' ...` (FS picks it up within 60 s, no restart). Harness:
+`tests/lua/onnet_router_harness.lua` (RCF loop) and the standalone cap/VIP-only checks in the PR.
 
 ## Volumes (docker-compose.media.yml)
 

@@ -463,6 +463,217 @@ if ! printf '%s' "${SINCH_TF2_IP}" | grep -Eq "${IPV4_RE}"; then
   SINCH_TF2_IP=206.146.98.25
 fi
 
+# ---------------------------------------------------------------------------
+# VERIZON MODE — Verizon SIP Gateway (2-Way DIDs) + ATF-IP (toll-free) over the
+# self-built IPsec gateways (docs/VERIZON_IPSEC_TRUNKS_PLAN.md §8.1,
+# docker/kamailio/CLAUDE.md §8.15). ALL vars OPTIONAL; DEFAULT OFF.
+#
+#   VERIZON_VIP        this zone's Verizon internal ILB address (10.x.0.251): a
+#                      third forwarding rule on the SAME SBC active/standby
+#                      backend. BOUND here (loopback add + listen=), never
+#                      advertised. Verizon's inside-tunnel traffic is 1:1
+#                      translated to it by the IPsec gateways.
+#   VERIZON_SIP_IP     this zone's inside-tunnel public SIP address (what Verizon
+#                      sees as our SIP source). ADVERTISED ONLY — it is never a
+#                      local address; the gateways translate it to VERIZON_VIP.
+#   VERIZON_SIP_NETS   comma-separated IPv4 CIDRs/IPs of EVERY Verizon signaling
+#                      source (SIP Gateway + ATF-IP SBCs + OPTIONS monitors):
+#                      static trust (flag 5), carrier-ingress branch, egress
+#                      selection, address advertisement, RFC1918 scrub gate,
+#                      MTU hint routes. Bare IPs are normalized to /32.
+#   VERIZON_TF_IPS     OPTIONAL comma list of the ATF-IP (toll-free) sources IF
+#                      they are distinct from the SIP Gateway sources. Set =>
+#                      those sources are the toll-free ingress class, every
+#                      other Verizon source is the non-TF class (normal
+#                      TF_INGRESS_CHECK). Unset => Verizon is a MIXED class:
+#                      the toll-free ingress class check is SKIPPED for Verizon
+#                      sources (both products share signaling IPs).
+#   VERIZON_PROBE_IPS  OPTIONAL comma list of Verizon SIP Gateway HOST IPs to
+#                      OPTIONS-probe (dispatcher group 13, VERIZON_VIP-sourced).
+#                      Unset => no probe group (comment line) + WARNING.
+#   VERIZON_ZONE       OPTIONAL zone label (east|west|central). Drives the
+#                      dispatcher duid `verizon-<zone>` (migration 62's
+#                      carrier_trunk_health derives 'verizon-' || pop from the
+#                      outbound rows) and the X-Inbound-PoP `<zone>-orig`
+#                      stamped on Verizon-originated calls (the view's
+#                      orig_map). Default: derived from VERIZON_VIP's second
+#                      octet (10.142 -> east, 10.138 -> west, 10.128 ->
+#                      central), else the prefix of SBC_ID.
+#
+# Verizon mode is ON only when VERIZON_VIP, VERIZON_SIP_IP and VERIZON_SIP_NETS
+# are all set and valid AND the two documented prerequisites hold:
+#   - SBC_SIGVIP_MODE=dedicated (SBC_SIGNALING_VIP set): a .251 rule on the
+#     signaling backend is meaningless in legacy mode, and the Verizon egress
+#     guard keys on signaling-VIP ingress (same forcing VIP_EGRESS gets);
+#   - SBC_PEER_INTERNAL_IP set (peer reply hand-off ON): ALL Verizon return
+#     traffic lands on VERIZON_VIP = the NLB-ACTIVE SBC. Without the hand-off
+#     the standby's VERIZON_VIP-sourced OPTIONS probes get their replies on the
+#     active with no transaction there and the standby reads Verizon DOWN
+#     forever (the pre-§8.12 Sinch bug), and failback strands in-flight
+#     Verizon INVITE replies.
+# Anything else => FORCED OFF with a loud WARNING (when any VERIZON_* var was
+# supplied) and compiled out.
+#
+# COMPILED OUT, BYTE-IDENTICAL: when OFF, every `#!ifdef VERIZON_MODE` block in
+# kamailio.cfg is REMOVED from the rendered file by the compile-out pass below
+# (the `#!else` branch, when present, is kept verbatim), and the
+# __VERIZON_MODE_DEFINE__ line is deleted — so the rendered kamailio.cfg is
+# byte-for-byte the pre-Verizon config (render-diffed in the PR), not merely
+# "preprocessor-skipped". The dispatcher group-13 placeholder renders as a
+# comment (the __SBC_PEER_DISPATCHER_LINE__ convention). When ON, the define is
+# emitted and Kamailio's own preprocessor resolves the blocks.
+VERIZON_MODE=off
+VERIZON_OFF_WHY=""
+VERIZON_REQUESTED=0
+if [ -n "${VERIZON_VIP:-}${VERIZON_SIP_IP:-}${VERIZON_SIP_NETS:-}${VERIZON_TF_IPS:-}${VERIZON_PROBE_IPS:-}${VERIZON_ZONE:-}" ]; then
+  VERIZON_REQUESTED=1
+fi
+VZ_CIDR_RE='^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(/([0-9]|[12][0-9]|3[0-2]))?$'
+# vz_norm_list VARNAME "raw,list" [cidr|host] -> prints the normalized,
+# de-duplicated comma list on stdout (bare IPv4 -> /32 in cidr mode; host mode
+# accepts ONLY bare IPv4). Invalid entries are DROPPED with a WARNING naming
+# the variable — garbage can never reach a #!define, a listen= or `ip route`.
+vz_norm_list() {
+  vz_name="$1"
+  vz_raw="$2"
+  vz_mode="$3"
+  vz_out=""
+  OLD_IFS="$IFS"
+  IFS=','
+  set -f
+  for vz_e in ${vz_raw}; do
+    vz_e="$(printf '%s' "${vz_e}" | tr -d '[:space:]')"
+    if [ -z "${vz_e}" ]; then
+      continue
+    fi
+    if [ "${vz_mode}" = "host" ]; then
+      if ! printf '%s' "${vz_e}" | grep -Eq "${IPV4_RE}"; then
+        echo "WARNING: ${vz_name} entry '${vz_e}' is not a dotted-quad IPv4 host address — IGNORED" >&2
+        continue
+      fi
+    else
+      if ! printf '%s' "${vz_e}" | grep -Eq "${VZ_CIDR_RE}"; then
+        echo "WARNING: ${vz_name} entry '${vz_e}' is not an IPv4 address or IPv4/prefix — IGNORED" >&2
+        continue
+      fi
+      case "${vz_e}" in
+        */*) ;;
+        *) vz_e="${vz_e}/32" ;;
+      esac
+    fi
+    case ",${vz_out}," in
+      *",${vz_e},"*) ;;
+      *) vz_out="${vz_out:+${vz_out},}${vz_e}" ;;
+    esac
+  done
+  set +f
+  IFS="$OLD_IFS"
+  printf '%s' "${vz_out}"
+}
+VERIZON_SIP_NETS_LIST="$(vz_norm_list VERIZON_SIP_NETS "${VERIZON_SIP_NETS:-}" cidr)"
+VERIZON_TF_IPS_LIST="$(vz_norm_list VERIZON_TF_IPS "${VERIZON_TF_IPS:-}" cidr)"
+VERIZON_PROBE_IPS_LIST="$(vz_norm_list VERIZON_PROBE_IPS "${VERIZON_PROBE_IPS:-}" host)"
+if [ "${VERIZON_REQUESTED}" = "1" ]; then
+  if [ -z "${VERIZON_VIP:-}" ] || ! printf '%s' "${VERIZON_VIP}" | grep -Eq "${IPV4_RE}"; then
+    VERIZON_OFF_WHY="${VERIZON_OFF_WHY} VERIZON_VIP='${VERIZON_VIP:-}' missing or not a dotted-quad IPv4;"
+  elif [ "${VERIZON_VIP}" = "${SBC_INTERNAL_IP}" ] || [ "${VERIZON_VIP}" = "${SBC_SIGNALING_VIP}" ] || [ "${VERIZON_VIP}" = "${EXTERNAL_SIP_IP}" ]; then
+    VERIZON_OFF_WHY="${VERIZON_OFF_WHY} VERIZON_VIP=${VERIZON_VIP} collides with an existing bind (SBC_INTERNAL_IP/SBC_SIGNALING_VIP/EXTERNAL_SIP_IP) — a duplicate listen is never emitted;"
+  fi
+  if [ -z "${VERIZON_SIP_IP:-}" ] || ! printf '%s' "${VERIZON_SIP_IP}" | grep -Eq "${IPV4_RE}"; then
+    VERIZON_OFF_WHY="${VERIZON_OFF_WHY} VERIZON_SIP_IP='${VERIZON_SIP_IP:-}' missing or not a dotted-quad IPv4;"
+  elif [ "${VERIZON_SIP_IP}" = "${EXTERNAL_SIP_IP}" ] || [ "${VERIZON_SIP_IP}" = "${VERIZON_VIP:-}" ]; then
+    VERIZON_OFF_WHY="${VERIZON_OFF_WHY} VERIZON_SIP_IP=${VERIZON_SIP_IP} must be the inside-tunnel address, not EXTERNAL_SIP_IP/VERIZON_VIP;"
+  fi
+  if [ -z "${VERIZON_SIP_NETS_LIST}" ]; then
+    VERIZON_OFF_WHY="${VERIZON_OFF_WHY} VERIZON_SIP_NETS='${VERIZON_SIP_NETS:-}' has no valid IPv4/CIDR entries;"
+  fi
+  if [ "${SBC_SIGVIP_MODE}" != "dedicated" ]; then
+    VERIZON_OFF_WHY="${VERIZON_OFF_WHY} SBC_SIGNALING_VIP unset/legacy (SBC_SIGVIP_MODE=${SBC_SIGVIP_MODE}) — dedicated signaling-VIP mode is a prerequisite;"
+  fi
+  if [ "${SBC_PEER_MODE}" != "on" ]; then
+    VERIZON_OFF_WHY="${VERIZON_OFF_WHY} SBC_PEER_INTERNAL_IP unset/invalid (peer reply hand-off off) — a prerequisite (standby probes + failback replies land on the active);"
+  fi
+  if [ -z "${VERIZON_OFF_WHY}" ]; then
+    VERIZON_MODE=on
+  else
+    echo "WARNING: Verizon mode requested (VERIZON_* set) but FORCED OFF:${VERIZON_OFF_WHY} Verizon blocks are compiled out; no VERIZON_VIP listen, trust, egress or probe group." >&2
+  fi
+fi
+# Render values. When OFF every token is only referenced from blocks the
+# compile-out pass removes, so they render to already-valid addresses (the
+# __FS_IP_2__ / __SBC_PEER_IP__ posture) and to a never-matching subnet.
+# Zone label: VERIZON_ZONE, else from VERIZON_VIP's second octet (the three
+# production VPC ranges), else SBC_ID's prefix. [a-z0-9-] only (it lands in a
+# duid and a header value). PoP header = "<zone>-orig".
+if [ -z "${VERIZON_ZONE:-}" ]; then
+  case "${VERIZON_VIP:-}" in
+    10.142.*) VERIZON_ZONE=east ;;
+    10.138.*) VERIZON_ZONE=west ;;
+    10.128.*) VERIZON_ZONE=central ;;
+    *) VERIZON_ZONE="${SBC_ID%%-*}" ;;
+  esac
+fi
+VERIZON_ZONE="$(printf '%s' "${VERIZON_ZONE}" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-')"
+if [ -z "${VERIZON_ZONE}" ]; then
+  VERIZON_ZONE=unknown
+fi
+VERIZON_POP="${VERIZON_ZONE}-orig"
+if [ "${VERIZON_MODE}" = "on" ]; then
+  VERIZON_MODE_DEFINE="#!define VERIZON_MODE"
+  VERIZON_VIP_RENDER="${VERIZON_VIP}"
+  VERIZON_SIP_IP_RENDER="${VERIZON_SIP_IP}"
+  VERIZON_SIP_NETS_RENDER="${VERIZON_SIP_NETS_LIST}"
+  if [ -n "${VERIZON_TF_IPS_LIST}" ]; then
+    VERIZON_TF_MODE_DEFINE="#!define VERIZON_TF_SPLIT"
+    VERIZON_TF_IPS_RENDER="${VERIZON_TF_IPS_LIST}"
+    VERIZON_TF_CLASS=split
+  else
+    if [ -n "${VERIZON_TF_IPS:-}" ]; then
+      echo "WARNING: VERIZON_TF_IPS='${VERIZON_TF_IPS}' contained NO valid entries — Verizon treated as a MIXED toll-free class (no ingress class check for Verizon sources)" >&2
+    fi
+    VERIZON_TF_MODE_DEFINE="# VERIZON_TF_IPS not set — Verizon is a MIXED class: toll-free ingress class check skipped for Verizon sources"
+    VERIZON_TF_IPS_RENDER="255.255.255.255/32"
+    VERIZON_TF_CLASS=mixed
+  fi
+  if [ -n "${VERIZON_PROBE_IPS_LIST}" ]; then
+    # One group-13 destination per probe IP. duid contract (migration 62
+    # carrier_trunk_health: 'verizon-' || pop, pop = zone): the FIRST listed
+    # probe IP is `verizon-<zone>`; any further IPs get `verizon-<zone>-2`,
+    # `-3`, ... — list the zone's primary Verizon SIP Gateway IP first.
+    # socket= forces the VERIZON_VIP bind (a REAL listen in this mode) so the
+    # probe's wire source is the inside-tunnel SIP IP after gateway
+    # translation; ping_from puts that same address in the From host. GNU
+    # sed renders \n as a newline.
+    VERIZON_DISPATCHER_LINES=""
+    vz_n=0
+    OLD_IFS="$IFS"
+    IFS=','
+    for vz_p in ${VERIZON_PROBE_IPS_LIST}; do
+      vz_n=$((vz_n + 1))
+      if [ "${vz_n}" -eq 1 ]; then
+        vz_duid="verizon-${VERIZON_ZONE}"
+      else
+        vz_duid="verizon-${VERIZON_ZONE}-${vz_n}"
+      fi
+      vz_line="13 sip:${vz_p}:5060 0 0 weight=100;duid=${vz_duid};socket=udp:${VERIZON_VIP}:5060;ping_from=sip:ping@${VERIZON_SIP_IP}"
+      VERIZON_DISPATCHER_LINES="${VERIZON_DISPATCHER_LINES:+${VERIZON_DISPATCHER_LINES}\\n}${vz_line}"
+    done
+    IFS="$OLD_IFS"
+  else
+    echo "WARNING: Verizon mode ON but VERIZON_PROBE_IPS is unset/empty — no dispatcher group 13 (no OPTIONS keepalive, no carrier-monitor up/down for Verizon)" >&2
+    VERIZON_DISPATCHER_LINES="# Verizon mode on but VERIZON_PROBE_IPS not set — no Verizon SIP Gateway keepalive destination"
+  fi
+else
+  VERIZON_MODE_DEFINE=""
+  VERIZON_VIP_RENDER="${SBC_INTERNAL_IP}"
+  VERIZON_SIP_IP_RENDER="${EXTERNAL_SIP_IP}"
+  VERIZON_SIP_NETS_RENDER="255.255.255.255/32"
+  VERIZON_TF_MODE_DEFINE="# Verizon mode off"
+  VERIZON_TF_IPS_RENDER="255.255.255.255/32"
+  VERIZON_TF_CLASS=off
+  VERIZON_DISPATCHER_LINES="# VERIZON_VIP not set — no Verizon SIP Gateway keepalive group (Verizon mode off)"
+fi
+
 # FS_PUBLIC_IP: FreeSWITCH VM's own public IP for RTP media.
 # Used in SDP body rewrites. Different from EXTERNAL_SIP_IP (NLB VIP) because
 # RTP goes directly to/from FS, not through the NLB.
@@ -555,6 +766,45 @@ sed -i "s|__UDP_MTU_VALUE__|${UDP_MTU}|g" "$CONFIG"
 # replacement string is a fixed literal (a #!define or a comment) with no '|',
 # '&' or '\'.
 sed -i "s|__VIP_EGRESS__|${VIP_EGRESS_DEFINE}|" "$CONFIG"
+# Verizon mode tokens (CLAUDE.md §8.15). cfg: __VERIZON_VIP__ (listen/alias/
+# forced $fs), __VERIZON_SIP_IP__ (advertise + every Verizon-visible address),
+# __VERIZON_SIP_NETS__ / __VERIZON_TF_IPS__ (#!define subnet lists — validated
+# digits, dots, slashes and commas only), __VERIZON_TF_MODE_DEFINE__ and
+# __VERIZON_MODE_DEFINE__ (define lines), __VERIZON_POP__ (attribution label,
+# [a-z0-9-] only). dispatcher.list: __VERIZON_DISPATCHER_LINES__ (one line per
+# probe IP joined by \n, which GNU sed renders as newlines; a comment when
+# off). No replacement contains '|' or '&' and no token is a substring of
+# another (__VERIZON_SIP_IP__ vs __VERIZON_SIP_NETS__ differ as whole tokens).
+sed -i "s|__VERIZON_VIP__|${VERIZON_VIP_RENDER}|g" "$CONFIG"
+sed -i "s|__VERIZON_SIP_IP__|${VERIZON_SIP_IP_RENDER}|g" "$CONFIG"
+sed -i "s|__VERIZON_SIP_NETS__|${VERIZON_SIP_NETS_RENDER}|g" "$CONFIG"
+sed -i "s|__VERIZON_TF_IPS__|${VERIZON_TF_IPS_RENDER}|g" "$CONFIG"
+sed -i "s|__VERIZON_TF_MODE_DEFINE__|${VERIZON_TF_MODE_DEFINE}|" "$CONFIG"
+sed -i "s|__VERIZON_POP__|${VERIZON_POP}|g" "$CONFIG"
+sed -i "s|__VERIZON_DISPATCHER_LINES__|${VERIZON_DISPATCHER_LINES}|" "$DISPATCH"
+if [ "${VERIZON_MODE}" = "on" ]; then
+  sed -i "s|__VERIZON_MODE_DEFINE__|${VERIZON_MODE_DEFINE}|" "$CONFIG"
+else
+  # COMPILE-OUT PASS (Verizon off): delete the define placeholder line and
+  # physically remove every `#!ifdef VERIZON_MODE` ... `#!endif` block from
+  # the rendered config, keeping the `#!else` branch (when present) verbatim.
+  # Nested #!ifdef/#!endif pairs INSIDE a Verizon block are tracked by depth
+  # (dropped in the if-branch, kept in the else-branch); directives OUTSIDE
+  # Verizon blocks pass through untouched. Result: the rendered kamailio.cfg
+  # is byte-identical to the pre-Verizon config (not just preprocessor-
+  # skipped) — the diff an operator sees is empty. Written to a sibling temp
+  # file then moved over (same root-owned 0644 copy cp created above).
+  sed -i '/^__VERIZON_MODE_DEFINE__$/d' "$CONFIG"
+  awk 'BEGIN { vz = 0; depth = 0 } vz == 0 && /^#!ifdef VERIZON_MODE[[:space:]]*$/ { vz = 1; depth = 1; next } vz == 0 { print; next } /^#!ifdef / || /^#!ifndef / { depth++; if (vz == 2) print; next } /^#!endif/ { depth--; if (depth == 0) { vz = 0; next } if (vz == 2) print; next } /^#!else/ && depth == 1 { vz = 2; next } vz == 2 { print }' "$CONFIG" > "${CONFIG}.vzout" && mv "${CONFIG}.vzout" "$CONFIG"
+fi
+# Fail fast if any Verizon token survived templating (template bug): an
+# unresolved token inside a listen= or #!define would either abort the start
+# or silently never match — neither is acceptable on a live SBC.
+if grep -q '__VERIZON_' "$CONFIG" "$DISPATCH"; then
+  echo "ERROR: unresolved __VERIZON_*__ placeholder(s) remain after templating:" >&2
+  grep -n '__VERIZON_' "$CONFIG" "$DISPATCH" >&2
+  exit 1
+fi
 # STIR x5u URL + key path. x5u is an ATIS-1000074 §5.3.1 URL (https, no query
 # string / fragment / userinfo), so it contains no '|', '&', or '\' — safe for
 # the s|..|..| delimiter and literal in the replacement. Escape defensively
@@ -602,6 +852,7 @@ sed -i "s|__SINCH_TF2_IP__|${SINCH_TF2_IP}|g" "$DISPATCH"
 
 echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_TF_ATL=${SINCH_TF_ATL_IP}, SINCH_TF_DEN=${SINCH_TF_DEN_IP}, TF_INGRESS_ENFORCE=${TF_INGRESS_ENFORCE}, TF_TEST_TNS=${TF_TEST_TNS_LIST:-<none>}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, SINCH_LD2=${SINCH_LD2_IP}, SINCH_TF2=${SINCH_TF2_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, E164_EGRESS=${E164_EGRESS}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
 echo "Kamailio peer reply hand-off: SBC_PEER_HANDOFF=${SBC_PEER_MODE} (peer=${SBC_PEER_ECHO}; on = transaction-less external replies received on the VIP socket are handed raw to the peer while dispatcher group 10 reads it UP, off = today's stateless via2 forward)"
+echo "Kamailio Verizon mode: VERIZON_MODE=${VERIZON_MODE} (VIP=${VERIZON_VIP:-<unset>} SIP_IP=${VERIZON_SIP_IP:-<unset>} NETS=${VERIZON_SIP_NETS_LIST:-<none>} TF_CLASS=${VERIZON_TF_CLASS} TF_IPS=${VERIZON_TF_IPS_LIST:-<none>} PROBE_IPS=${VERIZON_PROBE_IPS_LIST:-<none>} ZONE=${VERIZON_ZONE} POP=${VERIZON_POP} duid=verizon-${VERIZON_ZONE}; off = every VERIZON_MODE block removed from the rendered config)"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
 #
@@ -650,6 +901,48 @@ if [ "${SBC_SIGVIP_MODE}" = "dedicated" ]; then
   else
     echo "Adding signaling VIP ${SBC_SIGNALING_VIP}/32 to loopback"
     ip addr add "${SBC_SIGNALING_VIP}/32" dev lo 2>/dev/null || true
+  fi
+fi
+
+# Verizon mode (CLAUDE.md §8.15) — ON only:
+#   1. Add VERIZON_VIP/32 to loopback, exactly like the signaling VIP above
+#      (the Verizon internal ILB delivers packets with dst = the .251 VIP and
+#      `listen=udp:VERIZON_VIP:5060` must bind it; same " IP/" grep guard —
+#      .251 shares the subnet with the NIC IP, so a bare grep could false-match).
+#      VERIZON_SIP_IP is NEVER added anywhere: it is advertise-only, the IPsec
+#      gateways translate it to VERIZON_VIP.
+#   2. MTU hint routes (plan §3.4): one host route per VERIZON_SIP_NETS entry
+#      via this VM's default gateway/interface with `mtu lock 1400`, so SIP
+#      toward Verizon is fragmented locally at 1400 instead of relying on
+#      PMTU ICMP through the ESP tunnel (1460 GCE MTU - IPsec overhead).
+#      `ip route replace` is idempotent across container restarts (host
+#      networking + NET_ADMIN, as for the loopback add). The gateway/iface
+#      are read from `ip -4 route show default`; a missing default route or a
+#      failed add is logged and NOT fatal (the tunnel-side MTU on the
+#      gateways still clamps; this is the belt).
+if [ "${VERIZON_MODE}" = "on" ]; then
+  if ip addr show | grep -q " ${VERIZON_VIP}/"; then
+    echo "Verizon VIP ${VERIZON_VIP} already on interface"
+  else
+    echo "Adding Verizon VIP ${VERIZON_VIP}/32 to loopback"
+    ip addr add "${VERIZON_VIP}/32" dev lo 2>/dev/null || true
+  fi
+  VZ_DEFROUTE="$(ip -4 route show default 2>/dev/null | head -n 1)"
+  VZ_GW="$(printf '%s\n' "${VZ_DEFROUTE}" | awk '{ for (i = 1; i < NF; i++) { if ($i == "via") { print $(i + 1); exit } } }')"
+  VZ_DEV="$(printf '%s\n' "${VZ_DEFROUTE}" | awk '{ for (i = 1; i < NF; i++) { if ($i == "dev") { print $(i + 1); exit } } }')"
+  if [ -z "${VZ_GW}" ] || [ -z "${VZ_DEV}" ]; then
+    echo "WARNING: Verizon MTU hint routes SKIPPED — could not derive gateway/interface from default route '${VZ_DEFROUTE}'" >&2
+  else
+    OLD_IFS="$IFS"
+    IFS=','
+    for vz_net in ${VERIZON_SIP_NETS_LIST}; do
+      if ip route replace "${vz_net}" via "${VZ_GW}" dev "${VZ_DEV}" mtu lock 1400 2>/dev/null; then
+        echo "Verizon MTU hint route: ${vz_net} via ${VZ_GW} dev ${VZ_DEV} mtu lock 1400"
+      else
+        echo "WARNING: Verizon MTU hint route FAILED for ${vz_net} via ${VZ_GW} dev ${VZ_DEV} (NET_ADMIN? host network?)" >&2
+      fi
+    done
+    IFS="$OLD_IFS"
   fi
 fi
 

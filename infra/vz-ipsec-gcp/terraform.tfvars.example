@@ -1,0 +1,34 @@
+# Copy to terraform.tfvars (git-ignored). Nothing is required: project/network
+# and every as-built name/IP default to the 2026-10-30 ground truth in
+# locals.tf. The import plan runs with an empty tfvars.
+
+# project = "rugged-night-193017"
+# network = "default"
+
+# Gateway VM service account. The default below is what `gcloud compute
+# instances create` attaches when not told otherwise (project default compute
+# SA + gcloud's 7 default scopes). If `tofu plan` shows a service_account
+# change on the six gateways, paste the real values from
+#   gcloud compute instances describe east-vz-gw-a --zone=us-east1-b --format='yaml(serviceAccounts)'
+# here — or set the whole thing to null if they were built with
+# --no-service-account. Do NOT apply a service-account diff from this stack.
+# gateway_service_account = {
+#   email  = null   # null = <project-number>-compute@developer.gserviceaccount.com
+#   scopes = [
+#     "https://www.googleapis.com/auth/devstorage.read_only",
+#     "https://www.googleapis.com/auth/logging.write",
+#     "https://www.googleapis.com/auth/monitoring.write",
+#     "https://www.googleapis.com/auth/pubsub",
+#     "https://www.googleapis.com/auth/service.management.readonly",
+#     "https://www.googleapis.com/auth/servicecontrol",
+#     "https://www.googleapis.com/auth/trace.append",
+#   ]
+# }
+# gateway_service_account = null
+
+# --- Fill when Verizon answers (plan §10), then uncomment verizon_prefixes.tf --
+# PSKs are NEVER here (or anywhere in git): they live only in swanctl secrets
+# on the gateways.
+# verizon_ike_peers      = ["203.0.113.10/32", "203.0.113.11/32"]
+# verizon_sip_prefixes   = ["198.51.100.0/24"]
+# verizon_media_prefixes = ["198.51.100.0/24", "192.0.2.0/24"]
