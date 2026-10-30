@@ -107,7 +107,8 @@ if [ "$TUNNEL_READY" = 1 ]; then
 fi
 # nft anonymous-set literal for the forward rules: `{ a/24, b/28 }`
 VZ_PREFIX_SET="{ $(printf '%s' "$PREFIX_LIST" | sed 's/,/, /g') }"
-for v in VZ_ZONE VZ_GW VZ_NIC_IP VZ_IKE_IP VZ_SUBNET_GW VZ_GW_ILB_IP VZ_ZONE_SIP VZ_SBC_VIP VZ_SBC1_IP VZ_SBC2_IP VZ_FS1_NIC VZ_FS1_PUB VZ_FS2_NIC VZ_FS2_PUB VZ_PEER_IP VZ_PEER_ID VZ_LOCAL_ID VZ_IF_ID VZ_DRAIN_FILE VZ_PREFIX_SET PREFIX_LIST; do
+VZ_NE_XFRM_FLAG=""   # set after apt install (feature-detected); rendered into the node_exporter drop-in
+for v in VZ_ZONE VZ_GW VZ_NIC_IP VZ_IKE_IP VZ_SUBNET_GW VZ_GW_ILB_IP VZ_ZONE_SIP VZ_SBC_VIP VZ_SBC1_IP VZ_SBC2_IP VZ_FS1_NIC VZ_FS1_PUB VZ_FS2_NIC VZ_FS2_PUB VZ_PEER_IP VZ_PEER_ID VZ_LOCAL_ID VZ_IF_ID VZ_DRAIN_FILE VZ_PREFIX_SET PREFIX_LIST VZ_NE_XFRM_FLAG; do
     case "${!v}" in *'|'*|*'&'*|*'\'*) die "$v contains a character the renderer cannot escape (| & \\)" ;; esac
 done
 
@@ -116,7 +117,7 @@ info "zone=$VZ_ZONE gw=$VZ_GW nic=$VZ_NIC_IP ike=$VZ_IKE_IP ilb=$VZ_GW_ILB_IP tu
 # ----------------------------------------------------------------------------------------------------------------------
 # 2. renderer — `${VZ_X}` substitution with sed; refuses any unresolved `${...}` in the output
 # ----------------------------------------------------------------------------------------------------------------------
-RENDER_VARS="VZ_ZONE VZ_GW VZ_NIC_IP VZ_IKE_IP VZ_SUBNET_GW VZ_GW_ILB_IP VZ_ZONE_SIP VZ_SBC_VIP VZ_SBC1_IP VZ_SBC2_IP VZ_FS1_NIC VZ_FS1_PUB VZ_FS2_NIC VZ_FS2_PUB VZ_PEER_IP VZ_PEER_ID VZ_LOCAL_ID VZ_IF_ID VZ_DRAIN_FILE VZ_PREFIX_SET"
+RENDER_VARS="VZ_ZONE VZ_GW VZ_NIC_IP VZ_IKE_IP VZ_SUBNET_GW VZ_GW_ILB_IP VZ_ZONE_SIP VZ_SBC_VIP VZ_SBC1_IP VZ_SBC2_IP VZ_FS1_NIC VZ_FS1_PUB VZ_FS2_NIC VZ_FS2_PUB VZ_PEER_IP VZ_PEER_ID VZ_LOCAL_ID VZ_IF_ID VZ_DRAIN_FILE VZ_PREFIX_SET VZ_NE_XFRM_FLAG"
 render() {   # render SRC DST [MODE]  — DST is an absolute system path; honoured under $OUT in --render-only
     local src=$1 dst="$OUT$2" mode=${3:-0644} tmp args=()
     for v in $RENDER_VARS; do args+=(-e "s|\${$v}|${!v}|g"); done
@@ -221,6 +222,16 @@ put "$SELF_DIR/vz-healthd.py"  /usr/local/sbin/vz-healthd.py 0755
 put "$SELF_DIR/systemd/vz-routes.service"  /etc/systemd/system/vz-routes.service
 put "$SELF_DIR/systemd/vz-healthd.service" /etc/systemd/system/vz-healthd.service
 put "$SELF_DIR/systemd/strongswan.service.d/vz.conf" /etc/systemd/system/strongswan.service.d/vz.conf
+# node_exporter xfrm collector: Debian 12 ships node_exporter 1.5.0, which has NO --collector.xfrm (added in 1.6;
+# bookworm-backports carries nothing newer — checked 2026-10-30) and exits on the unknown flag. Feature-detect it so
+# node_exporter always starts; vz-healthd exports the two xfrm_stat counters that matter (XfrmOutNoStates,
+# XfrmInStateSeqError) itself, so the alert rules keep a source either way.
+VZ_NE_XFRM_FLAG=""
+if [ "$RENDER_ONLY" = 0 ] && /usr/bin/prometheus-node-exporter --help 2>&1 | grep -q -- '--collector.xfrm'; then
+    VZ_NE_XFRM_FLAG="--collector.xfrm"
+elif [ "$RENDER_ONLY" = 0 ]; then
+    warn "node_exporter $(/usr/bin/prometheus-node-exporter --version 2>&1 | head -1 | awk '{print $3}') has no --collector.xfrm (needs >= 1.6) — kernel node_xfrm_* metrics unavailable; vz-healthd's vz_ipsec_xfrm_*_total counters cover the alerts"
+fi
 render "$SELF_DIR/systemd/prometheus-node-exporter.service.d/vz.conf.tmpl" /etc/systemd/system/prometheus-node-exporter.service.d/vz.conf
 mkdir -p "$OUT/var/lib/node_exporter/textfile_collector"
 

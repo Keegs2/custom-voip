@@ -114,17 +114,22 @@ def check_nft():
     return rc == 0, {}
 
 
-def read_out_no_states():
-    """XfrmOutNoStates from /proc/net/xfrm_stat (counter), or None if unreadable."""
+def read_xfrm_counter(name):
+    """One counter from /proc/net/xfrm_stat by name, or None if unreadable/absent."""
     try:
         with open(XFRM_STAT, encoding="ascii") as f:
             for line in f:
                 parts = line.split()
-                if len(parts) == 2 and parts[0] == "XfrmOutNoStates":
+                if len(parts) == 2 and parts[0] == name:
                     return int(parts[1])
     except OSError:
         return None
     return None
+
+
+def read_out_no_states():
+    """XfrmOutNoStates from /proc/net/xfrm_stat (counter), or None if unreadable."""
+    return read_xfrm_counter("XfrmOutNoStates")
 
 
 class Sampler(threading.Thread):
@@ -205,6 +210,12 @@ def write_textfile(result, drained):
         lines.append("# HELP vz_ipsec_xfrm_out_no_states_total raw XfrmOutNoStates from /proc/net/xfrm_stat")
         lines.append("# TYPE vz_ipsec_xfrm_out_no_states_total counter")
         lines.append(f"vz_ipsec_xfrm_out_no_states_total{{{labels}}} {counter}")
+    # Replay-window drops (plan 3.5): exported here because Debian 12's node_exporter 1.5.0 has no xfrm collector.
+    seq_err = read_xfrm_counter("XfrmInStateSeqError")
+    if seq_err is not None:
+        lines.append("# HELP vz_ipsec_xfrm_in_state_seq_error_total raw XfrmInStateSeqError (anti-replay drops) from /proc/net/xfrm_stat")
+        lines.append("# TYPE vz_ipsec_xfrm_in_state_seq_error_total counter")
+        lines.append(f"vz_ipsec_xfrm_in_state_seq_error_total{{{labels}}} {seq_err}")
     gauge("vz_ipsec_healthd_timestamp_seconds", "last sampler run (unix time)", result["ts"])
     body = "\n".join(lines) + "\n"
     tmp = TEXTFILE + ".tmp"
