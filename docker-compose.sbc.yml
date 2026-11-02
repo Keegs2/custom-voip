@@ -205,6 +205,13 @@ services:
       #   VERIZON_ZONE      optional east|west|central (default from
       #                     VERIZON_VIP's second octet, else SBC_ID prefix):
       #                     duid verizon-<zone> + X-Inbound-PoP <zone>-orig.
+      #   VERIZON_TRANSPORT optional udp (default) | tcp — transport of every
+      #                     Verizon-bound request + group-13 probe, and the
+      #                     ;transport= on Verizon-visible Contact/outer RR.
+      #                     udp/unset = byte-identical render; anything else =
+      #                     WARNING + udp. tcp needs Verizon to accept TCP 5060
+      #                     from VERIZON_SIP_IP and tcp:5060 in the
+      #                     vz-allow-verizon-sip firewall rule (CLAUDE.md §8.15).
       # PREREQUISITES (entrypoint FORCES OFF with a WARNING otherwise):
       # SBC_SIGNALING_VIP set (dedicated mode) AND SBC_PEER_INTERNAL_IP set
       # (peer reply hand-off — all Verizon return traffic lands on the ACTIVE
@@ -218,6 +225,7 @@ services:
       - VERIZON_TF_IPS=${VERIZON_TF_IPS:-}
       - VERIZON_PROBE_IPS=${VERIZON_PROBE_IPS:-}
       - VERIZON_ZONE=${VERIZON_ZONE:-}
+      - VERIZON_TRANSPORT=${VERIZON_TRANSPORT:-}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro

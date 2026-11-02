@@ -206,6 +206,11 @@ goes to the SBC):
    immediately (plan §8.1 item 3). Every other carrier is byte-identical (2 attempts per row).
    Same lib, so trunk/API 8YY would behave the same if a Verizon `tollfree` row ever existed
    (none planned — 8YY stays on Sinch).
+**`VERIZON_TRANSPORT` is SBC-only.** With `VERIZON_TRANSPORT=tcp` on the SBCs, Kamailio
+carries every Verizon-bound request over TCP from the `.251` bind, including FS's in-dialog
+ACK/BYE/re-INVITE (`docker/kamailio/CLAUDE.md` §8.15 "Transport"). The FS→SBC leg stays UDP to
+`SBC_PROXY_IP`. There is no FS setting, no sofia change and no dial-string change.
+
 Enable order (per zone): migration 62 on the East primary → Kamailio Verizon build on both SBCs
 (`SBC_PEER_INTERNAL_IP` set) → tunnels up → `UPDATE carrier_trunks SET source_ip=<real>, enabled=true
 WHERE carrier='verizon' ...` (FS picks it up within 60 s, no restart). Harness:

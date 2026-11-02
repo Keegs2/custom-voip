@@ -481,7 +481,7 @@ Dispatcher groups (10 is the optional peer-SBC liveness group, §8.12):
 | 9 | sip:206.146.100.26:5060 (`__SINCH_TF_IP__`, duid=sinch-denver-tf) | Sinch Denver TF (OSAO 8YY) termination keepalive/health ONLY |
 | 11 | sip:206.146.100.25:5060 (`__SINCH_LD2_IP__`, duid=sinch-denver-ld) | Sinch Denver LD **redundant** termination (DENSBX21) keepalive/health ONLY |
 | 12 | sip:206.146.98.25:5060 (`__SINCH_TF2_IP__`, duid=sinch-atlanta-tf) | Sinch Atlanta TF (OSAO 8YY) **redundant** termination (ATLSBX21) keepalive/health ONLY |
-| 13 | `__VERIZON_DISPATCHER_LINES__` = one `sip:<ip>:5060` per `VERIZON_PROBE_IPS` entry, `duid=verizon-<zone>` (first IP; `verizon-<zone>-2`, … after), `socket=udp:VERIZON_VIP:5060`, `ping_from=sip:ping@VERIZON_SIP_IP` | Verizon SIP Gateway (IPsec) keepalive/health ONLY — **Verizon mode only** (§8.15); renders as a comment otherwise. VERIZON_VIP-sourced probes: replies reach the ACTIVE SBC only, so the standby reads it UP only via the peer reply hand-off (a Verizon prerequisite) |
+| 13 | `__VERIZON_DISPATCHER_LINES__` = one `sip:<ip>:5060` per `VERIZON_PROBE_IPS` entry, `duid=verizon-<zone>` (first IP; `verizon-<zone>-2`, … after), `socket=udp:VERIZON_VIP:5060`, `ping_from=sip:ping@VERIZON_SIP_IP` | Verizon SIP Gateway (IPsec) keepalive/health ONLY — **Verizon mode only** (§8.15); renders as a comment otherwise. VERIZON_VIP-sourced probes: replies reach the ACTIVE SBC only, so the standby reads it UP only via the peer reply hand-off (a Verizon prerequisite). `VERIZON_TRANSPORT=tcp`: `sip:<ip>:5060;transport=tcp` + `socket=tcp:VERIZON_VIP:5060` — the standby then reads Inactive while it is standby (its SYN-ACK lands on the active, which RSTs it; §8.15 "Transport") |
 
 **Groups 11/12 share their IPs with the 8XX-T TF ORIGINATION trunks** (static
 trust `SINCH_TF_DEN_IP`/`SINCH_TF_ATL_IP`). They are templated exactly like
@@ -663,6 +663,7 @@ Set in `.env` file on each SBC VM. Passed via `docker-compose.sbc.yml`.
 | `VERIZON_TF_IPS` | No (unset = MIXED class) | 198.51.100.7 | Optional ATF-IP (toll-free) sources if distinct from the SIP Gateway ones → `#!define VERIZON_TF_SPLIT`: those are the TF ingress class, other Verizon sources non-TF. Unset ⇒ the toll-free ingress class check is SKIPPED for Verizon sources (both products on shared IPs). |
 | `VERIZON_PROBE_IPS` | No (unset = no probe group, WARNING) | 203.0.113.10,203.0.113.11 | Verizon SIP Gateway HOST IPs to OPTIONS-probe — dispatcher group 13, one line per IP, VERIZON_VIP-sourced. List the zone's primary first (it gets `duid=verizon-<zone>`). |
 | `VERIZON_ZONE` | No (default from `VERIZON_VIP` octet: 10.142→east, 10.138→west, 10.128→central; else SBC_ID prefix) | central | Zone label → dispatcher `duid=verizon-<zone>` and `X-Inbound-PoP: <zone>-orig` on Verizon-originated calls (migration 62 `carrier_trunk_health` keys: `'verizon-' \|\| pop` and the `orig_map`). |
+| `VERIZON_TRANSPORT` | No (default udp) | tcp | Verizon mode only (§8.15 "Transport"): `tcp` ⇒ `#!define VERIZON_TCP` — every Verizon-bound request (Step 1b INVITE, 422 retry, FS-originated ACK/BYE/re-INVITE via `route[VZ_TCP_EGRESS]`, group-13 probes) leaves `tcp:VERIZON_VIP:5060`, and every Verizon-visible Contact / outer Record-Route carries `;transport=tcp`. `udp`/unset ⇒ every `#!ifdef VERIZON_TCP` block removed, render byte-identical. Anything else ⇒ WARNING + udp. With Verizon mode off: NOTE, inert. Inbound from Verizon is accepted on both transports in either mode. Set on BOTH SBCs of a zone. |
 | `VIP_EGRESS` | No (default off) | on | Carrier-bound INVITE egress from the external NLB VIP for INVITEs received on the signaling ILB VIP (`if ($Ri == "SIGNALING_VIP") { $fs = "udp:ADVERTISE_IP:5060"; }` in `route[TO_CARRIER]` Step 9, compiled in via `#!define VIP_EGRESS` + `SBC_SIGVIP_DEDICATED`). on/true/1 = ON, anything else = OFF; entrypoint forces OFF (warning) when `SBC_SIGNALING_VIP` is unset. Direct-IP ingress keeps own-public-IP egress — the 6 SBC public IPs stay whitelisted. BANDWIDTH destinations only: Sinch (any non-Bandwidth) INVITEs always keep own-public-IP egress. Enable on both SBCs of a zone. See "Carrier-bound INVITE egress" in §5 Dispatcher Configuration. |
 
 ## 7. SIP Call Flows
@@ -1296,8 +1297,9 @@ empty and the ingest falls back to intent.
 
 ### 8.15 Verizon mode — SIP Gateway (2-Way) + ATF-IP over self-built IPsec (`VERIZON_*`, default off)
 
-**Status: SHIPS DARK (2026-10-30).** Implements `docs/VERIZON_IPSEC_TRUNKS_PLAN.md`
-§8.1 items 1-10, 12, 13 (item 11, TCP transport, is a documented follow-up). The
+**Status: SHIPS DARK (2026-10-30; `VERIZON_TRANSPORT` 2026-11-02).** Implements
+`docs/VERIZON_IPSEC_TRUNKS_PLAN.md` §8.1 items 1-13 (item 11, TCP transport, is the
+opt-in `VERIZON_TRANSPORT=tcp`; UDP stays the default until plan §10 #7 is answered). The
 SBC side of the Verizon interconnect: Verizon's SIP Gateway (DID 2-Way) and ATF-IP
 (toll-free) SBCs reach each zone through two strongSwan gateways; the gateways
 translate, statelessly 1:1, Verizon-side addresses to VPC ones. Two addresses per
@@ -1310,7 +1312,7 @@ zone, deliberately different in kind:
 
 **Env contract** (§6; all optional, every var passed through `docker-compose.sbc.yml`):
 `VERIZON_VIP`, `VERIZON_SIP_IP`, `VERIZON_SIP_NETS` (required for ON),
-`VERIZON_TF_IPS`, `VERIZON_PROBE_IPS`, `VERIZON_ZONE` (optional). Mode is ON only
+`VERIZON_TF_IPS`, `VERIZON_PROBE_IPS`, `VERIZON_ZONE`, `VERIZON_TRANSPORT` (optional). Mode is ON only
 when the three required vars validate AND `SBC_SIGVIP_MODE=dedicated` AND
 `SBC_PEER_INTERNAL_IP` is set; otherwise the entrypoint FORCES it OFF with a
 WARNING naming every failed prerequisite (same forcing `VIP_EGRESS` gets). Set the
@@ -1323,12 +1325,25 @@ REMOVES every `#!ifdef VERIZON_MODE … #!endif` block from the rendered
 `#!ifdef` depth. The rendered config is byte-for-byte the pre-Verizon config —
 render-diffed against the pristine 29fd90f template with the production env
 (dedicated + peer), the legacy env, and both forced-off envs: `cmp` identical.
+(Since the §8.12 `route[REPLY_SRC]` fix, which renders in EVERY mode by design,
+the off render differs from 29fd90f by exactly that fix; the Verizon blocks
+themselves still contribute zero bytes.)
 `dispatcher.list` differs only by the group-13 comment block (the group-10
 convention). When ON, `#!define VERIZON_MODE` is emitted and Kamailio's own
 preprocessor resolves the blocks (`kamailio -c` clean on 5.8.8). Every new line
 of Verizon logic — including comments — lives inside a `#!ifdef VERIZON_MODE`
 block; sites that CHANGE an existing line carry the old line in `#!else`. Keep
-it that way or the OFF render stops being identical.
+it that way or the OFF render stops being identical. `VERIZON_TCP` follows the
+same contract one level down: `__VERIZON_TCP_DEFINE__` sits in the Verizon
+define block, and unless `VERIZON_TRANSPORT=tcp` with Verizon mode ON the
+entrypoint deletes that line and removes every `#!ifdef VERIZON_TCP` block
+(same awk pass, `vz_strip_blocks`), keeping its `#!else`. Every TCP line,
+comments included, lives in a `VERIZON_TCP` block; a changed line keeps the
+UDP original in `#!else`. Nested inside a `VERIZON_MODE` if-branch a
+`VERIZON_TCP` block may have an `#!else`; a standalone one (helper routes, the
+new call sites) must not, or the OFF render changes. Consequence: the udp
+render keeps the pre-feature comment text verbatim (e.g. Step 1b's "Not
+implemented here"); the `VERIZON_TCP` branch next to it says so.
 
 **What the blocks do (plan §8.1 item → cfg site):**
 1. *Listen + loopback*: the three `listen=` lines after the `SBC_SIGVIP_DEDICATED`
@@ -1354,11 +1369,13 @@ it that way or the OFF render stops being identical.
    signaling-ILB ingress proves this SBC is active; a direct-IP (`SBC_INTERNAL_IP`,
    127.0.0.1, external-VIP) attempt would strand its replies on the peer. Wider than
    the plan's `$Ri == SBC_INTERNAL_IP` on purpose. The 422 retry in
-   `failure_route[CARRIER_FAILURE]` re-forces the socket from `$avp(adv_ip)`.
+   `failure_route[CARRIER_FAILURE]` re-forces the socket from `$avp(adv_ip)`
+   (with `VERIZON_TRANSPORT=tcp` it re-pins `$du …;transport=tcp` too).
 4. *Peer reply hand-off guard* (`reply_route`): `($Ri == "ADVERTISE_IP" || $Ri ==
    "VERIZON_VIP")` — the standby's VERIZON_VIP-sourced group-13 probe replies and
    failback-window INVITE replies are handed to the peer's tm exactly like §8.12.
    Hence `SBC_PEER_INTERNAL_IP` is a hard prerequisite (forced off without it).
+   TCP interaction: see item 11.
 5. *Static trust* (flag 5): `$var(vz_src) == 1` arm in the trust chain and
    `|| $var(vz_src) == 1` on the carrier-ingress INVITE condition (parallel
    conditions — keep in sync). Untrusted OPTIONS are flood-blocked after 20/60 s,
@@ -1379,11 +1396,10 @@ it that way or the OFF render stops being identical.
    `else if (is_in_subnet($si, VERIZON_SIP_NETS_DEF))` arm that does nothing —
    Verizon SDP `c=` lines in private space pass intact (live-verified).
 9. *Dispatcher*: group 13 (`__VERIZON_DISPATCHER_LINES__`, §5), comment when off.
+   `VERIZON_TRANSPORT=tcp` renders `sip:<ip>:5060;transport=tcp` + `socket=tcp:…`.
 10. *MTU hint*: entrypoint `ip route replace <net> via <default gw> dev <iface>
     mtu lock 1400` per `VERIZON_SIP_NETS` entry (idempotent, logged, non-fatal).
-11. *Transport*: UDP only. `VERIZON_TRANSPORT` follow-up documented in the
-    Step 1b comment (`;transport=tcp` on `$du`/RR/Contact, `$fs = tcp:…`, both
-    .251 listens kept, Verizon must accept inbound TCP from `VERIZON_SIP_IP`).
+11. *Transport* (`VERIZON_TRANSPORT`, default `udp`; see "Transport" below).
 12. *Self-loop safety nets* (three sites): log the Route set / forced socket; for
     a Verizon dialog (`$var(vz_dlg)`) answer `481` (drop for ACK) instead of
     bouncing to `BANDWIDTH_IP_1`. Bandwidth/Sinch dialogs unchanged.
@@ -1391,6 +1407,92 @@ it that way or the OFF render stops being identical.
     `RCF_FROM_PASSTHROUGH` are operator gates, not touched here — Verizon commonly
     expects +1 E.164 and an on-account From/PAI TN; keep `RCF_FROM_PASSTHROUGH`
     off for Verizon and decide `E164_EGRESS` per zone before turn-up.
+
+**Transport — `VERIZON_TRANSPORT=udp|tcp` (2026-11-02, default udp).** `tcp`
+(Verizon mode ON only) emits `#!define VERIZON_TCP`; everything else keeps the
+UDP-only render byte-for-byte (see "Compiled out" above). What `tcp` changes:
+
+| Site | udp (default) | tcp |
+|---|---|---|
+| `TO_CARRIER` Step 9 (Verizon destination) | `$fs = udp:VERIZON_VIP:5060`, `$du` UDP | `$du = sip:<gw>:5060;transport=tcp` AND `$fs = tcp:VERIZON_VIP:5060` (both are needed: a tcp `$fs` with a UDP `$du` is a proto mismatch that core `get_send_socket2()` silently resolves to the udp sibling bind) |
+| `failure_route[CARRIER_FAILURE]` 422 retry | re-forces `udp:` | re-pins `$du …;transport=tcp` + `tcp:` |
+| Contact (B-leg INVITE, `REPLY_HANDLER` on FS replies, the three WITHINDIALOG rewrites) | `;transport=udp` | `route[VZ_TP]`: `;transport=tcp` when `$var(adv_ip)` is `VERIZON_SIP_IP`, `udp` otherwise |
+| Outer Record-Route (A-leg + B-leg presets, all `fsn` variants) | `<sip:VERIZON_SIP_IP:5060;fs=…;lr>` | `<sip:VERIZON_SIP_IP:5060;transport=tcp;fs=…;lr>` (`$var(adv_rrtp)`, empty for non-Verizon) — Verizon sends its in-dialog requests over TCP, and the FS-side r2 double-pop resolves the second Route to the TCP bind |
+| FS-originated ACK/BYE/re-INVITE/UPDATE toward Verizon | r2-forced socket, next hop = R-URI | `route[VZ_TCP_EGRESS]` (loose_route tail + both no-Route FS arms, gated `$var(vz_dlg) == 1`, non-self R-URI): next hop (`$du` if loose_route set one, else the R-URI) rebuilt `sip:host:port;transport=tcp`, `$fs = tcp:VERIZON_VIP:5060`. Needed because Verizon's Contact may omit `;transport=tcp`: without it the request falls back to UDP (proved by ablation) |
+| Group-13 probes | `socket=udp:…` | `sip:<ip>:5060;transport=tcp`, `socket=tcp:VERIZON_VIP:5060` |
+| Listens | udp + tcp `.251` | unchanged — inbound from Verizon accepted on either transport |
+
+Not changed: the 5xx in-trunk/cross-trunk flip (it never targets Verizon: Step 1a
+pre-sets flags 8+9 for every validated `X-Carrier-IP`, the only way into Step 1b),
+FS→SBC (UDP to `SBC_PROXY_IP`), every Bandwidth/Sinch/PBX path (live-verified identical).
+
+*Probes over TCP (decided).* The probe follows the trunk's transport: group 13
+then exercises exactly what calls use (Verizon's TCP listener, `tcp:5060` in the
+firewall rule, the gateway MSS clamp) and keeps a warm `.251` connection the next
+INVITE reuses (verified: the INVITE rode the probe's connection). The cost: TCP
+cannot complete from the STANDBY. Its SYN leaves `.251`, the SYN-ACK returns via
+`VERIZON_SIP_IP` → gateway → `VERIZON_VIP` → ILB → the ACTIVE SBC, which has no
+such socket and answers RST. So the standby reads group 13 Inactive for as long as
+it is standby, one `dispatcher:dst-down` per boot. The peer reply hand-off relays
+SIP replies; it cannot finish a TCP handshake. This is the documented Sinch 6/7
+posture before §8.12, and `carrier_trunk_health` is up-on-≥1-SBC (`bool_or`), so
+the zone signal stays correct. UDP probes would have kept the standby green but
+monitored a path the calls no longer take.
+
+*Peer hand-off and the stateless BYE forward with TCP.* In steady state a TCP reply
+arrives on the connection the sending SBC opened. Its segments go to
+`VERIZON_VIP` = the ILB-active SBC = that same SBC (Step 1b guard), so tm matches it
+locally and the hand-off never runs. The FS→Verizon BYE is `forward()`ed
+statelessly over TCP. Its 200 OK returns on that connection, has no transaction
+(BYE is excluded from the hand-off), and core `forward_reply()` sends it to FS by
+via2 over UDP (live-verified). After a flip, the ex-active's connections die: their
+segments now reach the new active, which RSTs them. Verizon then opens a new
+connection to `VERIZON_SIP_IP:5060` for in-dialog requests, which reaches the new
+active, and sends replies the same way (RFC 3261 §18.2.2). If such a reply belongs
+to a transaction the peer still owns (failback window), the existing guard
+(`$Ri == VERIZON_VIP`, a TCP listen's bind) hands `$mb`, one framed SIP message, to
+the peer over UDP via `send_data()`. The peer's tm matches by branch and ignores
+the transport (live-verified: byte-identical copy at the peer, no FS leak; a BYE
+reply over TCP is not handed off and goes to FS by via2). No hand-off code changed.
+A reply larger than the VPC MTU is IP-fragmented on that one internal hop.
+
+*Verizon TCP prerequisites (before setting `tcp` in a zone):*
+1. Verizon accepts inbound TCP 5060 from `VERIZON_SIP_IP` (plan §10 #7). With
+   `tcp_connection_lifetime=300`, an idle connection closes after 5 min, and the next
+   in-dialog request (BYE, session refresh) opens a fresh one from `.251`. Verizon
+   must not rely on an existing connection.
+2. GCP firewall `vz-allow-verizon-sip` (Verizon SIP prefixes → `voip-sbc`) includes
+   `tcp:5060`, not only `udp:5060`. Return traffic on our outbound connections is
+   covered by the stateful VPC firewall.
+3. The gateways' MTU 1400 / TCP-MSS 1350 clamp (nft `maxseg size set 1350`, plan
+   §3.3) applies to TCP SYNs in both directions. The SBC's `mtu lock 1400` hint
+   routes (item 10) also make the kernel advertise MSS 1360 on `.251` connections.
+   Large INVITEs (Identity + div + SDP) segment instead of fragmenting, which is the
+   reason to choose TCP (plan §12 "UDP fragmentation").
+4. Set `VERIZON_TRANSPORT=tcp` on BOTH SBCs of the zone (standby first), then
+   recreate kamailio. The entrypoint log line shows
+   `TRANSPORT=tcp VERIZON_TCP=on`; `kamcmd dispatcher.list` shows group 13 with
+   `;transport=tcp` / `socket=tcp:…` and `AP` on the active.
+
+*Verified (2026-11-02, Kamailio 5.8.8, docker harness, peers on `lo`).* udp:
+the render is `cmp`-identical to the pre-feature branch with Verizon on (`VERIZON_TRANSPORT`
+unset, `udp`, and garbage → WARNING), the off render is identical to the pre-feature
+branch (legacy, dedicated, and `tcp` with mode off → NOTE), dispatcher.list is
+identical, and the existing 46+5 live checks pass. tcp: `kamailio -c` is clean, and
+49/49 live checks + 2 log checks pass. Covered: probes over TCP from `.251` (Via
+`SIP/2.0/TCP VERIZON_SIP_IP`, dispatcher `AP`); the B-leg INVITE over TCP from `.251`
+with Contact/outer RR `;transport=tcp` and nothing on UDP; Verizon's 200 OK on that
+connection relayed to FS (SDP intact, SE 1800); FS ACK, re-INVITE and BYE over TCP
+with one SBC Via, even when Verizon's Contact had no `;transport`; the BYE 200
+stateless to FS; inbound INVITE over TCP to FS with the 200 OK back on the same
+connection (Contact `;transport=tcp`); the A-leg FS BYE over TCP; inbound over UDP
+still accepted; the 422 retry over TCP; the hand-off and BYE-forward behaviour
+described above; and the Bandwidth control leg unchanged (UDP, ADVERTISE_IP). Negative
+controls: the pre-feature config fails 9/24 of the same checks, and with
+`VZ_TCP_EGRESS` neutered, FS ACK/re-INVITE/BYE leave over UDP. *Not provable
+locally:* Verizon's TCP acceptance and timers, the GCP firewall/ILB path for TCP
+(SYN-ACK return through the gateway translation, plan U2), and the standby-RST
+behaviour on the real ILB.
 
 **Verified (2026-10-30, Kamailio 5.8.8 image, all peers on `lo`, throwaway
 Postgres):** `kamailio -c` on both ON renders (mixed + split); real boot in ON

@@ -499,6 +499,19 @@ fi
 #                      orig_map). Default: derived from VERIZON_VIP's second
 #                      octet (10.142 -> east, 10.138 -> west, 10.128 ->
 #                      central), else the prefix of SBC_ID.
+#   VERIZON_TRANSPORT  OPTIONAL udp (default) | tcp — the transport of every
+#                      Verizon-bound request (initial INVITE, 422 retry,
+#                      FS-originated ACK/BYE/re-INVITE toward Verizon, the
+#                      group-13 OPTIONS probes) and the ;transport= of every
+#                      Verizon-visible Contact / outer Record-Route. tcp =>
+#                      `#!define VERIZON_TCP`; udp/unset => every
+#                      `#!ifdef VERIZON_TCP` block is REMOVED from the render
+#                      (same compile-out pass as Verizon-off, below), so the
+#                      udp render is byte-identical to the pre-VERIZON_TRANSPORT
+#                      config. Anything else => WARNING + udp. Inert (NOTE)
+#                      when Verizon mode is off. Inbound from Verizon is
+#                      accepted on BOTH transports in either mode (the .251
+#                      udp + tcp listens always exist in Verizon mode).
 #
 # Verizon mode is ON only when VERIZON_VIP, VERIZON_SIP_IP and VERIZON_SIP_NETS
 # are all set and valid AND the two documented prerequisites hold:
@@ -599,6 +612,26 @@ if [ "${VERIZON_REQUESTED}" = "1" ]; then
     echo "WARNING: Verizon mode requested (VERIZON_* set) but FORCED OFF:${VERIZON_OFF_WHY} Verizon blocks are compiled out; no VERIZON_VIP listen, trust, egress or probe group." >&2
   fi
 fi
+# Verizon transport (CLAUDE.md §8.15 "Transport"). Validated independently of
+# the mode so a typo is always reported; only `tcp` with Verizon mode ON emits
+# the define. Deliberately NOT part of VERIZON_REQUESTED: VERIZON_TRANSPORT
+# alone never triggers the forced-off WARNING.
+VERIZON_TRANSPORT="$(printf '%s' "${VERIZON_TRANSPORT:-udp}" | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+case "${VERIZON_TRANSPORT}" in
+  udp|tcp) ;;
+  "") VERIZON_TRANSPORT=udp ;;
+  *)
+    echo "WARNING: VERIZON_TRANSPORT='${VERIZON_TRANSPORT}' is not udp|tcp — using udp" >&2
+    VERIZON_TRANSPORT=udp
+    ;;
+esac
+if [ "${VERIZON_TRANSPORT}" = "tcp" ] && [ "${VERIZON_MODE}" != "on" ]; then
+  echo "NOTE: VERIZON_TRANSPORT=tcp is inert — Verizon mode is off" >&2
+fi
+VERIZON_TCP=off
+if [ "${VERIZON_MODE}" = "on" ] && [ "${VERIZON_TRANSPORT}" = "tcp" ]; then
+  VERIZON_TCP=on
+fi
 # Render values. When OFF every token is only referenced from blocks the
 # compile-out pass removes, so they render to already-valid addresses (the
 # __FS_IP_2__ / __SBC_PEER_IP__ posture) and to a never-matching subnet.
@@ -644,6 +677,22 @@ if [ "${VERIZON_MODE}" = "on" ]; then
     # probe's wire source is the inside-tunnel SIP IP after gateway
     # translation; ping_from puts that same address in the From host. GNU
     # sed renders \n as a newline.
+    # VERIZON_TRANSPORT=tcp: the probe follows the trunk's transport —
+    # `sip:<ip>:5060;transport=tcp` + socket=tcp:VERIZON_VIP:5060 — so group
+    # 13 proves the path calls actually take (Verizon's TCP listener, the
+    # tcp:5060 firewall rule, the gateway MSS clamp) and keeps a warm .251
+    # connection the next INVITE reuses. Consequence (accepted, CLAUDE.md
+    # §8.15): the STANDBY's TCP SYN-ACK returns via VERIZON_VIP to the ACTIVE
+    # SBC, which has no such socket and RSTs it — the standby reads group 13
+    # Inactive for as long as it is standby (the peer reply hand-off relays
+    # SIP replies, it cannot complete a TCP handshake). carrier_trunk_health
+    # is up-on->=1-SBC, so the zone signal stays correct.
+    vz_probe_uri_tp=""
+    vz_probe_sock="udp"
+    if [ "${VERIZON_TCP}" = "on" ]; then
+      vz_probe_uri_tp=";transport=tcp"
+      vz_probe_sock="tcp"
+    fi
     VERIZON_DISPATCHER_LINES=""
     vz_n=0
     OLD_IFS="$IFS"
@@ -655,7 +704,7 @@ if [ "${VERIZON_MODE}" = "on" ]; then
       else
         vz_duid="verizon-${VERIZON_ZONE}-${vz_n}"
       fi
-      vz_line="13 sip:${vz_p}:5060 0 0 weight=100;duid=${vz_duid};socket=udp:${VERIZON_VIP}:5060;ping_from=sip:ping@${VERIZON_SIP_IP}"
+      vz_line="13 sip:${vz_p}:5060${vz_probe_uri_tp} 0 0 weight=100;duid=${vz_duid};socket=${vz_probe_sock}:${VERIZON_VIP}:5060;ping_from=sip:ping@${VERIZON_SIP_IP}"
       VERIZON_DISPATCHER_LINES="${VERIZON_DISPATCHER_LINES:+${VERIZON_DISPATCHER_LINES}\\n}${vz_line}"
     done
     IFS="$OLD_IFS"
@@ -782,20 +831,41 @@ sed -i "s|__VERIZON_TF_IPS__|${VERIZON_TF_IPS_RENDER}|g" "$CONFIG"
 sed -i "s|__VERIZON_TF_MODE_DEFINE__|${VERIZON_TF_MODE_DEFINE}|" "$CONFIG"
 sed -i "s|__VERIZON_POP__|${VERIZON_POP}|g" "$CONFIG"
 sed -i "s|__VERIZON_DISPATCHER_LINES__|${VERIZON_DISPATCHER_LINES}|" "$DISPATCH"
+# vz_strip_blocks SYMBOL — COMPILE-OUT PASS: physically remove every
+# `#!ifdef SYMBOL` ... `#!endif` block from the rendered config, keeping the
+# `#!else` branch (when present) verbatim. Nested #!ifdef/#!endif pairs INSIDE
+# a stripped block are tracked by depth (dropped in the if-branch, kept in the
+# else-branch); directives OUTSIDE such blocks — including blocks of OTHER
+# symbols the stripped block sits in — pass through untouched. Written to a
+# sibling temp file then moved over (same root-owned 0644 copy cp created
+# above).
+vz_strip_blocks() {
+  awk -v sym="$1" 'BEGIN { vz = 0; depth = 0; open_re = "^#!ifdef " sym "[[:space:]]*$" } vz == 0 && $0 ~ open_re { vz = 1; depth = 1; next } vz == 0 { print; next } /^#!ifdef / || /^#!ifndef / { depth++; if (vz == 2) print; next } /^#!endif/ { depth--; if (depth == 0) { vz = 0; next } if (vz == 2) print; next } /^#!else/ && depth == 1 { vz = 2; next } vz == 2 { print }' "$CONFIG" > "${CONFIG}.vzout" && mv "${CONFIG}.vzout" "$CONFIG"
+}
 if [ "${VERIZON_MODE}" = "on" ]; then
   sed -i "s|__VERIZON_MODE_DEFINE__|${VERIZON_MODE_DEFINE}|" "$CONFIG"
 else
   # COMPILE-OUT PASS (Verizon off): delete the define placeholder line and
   # physically remove every `#!ifdef VERIZON_MODE` ... `#!endif` block from
   # the rendered config, keeping the `#!else` branch (when present) verbatim.
-  # Nested #!ifdef/#!endif pairs INSIDE a Verizon block are tracked by depth
-  # (dropped in the if-branch, kept in the else-branch); directives OUTSIDE
-  # Verizon blocks pass through untouched. Result: the rendered kamailio.cfg
-  # is byte-identical to the pre-Verizon config (not just preprocessor-
-  # skipped) — the diff an operator sees is empty. Written to a sibling temp
-  # file then moved over (same root-owned 0644 copy cp created above).
+  # Result: the rendered kamailio.cfg is byte-identical to the pre-Verizon
+  # config (not just preprocessor-skipped) — the diff an operator sees is
+  # empty.
   sed -i '/^__VERIZON_MODE_DEFINE__$/d' "$CONFIG"
-  awk 'BEGIN { vz = 0; depth = 0 } vz == 0 && /^#!ifdef VERIZON_MODE[[:space:]]*$/ { vz = 1; depth = 1; next } vz == 0 { print; next } /^#!ifdef / || /^#!ifndef / { depth++; if (vz == 2) print; next } /^#!endif/ { depth--; if (depth == 0) { vz = 0; next } if (vz == 2) print; next } /^#!else/ && depth == 1 { vz = 2; next } vz == 2 { print }' "$CONFIG" > "${CONFIG}.vzout" && mv "${CONFIG}.vzout" "$CONFIG"
+  vz_strip_blocks VERIZON_MODE
+fi
+# VERIZON_TRANSPORT (CLAUDE.md §8.15 "Transport"): tcp (Verizon mode ON only)
+# emits `#!define VERIZON_TCP` and Kamailio's preprocessor resolves the
+# blocks. Otherwise the placeholder line is deleted and every
+# `#!ifdef VERIZON_TCP` block is removed (its `#!else` kept) — the udp render
+# is byte-identical to the pre-VERIZON_TRANSPORT config, both with Verizon
+# mode on and off. VERIZON_TCP blocks nested in VERIZON_MODE if-branches are
+# already gone when Verizon is off; standalone ones are removed here.
+if [ "${VERIZON_TCP}" = "on" ]; then
+  sed -i "s|__VERIZON_TCP_DEFINE__|#!define VERIZON_TCP|" "$CONFIG"
+else
+  sed -i '/^__VERIZON_TCP_DEFINE__$/d' "$CONFIG"
+  vz_strip_blocks VERIZON_TCP
 fi
 # Fail fast if any Verizon token survived templating (template bug): an
 # unresolved token inside a listen= or #!define would either abort the start
@@ -852,7 +922,7 @@ sed -i "s|__SINCH_TF2_IP__|${SINCH_TF2_IP}|g" "$DISPATCH"
 
 echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_TF_ATL=${SINCH_TF_ATL_IP}, SINCH_TF_DEN=${SINCH_TF_DEN_IP}, TF_INGRESS_ENFORCE=${TF_INGRESS_ENFORCE}, TF_TEST_TNS=${TF_TEST_TNS_LIST:-<none>}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, SINCH_LD2=${SINCH_LD2_IP}, SINCH_TF2=${SINCH_TF2_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, E164_EGRESS=${E164_EGRESS}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
 echo "Kamailio peer reply hand-off: SBC_PEER_HANDOFF=${SBC_PEER_MODE} (peer=${SBC_PEER_ECHO}; on = transaction-less external replies received on the VIP socket are handed raw to the peer while dispatcher group 10 reads it UP, off = today's stateless via2 forward)"
-echo "Kamailio Verizon mode: VERIZON_MODE=${VERIZON_MODE} (VIP=${VERIZON_VIP:-<unset>} SIP_IP=${VERIZON_SIP_IP:-<unset>} NETS=${VERIZON_SIP_NETS_LIST:-<none>} TF_CLASS=${VERIZON_TF_CLASS} TF_IPS=${VERIZON_TF_IPS_LIST:-<none>} PROBE_IPS=${VERIZON_PROBE_IPS_LIST:-<none>} ZONE=${VERIZON_ZONE} POP=${VERIZON_POP} duid=verizon-${VERIZON_ZONE}; off = every VERIZON_MODE block removed from the rendered config)"
+echo "Kamailio Verizon mode: VERIZON_MODE=${VERIZON_MODE} (VIP=${VERIZON_VIP:-<unset>} SIP_IP=${VERIZON_SIP_IP:-<unset>} NETS=${VERIZON_SIP_NETS_LIST:-<none>} TF_CLASS=${VERIZON_TF_CLASS} TF_IPS=${VERIZON_TF_IPS_LIST:-<none>} PROBE_IPS=${VERIZON_PROBE_IPS_LIST:-<none>} ZONE=${VERIZON_ZONE} POP=${VERIZON_POP} duid=verizon-${VERIZON_ZONE} TRANSPORT=${VERIZON_TRANSPORT} VERIZON_TCP=${VERIZON_TCP}; off = every VERIZON_MODE block removed from the rendered config, udp = every VERIZON_TCP block removed)"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
 #
