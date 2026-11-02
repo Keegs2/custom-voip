@@ -212,6 +212,16 @@ services:
       #                     WARNING + udp. tcp needs Verizon to accept TCP 5060
       #                     from VERIZON_SIP_IP and tcp:5060 in the
       #                     vz-allow-verizon-sip firewall rule (CLAUDE.md §8.15).
+      #   VERIZON_REFRESHER optional uac (default) | uas — refresher= offered on
+      #                     Verizon-bound INVITEs (+ 422 retry); uas also relays
+      #                     a Verizon refresher=uas answer to FS unchanged (FS
+      #                     then does not refresh). uac/unset = byte-identical
+      #                     render; anything else = WARNING + uac.
+      #   VERIZON_NUMBER_FORMAT optional asis (default) | e164 | 11 | 10 — NANP
+      #                     user-part form of R-URI/To/From/Contact/PAI/
+      #                     Diversion on Verizon-bound INVITEs (non-NANP
+      #                     untouched; STIR claims stay canonical). asis/unset =
+      #                     byte-identical render; anything else = WARNING + asis.
       # PREREQUISITES (entrypoint FORCES OFF with a WARNING otherwise):
       # SBC_SIGNALING_VIP set (dedicated mode) AND SBC_PEER_INTERNAL_IP set
       # (peer reply hand-off — all Verizon return traffic lands on the ACTIVE
@@ -226,6 +236,8 @@ services:
       - VERIZON_PROBE_IPS=${VERIZON_PROBE_IPS:-}
       - VERIZON_ZONE=${VERIZON_ZONE:-}
       - VERIZON_TRANSPORT=${VERIZON_TRANSPORT:-}
+      - VERIZON_REFRESHER=${VERIZON_REFRESHER:-}
+      - VERIZON_NUMBER_FORMAT=${VERIZON_NUMBER_FORMAT:-}
     volumes:
       - ./docker/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg.tmpl:ro
       - ./docker/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.tmpl:ro

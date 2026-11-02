@@ -632,6 +632,51 @@ VERIZON_TCP=off
 if [ "${VERIZON_MODE}" = "on" ] && [ "${VERIZON_TRANSPORT}" = "tcp" ]; then
   VERIZON_TCP=on
 fi
+# Verizon SE options (CLAUDE.md §8.15 "Verizon SE options") — the two answers
+# the Verizon SE owes us (plan §8.6 U3 / §10 #13, #17) become .env changes.
+# Validated like VERIZON_TRANSPORT: always checked so a typo is reported,
+# never part of VERIZON_REQUESTED, inert (NOTE) with Verizon mode off, and the
+# default renders byte-identical (every block of the symbol is removed).
+#   VERIZON_REFRESHER      uac (default) | uas — refresher= offered on
+#                          Verizon-bound INVITEs + the 422 retry, and a
+#                          Verizon refresher=uas answer relayed to FS as-is.
+#                          uas => `#!define VERIZON_REFRESHER_UAS`.
+#   VERIZON_NUMBER_FORMAT  asis (default) | e164 | 11 | 10 — NANP user-part
+#                          form of the R-URI/To/From/Contact/PAI/Diversion on
+#                          Verizon-bound INVITEs. Non-asis =>
+#                          `#!define VERIZON_NUMFMT` + VERIZON_NUMFMT_E164|_11|_10.
+VERIZON_REFRESHER="$(printf '%s' "${VERIZON_REFRESHER:-uac}" | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+case "${VERIZON_REFRESHER}" in
+  uac|uas) ;;
+  "") VERIZON_REFRESHER=uac ;;
+  *)
+    echo "WARNING: VERIZON_REFRESHER='${VERIZON_REFRESHER}' is not uac|uas — using uac" >&2
+    VERIZON_REFRESHER=uac
+    ;;
+esac
+if [ "${VERIZON_REFRESHER}" = "uas" ] && [ "${VERIZON_MODE}" != "on" ]; then
+  echo "NOTE: VERIZON_REFRESHER=uas is inert — Verizon mode is off" >&2
+fi
+VERIZON_REFRESHER_UAS=off
+if [ "${VERIZON_MODE}" = "on" ] && [ "${VERIZON_REFRESHER}" = "uas" ]; then
+  VERIZON_REFRESHER_UAS=on
+fi
+VERIZON_NUMBER_FORMAT="$(printf '%s' "${VERIZON_NUMBER_FORMAT:-asis}" | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+case "${VERIZON_NUMBER_FORMAT}" in
+  asis|e164|11|10) ;;
+  "") VERIZON_NUMBER_FORMAT=asis ;;
+  *)
+    echo "WARNING: VERIZON_NUMBER_FORMAT='${VERIZON_NUMBER_FORMAT}' is not asis|e164|11|10 — using asis" >&2
+    VERIZON_NUMBER_FORMAT=asis
+    ;;
+esac
+if [ "${VERIZON_NUMBER_FORMAT}" != "asis" ] && [ "${VERIZON_MODE}" != "on" ]; then
+  echo "NOTE: VERIZON_NUMBER_FORMAT=${VERIZON_NUMBER_FORMAT} is inert — Verizon mode is off" >&2
+fi
+VERIZON_NUMFMT=asis
+if [ "${VERIZON_MODE}" = "on" ]; then
+  VERIZON_NUMFMT="${VERIZON_NUMBER_FORMAT}"
+fi
 # Render values. When OFF every token is only referenced from blocks the
 # compile-out pass removes, so they render to already-valid addresses (the
 # __FS_IP_2__ / __SBC_PEER_IP__ posture) and to a never-matching subnet.
@@ -870,6 +915,36 @@ else
   sed -i '/^__VERIZON_TCP_DEFINE__$/d' "$CONFIG"
   vz_strip_blocks VERIZON_TCP
 fi
+# Verizon SE options (CLAUDE.md §8.15 "Verizon SE options"): same contract as
+# VERIZON_TCP. The placeholder lines sit inside the VERIZON_MODE define block
+# (already gone when Verizon is off). Default (uac / asis) => placeholder
+# deleted and every block of the symbol removed, keeping each `#!else` (the
+# pre-feature line), so the render is byte-identical. A non-default number
+# format emits two define lines (GNU sed renders the \n) and drops the blocks
+# of the two formats not chosen, so the rendered config shows one form only.
+if [ "${VERIZON_REFRESHER_UAS}" = "on" ]; then
+  sed -i "s|__VERIZON_REFRESHER_DEFINE__|#!define VERIZON_REFRESHER_UAS|" "$CONFIG"
+else
+  sed -i '/^__VERIZON_REFRESHER_DEFINE__$/d' "$CONFIG"
+  vz_strip_blocks VERIZON_REFRESHER_UAS
+fi
+case "${VERIZON_NUMFMT}" in
+  e164) VZ_NUMFMT_SYM=VERIZON_NUMFMT_E164 ;;
+  11) VZ_NUMFMT_SYM=VERIZON_NUMFMT_11 ;;
+  10) VZ_NUMFMT_SYM=VERIZON_NUMFMT_10 ;;
+  *) VZ_NUMFMT_SYM="" ;;
+esac
+if [ -n "${VZ_NUMFMT_SYM}" ]; then
+  sed -i "s|__VERIZON_NUMFMT_DEFINE__|#!define VERIZON_NUMFMT\\n#!define ${VZ_NUMFMT_SYM}|" "$CONFIG"
+else
+  sed -i '/^__VERIZON_NUMFMT_DEFINE__$/d' "$CONFIG"
+  vz_strip_blocks VERIZON_NUMFMT
+fi
+for vz_f in VERIZON_NUMFMT_E164 VERIZON_NUMFMT_11 VERIZON_NUMFMT_10; do
+  if [ "${vz_f}" != "${VZ_NUMFMT_SYM}" ]; then
+    vz_strip_blocks "${vz_f}"
+  fi
+done
 # Fail fast if any Verizon token survived templating (template bug): an
 # unresolved token inside a listen= or #!define would either abort the start
 # or silently never match — neither is acceptable on a live SBC.
@@ -925,7 +1000,7 @@ sed -i "s|__SINCH_TF2_IP__|${SINCH_TF2_IP}|g" "$DISPATCH"
 
 echo "Kamailio config templated: ADVERTISE_IP=${EXTERNAL_SIP_IP}, FS=${FREESWITCH_IP}, FS2=${FREESWITCH_IP_2} (${FS_HA_MODE}), FS_PUBLIC_IP=${FS_PUBLIC_IP}, DB=${DB_HOST}:${DB_PORT}, Homer=${HOMER_IP}, HEP_ID=${HEP_CAPTURE_ID}, SBC_ID=${SBC_ID}, SBC_INTERNAL_IP=${SBC_INTERNAL_IP}, SIGNALING_VIP=${SBC_SIGNALING_VIP} (${SBC_SIGVIP_MODE}), BW_PRIMARY=${BANDWIDTH_PRIMARY_IP}, BW_SECONDARY=${BANDWIDTH_SECONDARY_IP}, SINCH_DENVER=${SINCH_DENVER_IP}, SINCH_CHICAGO=${SINCH_CHICAGO_IP}, SINCH_TF_ATL=${SINCH_TF_ATL_IP}, SINCH_TF_DEN=${SINCH_TF_DEN_IP}, TF_INGRESS_ENFORCE=${TF_INGRESS_ENFORCE}, TF_TEST_TNS=${TF_TEST_TNS_LIST:-<none>}, SINCH_LD=${SINCH_LD_IP}, SINCH_TF=${SINCH_TF_IP}, SINCH_LD2=${SINCH_LD2_IP}, SINCH_TF2=${SINCH_TF2_IP}, INTERNAL_SUBNET=${INTERNAL_SUBNET}, MEDIA_SUBNET=${MEDIA_SUBNET}, FS_AWARE_OPTIONS=${FS_AWARE_OPTIONS}, STIR_SHAKEN_SIGN=${STIR_SHAKEN_SIGN}, E164_EGRESS=${E164_EGRESS}, STIR_SHAKEN_VERIFY=${STIR_SHAKEN_VERIFY}, STIR_CERT_URL=${STIR_CERT_URL}, STIR_VERIFY_CERT_MODE=${STIR_VERIFY_CERT_MODE}, STIR_VERIFY_CA_FILE=${STIR_VERIFY_CA_FILE:-<unset>}"
 echo "Kamailio peer reply hand-off: SBC_PEER_HANDOFF=${SBC_PEER_MODE} (peer=${SBC_PEER_ECHO}; on = transaction-less external replies received on the VIP socket are handed raw to the peer while dispatcher group 10 reads it UP, off = today's stateless via2 forward)"
-echo "Kamailio Verizon mode: VERIZON_MODE=${VERIZON_MODE} (VIP=${VERIZON_VIP:-<unset>} SIP_IP=${VERIZON_SIP_IP:-<unset>} NETS=${VERIZON_SIP_NETS_LIST:-<none>} TF_CLASS=${VERIZON_TF_CLASS} TF_IPS=${VERIZON_TF_IPS_LIST:-<none>} PROBE_IPS=${VERIZON_PROBE_IPS_LIST:-<none>} ZONE=${VERIZON_ZONE} POP=${VERIZON_POP} duid=verizon-${VERIZON_ZONE} TRANSPORT=${VERIZON_TRANSPORT} VERIZON_TCP=${VERIZON_TCP}; off = every VERIZON_MODE block removed from the rendered config, udp = every VERIZON_TCP block removed)"
+echo "Kamailio Verizon mode: VERIZON_MODE=${VERIZON_MODE} (VIP=${VERIZON_VIP:-<unset>} SIP_IP=${VERIZON_SIP_IP:-<unset>} NETS=${VERIZON_SIP_NETS_LIST:-<none>} TF_CLASS=${VERIZON_TF_CLASS} TF_IPS=${VERIZON_TF_IPS_LIST:-<none>} PROBE_IPS=${VERIZON_PROBE_IPS_LIST:-<none>} ZONE=${VERIZON_ZONE} POP=${VERIZON_POP} duid=verizon-${VERIZON_ZONE} TRANSPORT=${VERIZON_TRANSPORT} VERIZON_TCP=${VERIZON_TCP} REFRESHER=${VERIZON_REFRESHER} VERIZON_REFRESHER_UAS=${VERIZON_REFRESHER_UAS} NUMBER_FORMAT=${VERIZON_NUMBER_FORMAT} NUMFMT_EFFECTIVE=${VERIZON_NUMFMT}; off = every VERIZON_MODE block removed from the rendered config, udp = every VERIZON_TCP block removed, uac/asis = every VERIZON_REFRESHER_UAS/VERIZON_NUMFMT block removed)"
 
 # Add the NLB VIP (EXTERNAL_SIP_IP / ADVERTISE_IP) to the loopback interface.
 #
