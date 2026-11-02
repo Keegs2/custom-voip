@@ -259,6 +259,7 @@ Handles BYE, re-INVITE, ACK, UPDATE, etc. for established calls. (CANCEL never g
 
 3. **Header cleanup**: Remove ALL FS-specific headers:
    - P-Asserted-Identity, User-Agent, X-FS-Support, Content-Disposition, Privacy, Supported, Allow-Events, Allow, Contact, Remote-Party-ID, Session-Expires, Min-SE
+   - Add our `Session-Expires: 1800;refresher=uac` + `Min-SE: 90` (RFC 4028) BEFORE `msg_apply_changes()` — they must be real headers of the rebuilt buffer so the 422 retry can replace them (§4.8).
    - Add clean Contact with Kamailio's address BEFORE `msg_apply_changes()`.
 
 4. **`msg_apply_changes()` + DOUBLE `record_route_preset()`**: Rebuild message
@@ -276,7 +277,7 @@ Handles BYE, re-INVITE, ACK, UPDATE, etc. for established calls. (CANCEL never g
 
 7. **Clean outbound headers added**:
    - P-Asserted-Identity, User-Agent: VoicePlatform-SBC/1.0, Allow, Supported: timer,replaces
-   - Session-Expires: 1800;refresher=uac, Min-SE: 90 (RFC 4028)
+   - (Session-Expires / Min-SE are NOT here any more — Step 3, before `msg_apply_changes()`; see §4.8.)
 
 8. **SDP scrubbing**: Replace 172.28.x.x, 10.x.x.x, 127.x.x.x in the SDP body with
    **FS_PUBLIC_IP** (the FS VM's own public IP, where RTP actually flows), NOT
@@ -413,7 +414,58 @@ Called ONLY for inbound traffic from Bandwidth and re-INVITEs from external sour
 ### 4.8 Failure Routes
 
 **CARRIER_FAILURE**: Handles outbound carrier failures. Two-tier failover:
-- 422 (Session Interval Too Small): Retry with Session-Expires: 3600, Min-SE: 900.
+- 422 (Session Interval Too Small): ONE retry, to the PoP that sent the 422, with
+  exactly one `Session-Expires: 3600;refresher=uac` + `Min-SE: 900` (fixed values —
+  the 422's own Min-SE is not parsed). Runs BEFORE the flag 8/9 checks, so it also
+  applies to table-driven (`X-Carrier-IP`) legs and to a 422 from a flipped/
+  cross-trunk branch. Same Call-ID/From-tag/CSeq, new Via branch (a proxy branch of
+  the same transaction). `t_on_failure` is NOT re-armed, so whatever the retry gets
+  (a second 422, a 5xx, a 408, a 486) is relayed to FS as the final and FS's attempt
+  loop moves on — no loop, no flip after a 422 retry. Fixed 2026-11; before that the
+  retry never existed on the wire — two stacked defects (below).
+  **Defect 1 — retry never left (tm `no branches for forwarding`).** tm's
+  `faked_env()` runs `ruri_mark_consumed()` before every failure route
+  (`tm/t_reply.c` ~779), and `t_forward_nonack()` only adds the R-URI as a branch
+  when `ruri_get_forking_state()` is set (`tm/t_fwd.c` ~1693); with no appended
+  branch it returns -1 and nothing is sent — FS just saw the 422. Any R-URI/`$du`
+  assignment calls `ruri_mark_new()` (`core/action.c` SET_URI_T/SET_HOST_T,
+  `pv_core.c` `pv_set_dsturi`), which is why the 5xx flips (they assign `$rd`/`$du`)
+  always sent. Fix: the 422 arm assigns the R-URI (`$ru = $ru`, or the recorded
+  flip target below). Chosen over `$du = $du` (skips `ruri_mark_new()` when `$du` is
+  empty) and `append_branch()` (snapshots `$du` at call time — would add a SECOND,
+  stale branch if any later line re-assigns `$du`, e.g. a per-carrier transport arm).
+  **Defect 2 — the retry would have carried BOTH pairs.** The 1800/90 pair was
+  appended in Step 6, AFTER `msg_apply_changes()` = a request-route lump. tm saves
+  those lumps into the transaction (`save_msg_lumps()`) and re-applies them to EVERY
+  branch it builds (`prepare_new_uac()` → `dup_lump_list()`); the failure route's
+  `remove_hf()` only walks the cloned request's PARSED headers, where a lump is not a
+  header — so 1800/90 rode next to 3600/900 (proven with an RCF-V1 + `$ru = $ru`
+  control build). Fix: append the pair in Step 3, BEFORE `msg_apply_changes()`, so it
+  is a real buffer header the retry's `remove_hf()` deletes. Header set/values of a
+  normal INVITE are unchanged; only the pair's position moves (now after FS's own
+  headers/Diversion instead of after `Supported:` — field order across names is not
+  significant, RFC 3261 §7.3.1). Considered and rejected: moving the pair into
+  `branch_route[TO_CARRIER_BRANCH]` driven by an AVP — tm resets `t->on_branch`
+  after the first forward, so every failure-route re-relay (5xx flip, cross-trunk,
+  422) would also need `t_on_branch()` or lose the pair (a regression trap), and it
+  moves the pair to the very end of the header block. The 5xx flip/cross-trunk
+  re-relays append nothing, so every request-route lump (Contact, PAI, UA, Allow,
+  Supported, X-CID, Identity, both Record-Routes) is rendered exactly ONCE per branch
+  — verified header-by-header on the wire for the flip and the 422 retry.
+  **Retry target after a flip.** `fake_req()` clones `$ru`/`$du` from the
+  transaction's request as `route[TO_CARRIER]` left it; a flip's `$rd`/`$du` writes
+  live only in that failure route's private copy. So the flip and cross-trunk arms
+  record their target in transaction AVPs `$avp(cf_ru)`/`$avp(cf_du)` (a failure
+  route's AVP writes land in the transaction's lists) and the 422 arm re-targets
+  there when set — otherwise a 422 from the alternate PoP would be retried at the
+  PoP that just 5xx'd. (The `Carrier delivery failed ... to $ru` WARN in a SECOND
+  failure route still prints the ORIGINAL R-URI for the same reason — cosmetic.)
+  **Bounded:** besides not re-arming `t_on_failure`, the original 422 branch cannot
+  be re-picked because tm's default `failure_reply_mode=3` drops earlier branches'
+  replies once a failure route adds a branch (`t_reply.c` ~1505-1530). Do not set
+  `failure_reply_mode` without re-checking this.
+  Runtime suite: `kamcheck/test_422.py` (docker harness) — 422 retry wire shape,
+  double-422, 503 flip, 503→422 at the alternate PoP, table-driven 422, normal call.
 - 500/503/408/480/404, **flag 8 not yet set** -> in-trunk failover to the OTHER IP
   of the same Bandwidth trunk config, then set flag 8 (one in-trunk retry):
   - TC4: Dallas (`BANDWIDTH_IP_1`) <-> LA (`BANDWIDTH_IP_2`)
@@ -706,7 +758,7 @@ Kamailio (34.74.71.32:5060)
     4. msg_apply_changes(), then DOUBLE record_route_preset(VIP, SBC_INTERNAL_IP)
     5. (Via untouched - two Vias is valid)
     6. PAI from X-Original-CID
-    7. Add Supported: timer, Session-Expires: 1800
+    7. Add Supported: timer (Session-Expires: 1800 / Min-SE: 90 already added in step 3)
     8. SDP scrub -> FS_PUBLIC_IP (not VIP; RTP bypasses NLB)
     9. t_relay() with CARRIER_FAILURE failover
   |
