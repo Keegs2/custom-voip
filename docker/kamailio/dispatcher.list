@@ -287,9 +287,10 @@ __SBC_PEER_DISPATCHER_LINE__
 # the bind).
 # Rendered shape:
 #   13 sip:<ip>:5060 0 0 weight=100;duid=verizon-<zone>;socket=udp:<VERIZON_VIP>:5060;ping_from=sip:ping@<VERIZON_SIP_IP>
-#   - duid=verizon-<zone> (east|west|central) on the FIRST listed IP — the
-#     carrier_trunk_health join key (migration 62 derives 'verizon-' || pop);
-#     further IPs render verizon-<zone>-2, -3, ... List the primary first.
+#   - duid=verizon-<zone> (east|west|central) on the FIRST listed IP, further
+#     IPs verizon-<zone>-2, -3, ... — positional, it only keys the
+#     carrier_trunk_status rows: migration 62's carrier_trunk_health maps
+#     group 13 to carrier_trunks BY THE PROBED IP, so list order is free.
 #   - socket=udp:VERIZON_VIP:5060: the probe egresses the Verizon ILB bind
 #     (a REAL listen in this mode, on lo via entrypoint.sh) whose advertise is
 #     the inside-tunnel SIP IP — the VPC route carries it to the IPsec

@@ -200,11 +200,11 @@ services:
       #                     from the SIP Gateway ones; unset = mixed class (no
       #                     toll-free ingress class check for Verizon sources).
       #   VERIZON_PROBE_IPS optional Verizon SIP Gateway HOST IPs to
-      #                     OPTIONS-probe (dispatcher group 13; primary first —
-      #                     it gets duid verizon-<zone>).
+      #                     OPTIONS-probe (dispatcher group 13; any order — the
+      #                     NOC maps each IP to its carrier_trunks row).
       #   VERIZON_ZONE      optional east|west|central (default from
       #                     VERIZON_VIP's second octet, else SBC_ID prefix):
-      #                     duid verizon-<zone> + X-Inbound-PoP <zone>-orig.
+      #                     dispatcher duid verizon-<zone>[-n] + X-Inbound-PoP <zone>-orig.
       #   VERIZON_TRANSPORT optional udp (default) | tcp — transport of every
       #                     Verizon-bound request + group-13 probe, and the
       #                     ;transport= on Verizon-visible Contact/outer RR.

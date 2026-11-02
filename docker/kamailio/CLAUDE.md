@@ -481,7 +481,7 @@ Dispatcher groups (10 is the optional peer-SBC liveness group, §8.12):
 | 9 | sip:206.146.100.26:5060 (`__SINCH_TF_IP__`, duid=sinch-denver-tf) | Sinch Denver TF (OSAO 8YY) termination keepalive/health ONLY |
 | 11 | sip:206.146.100.25:5060 (`__SINCH_LD2_IP__`, duid=sinch-denver-ld) | Sinch Denver LD **redundant** termination (DENSBX21) keepalive/health ONLY |
 | 12 | sip:206.146.98.25:5060 (`__SINCH_TF2_IP__`, duid=sinch-atlanta-tf) | Sinch Atlanta TF (OSAO 8YY) **redundant** termination (ATLSBX21) keepalive/health ONLY |
-| 13 | `__VERIZON_DISPATCHER_LINES__` = one `sip:<ip>:5060` per `VERIZON_PROBE_IPS` entry, `duid=verizon-<zone>` (first IP; `verizon-<zone>-2`, … after), `socket=udp:VERIZON_VIP:5060`, `ping_from=sip:ping@VERIZON_SIP_IP` | Verizon SIP Gateway (IPsec) keepalive/health ONLY — **Verizon mode only** (§8.15); renders as a comment otherwise. VERIZON_VIP-sourced probes: replies reach the ACTIVE SBC only, so the standby reads it UP only via the peer reply hand-off (a Verizon prerequisite). `VERIZON_TRANSPORT=tcp`: `sip:<ip>:5060;transport=tcp` + `socket=tcp:VERIZON_VIP:5060` — the standby then reads Inactive while it is standby (its SYN-ACK lands on the active, which RSTs it; §8.15 "Transport") |
+| 13 | `__VERIZON_DISPATCHER_LINES__` = one `sip:<ip>:5060` per `VERIZON_PROBE_IPS` entry, `duid=verizon-<zone>` (first IP; `verizon-<zone>-2`, … after — positional, a status-row key only: `carrier_trunk_health` maps group 13 to `carrier_trunks` by the probed IP, migration 62), `socket=udp:VERIZON_VIP:5060`, `ping_from=sip:ping@VERIZON_SIP_IP` | Verizon SIP Gateway (IPsec) keepalive/health ONLY — **Verizon mode only** (§8.15); renders as a comment otherwise. VERIZON_VIP-sourced probes: replies reach the ACTIVE SBC only, so the standby reads it UP only via the peer reply hand-off (a Verizon prerequisite). `VERIZON_TRANSPORT=tcp`: `sip:<ip>:5060;transport=tcp` + `socket=tcp:VERIZON_VIP:5060` — the standby then reads Inactive while it is standby (its SYN-ACK lands on the active, which RSTs it; §8.15 "Transport") |
 
 **Groups 11/12 share their IPs with the 8XX-T TF ORIGINATION trunks** (static
 trust `SINCH_TF_DEN_IP`/`SINCH_TF_ATL_IP`). They are templated exactly like
@@ -661,8 +661,8 @@ Set in `.env` file on each SBC VM. Passed via `docker-compose.sbc.yml`.
 | `VERIZON_SIP_IP` | No (required for Verizon mode) | 35.184.132.124 | This zone's inside-tunnel public SIP address — ADVERTISE-ONLY, never bound (the IPsec gateways translate it to `VERIZON_VIP`). Every Verizon-visible address (Via from the forced socket, From/PAI/Diversion/Contact hosts, outer Record-Route, the Contact rewritten into FS replies/in-dialog requests) renders it. East 34.148.100.185 / West 136.86.242.57 / Central 35.184.132.124. |
 | `VERIZON_SIP_NETS` | No (required for Verizon mode) | 203.0.113.0/28,198.51.100.7 | Comma list of EVERY Verizon signaling source (SIP Gateway + ATF-IP SBCs + OPTIONS monitors) as IPv4 or IPv4/prefix (bare IPs → /32; invalid entries dropped with WARNING). Static trust (flag 5), carrier-ingress branch, `TO_CARRIER` egress selection, REPLY_HANDLER scrub gate, entrypoint MTU-hint routes (`mtu lock 1400`). |
 | `VERIZON_TF_IPS` | No (unset = MIXED class) | 198.51.100.7 | Optional ATF-IP (toll-free) sources if distinct from the SIP Gateway ones → `#!define VERIZON_TF_SPLIT`: those are the TF ingress class, other Verizon sources non-TF. Unset ⇒ the toll-free ingress class check is SKIPPED for Verizon sources (both products on shared IPs). |
-| `VERIZON_PROBE_IPS` | No (unset = no probe group, WARNING) | 203.0.113.10,203.0.113.11 | Verizon SIP Gateway HOST IPs to OPTIONS-probe — dispatcher group 13, one line per IP, VERIZON_VIP-sourced. List the zone's primary first (it gets `duid=verizon-<zone>`). |
-| `VERIZON_ZONE` | No (default from `VERIZON_VIP` octet: 10.142→east, 10.138→west, 10.128→central; else SBC_ID prefix) | central | Zone label → dispatcher `duid=verizon-<zone>` and `X-Inbound-PoP: <zone>-orig` on Verizon-originated calls (migration 62 `carrier_trunk_health` keys: `'verizon-' \|\| pop` and the `orig_map`). |
+| `VERIZON_PROBE_IPS` | No (unset = no probe group, WARNING) | 203.0.113.10,203.0.113.11 | Verizon SIP Gateway HOST IPs to OPTIONS-probe — dispatcher group 13, one line per IP, VERIZON_VIP-sourced, any order (first gets `duid=verizon-<zone>`, then `-2`, …; the NOC identity comes from the `carrier_trunks` row carrying the IP — put the IP on that row in TED first, or the probe reads `verizon-unmapped-…`). |
+| `VERIZON_ZONE` | No (default from `VERIZON_VIP` octet: 10.142→east, 10.138→west, 10.128→central; else SBC_ID prefix) | central | Zone label → dispatcher `duid=verizon-<zone>` (status-row key only; migration 62 maps group 13 by IP) and `X-Inbound-PoP: <zone>-orig` on Verizon-originated calls (the `carrier_trunk_health` `orig_map` key). |
 | `VERIZON_TRANSPORT` | No (default udp) | tcp | Verizon mode only (§8.15 "Transport"): `tcp` ⇒ `#!define VERIZON_TCP` — every Verizon-bound request (Step 1b INVITE, 422 retry, FS-originated ACK/BYE/re-INVITE via `route[VZ_TCP_EGRESS]`, group-13 probes) leaves `tcp:VERIZON_VIP:5060`, and every Verizon-visible Contact / outer Record-Route carries `;transport=tcp`. `udp`/unset ⇒ every `#!ifdef VERIZON_TCP` block removed, render byte-identical. Anything else ⇒ WARNING + udp. With Verizon mode off: NOTE, inert. Inbound from Verizon is accepted on both transports in either mode. Set on BOTH SBCs of a zone. |
 | `VIP_EGRESS` | No (default off) | on | Carrier-bound INVITE egress from the external NLB VIP for INVITEs received on the signaling ILB VIP (`if ($Ri == "SIGNALING_VIP") { $fs = "udp:ADVERTISE_IP:5060"; }` in `route[TO_CARRIER]` Step 9, compiled in via `#!define VIP_EGRESS` + `SBC_SIGVIP_DEDICATED`). on/true/1 = ON, anything else = OFF; entrypoint forces OFF (warning) when `SBC_SIGNALING_VIP` is unset. Direct-IP ingress keeps own-public-IP egress — the 6 SBC public IPs stay whitelisted. BANDWIDTH destinations only: Sinch (any non-Bandwidth) INVITEs always keep own-public-IP egress. Enable on both SBCs of a zone. See "Carrier-bound INVITE egress" in §5 Dispatcher Configuration. |
 
@@ -1382,10 +1382,16 @@ implemented here"); the `VERIZON_TCP` branch next to it says so.
    so `VERIZON_SIP_NETS` MUST include every Verizon OPTIONS-monitor source.
 6. *Attribution*: `X-Inbound-TC: tc4` (label `verizon`, joins the closed metric
    enum), `X-Inbound-Carrier: verizon`, `X-Inbound-PoP: <zone>-orig` (substdef
-   `VERIZON_POP`). Dispatcher `duid=verizon-<zone>` on the first probe IP
-   (`verizon-<zone>-2`, … after). Both key migration 62's `carrier_trunk_health`
-   (`'verizon-' || pop`, `orig_map`); the sidecar's `CARRIER_SETIDS` includes 13
-   and `DUID_NAMES` has the three zone duids.
+   `VERIZON_POP`) — keys migration 62's `carrier_trunk_health` `orig_map` (one
+   orig row per ZONE, whatever gateway IP the call came from). Dispatcher
+   `duid=verizon-<zone>` on the first probe IP (`verizon-<zone>-2`, … after) is
+   POSITIONAL and only keys the `carrier_trunk_status` rows: the view maps
+   group 13 to the Verizon `outbound`/`both` `carrier_trunks` row whose
+   `source_ip` is the probed IP (shown as `verizon-<pop>`, e.g. an extra
+   gateway row pop `east-2` = `verizon-east-2`; no row = `verizon-unmapped-<ip>`,
+   `trunk_enabled` NULL), so VERIZON_PROBE_IPS order never matters. The
+   sidecar's `CARRIER_SETIDS` includes 13 and `DUID_NAMES` has the three zone
+   duids (the view names group-13 rows itself).
 7. *Toll-free ingress class*: `VERIZON_TF_IPS` set ⇒ `#!define VERIZON_TF_SPLIT`,
    listed sources `$var(tf_src)=1`, other Verizon sources 0 (ordinary
    `TF_INGRESS_CHECK`). Unset ⇒ MIXED third class: `$var(tf_skip)=1`, the class

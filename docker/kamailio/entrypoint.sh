@@ -492,9 +492,9 @@ fi
 #                      OPTIONS-probe (dispatcher group 13, VERIZON_VIP-sourced).
 #                      Unset => no probe group (comment line) + WARNING.
 #   VERIZON_ZONE       OPTIONAL zone label (east|west|central). Drives the
-#                      dispatcher duid `verizon-<zone>` (migration 62's
-#                      carrier_trunk_health derives 'verizon-' || pop from the
-#                      outbound rows) and the X-Inbound-PoP `<zone>-orig`
+#                      dispatcher duid `verizon-<zone>` (a status-row key;
+#                      migration 62's carrier_trunk_health maps group 13 to
+#                      carrier_trunks by the probed IP) and the X-Inbound-PoP `<zone>-orig`
 #                      stamped on Verizon-originated calls (the view's
 #                      orig_map). Default: derived from VERIZON_VIP's second
 #                      octet (10.142 -> east, 10.138 -> west, 10.128 ->
@@ -669,10 +669,13 @@ if [ "${VERIZON_MODE}" = "on" ]; then
     VERIZON_TF_CLASS=mixed
   fi
   if [ -n "${VERIZON_PROBE_IPS_LIST}" ]; then
-    # One group-13 destination per probe IP. duid contract (migration 62
-    # carrier_trunk_health: 'verizon-' || pop, pop = zone): the FIRST listed
-    # probe IP is `verizon-<zone>`; any further IPs get `verizon-<zone>-2`,
-    # `-3`, ... — list the zone's primary Verizon SIP Gateway IP first.
+    # One group-13 destination per probe IP. duid: the FIRST listed probe IP
+    # is `verizon-<zone>`; any further IPs get `verizon-<zone>-2`, `-3`, ...
+    # Positional on purpose and NOT a mapping contract: it only keys the
+    # carrier_trunk_status rows (PK duid+sbc_id). Migration 62's
+    # carrier_trunk_health keys group 13 by the PROBED IP and names it from
+    # the carrier_trunks Verizon outbound row carrying that IP, so the list
+    # order (and SBCs disagreeing on it) never changes which row an IP maps to.
     # socket= forces the VERIZON_VIP bind (a REAL listen in this mode) so the
     # probe's wire source is the inside-tunnel SIP IP after gateway
     # translation; ping_from puts that same address in the From host. GNU

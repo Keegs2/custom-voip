@@ -12,9 +12,15 @@
 --     192.0.2.12  "verizon/west"     (the SIP Gateway West prefers)
 --     192.0.2.13  "verizon/central"  (the SIP Gateway Central prefers)
 -- and enabled = false. The row notes carry the same instruction. To turn a
--- zone up (owner, on the primary, after the tunnels and the Kamailio
--- Verizon build are live on BOTH SBCs of the zone):
+-- zone up (owner, on the primary), in two steps:
+--   (a) As soon as Verizon assigns the SIP Gateway IP — BEFORE (or together
+--       with) setting it in the SBCs' VERIZON_PROBE_IPS. Inert while the rows
+--       are disabled (FS and Kamailio's X-Carrier-IP / CARRIER_TRUST lookups
+--       all filter enabled = true); it is what maps the group-13 probe to
+--       this row (carrier_trunk_health matches Verizon probes BY IP, below):
 --     UPDATE carrier_trunks SET source_ip = '<verizon sip gw ip>', trunk_group = '<name>', updated_at = now() WHERE carrier = 'verizon' AND pop IN ('east', 'east-orig');
+--   (b) After the tunnels and the Kamailio Verizon build are live on BOTH
+--       SBCs of the zone:
 --     UPDATE carrier_trunks SET enabled = true, updated_at = now() WHERE carrier = 'verizon' AND pop = 'east';
 --     UPDATE carrier_gateways SET sip_proxy = '<verizon sip gw ip>', enabled = true, updated_at = now() WHERE gateway_name = 'verizon_east';
 -- (same for west / central). Change the IP on BOTH rows of a pop pair (the
@@ -22,6 +28,21 @@
 -- unique indexes allow exactly one ingress + one egress row per IP. FS picks
 -- an enabled row up within 60 s (trunk cache TTL); Kamailio's X-Carrier-IP
 -- validation passes it on the next call. No redeploy.
+--
+-- ** MORE THAN ONE SIP GATEWAY IP IN A ZONE ** (Verizon may assign several):
+-- give each extra IP its OWN outbound row with pop '<zone>-2', '<zone>-3',
+-- ... ((carrier, pop) is UNIQUE; 53's egress index takes one outbound row per
+-- IP), e.g. for East, tried right after verizon/east (equal effective
+-- priority, ORDER BY eff_priority, id) and before the other zones' gateways:
+--     INSERT INTO carrier_trunks (carrier, pop, trunk_group, source_ip, direction, traffic_class, cps_limit, enabled, priority, priority_east, priority_west, priority_central, notes) VALUES ('verizon', 'east-2', '<name>', '<2nd verizon sip gw ip>', 'outbound', 'ld', 25, false, 50, 50, 52, 51, 'Verizon IPsec LD termination — 2nd SIP Gateway preferred by East.');
+-- then enable it like (b). It shows in carrier_trunk_health as
+-- verizon-east-2 / 'Verizon SIP Gateway East 2'. NO extra '-orig' row:
+-- origination attribution is per ZONE (Kamailio stamps X-Inbound-PoP
+-- '<zone>-orig' for every VERIZON_SIP_NETS source), so verizon/east-orig
+-- covers all of East's gateways and an 'east-2-orig' row would only ever
+-- read 'passive'. Also add the IP to the zone SBCs' VERIZON_SIP_NETS and
+-- VERIZON_PROBE_IPS (any order). FS needs nothing (lib/term_trunks.lua is
+-- pop-agnostic; carrier 'verizon' rows get the signaling-VIP attempt only).
 --
 -- ** TERMINATION ROWS ** (direction 'outbound', traffic_class 'ld', FS
 -- selection contract of 44/53 unchanged). Base priority 50 — STRICTLY below
@@ -55,12 +76,24 @@
 --
 -- ** carrier_trunk_health ** — CREATE OR REPLACE of 53's definition (the
 -- latest; identical columns, order and types) with three changes:
---   1. The probe setid filter grows (2,3,6,7,8,9,11,12) -> (..., 13):
---      dispatcher group 13 = the Verizon SIP Gateway OPTIONS probes, sent
---      from the .251 VIP socket. (Chosen as the lowest unused setid above the
---      current max 12; 10 is the SBC peer-liveness group — not a carrier.)
---      ** CONTRACT for dispatcher.list: duid = 'verizon-<pop>' of the
---      OUTBOUND row, i.e. verizon-east / verizon-west / verizon-central. **
+--   1. The probe CTE gains a second arm for setid 13: dispatcher group 13 =
+--      the Verizon SIP Gateway OPTIONS probes, sent from the .251 VIP socket.
+--      (Chosen as the lowest unused setid above the current max 12; 10 is the
+--      SBC peer-liveness group — not a carrier.) The first arm (setids 2..12)
+--      is 53's aggregation unchanged. ** Verizon probe rows are keyed by the
+--      PROBED IP, not the dispatcher duid: ** a probe IP equal to the
+--      source_ip of a Verizon outbound/both carrier_trunks row shows as duid
+--      'verizon-<pop>' (verizon-east / -west / -central, verizon-east-2 for
+--      an extra gateway row), name 'Verizon SIP Gateway <Pop>'; any other
+--      probed IP shows as 'verizon-unmapped-<ip, dots as dashes>' with
+--      trunk_enabled NULL. The dispatcher duid (verizon-<zone> on the first
+--      VERIZON_PROBE_IPS entry, verizon-<zone>-2, ... after) is positional
+--      and only keys carrier_trunk_status rows — list order, SBCs disagreeing
+--      on it, and cross-zone probing never change which row an IP maps to.
+--      Per (IP, SBC) only that SBC's newest report counts (a row left under
+--      an old positional duid never double-counts an SBC). Single gateway
+--      IP per zone, IP replaced in TED (step (a) above): identical output to
+--      the duid-keyed form (verizon-<zone>, 'Verizon SIP Gateway <Zone>').
 --   2. orig_map gains the Verizon origination duids DATA-DRIVEN from
 --      carrier_trunks (carrier = 'verizon' AND direction = 'inbound'):
 --      duid 'verizon-<pop>' (= verizon-east-orig ...), synthesized passive
@@ -68,9 +101,12 @@
 --      so replacing the placeholder IP via TED updates the view with no
 --      further migration (the Sinch rows stay literal, byte-identical).
 --   3. trunk_map gains the Verizon termination duids the same way
---      (direction = 'outbound' -> duid 'verizon-<pop>'), so trunk_enabled
---      reads carrier_trunks.enabled for the probed Verizon rows and a seeded-
---      disabled row shows 'down' + trunk_enabled = false (53's semantics).
+--      (direction IN ('outbound','both') -> duid 'verizon-<pop>'), so
+--      trunk_enabled reads carrier_trunks.enabled for the mapped Verizon
+--      probe rows and a seeded-disabled row shows 'down' + trunk_enabled =
+--      false (53's semantics). A probe of an IP no row carries yet (e.g. the
+--      TEST-NET placeholder not replaced) is 'verizon-unmapped-...' with
+--      trunk_enabled NULL — do step (a) first.
 --
 -- IDEMPOTENT: safe to run repeatedly. Seed INSERTs are ON CONFLICT DO NOTHING
 -- (no conflict target: the (carrier, pop) key, either partial IP index, or
@@ -156,14 +192,19 @@ VALUES
 ON CONFLICT (gateway_name) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
--- 3) carrier_trunk_health — 53's definition + setid 13 + data-driven Verizon
---    orig_map / trunk_map arms. Columns, order, types and every pre-existing
---    duid's values are IDENTICAL to 53.
+-- 3) carrier_trunk_health — 53's definition + an IP-keyed setid-13 probe arm
+--    + data-driven Verizon orig_map / trunk_map arms. Columns, order, types
+--    and every pre-existing duid's values are IDENTICAL to 53.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW carrier_trunk_health AS
 WITH probe AS (
     -- Identical aggregation to 44/45/52/53: one row per carrier duid across
     -- all reporting SBCs; name/ip/setid collapse via MAX (identical per duid).
+    -- Live carriers: Bandwidth Dallas/LA (2/3), Sinch orig Denver/Chicago
+    -- (6/7), Sinch term Atlanta LD / Denver TF (8/9), Sinch redundant term
+    -- Denver LD / Atlanta TF (11/12). TC1/TC2 (4/5) stay structurally
+    -- excluded; 10 is the SBC peer-liveness group (not a carrier). Verizon
+    -- (13) is the second arm below.
     SELECT
         s.duid,
         MAX(s.name)  AS name,
@@ -174,13 +215,69 @@ WITH probe AS (
         bool_or(s.is_up)                AS probe_up,
         MAX(s.updated_at)               AS last_updated
     FROM carrier_trunk_status s
-    -- Live carriers: Bandwidth Dallas/LA (2/3), Sinch orig Denver/Chicago
-    -- (6/7), Sinch term Atlanta LD / Denver TF (8/9), Sinch redundant term
-    -- Denver LD / Atlanta TF (11/12), Verizon SIP Gateways (13, probed from
-    -- the .251 VIP). TC1/TC2 (4/5) stay structurally excluded; 10 is the SBC
-    -- peer-liveness group (not a carrier).
-    WHERE s.setid IN (2, 3, 6, 7, 8, 9, 11, 12, 13)
+    WHERE s.setid IN (2, 3, 6, 7, 8, 9, 11, 12)
     GROUP BY s.duid
+    UNION ALL
+    -- Verizon SIP Gateways (dispatcher group 13, probed from the .251 VIP),
+    -- keyed by the PROBED IP, not by the dispatcher duid. The entrypoint's
+    -- duid (verizon-<zone>, verizon-<zone>-2, ...) is positional in
+    -- VERIZON_PROBE_IPS, so it only keys the carrier_trunk_status rows; the
+    -- identity shown here comes from the carrier_trunks Verizon termination
+    -- row whose source_ip IS that IP (53's egress partial unique index: at
+    -- most one outbound/both row per IP), so any number of gateway IPs per
+    -- zone map correctly in any list order, on SBCs that disagree on the
+    -- order, and when probed from more than one zone.
+    --   mapped   -> duid 'verizon-' || pop (verizon-east, verizon-east-2 ...),
+    --               name 'Verizon SIP Gateway ' || <Pop> (East, East 2 ...);
+    --               trunk_map below joins the same row for trunk_enabled.
+    --   unmapped -> duid 'verizon-unmapped-<ip with - for .>', name naming
+    --               the IP and the dispatcher duid(s) it is probed under;
+    --               trunk_enabled NULL. Fix by putting the IP on the row in
+    --               TED (no migration).
+    -- Per (IP, SBC) only that SBC's MOST RECENT report counts, so a
+    -- carrier_trunk_status row left behind under an old positional duid
+    -- after a VERIZON_PROBE_IPS reorder/shrink never double-counts an SBC.
+    -- (A report with no IP falls back to its duid as the key.)
+    SELECT
+        COALESCE('verizon-' || ct.pop,
+                 'verizon-unmapped-' || translate(v.ip_key, '.:', '--')),
+        CASE
+            WHEN ct.pop IS NOT NULL
+            THEN 'Verizon SIP Gateway ' || initcap(replace(ct.pop, '-', ' '))
+            ELSE 'Verizon SIP Gateway ' || COALESCE(NULLIF(v.ip, ''), '<no IP reported>')
+                 || ' (unmapped: probed as ' || v.probe_duids || ')'
+        END,
+        v.ip,
+        v.setid,
+        v.up_sbcs,
+        v.total_sbcs,
+        v.probe_up,
+        v.last_updated
+    FROM (
+        SELECT
+            l.ip_key,
+            MAX(l.ip)    AS ip,
+            MAX(l.setid) AS setid,
+            COUNT(*) FILTER (WHERE l.is_up) AS up_sbcs,
+            COUNT(*)                        AS total_sbcs,
+            bool_or(l.is_up)                AS probe_up,
+            MAX(l.updated_at)               AS last_updated,
+            string_agg(DISTINCT l.duid, ',' ORDER BY l.duid) AS probe_duids
+        FROM (
+            SELECT DISTINCT ON (COALESCE(NULLIF(s.ip, ''), s.duid), s.sbc_id)
+                COALESCE(NULLIF(s.ip, ''), s.duid) AS ip_key,
+                s.duid, s.ip, s.setid, s.is_up, s.updated_at
+            FROM carrier_trunk_status s
+            WHERE s.setid = 13
+            ORDER BY COALESCE(NULLIF(s.ip, ''), s.duid), s.sbc_id,
+                     s.updated_at DESC, s.duid
+        ) l
+        GROUP BY l.ip_key
+    ) v
+    LEFT JOIN carrier_trunks ct
+           ON ct.carrier = 'verizon'
+          AND ct.direction IN ('outbound', 'both')
+          AND host(ct.source_ip) = v.ip_key
 ),
 -- ORIGINATION-ONLY duids. duid -> CDR-attribution join key (Kamailio stamps
 -- inbound_carrier/_pop on carrier ingress; FS records them into cdrs). name/
@@ -219,7 +316,10 @@ orig_traffic AS (
 -- (carrier, pop) is UNIQUE, so the join never multiplies rows. Orig duids
 -- reuse orig_map; probed termination/Bandwidth duids are listed here. The
 -- Verizon termination duids ('verizon-<pop>' = verizon-east / -west /
--- -central, dispatcher group 13) come from carrier_trunks.
+-- -central / any extra gateway row such as verizon-east-2) come from
+-- carrier_trunks — the same row the probe arm matched by IP, so a mapped
+-- Verizon probe row always gets its own row's enabled flag; an unmapped one
+-- ('verizon-unmapped-...') matches nothing here (trunk_enabled NULL).
 trunk_map AS (
     SELECT m.duid, m.carrier, m.pop FROM orig_map m
     UNION ALL
