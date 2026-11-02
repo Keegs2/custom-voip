@@ -1424,7 +1424,7 @@ UDP-only render byte-for-byte (see "Compiled out" above). What `tcp` changes:
 | `failure_route[CARRIER_FAILURE]` 422 retry | re-forces `udp:` | re-pins `$du …;transport=tcp` + `tcp:` |
 | Contact (B-leg INVITE, `REPLY_HANDLER` on FS replies, the three WITHINDIALOG rewrites) | `;transport=udp` | `route[VZ_TP]`: `;transport=tcp` when `$var(adv_ip)` is `VERIZON_SIP_IP`, `udp` otherwise |
 | Outer Record-Route (A-leg + B-leg presets, all `fsn` variants) | `<sip:VERIZON_SIP_IP:5060;fs=…;lr>` | `<sip:VERIZON_SIP_IP:5060;transport=tcp;fs=…;lr>` (`$var(adv_rrtp)`, empty for non-Verizon) — Verizon sends its in-dialog requests over TCP, and the FS-side r2 double-pop resolves the second Route to the TCP bind |
-| FS-originated ACK/BYE/re-INVITE/UPDATE toward Verizon | r2-forced socket, next hop = R-URI | `route[VZ_TCP_EGRESS]` (loose_route tail + both no-Route FS arms, gated `$var(vz_dlg) == 1`, non-self R-URI): next hop (`$du` if loose_route set one, else the R-URI) rebuilt `sip:host:port;transport=tcp`, `$fs = tcp:VERIZON_VIP:5060`. Needed because Verizon's Contact may omit `;transport=tcp`: without it the request falls back to UDP (proved by ablation) |
+| FS-originated ACK/BYE/re-INVITE/UPDATE toward Verizon | r2-forced socket (U1, proved) + explicit `$fs = udp:VERIZON_VIP:5060` pin (loose_route tail + both no-Route FS arms, same gate as tcp), next hop = R-URI | `route[VZ_TCP_EGRESS]` (loose_route tail + both no-Route FS arms, gated `$var(vz_dlg) == 1`, non-self R-URI): next hop (`$du` if loose_route set one, else the R-URI) rebuilt `sip:host:port;transport=tcp`, `$fs = tcp:VERIZON_VIP:5060`. Needed because Verizon's Contact may omit `;transport=tcp`: without it the request falls back to UDP (proved by ablation) |
 | Group-13 probes | `socket=udp:…` | `sip:<ip>:5060;transport=tcp`, `socket=tcp:VERIZON_VIP:5060` |
 | Listens | udp + tcp `.251` | unchanged — inbound from Verizon accepted on either transport |
 
@@ -1516,9 +1516,60 @@ intact, SE normalized to 1800, Contact untouched; the same B-leg via the direct
 SBC IP rejected `503 Verizon Trunk Requires Signaling VIP` and never sent; a
 Bandwidth-bound control B-leg unchanged (VIP-sourced, all ADVERTISE_IP).
 
+**U1 — PROVED in the lab (2026-11-02, 5.8.8 harness, udp mode), plus a udp `$fs`
+pin.** Question: for FS→Verizon ACK/BYE (Route `[SIGNALING_VIP;r2=on, VERIZON_SIP_IP]`),
+does the r2 double-pop force the `.251` socket when the second Route's host is only
+*advertised*? Yes. Source (5.8.8): `after_loose()` (`rr/loose.c` ~924-934) sees `r2` on
+the first Route, parses the second and calls `rr_do_force_send_socket(…, rr2on=1)` —
+unconditionally, not gated on `force_send_socket` — which calls `grep_sock_info()`.
+For each socket, `grep_sock_info()` (`core/socket_info.c` ~712-790) compares the bind
+name, then the ADVERTISE name (`si->useinfo.name`), then extra addresses. The `.251`
+UDP bind is the only socket that advertises `VERIZON_SIP_IP`, so the first match
+can only be that bind (`proto` 0 ⇒ the UDP list is searched first). A miss would log
+`no socket found to match second RR` (WARN). Wire evidence, suite
+`kamcheck/test_u1.py` (fake FS/Verizon on `lo`, `recvfrom()` = the sending socket):
+`corex.list_sockets` shows `udp:10.128.0.251:5060 advertise udp:35.184.132.124:5060`,
+and nothing binds the SIP IP. B-leg ACK, re-INVITE and BYE, A-leg BYE (FS hangs up a
+Verizon-originated call), each with the Route set (a) hand-written and comma-joined
+(exact RR URIs incl. `ftag`/`did`, and the minimal shape) and (b) derived end-to-end
+the way a UA does (B-leg: the RR Verizon echoed in its 200, reversed; A-leg: the
+INVITE's RR in order). In every case: UDP source `10.128.0.251:5060`, top Via
+`SIP/2.0/UDP 35.184.132.124:5060`, exactly one SBC Via + FS's, no Route left,
+R-URI = Verizon's Contact, Contact = `VERIZON_SIP_IP`, one transaction, no copy back
+toward FS, no `routed to self` / rr WARN in the log. Verizon's 200 OK (sent to `.251`,
+standing in for the gateway translation) reached FS for both BYEs and the re-INVITE.
+This held on the HEAD config before the pin was added. Negative control: the same BYE
+with a second Route host that no socket binds or advertises left `udp:ADVERTISE_IP`
+with `Via: ADVERTISE_IP` and rr logged the WARN. That is the U1-failure shape (in GCP
+the NIC socket, same Via), and it shows the checks can fail.
+
+*udp pin (added with the proof).* `route[WITHINDIALOG]` now sets
+`$fs = "udp:VERIZON_VIP:5060"` in udp mode for FS-originated requests on Verizon
+dialogs (`$var(vz_dlg) == 1`, internal source, non-self R-URI), at the same three
+sites as the tcp `route[VZ_TCP_EGRESS]` calls. The sites are now
+`#!ifdef VERIZON_MODE` / `#!ifdef VERIZON_TCP` … `#!else` udp pin `#!endif` / `#!endif`.
+(a) **No-Route FS arms (the gap the TCP work noted):** a no-Route ACK/BYE has no r2
+pop, so mhomed chose the NIC socket with `Via: ADVERTISE_IP`, which Verizon cannot
+reach. This was reproduced on HEAD (G1 checks) and is fixed by the pin. FS normally
+cannot produce this shape, because both legs are always Record-Routed and an empty
+route set would make FS bypass the SBC. The pin costs nothing.
+(b) **loose_route tail:** a no-op on the proved path. It removes the dependency on the
+advertise-name lookup and on FS echoing the outer Route verbatim. With the pin, the
+negative-control BYE (unresolvable second Route) leaves `.251` anyway.
+Renders: Verizon-off (legacy, dedicated, tcp-with-mode-off) are `cmp`-identical to the
+pre-pin HEAD. The udp/unset/garbage renders gain only the pin (they are no longer
+identical to the pre-`VERIZON_TRANSPORT` branch). The tcp render changes only by
+directive lines and the inert `#!else`. `kamailio -c` rc=0 for every render. Live:
+test_u1 81/81 + 4/4 log checks (HEAD: 79/81 + 4/4, failing only the two no-Route gap checks); udp
+suite 46/46 + 5/5; tcp suite 49/49 + 2/2.
+*Still only provable on the GCP path:* that the `.251`-sourced packets actually take the
+next-hop-ILB route to the gateway and are translated to `VERIZON_SIP_IP` (U2), and that
+Verizon's replies to `Via: VERIZON_SIP_IP` come back through the gateway to the ACTIVE
+SBC's `.251` (the harness injects them straight to `.251`). Homer check at turn-up: an
+FS-side hangup shows the BYE from `10.x.0.251` with one `Via: <VERIZON_SIP_IP>`, and
+its 200 OK.
+
 **Unverified in the lab (plan §8.6) — prove in the zone before turn-up:**
-U1 FS-side ACK/BYE r2 double-pop forcing the `.251` socket from the advertise-only
-second Route (`kamcmd corex.list_sockets` + Homer trace of an FS-side hangup);
 U2 `.251`-sourced egress into the next-hop-ILB VPC route and ILB delivery of
 gateway-forwarded packets with a Verizon source; U3 Verizon's refresher
 expectation. Also: the ILB VIP-addressed `/healthz` on `VERIZON_VIP:8080` (same
