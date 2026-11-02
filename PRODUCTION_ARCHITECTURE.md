@@ -280,7 +280,7 @@ production services, no monitoring enrollment).
 | 8880 | TCP | vmalert | Rule status | Grafana/ops (bridge) |
 | 8429 | TCP | vmagent (every VM) | Agent health/buffer | Local |
 | 8710 | TCP | ops-agent (all roles) | NOC/CRAG command API — bearer token, argv-only verbs (§10.3) | CRAG GKE backend + console hosts (VPC-internal on every role, media VMs included: host-network, binds `0.0.0.0`; access restricted by the `allow-ops-agent` firewall tag rule) |
-| 9100 | TCP | node-exporter (every monitored VM) | Host metrics | Local vmagent |
+| 9100 | TCP | node-exporter (every monitored VM) | Host metrics | Local vmagent; on the Verizon IPsec gateways (NIC IP only), the zone's media vmagents (job `vz_gateway`) |
 | 9103 | TCP (lo) | ops-agent ESL exporter (media) | FS channel/call gauges | Local vmagent |
 | 9104 | TCP (lo) | ops-agent fsdisp exporter (SBC) | Dispatcher group-1 state incl. `fs_dispatcher_disabled` (MAINT) | Local vmagent |
 | 9115 | TCP | blackbox-exporter (services) | HTTP probe module | services vmagent (in-network) |
@@ -1072,7 +1072,7 @@ Per-VM `vmagent` → remote-write → East VictoriaMetrics `:8428`
 | Role | Scrape config | Jobs |
 |------|---------------|------|
 | SBC | `docker/vmagent/scrape-sbc.yml` | kamailio :8080 `/metrics` (xhttp_prom), node :9100, fsdisp :9104 |
-| Media | `scrape-media.yml` | node :9100, esl-exporter :9103 |
+| Media | `scrape-media.yml` | node :9100, esl-exporter :9103, `vz_gateway`: the zone's two Verizon IPsec gateways' node_exporter on their NIC IP :9100 (no Docker/vmagent on a gateway; `vz_ipsec_*` textfile metrics from vz-healthd; scraped by both media VMs of the zone, so reduce with `max by (zone, node, gw)`) |
 | DB replica | `scrape-db.yml` | node :9100, postgres-exporter :9187 (`db_role=replica`), pgbouncer-exporter :9127 |
 | Services | `scrape-services.yml` | api :8000, postgres-exporter :9187, pgbouncer-exporter :9127, blackbox :9115, node :9100 (+ STIR textfile metrics), heplify :9096 |
 
@@ -1082,7 +1082,7 @@ gauges, `kamailio_maint_drain`, dispatcher/carrier state, STIR sign counters.
 ### 9.2 Recording rules (vmalert, 30s eval)
 
 `docker/vmalert/rules/`: `traffic.yml` (zone reply-class rates → live ASR /
-failure %), `sip_health.yml`, `stir.yml`.
+failure %), `sip_health.yml`, `stir.yml`, `vz_ipsec.yml` (Verizon gateway tunnel/datapath alerts, zone-down guarded so pre-turn-up gateways never page).
 
 ### 9.3 Grafana NOC boards (`docker/homer/grafana/dashboards/`)
 
