@@ -6,9 +6,12 @@ check_no_skips). Run it on a workstation against a throwaway container — it
 DROPS and recreates the ``qryn`` and ``bench`` databases, so it refuses any
 URL that is not loopback:
 
-  docker run -d --name crag-ch-idx -p 127.0.0.1:18123:8123 clickhouse/clickhouse-server:23.3-alpine
-  CH_CLIENT="docker exec -i crag-ch-idx clickhouse-client" python3 scripts/homer/test_sip_number_index_clickhouse.py
+  docker run -d --name crag-ch-idx -p 127.0.0.1:18123:8123 -v "$PWD/docker/homer/clickhouse-users.xml:/etc/clickhouse-server/users.d/custom-users.xml" clickhouse/clickhouse-server:23.3-alpine
+  CH_CLIENT="docker exec -i crag-ch-idx clickhouse-client" python3 scripts/homer/test_sip_number_index_clickhouse.py [--scale]
   docker rm -f crag-ch-idx
+
+The repo's clickhouse-users.xml MUST be mounted (production's profile):
+check 0 asserts materialized_views_ignore_errors=1 for the inserting user.
 
 What it proves:
   1. The DDL applies, and re-applies as a no-op (one 'mv' coverage row).
@@ -29,6 +32,14 @@ What it proves:
      verbatim and alter nothing; readonly=2 refuses writes.
   7. Ingest overhead of the MV (wall clock, same rows, with vs without it).
   8. Why there is no ngram bloom-filter skip index (EXPLAIN on 2M numbers).
+  9. Failure modes: a throwing MV with ignore-errors on (insert succeeds,
+     our index still fills), a dropped target table while the MV exists
+     (insert FAILS — why rollback drops the MV first), schema drift, and the
+     memory/time a 95 MB / 50k-row and a 200k-row insert block costs.
+ 10. --scale: 30M unmerged index rows over 7 days; exact 10/11-digit,
+     international, 4- and 3-digit partial lookups with read rows/bytes,
+     memory and time from system.query_log under the API's caps, and the
+     same queries without PREWHERE for comparison.
 """
 import json
 import os
@@ -93,6 +104,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.metrics_15s_mv TO {db}.metrics_15s A
 """
 
 NS = 1_000_000_000
+DAYNS = 86400 * NS
 NOW = datetime.now(timezone.utc)
 TODAY = NOW.date()
 SDP = ("v=0\r\no=- 6179990000 1 IN IP4 67.231.13.185\r\ns=-\r\nc=IN IP4 67.231.13.185\r\n"
@@ -174,18 +186,22 @@ def oddities(ts):
     ]
 
 
+OTHER_A = {("5087282017", "other"), ("15087282017", "other"), ("7744045256", "other"), ("17744045256", "other")}
+OTHER_B = {("7744045256", "other"), ("17744045256", "other"), ("6174544217", "other"), ("16174544217", "other")}
 EXPECT = {
+    # Roles from the INITIAL INVITE only; every other message -> 'other'
+    # (the callee's BYE has From/To swapped and R-URI = caller Contact).
     "a-leg-1@67.231.13.185": {
-        ("7744045256", "ruri"), ("17744045256", "ruri"), ("5087282017", "ruri"), ("15087282017", "ruri"),
-        ("5087282017", "from"), ("15087282017", "from"), ("7744045256", "from"), ("17744045256", "from"),
-        ("7744045256", "to"), ("17744045256", "to"), ("5087282017", "to"), ("15087282017", "to"),
+        ("7744045256", "ruri"), ("17744045256", "ruri"),
+        ("5087282017", "from"), ("15087282017", "from"),
+        ("7744045256", "to"), ("17744045256", "to"),
         ("5087282017", "pai"), ("15087282017", "pai"),
-    },
+    } | OTHER_A,
     "b-leg-1@192.168.10.2": {
         ("6174544217", "ruri"), ("16174544217", "ruri"), ("7744045256", "from"), ("17744045256", "from"),
         ("6174544217", "to"), ("16174544217", "to"), ("7744045256", "pai"), ("17744045256", "pai"),
         ("7744045256", "diversion"), ("17744045256", "diversion"), ("5551234567", "diversion"),
-    },
+    } | OTHER_B,
     "odd-npdi@x": {("5085550100", "ruri"), ("15085550100", "ruri"), ("2125550123", "from"),
                    ("12125550123", "from"), ("5085550100", "to"), ("15085550100", "to")},
     "odd-lf@x": {("3125550199", "ruri"), ("3125550100", "from"), ("3125550199", "to")},
@@ -224,14 +240,91 @@ def run_backfill(*args):
     return p.returncode, p.stdout + p.stderr
 
 
-def lookup(needles, start_ns, end_ns, limit=50, **kw):
-    q = hi.build_lookup("qryn", needles, start_ns, end_ns, limit, **kw)
-    return [h.call_id for h in hi.parse_lookup(ch(q.sql, {**q.params, **hi.INDEX_QUERY_SETTINGS}))]
+def lookup(needles, start_ns, end_ns, limit=50, db="qryn", tag=None):
+    q = hi.build_lookup(db, needles, start_ns, end_ns, limit)
+    extra = {"log_comment": tag} if tag else {}
+    return [h.call_id for h in hi.parse_lookup(ch(q.sql, {**q.params, **hi.INDEX_QUERY_SETTINGS, **extra}))]
+
+
+def scale():
+    """30M unmerged index rows over 7 days, then the API's lookups."""
+    ch("DROP DATABASE IF EXISTS scale SYNC")
+    ch("CREATE DATABASE scale")
+    client(DDL.read_text().split("-- 3) The materialized view.")[0].replace("qryn.", "scale."))
+    ch("SYSTEM STOP MERGES scale.sip_number_index")
+    per_insert, inserts_per_day = 430_000, 10
+    t0 = time.time()
+    for d in range(7):
+        day = TODAY - timedelta(days=d)
+        for part in range(inserts_per_day):
+            off = (d * inserts_per_day + part) * per_insert
+            ch(f"""INSERT INTO scale.sip_number_index
+SELECT toDate('{day.isoformat()}') AS day,
+  multiIf(k % 10 = 0, concat('508', toString(1000000 + cityHash64(k, 1) % 9000000)),
+          k % 10 = 1, concat('1', toString(2000000000 + cityHash64(k, 2) % 8000000000)),
+          toString(2000000000 + cityHash64(k, 3) % 8000000000)) AS number,
+  ['ruri', 'from', 'to', 'pai', 'diversion', 'other'][1 + k % 6] AS role,
+  concat(hex(cityHash64(intDiv(k, 6))), '-', toString(intDiv(k, 6)), '@67.231.13.185') AS call_id,
+  toInt64({hi.midnight_ns(day)} + cityHash64(k, 4) % {DAYNS}) AS first_ns,
+  first_ns + 30000000000 AS last_ns,
+  arrayReduce('argMaxState', [toUInt16(200)], [first_ns]) AS final_code
+FROM (SELECT number + {off} AS k FROM numbers({per_insert}))""")
+        # Planted calls: 3 per day for the full number, 2 international.
+        for k in range(3):
+            for num, role in (("5087282017", "from"), ("15087282017", "from"), ("5087282017", "other")):
+                ts = hi.midnight_ns(day) + (k * 6 + 3) * 3600 * NS
+                ch(f"INSERT INTO scale.sip_number_index SELECT toDate('{day.isoformat()}'), '{num}', '{role}', 'target-{d}-{k}@x', {ts}, {ts + 60 * NS}, arrayReduce('argMaxState', [toUInt16(200)], [toInt64({ts})])")
+        for k in range(2):
+            ts = hi.midnight_ns(day) + (k * 8 + 1) * 3600 * NS
+            ch(f"INSERT INTO scale.sip_number_index SELECT toDate('{day.isoformat()}'), '442079460958', 'to', 'intl-{d}-{k}@x', {ts}, {ts + 60 * NS}, arrayReduce('argMaxState', [toUInt16(200)], [toInt64({ts})])")
+    rows = int(ch("SELECT count() FROM scale.sip_number_index").strip())
+    parts = ch("SELECT count() FROM system.parts WHERE database = 'scale' AND table = 'sip_number_index' AND active").strip()
+    size = ch("SELECT formatReadableSize(sum(bytes_on_disk)) FROM system.parts WHERE database = 'scale' AND table = 'sip_number_index' AND active").strip()
+    print(f"SCALE loaded {rows:,} rows in {parts} active parts ({size} on disk), merges stopped, {time.time() - t0:.0f}s")
+    w0 = hi.midnight_ns(TODAY - timedelta(days=6))
+    w1 = hi.midnight_ns(TODAY + timedelta(days=1))
+    cases = [("exact 10-digit (+1 (508) 728-2017)", [("number", hp.normalize_number_needle("+1 (508) 728-2017"))]),
+             ("11-digit 15087282017 (normalized)", [("number", hp.normalize_number_needle("15087282017"))]),
+             ("international 12-digit exact", [("number", "442079460958")]),
+             ("from_user exact", [("from_user", "5087282017")]),
+             ("4-digit partial 2017", [("number", "2017")]),
+             ("3-digit partial 508", [("number", "508")])]
+    ok_all = True
+    for name, needles in cases:
+        for mode in ("prewhere", "no-prewhere"):
+            tag = f"scale-{mode}-{abs(hash(name)) % 10**8}"
+            q = hi.build_lookup("scale", needles, w0, w1, 70)
+            sql = q.sql
+            if mode == "no-prewhere":
+                pre = sql.split("PREWHERE ")[1].split(" WHERE day")[0]
+                sql = sql.replace(f"PREWHERE {pre} WHERE day >= {{d0:Date}} AND day <= {{d1:Date}}",
+                                  f"WHERE day >= {{d0:Date}} AND day <= {{d1:Date}} AND ({pre})")
+            try:
+                got = hi.parse_lookup(ch(sql, {**q.params, **hi.INDEX_QUERY_SETTINGS, "log_comment": tag}))
+                res = f"{len(got)} calls"
+            except CHError as e:
+                res = f"REFUSED code {e.code}"
+                if mode == "prewhere":
+                    ok_all = False
+            ch("SYSTEM FLUSH LOGS")
+            r = ch(f"SELECT read_rows, read_bytes, memory_usage, query_duration_ms FROM system.query_log WHERE log_comment = '{tag}' AND type != 'QueryStart' ORDER BY event_time_microseconds DESC LIMIT 1 FORMAT TSV").split()
+            if r:
+                print(f"SCALE {name:<36} {mode:<11} {res:<18} read {int(r[0]):>11,} rows {int(r[1]) / 1e6:>8.1f} MB  mem {int(r[2]) / 2**20:>6.0f} MiB  {int(r[3]):>5} ms")
+    check("scale: every lookup (exact and partial) answers under the API caps with PREWHERE", ok_all)
+    exact = hi.parse_lookup(ch(hi.build_lookup("scale", [("number", "5087282017")], w0, w1, 70).sql,
+                               {**hi.build_lookup("scale", [("number", "5087282017")], w0, w1, 70).params, **hi.INDEX_QUERY_SETTINGS}))
+    planted = {f"target-{d}-{k}@x" for d in range(7) for k in range(3)}
+    check("scale: the exact number finds all 21 planted calls (random rows may collide)",
+          planted <= {h.call_id for h in exact}, str(len(exact)))
+    ch("DROP DATABASE scale SYNC")
 
 
 def main():
     random.seed(7)
-    for db in ("qryn", "bench"):
+    setting = ch("SELECT value FROM system.settings WHERE name = 'materialized_views_ignore_errors'").strip()
+    check("0. repo clickhouse-users.xml mounted: materialized_views_ignore_errors = 1 for the inserting user",
+          setting == "1", setting)
+    for db in ("qryn", "bench", "drift"):
         ch(f"DROP DATABASE IF EXISTS {db} SYNC")
         ch(f"CREATE DATABASE {db}")
         client(QRYN_SCHEMA.format(db=db))
@@ -335,8 +428,10 @@ def main():
     check("partial '4217' finds the B leg", "b-leg-1@192.168.10.2" in lookup([("number", "4217")], w0, w1))
     check("partial '15087' (includes the 1) still matches", "a-leg-1@67.231.13.185" in lookup([("number", "15087")], w0, w1))
     check("from_user 5087282017 -> A leg", "a-leg-1@67.231.13.185" in lookup([("from_user", "5087282017")], w0, w1))
-    check("to_user 5087282017 matches only BYE-carrying legs' ruri/to (A leg via BYE R-URI)",
-          set(lookup([("to_user", "5087282017")], t - NS, t + 100 * NS)) == {"a-leg-1@67.231.13.185"})
+    check("to_user <caller> matches nothing: the callee's BYE (From/To swapped) carries no role",
+          lookup([("to_user", "5087282017")], t - NS, t + 100 * NS) == [])
+    check("number <caller> still finds the A leg via every message",
+          "a-leg-1@67.231.13.185" in lookup([("number", "5087282017")], t - NS, t + 100 * NS))
     check("from_user 6174544217 matches nothing (it is only ever the callee)",
           lookup([("from_user", "6174544217")], w0, w1) == [])
     check("to_user 6174544217 -> B leg", lookup([("to_user", "6174544217")], w0, w1) == ["b-leg-1@192.168.10.2"])
@@ -346,7 +441,9 @@ def main():
     order = lookup([("number", "5087282017")], w0, w1)
     check("newest first", order.index("a-leg-1@67.231.13.185") < order.index("hist-y@x") < order.index("hist-6d@x"), str(order))
     check("window bound respected (yesterday only)", lookup([("number", "5087282017")], ts_of(y, 0), ts_of(TODAY, 0)) == ["hist-y@x"])
-    check("first_ns_at_least bound", lookup([("number", "5087282017")], w0, w1, first_ns_at_least=ts_of(TODAY, 0)) == ["a-leg-1@67.231.13.185", "hist-today-early@x"])
+    check("full number is an exact match: an international number containing it is not returned",
+          "a-leg-1@67.231.13.185" in lookup([("number", "5087282017")], w0, w1)
+          and lookup([("number", "4450872820179")], w0, w1) == [])
 
     # --- hostile input is data ---
     hostile = "'; DROP TABLE qryn.samples_v3; --\\\u0663"
@@ -411,6 +508,122 @@ def main():
     print(f"BENCH backfill SELECT over {src} rows / {srcb / 1e6:.1f} MB: {bf:.2f}s -> {srcb / 1e6 / bf:.0f} MB/s at max_threads=2")
     check("benchmark ran", nm > 0 and wm > 0)
 
+    # --- failure modes ---
+    ch("TRUNCATE TABLE bench.sip_number_index")
+    ch("CREATE TABLE bench.bad_target (n UInt8) ENGINE = MergeTree ORDER BY tuple()")
+    ch("CREATE MATERIALIZED VIEW bench.bad_mv TO bench.bad_target AS SELECT throwIf(length(string) > 0, 'simulated MV bug') AS n FROM bench.samples_v3")
+    try:
+        insert_samples(a_leg("fail-1@x", base), db="bench")
+        ok = True
+    except CHError as e:
+        ok = False
+        print(e)
+    ch("SYSTEM FLUSH LOGS")
+    logged = ch("SELECT count() FROM system.query_views_log WHERE view_name = 'bench.bad_mv' AND status = 'ExceptionWhileProcessing'").strip()
+    check("a throwing MV with ignore-errors: the samples insert succeeds and the error is logged",
+          ok and int(logged) > 0, logged)
+    check("... and the index MV still indexes that batch", ("5087282017", "from") in
+          {(r["number"], r["role"]) for r in hi.parse_rows(ch("SELECT number, role FROM bench.sip_number_index WHERE call_id = 'fail-1@x' FORMAT JSONEachRow"))})
+    ch("DROP VIEW bench.bad_mv SYNC")
+    ch("DROP TABLE bench.bad_target SYNC")   # an MV whose target is gone ...
+    ch("CREATE TABLE bench.bad_target (n UInt8) ENGINE = MergeTree ORDER BY tuple()")
+    ch("CREATE MATERIALIZED VIEW bench.bad_mv TO bench.bad_target AS SELECT toUInt8(1) AS n FROM bench.samples_v3")
+    ch("DROP TABLE bench.bad_target SYNC")
+    try:
+        insert_samples(a_leg("fail-2@x", base), db="bench")
+        failed_code = None
+    except CHError as e:
+        failed_code = e.code
+    check("target table dropped while its MV exists: the insert FAILS (Code 60) even with ignore-errors — rollback must drop the MV first",
+          failed_code == "60", str(failed_code))
+    ch("DROP VIEW bench.bad_mv SYNC")
+    try:
+        insert_samples(a_leg("fail-3@x", base), db="bench")
+        ok = True
+    except CHError:
+        ok = False
+    check("after DROP VIEW the insert works again", ok)
+
+    # Schema drift: qryn renames/drops the text column.
+    try:
+        client(ddl.replace("qryn.", "drift."))
+        drift_ok = True
+    except subprocess.CalledProcessError:
+        drift_ok = False
+    ch("ALTER TABLE drift.samples_v3 RENAME COLUMN string TO string_v2")
+    try:
+        ch("INSERT INTO drift.samples_v3 (fingerprint, timestamp_ns, value, string_v2) VALUES (1, 1, 0, 'x')")
+        drift_insert = "ok"
+    except CHError as e:
+        drift_insert = e.code
+    check("schema drift after deploy (qryn renames `string`): inserts FAIL — the pre-upgrade check in docker/homer/CLAUDE.md is required",
+          drift_ok and drift_insert != "ok", str(drift_insert))
+    ch("DROP DATABASE drift SYNC")
+    ch("CREATE DATABASE drift")
+    client(QRYN_SCHEMA.format(db="drift").replace("string String", "body String").replace("length(string)", "length(body)"))
+    try:
+        client(ddl.replace("qryn.", "drift."))
+        drift_ddl = "applied"
+    except subprocess.CalledProcessError:
+        drift_ddl = "failed"
+    objs = ch("SELECT groupArray(name) FROM system.tables WHERE database = 'drift' AND name LIKE 'sip_number_index%'").strip()
+    check("schema drift before deploy: the DDL fails at the MV, no MV exists, the API sees no index",
+          drift_ddl == "failed" and "sip_number_index_mv" not in objs, objs)
+    ch("DROP DATABASE drift SYNC")
+
+    # Insert block cost: realistic ~1.9 KB messages.
+    def big(i):
+        cid = f"blk-{i}@67.231.13.185"
+        return msg([f"INVITE sip:+1774404{i % 10000:04d}@34.24.133.82:5060 SIP/2.0",
+                    "Via: SIP/2.0/UDP 67.231.13.185:5060;branch=z9hG4bK" + "a" * 30,
+                    "Via: SIP/2.0/UDP 10.142.0.100:5060;branch=z9hG4bK" + "b" * 30,
+                    "Record-Route: <sip:34.24.133.82:5060;lr;fs=5080>", "Record-Route: <sip:10.142.0.250:5060;r2=on;lr>",
+                    f'From: "CALLER {i}" <sip:+1508728{i % 10000:04d}@67.231.13.185:5060;user=phone>;tag=gK{i}',
+                    f"To: <sip:+1774404{i % 10000:04d}@34.24.133.82:5060>", f"Call-ID: {cid}", "CSeq: 1 INVITE",
+                    f"P-Asserted-Identity: <sip:+1508728{i % 10000:04d}@67.231.13.185:5060;user=phone>",
+                    "Identity: " + "e" * 700 + ";info=<https://cert.example/x.pem>;alg=ES256;ppt=shaken",
+                    "Allow: INVITE,ACK,CANCEL,BYE,OPTIONS,UPDATE,PRACK,INFO", "Supported: timer,100rel",
+                    "User-Agent: carrier-sbc/1.0", "Contact: <sip:+15087280000@67.231.13.185:5060>",
+                    "Content-Type: application/sdp", "Content-Length: 300"], SDP + "a=" + "x" * 150 + "\r\n")
+
+    def block_cost(n, tag):
+        rows = [(base + 10 * DAYNS + i, big(i)) for i in range(n)]
+        data = "\n".join(json.dumps({"fingerprint": i, "timestamp_ns": ts, "value": 0, "string": m}) for i, (ts, m) in enumerate(rows)).encode()
+        try:
+            ch("INSERT INTO bench.samples_v3 (fingerprint, timestamp_ns, value, string) FORMAT JSONEachRow", data=data,
+               params={"log_comment": tag})
+            res = "ok"
+        except CHError as e:
+            res = f"FAILED {e.code}"
+        ch("SYSTEM FLUSH LOGS")
+        row = ch(f"SELECT memory_usage, query_duration_ms FROM system.query_log WHERE log_comment = '{tag}' AND type != 'QueryStart' ORDER BY event_time_microseconds DESC LIMIT 1 FORMAT TSV").split()
+        return res, len(data), row
+    out = {}
+    for n in (50_000, 200_000):
+        ch("DROP VIEW IF EXISTS bench.sip_number_index_mv SYNC")
+        out[(n, "without")] = block_cost(n, f"blk-{n}-nomv")
+        client(ddl_bench)
+        out[(n, "with")] = block_cost(n, f"blk-{n}-mv")
+    for (n, k), (res, nbytes, row) in sorted(out.items()):
+        mem = int(row[0]) / 2**20 if row else -1
+        dur = int(row[1]) if row else -1
+        print(f"BLOCK {n} rows / {nbytes / 1e6:.0f} MB JSON {k:>7} our MV: {res}, memory {mem:.0f} MiB, {dur} ms")
+    # The MV hits a memory limit: ignore-errors must keep the insert.
+    rows = [(base + 20 * DAYNS + i, big(i)) for i in range(200_000)]
+    data = "\n".join(json.dumps({"fingerprint": i, "timestamp_ns": ts, "value": 0, "string": m}) for i, (ts, m) in enumerate(rows)).encode()
+    try:
+        ch("INSERT INTO bench.samples_v3 (fingerprint, timestamp_ns, value, string) FORMAT JSONEachRow", data=data,
+           params={"max_memory_usage": "1500000000", "log_comment": "blk-memcap"})
+        capped = "ok"
+    except CHError as e:
+        capped = f"FAILED {e.code}"
+    ch("SYSTEM FLUSH LOGS")
+    vfail = ch("SELECT count() FROM system.query_views_log WHERE view_name = 'bench.sip_number_index_mv' AND status = 'ExceptionWhileProcessing' AND exception_code = 241").strip()
+    print(f"BLOCK 200000 rows with max_memory_usage 1.5e9: insert {capped}, MV memory-limit failures logged: {vfail}")
+    check("MV over its memory limit: the samples insert still succeeds (index gap, no trace loss)", capped == "ok", capped)
+    check("a 50k-row ~95 MB block inserts with the MV", out[(50_000, "with")][0] == "ok")
+    check("a 200k-row block inserts with the MV (ignore-errors or fits)", out[(200_000, "with")][0] == "ok")
+
     # --- why no ngram bloom filter ---
     ch("CREATE TABLE bench.ngram (number String, INDEX ng number TYPE ngrambf_v1(3, 4096, 3, 0) GRANULARITY 1) ENGINE = MergeTree ORDER BY number")
     ch("INSERT INTO bench.ngram SELECT toString(2000000000 + rand() % 8000000000) FROM numbers(2000000)")
@@ -420,6 +633,8 @@ def main():
         print(f"NGRAM {pat}: {gr}")
 
     print(f"first backfill run (8 days, tiny data): {first_run_s:.1f}s")
+    if "--scale" in sys.argv:
+        scale()
     failed = [n for n, ok in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")
     sys.exit(1 if failed else 0)

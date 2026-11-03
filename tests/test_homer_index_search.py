@@ -75,8 +75,10 @@ def test_lookup_sql_is_constant_text_with_typed_placeholders():
     assert q.sql == (
         "SELECT call_id, toString(min(first_ns)) AS f_ns, toString(max(last_ns)) AS l_ns "
         "FROM qryn.sip_number_index "
+        # Explicit PREWHERE: ClickHouse 23.3 would otherwise move `day` there
+        # and read every column of every row in the window.
+        "PREWHERE (number = {n0:String}) "
         "WHERE day >= {d0:Date} AND day <= {d1:Date} "
-        "AND ((number LIKE {n0:String})) "
         "GROUP BY call_id "
         "HAVING max(last_ns) >= {lo:Int64} AND min(first_ns) < {hi:Int64} "
         "ORDER BY min(first_ns) DESC, call_id DESC "
@@ -86,21 +88,32 @@ def test_lookup_sql_is_constant_text_with_typed_placeholders():
     assert q.params == {
         "param_d0": "2026-11-01", "param_d1": "2026-11-03",
         "param_lo": str(W0), "param_hi": str(W1), "param_lim": "51",
-        "param_n0": "%5087282017%",
+        "param_n0": "5087282017",          # a full number: exact, primary key
     }
     assert "5087282017" not in q.sql   # the needle never enters the SQL text
 
 
-def test_lookup_roles_and_semantics_and_lower_bound():
+@pytest.mark.parametrize("needle,cond,param", [
+    ("508", "number LIKE {n0:String}", "%508%"),
+    ("508728201", "number LIKE {n0:String}", "%508728201%"),     # 9 digits: partial
+    ("5087282017", "number = {n0:String}", "5087282017"),        # 10: exact
+    ("442079460958", "number = {n0:String}", "442079460958"),    # international: exact
+])
+def test_full_numbers_are_exact_partials_are_substring(needle, cond, param):
+    q = hx.build_lookup("qryn", [("number", needle)], W0, W1, 5)
+    assert f"PREWHERE ({cond}) WHERE day" in q.sql and q.params["param_n0"] == param
+
+
+def test_lookup_roles_and_semantics():
     q = hx.build_lookup("qryn", [("from_user", "617"), ("to_user", "774"), ("number", "5256")],
-                        W0, W1, 10, first_ns_at_least=W0 + 5)
+                        W0, W1, 10)
     assert "(number LIKE {n0:String} AND role IN ('from', 'pai'))" in q.sql
     assert "(number LIKE {n1:String} AND role IN ('to', 'ruri'))" in q.sql
     assert "(number LIKE {n2:String})" in q.sql
     # AND: every needle must match some row of the same call.
     for i in range(3):
         assert f"countIf(number LIKE {{n{i}:String}}" in q.sql
-    assert "min(first_ns) >= {flo:Int64}" in q.sql and q.params["param_flo"] == str(W0 + 5)
+    assert "role IN ('other'" not in q.sql   # 'other' is only for `number`
     assert [q.params[f"param_n{i}"] for i in range(3)] == ["%617%", "%774%", "%5256%"]
 
 
@@ -149,9 +162,12 @@ def test_state_sql_passes_names_as_parameters():
 def test_every_index_request_is_readonly_and_capped():
     for settings in (hx.INDEX_QUERY_SETTINGS, hx.STATE_QUERY_SETTINGS):
         assert settings["readonly"] == "2"
-        assert int(settings["max_execution_time"]) <= 5
-        assert int(settings["max_memory_usage"]) < 4_000_000_000
-    assert int(hx.INDEX_QUERY_SETTINGS["max_bytes_to_read"]) <= 1_000_000_000
+        assert int(settings["max_execution_time"]) <= 10
+        assert int(settings["max_memory_usage"]) <= 1_000_000_000
+        assert int(settings["max_bytes_to_read"]) <= 6_000_000_000
+    # A wide partial spills its GROUP BY instead of failing.
+    assert int(hx.INDEX_QUERY_SETTINGS["max_bytes_before_external_group_by"]) < \
+        int(hx.INDEX_QUERY_SETTINGS["max_memory_usage"])
 
 
 # ---- coverage -------------------------------------------------------------
@@ -221,6 +237,28 @@ def test_capability_never_older_than_retention():
             for i in range(12)]
     cap = hx.compute_capability(TABLES, rows, NOW_NS)
     assert cap.covered_from_iso == "2026-10-29T00:00:00Z"   # 2026-11-05 - 7 days
+
+
+def test_capability_stale_index_reads_as_no_index():
+    cap = hx.compute_capability(TABLES, [], NOW_NS, stale=True)
+    assert (cap.number_index, cap.covered_from_iso) == (False, None)
+
+
+def test_is_stale():
+    m = 60 * S
+    assert not hx.is_stale(0, 0)                      # no INVITE 2-15 min ago
+    assert not hx.is_stale(NOW_NS - 5 * m, NOW_NS - 6 * m)   # within tolerance
+    assert hx.is_stale(NOW_NS - 5 * m, NOW_NS - 11 * m)      # MV stopped
+    assert hx.is_stale(NOW_NS - 5 * m, 0)                    # index empty
+    lo, hi_ = hx.fresh_params(NOW_NS)
+    assert int(lo["param_hi"]) - int(lo["param_lo"]) == 13 * m
+    assert hx.parse_max('{"t":"123"}') == 123 and hx.parse_max("") == 0
+
+
+def test_freshness_sql_is_parameterized_and_bounded():
+    sq = hx.build_fresh_samples_sql("qryn")
+    assert "PREWHERE timestamp_ns >= {lo:Int64} AND timestamp_ns < {hi:Int64}" in sq
+    assert "WHERE day >= {d:Date}" in hx.build_fresh_index_sql("qryn")
 
 
 def test_capability_ignores_garbage_rows():
@@ -296,6 +334,19 @@ def test_ddl_normalization_matches_the_python_needle_rule():
     for raw, stored in (("+1 (508) 728-2017", {"15087282017", "5087282017"}),
                         ("5087282017", {"5087282017"})):
         assert hp.normalize_number_needle(raw) in stored
+
+
+def test_ddl_mv_row_never_expires_and_roles_come_from_the_initial_invite():
+    assert "TTL toDate(finished_at) + INTERVAL 9 DAY DELETE WHERE kind = 'backfill'" in DDL
+    assert "NOT match(v_to, '(?i);[ \\\\t]*tag[ \\\\t]*=') AS is_initial" in DDL
+    assert "if(is_initial, ['ruri', 'from', 'to', 'pai', 'diversion'], ['other', 'other', 'other', 'other', 'other'])" in DDL
+    # Bounded per-row work: header block <= 8 KiB, no RE2 {m,n} blow-up.
+    assert "BETWEEN 1 AND 8192" in DDL and not re.search(r"\{\d+,\d+\}", DDL.split("BEGIN sip")[1])
+
+
+def test_users_xml_keeps_ingest_alive_when_the_mv_fails():
+    users = (REPO / "docker/homer/clickhouse-users.xml").read_text()
+    assert "<materialized_views_ignore_errors>1</materialized_views_ignore_errors>" in users
 
 
 def test_ddl_mv_never_uses_throwing_functions():
@@ -389,6 +440,9 @@ def _forms(value):
     return out
 
 
+_CSEQ = re.compile(r"(?mi)^cseq[ \t]*:[ \t]*[0-9]+[ \t]+([A-Za-z]+)")
+
+
 def derive_index(rows):
     idx = {}
     for r in rows:
@@ -402,9 +456,15 @@ def derive_index(rows):
             continue
         cid, ts = m.group(1), r["timestamp_ns"]
         day = datetime.fromtimestamp(ts // S, tz=timezone.utc).date().isoformat()
+        cseq = (_CSEQ.search(hdr).group(1).upper() if _CSEQ.search(hdr) else "")
+        to_v = "\n".join(_ROLE_HDR["to"].findall(hdr))
+        initial = (is_req and line1.startswith("INVITE ") and cseq == "INVITE"
+                   and not re.search(r"(?i);[ \t]*tag[ \t]*=", to_v))
         pairs = [("ruri", n) for n in (_forms(line1) if is_req else [])]
         for role, rx in _ROLE_HDR.items():
             pairs += [(role, n) for n in _forms("\n".join(rx.findall(hdr)))]
+        if not initial:
+            pairs = [("other", n) for _r, n in pairs]
         for role, n in set(pairs):
             k = (day, n, role, cid)
             f, l = idx.get(k, (ts, ts))
@@ -413,7 +473,7 @@ def derive_index(rows):
              "first_ns": v[0], "last_ns": v[1]} for k, v in idx.items()]
 
 
-_COND_RE = re.compile(r"\(number LIKE \{n(\d+):String\}(?: AND role IN \(([^)]*)\))?\)")
+_COND_RE = re.compile(r"\(number (LIKE|=) \{n(\d+):String\}(?: AND role IN \(([^)]*)\))?\)")
 
 
 class IndexedFakeClickHouse(FakeClickHouse):
@@ -421,9 +481,12 @@ class IndexedFakeClickHouse(FakeClickHouse):
 
     def __init__(self, rows, *, objects=("sip_number_index", "sip_number_index_mv",
                                          "sip_number_index_coverage"),
-                 mv_created_s=None, coverage=(), index_fail=None):
+                 mv_created_s=None, coverage=(), index_fail=None, extra_index=(),
+                 stale=False):
         super().__init__()
         self.add(rows)
+        self.extra_index = list(extra_index)     # index rows with no SIP stored
+        self.stale = stale                       # MV stopped filling
         self.objects = {o: (mv_created_s or NOW - 3 * 86400) for o in objects}
         self.coverage = list(coverage)
         self.index_fail = index_fail            # None | "cap" | "error"
@@ -441,6 +504,13 @@ class IndexedFakeClickHouse(FakeClickHouse):
         if "sip_number_index_coverage" in sql:
             self.probes.append((sql, params))
             return 200, "\n".join(json.dumps(c) for c in self.coverage)
+        if "startsWith(string, 'INVITE ')" in sql:       # freshness: samples
+            self.probes.append((sql, params))
+            t = (NOW - 300) * S if self.stale else 0
+            return 200, json.dumps({"t": str(t)})
+        if "max(last_ns)) AS t" in sql:                  # freshness: index
+            self.probes.append((sql, params))
+            return 200, json.dumps({"t": str((NOW - 3600) * S)})
         if "sip_number_index" in sql:
             self.index_calls.append((sql, params))
             if self.index_fail == "cap":
@@ -451,24 +521,25 @@ class IndexedFakeClickHouse(FakeClickHouse):
         return super().handle(sql, params)
 
     def _lookup(self, sql, p):
-        conds = [(p[f"param_n{i}"].strip("%"),
+        assert "PREWHERE" in sql
+        conds = [(op, p[f"param_n{i}"].strip("%"),
                   {x.strip().strip("'") for x in roles.split(",")} if roles else None)
-                 for i, roles in _COND_RE.findall(sql) for i in [int(i)]]
+                 for op, i, roles in _COND_RE.findall(sql)]
         d0, d1 = p["param_d0"], p["param_d1"]
         calls = {}
-        for r in derive_index(self.rows):
+        for r in derive_index(self.rows) + self.extra_index:
             if not (d0 <= r["day"] <= d1):
                 continue
-            hit = [n in r["number"] and (roles is None or r["role"] in roles) for n, roles in conds]
+            hit = [(n == r["number"] if op == "=" else n in r["number"])
+                   and (roles is None or r["role"] in roles) for op, n, roles in conds]
             if not any(hit):
                 continue
             c = calls.setdefault(r["call_id"], {"f": r["first_ns"], "l": r["last_ns"], "m": [False] * len(conds)})
             c["f"], c["l"] = min(c["f"], r["first_ns"]), max(c["l"], r["last_ns"])
             c["m"] = [a or b for a, b in zip(c["m"], hit)]
         lo, hi = int(p["param_lo"]), int(p["param_hi"])
-        flo = int(p["param_flo"]) if "param_flo" in p else None
         out = [(cid, c) for cid, c in calls.items()
-               if all(c["m"]) and c["l"] >= lo and c["f"] < hi and (flo is None or c["f"] >= flo)]
+               if all(c["m"]) and c["l"] >= lo and c["f"] < hi]
         out.sort(key=lambda kv: (kv[1]["f"], kv[0]), reverse=True)
         return "\n".join(json.dumps({"call_id": cid, "f_ns": str(c["f"]), "l_ns": str(c["l"])})
                          for cid, c in out[:int(p["param_lim"])])
@@ -626,11 +697,15 @@ def test_index_path_7_days_fetches_by_callid_and_correlates(api, monkeypatch):
         assert body["correlations"][cid] == group
     assert body["legs"]["B2-A-1@67.231.13.185"]["role"] == "B"
     assert body["has_more"] is False
-    assert body["oldest_ts_ns"] == T0
+    # Cursor = first matching message of the page's oldest call (B1); the
+    # correlated A leg (not a number match) holds older rows.
+    assert body["oldest_ts_ns"] == T0 + 100 * MS
+    assert min(m["timestamp_ns"] for m in body["data"]) == T0
     # The index lookup carried the needle only as a parameter, with caps.
     sql, params = up.ch.index_calls[0]
-    assert "7744045256" not in sql and params["param_n0"] == "%7744045256%"
-    assert params["readonly"] == "2" and params["max_memory_usage"] == "500000000"
+    assert "7744045256" not in sql and params["param_n0"] == "7744045256"   # exact
+    assert params["readonly"] == "2" and params["max_memory_usage"] == "1000000000"
+    assert params["max_bytes_to_read"] == "6000000000"
     # Every other ClickHouse request on this path is capped too.
     for _k, _sql, p in up.ch.calls:
         assert p["readonly"] == "2" and p["max_execution_time"] and p["max_memory_usage"]
@@ -701,7 +776,8 @@ def test_index_paging_50_calls_per_page_no_overlap_no_skip(api, monkeypatch):
     c1 = {m["callid"] for m in p1["data"]}
     assert p1["search_path"] == "index" and len(c1) == 50 and p1["has_more"] is True
     assert c1 == {f"C{i:03d}@x" for i in range(50)}          # the newest 50
-    assert p1["oldest_ts_ns"] == min(m["timestamp_ns"] for m in p1["data"])
+    # The cursor = first matching message of the page's oldest call.
+    assert p1["oldest_ts_ns"] == T0 - 49 * 30 * S
     p2 = post(api, number=DID, before_ns=p1["oldest_ts_ns"]).json()
     c2 = {m["callid"] for m in p2["data"]}
     assert c2 == {f"C{i:03d}@x" for i in range(50, 60)} and p2["has_more"] is False
@@ -724,15 +800,15 @@ def test_index_before_ns_clamps_the_lookup(api, monkeypatch):
 
 
 @needs_web
-def test_index_page_boundary_pulls_in_calls_a_correlated_leg_would_skip(api, monkeypatch):
-    # 50 newer calls to FWD (B legs), the oldest of which (#49) is a B leg
-    # whose A leg started 30 s earlier. Call X to FWD starts inside that gap:
-    # it is call #51 by its own start, but the page cursor (the A leg's
-    # INVITE) is older than X — without expansion page 2 would skip X.
+def test_index_paging_by_call_never_skips_a_call_a_correlated_leg_straddles(api, monkeypatch):
+    # 50 newer calls to FWD (B legs); the oldest of them (EDGE-B) has an A
+    # leg that started 30 s before it. GAP starts between that A leg and
+    # EDGE-B. The cursor is EDGE-B's first message (paging is by call), so
+    # GAP is on page 2 instead of being skipped, and the A leg's older rows
+    # ride along with EDGE-B on page 1.
     rows = []
     for i in range(49):
-        t = T0 + (100 + i) * S
-        rows += b_leg(f"N{i:02d}@x", f"NA{i:02d}@x", t)
+        rows += b_leg(f"N{i:02d}@x", f"NA{i:02d}@x", T0 + (100 + i) * S)
     a_old = T0 - 30 * S
     rows += a_leg("EDGE-A@x", a_old) + b_leg("EDGE-B@x", "EDGE-A@x", T0)
     rows += b_leg("GAP@x", "GAP-A-not-captured@x", T0 - 10 * S)
@@ -740,11 +816,54 @@ def test_index_page_boundary_pulls_in_calls_a_correlated_leg_would_skip(api, mon
     setup(api, monkeypatch, rows)
     p1 = post(api, number=FWD).json()
     c1 = {m["callid"] for m in p1["data"]}
-    assert "EDGE-A@x" in c1 and "EDGE-B@x" in c1
-    assert "GAP@x" in c1, "a call starting between the cursor and the page's oldest call was skipped"
-    assert p1["oldest_ts_ns"] == a_old and p1["has_more"] is True
+    assert {"EDGE-A@x", "EDGE-B@x"} <= c1 and "GAP@x" not in c1
+    assert p1["oldest_ts_ns"] == T0 and p1["has_more"] is True
+    assert min(m["timestamp_ns"] for m in p1["data"]) == a_old   # correlated leg is older
     p2 = post(api, number=FWD, before_ns=p1["oldest_ts_ns"]).json()
-    assert {m["callid"] for m in p2["data"]} == {"OLD@x"} and p2["has_more"] is False
+    assert {m["callid"] for m in p2["data"]} == {"GAP@x", "OLD@x"} and p2["has_more"] is False
+    assert p2["oldest_ts_ns"] == T0 - 3600 * S
+
+
+@needs_web
+def test_index_paging_keeps_ties_with_the_oldest_call_together(api, monkeypatch):
+    rows = []
+    for i in range(49):
+        rows += a_leg(f"T{i:02d}@x", T0 + (100 + i) * S)
+    rows += a_leg("TIE-1@x", T0) + a_leg("TIE-2@x", T0) + a_leg("OLDER@x", T0 - 600 * S)
+    setup(api, monkeypatch, rows)
+    p1 = post(api, number=DID).json()
+    c1 = {m["callid"] for m in p1["data"]}
+    assert {"TIE-1@x", "TIE-2@x"} <= c1 and len(c1) == 51 and p1["has_more"] is True
+    p2 = post(api, number=DID, before_ns=p1["oldest_ts_ns"]).json()
+    assert {m["callid"] for m in p2["data"]} == {"OLDER@x"}
+
+
+@needs_web
+def test_has_more_always_comes_with_a_usable_cursor(api, monkeypatch):
+    # The index knows 60 calls but their SIP is gone (e.g. samples expired
+    # first): has_more must still come with a cursor, and the page says why.
+    day = datetime.fromtimestamp(T0 // S, tz=timezone.utc).date().isoformat()
+    extra = [{"day": day, "number": "7744045256", "role": "to", "call_id": f"GONE{i:02d}@x",
+              "first_ns": T0 - i * S, "last_ns": T0 - i * S} for i in range(60)]
+    setup(api, monkeypatch, [], extra_index=extra)
+    body = post(api, number=FWD).json()
+    assert body["data"] == [] and body["has_more"] is True
+    assert body["oldest_ts_ns"] == T0 - 49 * S
+    assert any("could be fetched" in w for w in body["pipeline_warnings"])
+    p2 = post(api, number=FWD, before_ns=body["oldest_ts_ns"]).json()
+    assert p2["has_more"] is False and p2["oldest_ts_ns"] == T0 - 59 * S
+
+
+@needs_web
+def test_stale_index_falls_back_to_the_scan(api, monkeypatch):
+    up = setup(api, monkeypatch, forwarded_call(), stale=True)
+    r = _run(api["client"].get("/v1/homer/search/capabilities", headers=api["support"]))
+    assert r.json()["number_index"] is False and r.json()["index_covered_from"] is None
+    api["homer"]._reset_capability_cache()
+    body = post(api, number=FWD, start_time=_iso(NOW - 3600 * 3), end_time=_iso(NOW)).json()
+    assert body["search_path"] == "scan" and up.ch.index_calls == []
+    api["homer"]._reset_capability_cache()
+    assert post(api, number=FWD).status_code == 422       # 7 days, no index
 
 
 # ---- fallback, refusals -------------------------------------------------------
@@ -825,6 +944,8 @@ def test_seed_fetch_total_failure_is_loud(api, monkeypatch):
     up.ch.fail = {"fetch"}           # FakeClickHouse answers 500 Code 241
     r = post(api, number=FWD)
     assert r.status_code == 422 and r.json()["code"] == "search_too_broad"
+    # Its own plain message: a full number is not "too short".
+    assert r.json()["detail"] == hx.fetch_too_large_sentence()
 
 
 @needs_web

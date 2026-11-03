@@ -7,6 +7,13 @@
                  (docker-compose.services.yml) with room for server overhead;
                  see docs/SERVICES_VM_32GB_TUNING.md. -->
             <max_memory_usage>4000000000</max_memory_usage>
+            <!-- SIP number index (docker/homer/clickhouse/10_sip_number_index.sql):
+                 a failing materialized view must NEVER fail qryn's insert and
+                 lose SIP capture. With this on, an MV error is logged
+                 (system.query_views_log status ExceptionWhileProcessing) and
+                 the samples_v3 insert still succeeds — an index gap is
+                 preferred to trace loss. qryn inserts as this default user. -->
+            <materialized_views_ignore_errors>1</materialized_views_ignore_errors>
             <load_balancing>random</load_balancing>
         </default>
     </profiles>

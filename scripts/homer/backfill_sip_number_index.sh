@@ -8,7 +8,7 @@
 #     rows the AggregatingMergeTree collapses (min/max/argMax), so no
 #     duplicates are ever visible.
 # Each day is inserted as 24 hourly INSERT ... SELECT statements, each capped
-# (max_memory_usage 1.5e9 — well under the 4e9 per-query limit —
+# (max_memory_usage 5e8 — an hour of SIP is ~25 MB; well under the 4e9 per-query limit —
 # max_execution_time 900 s, max_threads 2) so the backfill can never starve
 # heplify/qryn ingest or the API. A failed hour aborts the run with a non-zero
 # exit; that day stays uncovered (the API keeps falling back for it) until a
@@ -77,7 +77,7 @@ fi
 MV_SINCE_MS=$(chq "SELECT greatest((SELECT toUnixTimestamp(metadata_modification_time) * 1000 FROM system.tables WHERE database = '$CH_DB' AND name = 'sip_number_index_mv'), (SELECT toInt64(ifNull(max(toUnixTimestamp64Milli(started_at)), 0)) FROM $CH_DB.sip_number_index_coverage FINAL WHERE kind = 'mv'))")
 echo "materialized view capturing since $(chq "SELECT toString(fromUnixTimestamp64Milli(toInt64($MV_SINCE_MS), 'UTC'))") UTC"
 
-SETTINGS="SETTINGS max_memory_usage = 1500000000, max_execution_time = 900, max_threads = 2, max_insert_threads = 1"
+SETTINGS="SETTINGS max_memory_usage = 500000000, max_execution_time = 900, max_threads = 2, max_insert_threads = 1"
 DAY_LIST=()
 if [ -n "$REDO" ]; then
   DAY_LIST=("$REDO")

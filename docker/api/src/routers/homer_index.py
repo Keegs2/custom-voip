@@ -20,10 +20,13 @@ needs no I/O, so it is unit-testable without fastapi/httpx:
 Normalization contract (shared with the DDL): stored numbers are digits only;
 an 11-digit number starting with 1 is stored both as-is and without the 1.
 The API normalizes needles with homer_pipeline.normalize_number_needle (strip
-non-digits; exactly 11 digits with a leading 1 -> drop it) and matches by
-substring (``number LIKE '%<needle>%'``), so "5087282017", "15087282017" and
-"+1 (508) 728-2017" all find the same calls, and a 3+ digit partial finds
-every stored number containing it.
+non-digits; exactly 11 digits with a leading 1 -> drop it). A FULL number
+(>= EXACT_MIN_DIGITS digits) matches a stored number EXACTLY — a primary-key
+lookup — so "5087282017", "15087282017" and "+1 (508) 728-2017" all find the
+same calls. A shorter needle is a PARTIAL and matches by substring
+(``number LIKE '%<needle>%'``). Both run in an explicit PREWHERE: ClickHouse
+23.3 would otherwise move the ``day`` predicate there and read every column
+of every row in the window.
 """
 
 import json
@@ -44,7 +47,9 @@ MAX_WINDOW_DAYS = 7
 # present. Coverage is never reported older than that.
 INDEX_RETENTION_DAYS = 7
 
-# Which stored roles each request field matches. ``number`` matches any role.
+# Which stored roles each request field matches. ``number`` matches any role
+# (including 'other': numbers seen in any message that is not the initial
+# INVITE). Roles are recorded from the initial INVITE only:
 # from_user = the calling identity (From, P-Asserted-Identity);
 # to_user   = the called party (To, Request-URI).
 ROLE_FILTERS: dict[str, Optional[tuple[str, ...]]] = {
@@ -52,24 +57,43 @@ ROLE_FILTERS: dict[str, Optional[tuple[str, ...]]] = {
     "from_user": ("from", "pai"),
     "to_user": ("to", "ruri"),
 }
-_ALLOWED_ROLES = {"ruri", "from", "to", "pai", "diversion"}
+_ALLOWED_ROLES = {"ruri", "from", "to", "pai", "diversion", "other"}
+# A needle this long is a full number: exact match (primary key), not a
+# substring scan. 10 = a NANP national number (the normalized form of every
+# +1 / 11-digit input); longer international numbers are exact too.
+EXACT_MIN_DIGITS = 10
 
 # Settings sent with every index query (URL settings, never data).
 # readonly=2: the request can only read (it may still carry these settings).
 # The memory/bytes caps sit far below the global 4e9 per-query limit, so a
 # broad partial needle fails fast as search_too_broad instead of an OOM.
+# Sized from a 30M-row, 7-day unmerged local load (scripts/homer/
+# test_sip_number_index_clickhouse.py --scale; table in docker/homer/CLAUDE.md):
+#   full number (primary key):   ~0.57M rows /  11 MB / ~10 MiB / 7-26 ms
+#   4-digit partial "2017":       30.1M rows / 2.4 GB / 270 MiB / 281 ms
+#   3-digit partial "508":        30.1M rows / 2.5 GB / 756 MiB / 666 ms
+# A partial reads the whole index in the window (matches sit in every
+# granule), so the byte cap leaves ~2.4x headroom over 30M rows, and a big
+# GROUP BY spills to disk at 5e8 instead of failing under the 1e9 memory cap.
 INDEX_QUERY_SETTINGS: dict[str, str] = {
     "readonly": "2",
-    "max_execution_time": "5",
-    "max_memory_usage": "500000000",
-    "max_bytes_to_read": "1000000000",
+    "max_execution_time": "10",
+    "max_memory_usage": "1000000000",
+    "max_bytes_before_external_group_by": "500000000",
+    "max_bytes_to_read": "6000000000",
 }
 # Capability probe: two tiny reads (system.tables + the coverage table).
 STATE_QUERY_SETTINGS: dict[str, str] = {
     "readonly": "2",
-    "max_execution_time": "3",
-    "max_memory_usage": "100000000",
+    "max_execution_time": "5",
+    "max_memory_usage": "200000000",
+    "max_bytes_to_read": "500000000",
 }
+# Freshness (is the MV still filling?): the newest INVITE in samples_v3 in
+# [now - 15 min, now - 2 min) must be in the index within this tolerance.
+FRESH_LOOKBACK_S = 15 * 60
+FRESH_SETTLE_S = 2 * 60
+FRESH_TOLERANCE_S = 5 * 60
 
 # ClickHouse error codes that mean "this query hit a limit" (too broad), not
 # "ClickHouse is broken": TOO_MANY_ROWS, TIMEOUT_EXCEEDED, TOO_SLOW,
@@ -145,6 +169,52 @@ def build_coverage_sql(db: str) -> str:
     )
 
 
+def build_fresh_samples_sql(db: str) -> str:
+    """Newest INVITE request in samples_v3 inside {lo, hi} (timestamp_ns is
+    qryn's sort key, so this reads only the last minutes)."""
+    return (
+        "SELECT toString(max(timestamp_ns)) AS t "
+        f"FROM {_ident(db)}.samples_v3 "
+        "PREWHERE timestamp_ns >= {lo:Int64} AND timestamp_ns < {hi:Int64} "
+        "WHERE startsWith(string, 'INVITE ') "
+        "FORMAT JSONEachRow"
+    )
+
+
+def build_fresh_index_sql(db: str) -> str:
+    """Newest message the index holds (today's and yesterday's partitions)."""
+    return (
+        "SELECT toString(max(last_ns)) AS t "
+        f"FROM {_ident(db)}.{INDEX_TABLE} "
+        "WHERE day >= {d:Date} "
+        "FORMAT JSONEachRow"
+    )
+
+
+def fresh_params(now_ns: int) -> tuple[dict[str, str], dict[str, str]]:
+    lo = now_ns - FRESH_LOOKBACK_S * NS
+    hi = now_ns - FRESH_SETTLE_S * NS
+    return ({"param_lo": str(lo), "param_hi": str(hi)},
+            {"param_d": (utc_date(now_ns) - timedelta(days=1)).isoformat()})
+
+
+def parse_max(text: str) -> int:
+    rows = parse_rows(text)
+    try:
+        return int(rows[0]["t"]) if rows else 0
+    except (KeyError, TypeError, ValueError):
+        return 0
+
+
+def is_stale(newest_invite_ns: int, newest_index_ns: int) -> bool:
+    """True when SIP arrived that the MV did not index: an INVITE captured
+    2-15 min ago is newer than everything in the index by more than the
+    tolerance. No INVITE in that span (quiet platform) -> not stale."""
+    if newest_invite_ns <= 0:
+        return False
+    return newest_index_ns < newest_invite_ns - FRESH_TOLERANCE_S * NS
+
+
 @dataclass
 class Capability:
     number_index: bool = False
@@ -188,6 +258,8 @@ def compute_capability(
     tables: dict[str, int],
     coverage_rows: Iterable[dict[str, Any]],
     now_ns: int,
+    *,
+    stale: bool = False,
 ) -> Capability:
     """Truthful coverage from the objects present + the coverage table.
 
@@ -202,9 +274,13 @@ def compute_capability(
       between the two, so it does not count). The MV's own day counts once
       backfilled: the backfill read every row inserted before it started.
     * Never older than retention (today - INDEX_RETENTION_DAYS, midnight).
+    * ``stale`` (the MV stopped filling, see is_stale) -> no index: the
+      search falls back to the bounded scan instead of answering "no calls".
     """
     if INDEX_MV not in tables or INDEX_TABLE not in tables:
         return Capability(False, None, "absent")
+    if stale:
+        return Capability(False, None, "stale")
     mv_since_ns = tables[INDEX_MV] * NS
     filled: dict[date, int] = {}
     for r in coverage_rows:
@@ -250,19 +326,19 @@ def build_lookup(
     start_ns: int,
     end_ns: int,
     limit: int,
-    *,
-    first_ns_at_least: Optional[int] = None,
 ) -> Lookup:
     """Calls whose stored numbers match EVERY needle, newest first.
 
-    ``needles`` = [(field, digits)] with field in ROLE_FILTERS. A call matches
-    when, for each needle, at least one of its index rows contains the needle
-    (substring) in an allowed role. Time: the call's matched rows overlap
-    [start_ns, end_ns) — ``max(last_ns) >= start`` and ``min(first_ns) < end``
-    — and calls are ordered by that ``min(first_ns)`` DESC (ties broken by
-    Call-ID), which is what cursor paging walks. ``first_ns_at_least`` adds a
-    lower bound on min(first_ns) (page-boundary expansion).
-    Partition pruning: day BETWEEN the window's UTC dates.
+    ``needles`` = [(field, digits)] with field in ROLE_FILTERS. A needle of
+    EXACT_MIN_DIGITS+ digits matches a stored number exactly; a shorter one
+    by substring. A call matches when, for each needle, at least one of its
+    index rows matches in an allowed role. Time: the call's matched rows
+    overlap [start_ns, end_ns) — ``max(last_ns) >= start`` and
+    ``min(first_ns) < end`` — and calls are ordered by that ``min(first_ns)``
+    DESC (ties broken by Call-ID), which is the paging cursor.
+    The number conditions are an explicit PREWHERE (read the narrow number /
+    role columns first, the rest only for matching granules); ``day`` in
+    WHERE prunes partitions.
     """
     if not needles:
         raise ValueError("build_lookup needs at least one needle")
@@ -279,8 +355,13 @@ def build_lookup(
     for i, (fld, needle) in enumerate(needles):
         if fld not in ROLE_FILTERS:
             raise ValueError(f"unknown needle field {fld!r}")
-        params[f"param_n{i}"] = f"%{_digits(needle)}%"
-        cond = f"number LIKE {{n{i}:String}}"
+        digits = _digits(needle)
+        if len(digits) >= EXACT_MIN_DIGITS:
+            params[f"param_n{i}"] = digits
+            cond = f"number = {{n{i}:String}}"
+        else:
+            params[f"param_n{i}"] = f"%{digits}%"
+            cond = f"number LIKE {{n{i}:String}}"
         roles = ROLE_FILTERS[fld]
         if roles:
             assert set(roles) <= _ALLOWED_ROLES
@@ -288,16 +369,13 @@ def build_lookup(
         conds.append(f"({cond})")
     having = [f"countIf{c} > 0" for c in conds] if len(conds) > 1 else []
     having += ["max(last_ns) >= {lo:Int64}", "min(first_ns) < {hi:Int64}"]
-    if first_ns_at_least is not None:
-        params["param_flo"] = str(int(first_ns_at_least))
-        having.append("min(first_ns) >= {flo:Int64}")
     sql = (
         # Output aliases must not shadow the column names used in HAVING.
         "SELECT call_id, toString(min(first_ns)) AS f_ns, "
         "toString(max(last_ns)) AS l_ns "
         f"FROM {_ident(db)}.{INDEX_TABLE} "
+        f"PREWHERE {' OR '.join(conds)} "
         "WHERE day >= {d0:Date} AND day <= {d1:Date} "
-        f"AND ({' OR '.join(conds)}) "
         "GROUP BY call_id "
         f"HAVING {' AND '.join(having)} "
         "ORDER BY min(first_ns) DESC, call_id DESC "
@@ -340,6 +418,11 @@ def error_code(headers: Any, body: str) -> Optional[int]:
 
 def is_cap_error(code: Optional[int], body: str = "") -> bool:
     return (code in CAP_ERROR_CODES) or bool(_MEM_RE.search(body or ""))
+
+
+def fetch_too_large_sentence() -> str:
+    return ("The matching calls' SIP is too large to load in one page; "
+            "choose a shorter window.")
 
 
 def too_broad_sentence(needles: list[tuple[str, str]]) -> str:

@@ -436,10 +436,14 @@ class ClickHouseLimitError(HTTPException):
 # X-CID scan, fingerprint map): far below the global 4e9 per-query memory
 # limit (clickhouse-users.xml), so one request can never OOM the server.
 # readonly=2: these requests can only read.
+# A fetch reads the SIP text of every 8192-row granule that holds a
+# requested call (qryn sorts samples_v3 by time only), so the byte cap, not
+# memory, is the real bound; 4 such reads may run at once (CLICKHOUSE_CONCURRENCY)
+# and 4 x 1e9 stays inside the 6G ClickHouse container.
 CH_QUERY_CAPS: dict[str, str] = {
     "readonly": "2",
     "max_execution_time": "10",
-    "max_memory_usage": "2000000000",
+    "max_memory_usage": "1000000000",
     "max_bytes_to_read": "4000000000",
 }
 
@@ -551,6 +555,9 @@ async def _query_clickhouse_by_callids(
     # memory limit (verified 2026-06-10 on the services VM).  Pre-filtering
     # the joined subselect with the indexed gin lookup keeps the right side
     # to the handful of fingerprints belonging to the requested Call-IDs.
+    # PREWHERE on the fingerprint (explicit: ClickHouse 23.3 would otherwise
+    # move the timestamp range there) reads the narrow fingerprint column for
+    # the window and the SIP text only for granules holding a requested call.
     gin_subquery = f"""SELECT fingerprint
             FROM {CLICKHOUSE_DB}.time_series_gin
             WHERE key = 'call_id'
@@ -570,8 +577,8 @@ async def _query_clickhouse_by_callids(
             WHERE fingerprint IN ({gin_subquery})
         ) AS ts
             ON s.fingerprint = ts.fingerprint
-        WHERE s.fingerprint IN ({gin_subquery})
-          AND s.timestamp_ns >= {start_ns}
+        PREWHERE s.fingerprint IN ({gin_subquery})
+        WHERE s.timestamp_ns >= {start_ns}
           AND s.timestamp_ns < {end_ns}
         ORDER BY s.timestamp_ns ASC
         LIMIT {limit}
@@ -1062,9 +1069,9 @@ async def _attach_attestations(data: list[dict[str, Any]]) -> None:
 # Index path page size: Call-IDs matched in the index per response (newest
 # first). Their full SIP is fetched by Call-ID, then correlated as before.
 INDEX_CALL_LIMIT = 50
-# Page-boundary expansion (see _search_via_index): rounds and Call-IDs/round.
-INDEX_EXPAND_ROUNDS = 2
-INDEX_EXPAND_LIMIT = 100
+# Extra rows fetched past the page so calls tied with the page's oldest call
+# (same first-message ns) stay on the same page — the cursor never splits them.
+INDEX_TIE_EXTRA = 20
 # Capture-clock slack before a call's first indexed message for its fetch.
 INDEX_FETCH_SLACK_NS = 5 * 1_000_000_000
 # Capability cache: a healthy answer for 60 s, a failed probe for 10 s.
@@ -1097,11 +1104,28 @@ async def _get_capability(client: httpx.AsyncClient) -> hx.Capability:
         tables = hx.parse_state(await _clickhouse_post(
             client, st.sql, {**st.params, **hx.STATE_QUERY_SETTINGS}))
         coverage: list[dict[str, Any]] = []
-        if hx.COVERAGE_TABLE in tables and hx.INDEX_MV in tables and hx.INDEX_TABLE in tables:
-            coverage = hx.parse_rows(await _clickhouse_post(
-                client, hx.build_coverage_sql(CLICKHOUSE_DB), dict(hx.STATE_QUERY_SETTINGS)))
-        cap = hx.compute_capability(
-            tables, coverage, int(datetime.now(timezone.utc).timestamp() * _NS))
+        stale = False
+        now_ns = int(datetime.now(timezone.utc).timestamp() * _NS)
+        if hx.INDEX_MV in tables and hx.INDEX_TABLE in tables:
+            if hx.COVERAGE_TABLE in tables:
+                coverage = hx.parse_rows(await _clickhouse_post(
+                    client, hx.build_coverage_sql(CLICKHOUSE_DB), dict(hx.STATE_QUERY_SETTINGS)))
+            # Is the MV still filling? (present but stalled must not answer
+            # "no calls" — it reads as no index and the scan answers).
+            p_samples, p_index = hx.fresh_params(now_ns)
+            newest_invite = hx.parse_max(await _clickhouse_post(
+                client, hx.build_fresh_samples_sql(CLICKHOUSE_DB),
+                {**p_samples, **hx.STATE_QUERY_SETTINGS}))
+            newest_index = hx.parse_max(await _clickhouse_post(
+                client, hx.build_fresh_index_sql(CLICKHOUSE_DB),
+                {**p_index, **hx.STATE_QUERY_SETTINGS}))
+            stale = hx.is_stale(newest_invite, newest_index)
+            if stale:
+                logger.error(
+                    "Homer search: number index is NOT filling (newest INVITE %s, newest "
+                    "index row %s) — number searches fall back to the 24 h scan",
+                    newest_invite, newest_index)
+        cap = hx.compute_capability(tables, coverage, now_ns, stale=stale)
     except HTTPException as exc:
         logger.warning("Homer search: number-index capability probe failed: %s", exc.detail)
         cap = hx.Capability(False, None, "unavailable")
@@ -1113,6 +1137,11 @@ async def _get_capability(client: httpx.AsyncClient) -> hx.Capability:
 
 class _IndexUnavailable(Exception):
     """The index lookup failed for a reason other than a limit."""
+
+
+class _FetchTooLarge(ClickHouseLimitError):
+    """The fetch-by-Call-ID of the matched calls hit a limit (their SIP is too
+    large for one page) — not a too-short needle."""
 
 
 def _refusal(code: str, detail: str) -> JSONResponse:
@@ -1127,8 +1156,6 @@ async def _index_lookup(
     start_ns: int,
     end_ns: int,
     limit: int,
-    *,
-    first_ns_at_least: Optional[int] = None,
 ) -> list[hx.IndexHit]:
     """Call-IDs matching every needle in [start_ns, end_ns), newest first.
 
@@ -1139,8 +1166,7 @@ async def _index_lookup(
     """
     if end_ns <= start_ns:
         return []
-    q = hx.build_lookup(CLICKHOUSE_DB, needles, start_ns, end_ns, limit,
-                        first_ns_at_least=first_ns_at_least)
+    q = hx.build_lookup(CLICKHOUSE_DB, needles, start_ns, end_ns, limit)
     try:
         text = await _clickhouse_post(client, q.sql, {**q.params, **hx.INDEX_QUERY_SETTINGS})
     except ClickHouseLimitError:
@@ -1175,8 +1201,9 @@ async def _fetch_index_seed(
     local = hc.CorrelationHealth()
     rows = await _fetch_legs(client, cids, lo, end_ns, local, errors=errors)
     if local.degraded:
-        if any(isinstance(e, ClickHouseLimitError) for e in errors):
-            raise ClickHouseLimitError(241)
+        limits = [e for e in errors if isinstance(e, ClickHouseLimitError)]
+        if limits:
+            raise _FetchTooLarge(limits[0].code)
         raise HTTPException(status_code=502,
                             detail="ClickHouse fetch by Call-ID failed for the number search")
     for r in local.reasons:
@@ -1200,12 +1227,6 @@ def _page_rows(
             if r.get("timestamp_ns", 0) < before_ns or r.get("callid") in keep]
 
 
-def _oldest_ns(rows: list[dict[str, Any]], before_ns: Optional[int]) -> Optional[int]:
-    vals = [r.get("timestamp_ns") or 0 for r in rows]
-    vals = [v for v in vals if v > 0 and (before_ns is None or v < before_ns)]
-    return min(vals) if vals else None
-
-
 async def _search_via_index(
     client: httpx.AsyncClient,
     body: "HomerSearchRequest",
@@ -1213,70 +1234,53 @@ async def _search_via_index(
     start_ns: int,
     end_ns: int,
     window_end_ns: int,
-) -> tuple[list[dict[str, Any]], Optional["_Correlation"], bool, set[str]]:
+) -> tuple[list[dict[str, Any]], Optional["_Correlation"], bool, set[str], Optional[int]]:
     """Index path: Call-IDs from the index, then the unchanged pipeline.
 
-    1. Up to INDEX_CALL_LIMIT (+1 to detect more) calls whose first matching
-       message is in [start_ns, end_ns) (end_ns = end_time clamped by
-       before_ns), newest first by that first matching message.
-    2. Fetch those calls by Call-ID over the WHOLE window (to window_end_ns =
-       end_time): a page returns whole calls, so a call that started before
-       the cursor still shows its later 200 OK / BYE. Correlate exactly like
-       the scan path (the selected calls are the fully fetched seed).
-    3. Page boundary: the response cursor (oldest_ts_ns) is the oldest
-       returned message, which a correlated A leg can pull below the oldest
-       selected call's start. Calls starting in that gap would otherwise be
-       skipped by the next page, so they are added to this page (bounded
-       rounds) before answering.
-    4. has_more = some matching call starts before the cursor.
-    Returns (rows, correlation, has_more, selected Call-IDs). Rows of the
-    selected calls are exempt from the strict before_ns filter: no earlier
-    page can hold them (a call on an earlier page started at or after that
-    page's cursor, so it is never selected again).
+    Pages are by CALL, newest first by each call's first matching message
+    (``first_ns``), and the cursor is that ``first_ns`` of the page's oldest
+    call:
+      1. Up to INDEX_CALL_LIMIT calls whose first matching message is in
+         [start_ns, end_ns) (end_ns = end_time clamped by before_ns), plus any
+         calls tied with the oldest one (same ns), so the next page —
+         ``first_ns < cursor`` — can neither repeat nor skip a call.
+      2. Fetch those calls by Call-ID over the WHOLE window (to window_end_ns
+         = end_time): a page returns whole calls, so a call that started
+         before an earlier page's cursor still shows its 200 OK / BYE.
+         Correlate exactly like the scan path (selected calls = the seed).
+      3. has_more = a matching call starts before the cursor. The cursor is
+         never None when there is a page, even if no SIP could be fetched.
+    Returns (rows, correlation, has_more, selected Call-IDs, cursor).
     """
     seed_health = hc.CorrelationHealth()
-    hits = await _index_lookup(client, needles, start_ns, end_ns, INDEX_CALL_LIMIT + 1)
-    more = len(hits) > INDEX_CALL_LIMIT
-    selected = [h for h in hits[:INDEX_CALL_LIMIT] if hc.is_safe_callid(h.call_id)]
-    if not selected:
-        return [], (_Correlation() if body.correlate else None), False, set()
-    ids = {h.call_id for h in selected}
-    seed = await _fetch_index_seed(client, selected, start_ns, window_end_ns, seed_health)
-
-    async def correlate() -> tuple[list[dict[str, Any]], Optional[_Correlation]]:
-        if not body.correlate:
-            return list(seed), None
-        c = await _correlate_legs(client, seed, start_ns, window_end_ns, prefetched=set(ids))
-        return c.rows, c
-
-    rows, corr = await correlate()
-    has_more = False
-    if more:
-        for _round in range(INDEX_EXPAND_ROUNDS):
-            cursor = _oldest_ns(_page_rows(rows, body.before_ns, {h.call_id for h in selected}), None)
-            boundary = min(h.first_ns for h in selected)
-            if cursor is None or cursor >= boundary:
-                break
-            extra = await _index_lookup(client, needles, start_ns, boundary,
-                                        INDEX_EXPAND_LIMIT, first_ns_at_least=cursor)
-            present = {r.get("callid") for r in rows}
-            new = [h for h in extra if h.call_id not in ids and h.call_id not in present
-                   and hc.is_safe_callid(h.call_id)]
-            ids |= {h.call_id for h in extra}
-            if not new:
-                break
-            selected += new
-            seed += await _fetch_index_seed(client, new, start_ns, window_end_ns, seed_health)
-            rows, corr = await correlate()
-        cursor = _oldest_ns(_page_rows(rows, body.before_ns, {h.call_id for h in selected}), None)
-        if cursor is None:
-            cursor = min(h.first_ns for h in selected)
+    hits = await _index_lookup(client, needles, start_ns, end_ns,
+                               INDEX_CALL_LIMIT + INDEX_TIE_EXTRA)
+    truncated = len(hits) >= INDEX_CALL_LIMIT + INDEX_TIE_EXTRA
+    safe = [h for h in hits if hc.is_safe_callid(h.call_id)]
+    if not safe:
+        return [], (_Correlation() if body.correlate else None), False, set(), None
+    page = safe[:INDEX_CALL_LIMIT]
+    cursor = page[-1].first_ns
+    for h in safe[INDEX_CALL_LIMIT:]:
+        if h.first_ns != cursor:
+            break
+        page.append(h)
+    if any(h.first_ns < cursor for h in safe[len(page):]):
+        has_more = True
+    elif truncated:
+        # Every extra row tied with the cursor (degenerate): ask directly.
         has_more = bool(await _index_lookup(client, needles, start_ns, cursor, 1))
-    if corr is not None:
-        for r in seed_health.reasons:
-            corr.health.add(r)
-        corr.health.truncated = corr.health.truncated or seed_health.truncated
-    return rows, corr, has_more, {h.call_id for h in selected}
+    else:
+        has_more = False
+    ids = {h.call_id for h in page}
+    seed = await _fetch_index_seed(client, page, start_ns, window_end_ns, seed_health)
+    if not body.correlate:
+        return list(seed), None, has_more, ids, cursor
+    corr = await _correlate_legs(client, seed, start_ns, window_end_ns, prefetched=set(ids))
+    for r in seed_health.reasons:
+        corr.health.add(r)
+    corr.health.truncated = corr.health.truncated or seed_health.truncated
+    return corr.rows, corr, has_more, ids, cursor
 
 
 async def _build_response(
@@ -1288,6 +1292,7 @@ async def _build_response(
     has_more: bool,
     meta: dict[str, Any],
     whole_calls: Optional[set[str]] = None,
+    cursor_ns: Optional[int] = None,
 ) -> dict:
     """The one response envelope every search path returns.
 
@@ -1311,6 +1316,14 @@ async def _build_response(
         (m["timestamp_ns"] for m in data if m.get("timestamp_ns")),
         default=None,
     )
+    if cursor_ns is not None:
+        # Index path: the cursor is the page's oldest call's first matching
+        # message (paging is by call); correlated legs may hold older rows.
+        oldest_ts_ns = cursor_ns
+        if whole_calls and not any(m.get("callid") in whole_calls for m in data):
+            pipeline_warnings = list(pipeline_warnings) + [
+                f"{len(whole_calls)} calls matched in the number index but none of "
+                "their SIP could be fetched by Call-ID"]
     if corr is not None:
         # Groups/legs cover exactly the Call-IDs present in data.
         correlations, legs = hc.build_groups(
@@ -1515,14 +1528,16 @@ async def search_sip_traces(
                    number = any of those or Diversion), INDEX_CALL_LIMIT calls
                    per page newest first (by each call's first matching
                    message), then the same fetch-by-Call-ID + correlation +
-                   pipeline. Paging uses before_ns = oldest_ts_ns as above,
-                   but a page returns WHOLE calls: page N+1 selects calls
-                   whose first matching message is older than before_ns and
-                   returns all their messages in the window (a long call's
-                   BYE may be newer than before_ns); correlated legs keep the
-                   strict bound. Pages never share a row and never skip a
-                   call. has_more = a matching call starts before
-                   oldest_ts_ns.
+                   pipeline. Paging is BY CALL: oldest_ts_ns is the cursor =
+                   the first matching message of the page's oldest call
+                   (correlated legs may hold older rows); page N+1 =
+                   before_ns = oldest_ts_ns selects calls whose first
+                   matching message is older and returns them whole (a long
+                   call's BYE may be newer than before_ns); correlated legs
+                   keep the strict bound. A call is never repeated or
+                   skipped; a forwarded call whose legs straddle the cursor
+                   can show its correlated legs on both pages. has_more
+                   implies a non-null oldest_ts_ns.
       scan         otherwise, when end_time - start_time <= 24 h: the qryn
                    text scan above, unchanged.
     Refusals (JSON {"detail", "code", "max_scan_hours"}, HTTP 422):
@@ -1624,7 +1639,7 @@ async def search_sip_traces(
         try:
             if search_path == "index":
                 try:
-                    rows, corr, has_more, whole = await _search_via_index(
+                    rows, corr, has_more, whole, cursor = await _search_via_index(
                         client, body, needles, start_ns, end_ns, window_end_ns)
                 except _IndexUnavailable as exc:
                     # Rollback / race: forget the capability and fall back to
@@ -1640,7 +1655,8 @@ async def search_sip_traces(
                 else:
                     return await _build_response(
                         body, rows, corr, disabled=not body.correlate,
-                        has_more=has_more, meta=meta, whole_calls=whole)
+                        has_more=has_more, meta=meta, whole_calls=whole,
+                        cursor_ns=cursor)
 
             # Scan / Call-ID paths: LogQL exactly as before.
             logql = _build_logql_query(
@@ -1680,8 +1696,10 @@ async def search_sip_traces(
                 body, corr.rows, corr, disabled=False,
                 has_more=base_truncated, meta=meta)
         except ClickHouseLimitError as exc:
-            logger.warning("Homer search refused as too broad (%s path, code %s)",
-                           meta["search_path"], exc.code)
+            logger.warning("Homer search refused as too broad (%s path, code %s, %s)",
+                           meta["search_path"], exc.code, type(exc).__name__)
+            if isinstance(exc, _FetchTooLarge):
+                return _refusal("search_too_broad", hx.fetch_too_large_sentence())
             return _refusal("search_too_broad", hx.too_broad_sentence(needles))
 
 

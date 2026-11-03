@@ -13,6 +13,10 @@
 -- (docker/api/src/routers/homer.py, homer_index.py). heplify and qryn are
 -- untouched: qryn already runs its own MV on samples_v3 (metrics_15s_mv).
 --
+-- PREREQUISITE: materialized_views_ignore_errors = 1 live for qryn's user
+-- (docker/homer/clickhouse-users.xml, needs a ClickHouse restart) so a
+-- failing MV leaves an index gap instead of failing qryn's insert.
+--
 -- APPLY (services VM, single line, idempotent — every statement is
 -- IF NOT EXISTS / guarded, so re-running changes nothing):
 --   sudo docker exec -i voip-clickhouse clickhouse-client --multiquery < /opt/revup/docker/homer/clickhouse/10_sip_number_index.sql
@@ -20,8 +24,12 @@
 -- -> "MV started" coverage row. Then run the backfill
 -- (scripts/homer/backfill_sip_number_index.sh, newest day first).
 --
--- ROLLBACK (MV first, so ingest never writes to a dropped table):
---   sudo docker exec voip-clickhouse clickhouse-client --multiquery --query "DROP VIEW IF EXISTS qryn.sip_number_index_mv; DROP TABLE IF EXISTS qryn.sip_number_index; DROP TABLE IF EXISTS qryn.sip_number_index_coverage"
+-- ROLLBACK — DROP THE VIEW FIRST, ALONE, AND VERIFY IT IS GONE. Dropping the
+-- index table while the MV exists makes EVERY qryn insert fail (Code 60,
+-- not covered by materialized_views_ignore_errors) and stops SIP capture.
+--   1) sudo docker exec voip-clickhouse clickhouse-client --query "DROP VIEW IF EXISTS qryn.sip_number_index_mv"
+--   2) sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database = 'qryn' AND name = 'sip_number_index_mv'"   (must print 0)
+--   3) sudo docker exec voip-clickhouse clickhouse-client --multiquery --query "DROP TABLE IF EXISTS qryn.sip_number_index; DROP TABLE IF EXISTS qryn.sip_number_index_coverage"
 -- The API notices within 60 s and falls back to the <=24 h scan.
 --
 -- NORMALIZATION (must match routers/homer_pipeline.normalize_number_needle):
@@ -29,16 +37,17 @@
 --   From (f), To (t), P-Asserted-Identity and Diversion -> drop %XX escapes
 --   -> strip every non-ASCII-digit. 3..32 digits are kept. An 11-digit
 --   number starting with 1 is stored TWICE: as-is and without the 1, so the
---   10-digit needle the API builds ("+1 (508) 728-2017" -> 5087282017) and a
---   partial that includes the 1 ("15087") both match by substring, exactly as
---   the old text scan did.
+--   10-digit needle the API builds ("+1 (508) 728-2017" -> 5087282017) matches
+--   exactly (primary key) and a partial that includes the 1 ("15087") matches
+--   by substring. Roles (ruri/from/to/pai/diversion) come from the INITIAL
+--   INVITE only; every other message stores its numbers as role 'other'.
 --
 -- INGEST SAFETY: the MV uses only total functions (substring, position,
 -- extract/extractAll, replaceRegexpAll, toUInt16OrZero, array lambdas) that
 -- return ''/[]/0 on any input — nothing here can throw on bad SIP text, so a
 -- malformed or non-SIP row yields zero index rows, never a failed qryn
 -- insert. Regex work is bounded: only the header block (before the first
--- blank line, at most 16 KiB) is read, the SDP body is never scanned.
+-- blank line, at most 8 KiB) is read, the SDP body is never scanned.
 -- Only SIP rows are indexed (first line is a SIP request or status line),
 -- and OPTIONS / REGISTER (keepalives, scanners) are skipped.
 --
@@ -64,14 +73,17 @@ CREATE TABLE IF NOT EXISTS qryn.sip_number_index_coverage
 )
 ENGINE = ReplacingMergeTree(finished_at)
 ORDER BY (kind, day)
-TTL toDate(finished_at) + INTERVAL 9 DAY;
+-- Only backfill rows expire. The single 'mv' row must outlive any TTL: if it
+-- were deleted, re-applying this file would write a new one at "now" and
+-- collapse index_covered_from to the re-apply time.
+TTL toDate(finished_at) + INTERVAL 9 DAY DELETE WHERE kind = 'backfill';
 
 -- 2) The index.
 CREATE TABLE IF NOT EXISTS qryn.sip_number_index
 (
     day        Date,
     number     String,                                  -- digits only
-    role       LowCardinality(String),                  -- ruri|from|to|pai|diversion
+    role       LowCardinality(String),                  -- ruri|from|to|pai|diversion (initial INVITE) | other
     call_id    String,                                  -- == qryn call_id label
     first_ns   SimpleAggregateFunction(min, Int64),
     last_ns    SimpleAggregateFunction(max, Int64),
@@ -104,11 +116,16 @@ FROM
     SELECT
         timestamp_ns AS ts,
         toDate(toDateTime(intDiv(timestamp_ns, 1000000000), 'UTC')) AS day,
-        substring(string, 1, 16384) AS head,
-        substring(head, 1, if(position(head, '\r\n\r\n') > 0, position(head, '\r\n\r\n'), length(head))) AS hdr,
-        extract(hdr, '^([^\\r\\n]*)') AS line1,
+        -- First line from the raw text: a cheap SIP test before any header
+        -- work (anchored, stops at the first line break). No {m,n} bound here:
+        -- RE2 expands bounded repetition into a huge automaton (measured 3x
+        -- slower inserts).
+        extract(string, '^([^\\r\\n]*)') AS line1,
         startsWith(line1, 'SIP/2.0 ') AS is_resp,
         match(line1, '^[A-Za-z]+ [^ ]+ SIP/2\\.0$') AS is_req,
+        -- Header block only: up to the blank line, at most 8 KiB (position()
+        -- scans in place, no copy). The SDP body is never read.
+        substring(string, 1, if(position(string, '\r\n\r\n') BETWEEN 1 AND 8192, position(string, '\r\n\r\n'), 8192)) AS hdr,
         upper(extract(hdr, '(?mi)^cseq[ \\t]*:[ \\t]*[0-9]+[ \\t]+([A-Za-z]+)')) AS cseq_method,
         extract(hdr, '(?mi)^(?:call-id|i)[ \\t]*:[ \\t]*([^\\r\\n]*[^\\r\\n \\t])') AS call_id,
         if(is_resp, toUInt16OrZero(substring(line1, 9, 3)), toUInt16(0)) AS code,
@@ -119,10 +136,18 @@ FROM
         arrayStringConcat(extractAll(hdr, '(?mi)^(?:to|t)[ \\t]*:([^\\r\\n]*)'), '\n') AS v_to,
         arrayStringConcat(extractAll(hdr, '(?mi)^p-asserted-identity[ \\t]*:([^\\r\\n]*)'), '\n') AS v_pai,
         arrayStringConcat(extractAll(hdr, '(?mi)^diversion[ \\t]*:([^\\r\\n]*)'), '\n') AS v_div,
-        -- URI user parts -> digits -> stored forms, per role. sip:/sips: need
+        -- Roles are only meaningful on the INITIAL INVITE (a request with no
+        -- To tag): on a callee-sent BYE / re-INVITE From and To are swapped
+        -- and the R-URI is the caller's Contact. Every other message stores
+        -- its numbers with role 'other' — still found by `number`, never by
+        -- from_user / to_user.
+        is_req AND cseq_method = 'INVITE' AND startsWith(line1, 'INVITE ') AND NOT match(v_to, '(?i);[ \\t]*tag[ \\t]*=') AS is_initial,
+        -- URI user parts -> digits -> stored forms, per role (the role list is
+        -- a lambda ARGUMENT: capturing a column inside a lambda makes
+        -- ClickHouse copy it per array element). sip:/sips: need
         -- a user@ (a host-only URI such as sip:67.231.2.12 yields nothing),
         -- and user parameters (npdi, rn=...) are cut at the first semicolon.
-        arrayMap((r, v) -> arrayMap(n -> (r, n), arrayFilter(n -> length(n) BETWEEN 3 AND 32, arrayFlatten(arrayMap(d -> if(length(d) = 11 AND startsWith(d, '1'), [d, substring(d, 2)], [d]), arrayMap(u -> replaceRegexpAll(replaceRegexpAll(u, '%[0-9A-Fa-f]{2}', ''), '[^0-9]', ''), arrayConcat(extractAll(v, '(?i)\\bsips?:([^@>,;?\\s]+)[^@>,?\\s]*@'), extractAll(v, '(?i)\\btel:([^;>,?\\s]+)'))))))), ['ruri', 'from', 'to', 'pai', 'diversion'], [v_ruri, v_from, v_to, v_pai, v_div]) AS per_role,
+        arrayMap((r, v) -> arrayMap(n -> (r, n), arrayFilter(n -> length(n) BETWEEN 3 AND 32, arrayFlatten(arrayMap(d -> if(length(d) = 11 AND startsWith(d, '1'), [d, substring(d, 2)], [d]), arrayMap(u -> replaceRegexpAll(replaceRegexpAll(u, '%[0-9A-Fa-f]{2}', ''), '[^0-9]', ''), arrayConcat(extractAll(v, '(?i)\\bsips?:([^@>,;?\\s]+)[^@>,?\\s]*@'), extractAll(v, '(?i)\\btel:([^;>,?\\s]+)'))))))), if(is_initial, ['ruri', 'from', 'to', 'pai', 'diversion'], ['other', 'other', 'other', 'other', 'other']), [v_ruri, v_from, v_to, v_pai, v_div]) AS per_role,
         arrayDistinct(arrayFlatten(per_role)) AS pairs
     FROM qryn.samples_v3
     WHERE (is_req OR is_resp)
