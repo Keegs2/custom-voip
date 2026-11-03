@@ -402,6 +402,7 @@ SIP trunk management with call path packages.
 - Auth-IP add/remove are owner self-service for WRITERS (`require_writer` before `get_customer_filter`; readonly / support → 403). `TrunkIP` validates in the model (422, never the `::inet` / VARCHAR(100) 500): `ip_address` = ONE IPv4/IPv6 host (`ipaddress`, stored `str(ip)` canonical; CIDR / zone suffix / junk refused — the INET column would take a CIDR, but Kamailio matches `ip_address = '$si'` and FS routes to `host(ip_address)`, so a range never authenticates), `description` ≤ 100 chars (`TRUNK_IP_DESCRIPTION_MAX`). The admin-only `POST /trunks` `auth_ips` list is unchanged (its `::inet` failure is caught as a 422 that echoes the DB error)
 - `GET /{trunk_id}/stats`: real-time channel count via ESL `show channels as json`, plus last-hour CDR aggregates (ASR, avg duration, cost). Tenants get `avg_duration_minutes` and no cost (see Tenant redaction); admins keep `avg_duration_sec` + `total_cost`.
 - Cache invalidation on IP delete (`trunk_ip:{ip}`)
+- `DELETE /{trunk_id}` (disabled trunks only) and `DELETE /{trunk_id}/dids/{trunk_did_id}` (TED contract C1/C2): the former DIDs stay with the customer — `_reserve_former_trunk_dids()` upserts each pool row to `reserved` (one statement, same transaction)
 
 ### cdrs.py
 CDR ingestion and querying. The largest router file.
