@@ -306,6 +306,22 @@ def test_formatter_boolean_on_net_rendering():
     assert fmt.format_record(make_row(on_net=None)).split(",")[idx["on_net"]] == ""
 
 
+def test_formatter_traffic_grade_keeps_the_old_words_for_equinox():
+    """Owner decision 2026-11-03: cdrs.traffic_grade stores enterprise|premium
+    (migration 63), but Equinox keeps receiving the old words — enterprise is
+    exported as 'standard'; premium and every historic value pass through."""
+    fmt = EquinoxFormatter()
+    idx = {n: i for i, n in enumerate(FIELDS)}
+    assert idx["traffic_grade"] == 31            # column 32 of the file
+    got = {g: fmt.format_record(make_row(traffic_grade=g)).split(",")[idx["traffic_grade"]]
+           for g in ("enterprise", "premium", "standard", "economy")}
+    assert got == {"enterprise": "standard", "premium": "premium",
+                   "standard": "standard", "economy": "economy"}
+    assert fmt.format_record(make_row(traffic_grade=None)).split(",")[idx["traffic_grade"]] == ""
+    # the raw DB value is not rewritten anywhere else: header label unchanged
+    assert fmt.header().split(",")[idx["traffic_grade"]] == "traffic_grade"
+
+
 def test_formatter_none_becomes_empty_string():
     fmt = EquinoxFormatter()
     row = make_row(answer_time=None, trunk_id=None, rate_per_min=None,
