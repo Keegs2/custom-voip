@@ -74,3 +74,21 @@ def test_every_fs_bound_ingress_strips_trunk_headers():
     for h in HEADERS:
         assert carrier_trust.find(f'remove_hf("{h}");') < carrier_trust.find(
             'append_hf("X-SBC-ID'), h
+
+
+def test_verizon_ingress_strips_trunk_headers():
+    """#170's Verizon ingress (VERIZON_MODE) shares the static-carrier branch:
+    its `if` admits `$var(vz_src) == 1`, and the four headers are stripped
+    inside that branch before its X-SBC-ID stamp and before route(DISPATCH)."""
+    lines = _code(CFG.read_text()).splitlines()
+    starts = [i for i, l in enumerate(lines)
+              if "$var(vz_src) == 1) {" in l and "BANDWIDTH_IP_1" in l]
+    assert len(starts) == 1, starts
+    start = starts[0]
+    dispatch = next(i for i in range(start, len(lines)) if "route(DISPATCH);" in lines[i])
+    stamp = next(i for i in range(start, dispatch) if 'append_hf("X-SBC-ID' in lines[i])
+    branch = "\n".join(lines[start:stamp])
+    for h in HEADERS:
+        assert f'remove_hf("{h}");' in branch, h
+    # the Verizon attribution arm lives in the same branch (after the strips)
+    assert any('X-Inbound-Carrier: verizon' in l for l in lines[stamp:dispatch])

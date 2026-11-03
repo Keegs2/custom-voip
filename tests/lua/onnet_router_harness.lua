@@ -1338,6 +1338,26 @@ do
 end
 
 do
+    print("[14g] premium list is NOT capped (no cap for Premium, #170) + Verizon VIP-only")
+    local T = P_TRUNKS
+    local trunks = { T.atl_ld }
+    for i = 1, 4 do
+        trunks[#trunks + 1] = { carrier = "c" .. i, pop = "p", term_ip = "198.51.100." .. i,
+                                traffic_class = "ld", tier1 = "f" }
+    end
+    trunks[#trunks + 1] = { carrier = "verizon", pop = "east", term_ip = "192.0.2.11",
+                            traffic_class = "ld", tier1 = "f" }
+    trunks[#trunks + 1] = T.bw_la
+    local c = run_scenario(premium_scenario(13, "premium", "+17745550177", trunks, {}))
+    local ips = bridged_ips(c)
+    check("14g: Tier 1 first, then all 6 others (x2 SBCs, Verizon x1) — 15 attempts",
+          ips == "216.82.238.134,216.82.238.134,206.146.98.26,206.146.98.26,"
+              .. "198.51.100.1,198.51.100.1,198.51.100.2,198.51.100.2,198.51.100.3,198.51.100.3,"
+              .. "198.51.100.4,198.51.100.4,192.0.2.11", ips)
+    check("14g: flag=1 (non-Tier-1 tried)", c.setvars["term_premium_fallback"] == "1")
+end
+
+do
     print("[14d] enterprise (and pre-63 'standard') with tier1 marks -> today's attempts, no flag")
     local T = P_TRUNKS
     local trunks = { T.bw_dal, T.atl_ld, T.bw_la, T.den_tf }
