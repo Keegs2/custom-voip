@@ -434,7 +434,7 @@ local function run_scenario(sc, script_path)
                     ring_timeout = tostring(sc.step1.ring_timeout),
                     max_channels = tostring(sc.step1.max_channels),
                     name = sc.step1.rcf_name,
-                    traffic_grade = "standard", cpm_limit = "60",
+                    traffic_grade = sc.step1.traffic_grade or "standard", cpm_limit = "60",
                     daily_limit = "500", status = "active",
                 }
             end
@@ -470,6 +470,16 @@ local function run_scenario(sc, script_path)
     -- router takes the LEGACY fallback loop (fail-open path).
     if sc.term_trunks then
         fake_db.get_termination_trunks = function(_) return sc.term_trunks end
+    end
+    -- customers rows for db.lookup_customer (premium routing on an on-net
+    -- chain whose terminal RCF DID belongs to another customer); absent =
+    -- the function does not exist (every pre-premium scenario).
+    if sc.customers then
+        captured.customer_lookups = {}
+        fake_db.lookup_customer = function(id)
+            captured.customer_lookups[#captured.customer_lookups + 1] = tostring(id)
+            return sc.customers[tonumber(id)]
+        end
     end
 
     -- ---- os stub: per-scenario env overrides (os.getenv) ----
@@ -1245,6 +1255,126 @@ do
           bridged_ips(c) == "67.231.2.12,67.231.2.12,192.0.2.11", bridged_ips(c))
     check("13h: verizon attempt goes to SBC-1 only",
           bridged_sbcs(c) == "10.0.0.1,10.0.0.2,10.0.0.1", bridged_sbcs(c))
+end
+
+-- ------------------------------------------------------------------
+-- [14] Premium traffic pattern (migrations 63/64, TED contract C7)
+-- ------------------------------------------------------------------
+local P_TRUNKS = {
+    bw_dal = { carrier = "bandwidth", pop = "dallas",     term_ip = "67.231.2.12",    traffic_class = "ld",       tier1 = "t" },
+    bw_la  = { carrier = "bandwidth", pop = "la",         term_ip = "216.82.238.134", traffic_class = "ld",       tier1 = "t" },
+    atl_ld = { carrier = "sinch",     pop = "atlanta-ld", term_ip = "206.146.98.26",  traffic_class = "ld",       tier1 = "f" },
+    den_tf = { carrier = "sinch",     pop = "denver-tf",  term_ip = "206.146.100.26", traffic_class = "tollfree", tier1 = "f" },
+}
+local function premium_scenario(n, grade, forward_to, trunks, results)
+    local sc = tf_scenario(20 + n, forward_to, trunks, results)
+    sc.step1.traffic_grade = grade
+    return sc
+end
+local ALL_FAIL = {}
+for i = 1, 8 do ALL_FAIL[i] = "NORMAL_TEMPORARY_FAILURE" end
+
+do
+    print("[14a] premium LD -> Tier 1 (Bandwidth) rows only, no fallback flag")
+    local T = P_TRUNKS
+    local c = run_scenario(premium_scenario(1, "premium", "+17745550170",
+        { T.bw_dal, T.atl_ld, T.bw_la, T.den_tf }, ALL_FAIL))
+    check("14a: only Tier 1 trunks attempted (x2 SBCs), Sinch LD never",
+          bridged_ips(c) == "67.231.2.12,67.231.2.12,216.82.238.134,216.82.238.134", bridged_ips(c))
+    check("14a: no term_premium_fallback", c.setvars["term_premium_fallback"] == nil,
+          c.setvars["term_premium_fallback"])
+    check("14a: table path", c.setvars["term_trunks_source"] == "db", c.setvars["term_trunks_source"])
+end
+
+do
+    print("[14b] premium 8YY, only non-Tier-1 tollfree rows -> all tollfree rows + fallback=1")
+    local T = P_TRUNKS
+    local c = run_scenario(premium_scenario(2, "premium", "+18885550170",
+        { T.bw_dal, T.den_tf, T.atl_ld }, { "SUCCESS" }))
+    check("14b: the tollfree trunk is used (call still completes)",
+          bridged_ips(c) == "206.146.100.26", bridged_ips(c))
+    check("14b: term_premium_fallback=1", c.setvars["term_premium_fallback"] == "1",
+          c.setvars["term_premium_fallback"])
+    check("14b: no hangup (answered)", #c.hangups == 0, table.concat(c.hangups, ","))
+end
+
+do
+    print("[14c] premium LD with NO Tier 1 row -> full class list + fallback=1")
+    local T = P_TRUNKS
+    local c = run_scenario(premium_scenario(3, "premium", "+17745550171",
+        { T.atl_ld, T.den_tf }, { "SUCCESS" }))
+    check("14c: the LD trunk is used", bridged_ips(c) == "206.146.98.26", bridged_ips(c))
+    check("14c: term_premium_fallback=1", c.setvars["term_premium_fallback"] == "1",
+          c.setvars["term_premium_fallback"])
+end
+
+do
+    print("[14d] enterprise (and pre-63 'standard') with tier1 marks -> today's attempts, no flag")
+    local T = P_TRUNKS
+    local trunks = { T.bw_dal, T.atl_ld, T.bw_la, T.den_tf }
+    local want = "67.231.2.12,67.231.2.12,206.146.98.26,206.146.98.26,216.82.238.134,216.82.238.134"
+    for i, grade in ipairs({ "enterprise", "standard" }) do
+        local c = run_scenario(premium_scenario(3 + i, grade, "+17745550172", trunks, ALL_FAIL))
+        check("14d " .. grade .. ": every ld trunk in priority order", bridged_ips(c) == want,
+              bridged_ips(c))
+        check("14d " .. grade .. ": no term_premium_fallback",
+              c.setvars["term_premium_fallback"] == nil, c.setvars["term_premium_fallback"])
+        -- identical dial strings to the same scenario with tier1 stripped
+        local plain = {}
+        for k, t in ipairs(trunks) do
+            plain[k] = { carrier = t.carrier, pop = t.pop, term_ip = t.term_ip,
+                         traffic_class = t.traffic_class }
+        end
+        local c0 = run_scenario(premium_scenario(3 + i, grade, "+17745550172", plain, ALL_FAIL))
+        check("14d " .. grade .. ": dial strings byte-identical to a list without tier1",
+              table.concat(c.bridges, "\n") == table.concat(c0.bridges, "\n"), "differs")
+    end
+end
+
+do
+    print("[14e] on-net chain: enterprise origin -> premium customer's RCF DID -> off-net")
+    local T = P_TRUNKS
+    local sc = premium_scenario(6, "enterprise", "+16170000091",
+        { T.atl_ld, T.bw_dal }, ALL_FAIL)
+    sc.oracle = {
+        ["+16170000091"] = {
+            did = "+16170000091", product_type = "rcf", customer_id = "77",
+            product_ref_id = "91", product_enabled = "t", customer_status = "active",
+            forward_to = "+17745550173", pass_caller_id = "t", ring_timeout = "30",
+            max_channels = "0", product_name = "Premium line",
+        },
+    }
+    sc.customers = { [77] = { id = "77", traffic_grade = "premium", status = "active" } }
+    local c = run_scenario(sc)
+    check("14e: terminal customer 77 looked up once",
+          table.concat(c.customer_lookups or {}, ",") == "77",
+          table.concat(c.customer_lookups or {}, ","))
+    check("14e: premium applied (Bandwidth only)",
+          bridged_ips(c) == "67.231.2.12,67.231.2.12", bridged_ips(c))
+    -- and the reverse: premium origin forwarding onto an ENTERPRISE customer's DID
+    local sc2 = premium_scenario(7, "premium", "+16170000091", { T.atl_ld, T.bw_dal }, ALL_FAIL)
+    sc2.oracle = sc.oracle
+    sc2.customers = { [77] = { id = "77", traffic_grade = "enterprise", status = "active" } }
+    local c2 = run_scenario(sc2)
+    check("14e: the PAYING (terminal) customer's enterprise grade wins",
+          bridged_ips(c2) == "206.146.98.26,206.146.98.26,67.231.2.12,67.231.2.12", bridged_ips(c2))
+    -- lookup failure reads as enterprise
+    local sc3 = premium_scenario(8, "enterprise", "+16170000091", { T.atl_ld, T.bw_dal }, ALL_FAIL)
+    sc3.oracle = sc.oracle
+    sc3.customers = {}
+    local c3 = run_scenario(sc3)
+    check("14e: unknown terminal customer -> enterprise routing",
+          bridged_ips(c3) == "206.146.98.26,206.146.98.26,67.231.2.12,67.231.2.12", bridged_ips(c3))
+end
+
+do
+    print("[14f] premium on the LEGACY fallback loop (table unresolvable) -> unchanged, no flag")
+    local sc = premium_scenario(9, "premium", "+17745550174", nil, { "SUCCESS" })
+    local c = run_scenario(sc)
+    check("14f: term_trunks_source=fallback", c.setvars["term_trunks_source"] == "fallback",
+          c.setvars["term_trunks_source"])
+    check("14f: no term_premium_fallback", c.setvars["term_premium_fallback"] == nil,
+          c.setvars["term_premium_fallback"])
 end
 
 local BASELINE = os.getenv("BASELINE_ROUTER")

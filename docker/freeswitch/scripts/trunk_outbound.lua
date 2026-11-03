@@ -916,12 +916,30 @@ if dest_class == "tollfree" then
     set_var("hangup_after_bridge", "true")
     set_var("lua_routed", "true")
 
-    local tf_trunks, tf_source = nil, "fallback"
+    -- Traffic pattern of the paying customer (migration 63, TED contract
+    -- C7): the trunk's customer. Kamailio's X-Customer-ID path sets no
+    -- traffic_grade, so it is read here, once, only for 8YY. A lookup
+    -- failure reads as enterprise (today's routing).
+    local paying_grade = get_var("traffic_grade", nil)
+    if paying_grade == nil and db and db.lookup_customer and customer_id and customer_id > 0 then
+        local ok, row = pcall(db.lookup_customer, customer_id)
+        if ok and type(row) == "table" then
+            paying_grade = row.traffic_grade
+        end
+    end
+
+    local tf_trunks, tf_source, tf_premium_fallback = nil, "fallback", false
     if term_trunks_lib then
-        tf_trunks, tf_source = term_trunks_lib.select_tollfree(
-            term_trunks_lib.zone(), db, "trunk_outbound")
+        tf_trunks, tf_source, tf_premium_fallback = term_trunks_lib.select_tollfree(
+            term_trunks_lib.zone(), db, "trunk_outbound", paying_grade)
     end
     set_var("term_trunks_source", tf_source)
+    if tf_premium_fallback then
+        set_var("term_premium_fallback", "1")
+        freeswitch.consoleLog("WARNING", string.format(
+            "[%s] Premium customer %s: no Tier 1 tollfree trunk enabled — using every tollfree trunk (term_premium_fallback=1)\n",
+            uuid, tostring(customer_id)))
+    end
 
     if not tf_trunks then
         freeswitch.consoleLog("ERR", string.format(
@@ -967,6 +985,12 @@ if dest_class == "tollfree" then
     return
 end
 
+-- Non-8YY long distance stays on the zone's Bandwidth primary/secondary path
+-- below for EVERY traffic pattern: it never reads carrier_trunks, so the
+-- premium Tier 1 filter (TED contract C7) does not apply here. Bandwidth is
+-- Tier 1 by seed (migration 64), so a premium trunk customer already gets Tier
+-- 1 carriers only; moving this path onto the table-driven loop is a separate
+-- change.
 -- Build dial string using external profile to ensure public IP in Via/Contact/SDP.
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(

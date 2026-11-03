@@ -529,11 +529,11 @@ end
 -- (freeswitch.get/setGlobalVariable — the exact SBC-health-cache
 -- pattern above) for TERM_TRUNKS_TTL seconds: within the TTL no call
 -- touches the DB; steady state is ~1 query/minute per FS.
--- Cache entry: "term_trunks_<zone>" = "<epoch>|carrier,pop,ip,class;..."
+-- Cache entry: "term_trunks2_<zone>" = "<epoch>|carrier,pop,ip,class,t1;..."
 -- ("<epoch>|FALLBACK" is the negative-cache sentinel: DB error or
--- zero rows, re-checked after the same TTL). A 3-field pre-44 entry
--- (no class) still parses, as class 'any' — covers the one stale
--- cache generation across a rolling Lua deploy.
+-- zero rows, re-checked after the same TTL). The 4-field (pre-64, no
+-- Tier 1 flag) and 3-field (pre-44, class 'any') forms still parse —
+-- lib/term_trunks.lua owns the format.
 --
 -- FAIL-OPEN (non-negotiable): DB error, zero usable rows, or an
 -- unparsable cache entry all return nil, and the caller runs the
@@ -597,7 +597,7 @@ end
 -- The trunk-list fetch/cache/validation, class coercion and destination
 -- classifier live in lib/term_trunks.lua (shared with trunk_outbound.lua /
 -- api_outbound.lua 8YY egress — ONE implementation, same process-wide
--- "term_trunks_<zone>" cache entry and format). These local wrappers keep
+-- "term_trunks2_<zone>" cache entry and format). These local wrappers keep
 -- the call sites below unchanged; log lines keep the "[inbound_router]"
 -- tag, so output is byte-identical to the pre-extraction script.
 --
@@ -1204,6 +1204,36 @@ local function cdr_b_leg_block(attempt_no)
 end
 
 -- ================================================================
+-- Traffic pattern of the PAYING customer (migration 63, TED contract C7)
+-- ================================================================
+-- The carrier leg of an RCF forward / IVR transfer is paid by the customer
+-- of the terminal RCF hop (dest.customer_id = the CDR customer_id). On a
+-- single-hop call (and a directly dialed IVR) that is the STEP-1 customer,
+-- whose grade the STEP-1 lookup already selected (ctx.traffic_grade). Only
+-- an on-net chain that ends on ANOTHER customer's RCF DID (or an IVR reached
+-- on-net) costs one lookup_customer read, memoized per call. Any failure
+-- reads as "not premium" (today's routing). Returns the grade or nil.
+local function paying_traffic_grade(ctx, customer_id)
+    local cid = tonumber(customer_id)
+    if cid == nil or cid == tonumber(ctx.origin_customer_id) then
+        return ctx.traffic_grade
+    end
+    ctx.paying_grades = ctx.paying_grades or {}
+    local known = ctx.paying_grades[cid]
+    if known == nil then
+        known = false
+        if db and db.lookup_customer then
+            local ok, row = pcall(db.lookup_customer, cid)
+            if ok and type(row) == "table" and row.traffic_grade then
+                known = row.traffic_grade
+            end
+        end
+        ctx.paying_grades[cid] = known
+    end
+    return known or nil
+end
+
+-- ================================================================
 -- Terminator: RCF  (dest = terminal RCF routing row, ctx = cross-hop state)
 -- ================================================================
 -- BEHAVIOR-PRESERVING extraction of the original `product_type == "rcf"` body.
@@ -1794,6 +1824,30 @@ local function terminate_rcf(dest, ctx)
                 "[%s] No termination trunk carries class %s (no 'any' rows either) — using the full trunk list\n",
                 uuid, dest_class))
             eligible_trunks = term_trunks
+        end
+        -- Traffic pattern (migration 63/64, TED contract C7): a 'premium'
+        -- paying customer terminates on Tier 1 carriers only
+        -- (carrier_trunks.tier1). No Tier 1 row in the class-filtered list
+        -- -> the full class-filtered list (the call still completes) and
+        -- term_premium_fallback=1 (CDR, migration 65). Any other grade gets
+        -- the SAME list back: enterprise attempts are unchanged.
+        do
+            local paying_grade = paying_traffic_grade(ctx, dest.customer_id)
+            if paying_grade == "premium" then
+                local premium_fallback
+                eligible_trunks, premium_fallback =
+                    term_trunks_lib.apply_traffic_pattern(eligible_trunks, paying_grade)
+                if premium_fallback then
+                    set_var("term_premium_fallback", "1")
+                    freeswitch.consoleLog("WARNING", string.format(
+                        "[%s] Premium customer %s: no Tier 1 %s trunk enabled — falling back to all %d eligible trunks (term_premium_fallback=1)\n",
+                        uuid, tostring(dest.customer_id), dest_class, #eligible_trunks))
+                else
+                    freeswitch.consoleLog("INFO", string.format(
+                        "[%s] Premium customer %s: %d Tier 1 %s trunk(s)\n",
+                        uuid, tostring(dest.customer_id), #eligible_trunks, dest_class))
+                end
+            end
         end
         -- No attempt cap: every eligible trunk is tried, in eff_priority
         -- order (see the TERM_TRUNKS comment block near the top).

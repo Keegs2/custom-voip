@@ -626,6 +626,11 @@ _INIT = pathlib.Path(__file__).resolve().parents[1] / "docker" / "postgres" / "i
 # The watermark column is the selection cursor (NULL at export time); it is
 # deliberately NOT exported.
 _WATERMARK_EXCLUDED = {"exported_at"}
+#: Columns deliberately NOT in the Equinox export (the file stays
+#: byte-identical): routing breadcrumbs that carry no billing meaning.
+#:   term_premium_fallback (65) — a premium customer's call used non-Tier-1
+#:   carriers because no Tier 1 carrier was eligible (staff-only).
+_NOT_EXPORTED = {"term_premium_fallback"}
 
 # Non-column tokens that can start a line inside the CREATE TABLE body.
 _NOT_A_COLUMN = {"primary", "constraint", "unique", "check", "foreign", "like"}
@@ -698,8 +703,9 @@ def _all_cdrs_columns() -> list[str]:
         + _cdrs_added_columns("48_cdr_call_legs.sql")
         + _cdrs_added_columns("50_cdr_quality_accuracy.sql")
         + _cdrs_added_columns("60_cdr_ivr.sql")
+        + _cdrs_added_columns("65_cdr_premium_fallback.sql")
     ):
-        if col in _WATERMARK_EXCLUDED or col in seen:
+        if col in _WATERMARK_EXCLUDED or col in _NOT_EXPORTED or col in seen:
             continue
         seen.add(col)
         ordered.append(col)
@@ -751,6 +757,7 @@ def test_drift_guard_covers_every_cdrs_add_column_migration():
                "23_onnet_cdr_columns.sql", "40_carrier_trunks.sql",
                "47_cdr_stir_outcome.sql", "48_cdr_call_legs.sql",
                "50_cdr_quality_accuracy.sql", "60_cdr_ivr.sql",
+               "65_cdr_premium_fallback.sql",  # _NOT_EXPORTED (routing breadcrumb)
                "21_cdr_export.sql"}   # 21 = exported_at watermark (excluded)
     for f in sorted(_INIT.glob("*.sql")):
         code = "\n".join(line.split("--", 1)[0] for line in f.read_text().splitlines())

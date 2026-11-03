@@ -71,11 +71,30 @@ local function run(sc, script_path)
         end,
         get_connection = function() return nil end,
     }
+    -- 8YY scenarios: carrier_trunks rows + the trunk customer's row.
+    if sc.term_trunks then
+        fake_db.get_termination_trunks = function(_) return sc.term_trunks end
+    end
+    if sc.customer_grade ~= nil then
+        captured.customer_lookups = 0
+        fake_db.lookup_customer = function(id)
+            captured.customer_lookups = captured.customer_lookups + 1
+            if tostring(id) == "42" and sc.customer_grade then
+                return { id = "42", traffic_grade = sc.customer_grade, status = "active" }
+            end
+            return nil
+        end
+    end
+    local sbc_up = string.format("up:%d", os.time())
     local env = setmetatable({
         session = session,
         freeswitch = {
             consoleLog = function() end,
-            getGlobalVariable = function() return nil end,
+            getGlobalVariable = function(k)
+                -- 8YY scenarios: both SBCs "up" (no real TCP probe)
+                if sc.term_trunks and k:match("^sbc_health_") then return sbc_up end
+                return nil
+            end,
             setGlobalVariable = function() end,
         },
         os = setmetatable({ getenv = function(k)
@@ -238,6 +257,47 @@ do
         check(label .. ": sofia_session_timeout NOT in any B-leg dial string", #leaked == 0,
               table.concat(leaked, " | "))
     end
+end
+
+do
+    print("[7] 8YY premium traffic pattern (TED contract C7)")
+    local TF = { carrier = "sinch", pop = "denver-tf", term_ip = "206.146.100.26",
+                 traffic_class = "tollfree", tier1 = "f" }
+    local TF1 = { carrier = "acme", pop = "tf1", term_ip = "198.51.100.5",
+                  traffic_class = "tollfree", tier1 = "t" }
+    local BWR = { carrier = "bandwidth", pop = "dallas", term_ip = "67.231.2.12",
+                  traffic_class = "ld", tier1 = "t" }
+    local function tf_ips(c)
+        local out = {}
+        for _, b in ipairs(c.bridges) do out[#out + 1] = b:match("sip_h_X%-Carrier%-IP=([^,}]+)") end
+        return table.concat(out, ",")
+    end
+    local fail4 = { "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE",
+                    "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE" }
+    local c = run({ dest = "+18885550100", term_trunks = { BWR, TF, TF1 },
+                    customer_grade = "premium", bridge_results = fail4 })
+    check("7a premium: only the Tier 1 tollfree row (x2 SBCs)",
+          tf_ips(c) == "198.51.100.5,198.51.100.5", tf_ips(c))
+    check("7a premium: customer read once", c.customer_lookups == 1, c.customer_lookups)
+    check("7a premium: no fallback flag", c.setvars.term_premium_fallback == nil,
+          c.setvars.term_premium_fallback)
+    c = run({ dest = "+18885550100", term_trunks = { BWR, TF }, customer_grade = "premium",
+              bridge_results = { "SUCCESS" } })
+    check("7b premium, no Tier 1 TF row: every TF row + fallback=1",
+          tf_ips(c) == "206.146.100.26" and c.setvars.term_premium_fallback == "1",
+          tf_ips(c) .. " / " .. tostring(c.setvars.term_premium_fallback))
+    for _, g in ipairs({ "enterprise", false }) do
+        c = run({ dest = "+18885550100", term_trunks = { BWR, TF, TF1 }, customer_grade = g,
+                  bridge_results = fail4 })
+        check("7c " .. tostring(g) .. ": every TF row in priority order, no flag",
+              tf_ips(c) == "206.146.100.26,206.146.100.26,198.51.100.5,198.51.100.5"
+                  and c.setvars.term_premium_fallback == nil, tf_ips(c))
+    end
+    c = run({ dest = "+17745550199", term_trunks = { BWR, TF }, customer_grade = "premium",
+              bridge_results = { "SUCCESS" } })
+    check("7d non-8YY LD: Bandwidth primary path unchanged, customer never read",
+          c.bridges[1] and c.bridges[1]:find("sip_h_X-Carrier=primary", 1, true)
+              and c.customer_lookups == 0, c.bridges[1])
 end
 
 local BASE = os.getenv("BASELINE_TRUNK")
