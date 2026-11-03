@@ -316,7 +316,7 @@ IP-based SIP trunk authentication for customer PBXs:
 1. SQL query joins `trunk_auth_ips` -> `sip_trunks` -> `customers` to find trunk by source IP.
 2. Verifies trunk is enabled.
 3. Enforces per-trunk CPS rate limiting via `trunk_cps` htable.
-4. Appends `X-Trunk-ID`, `X-Customer-ID`, `X-Max-Channels` (and `X-SBC-ID`) for FreeSWITCH — after `remove_hf()` of any PBX-sent copy (2026-11): mod_sofia keeps the FIRST instance of a repeated X- header as `sip_h_<name>`, and our append lumps land after the PBX's headers, so an unstripped PBX copy would set FS's trunk_id/customer_id/max_channels. Static check: `tests/test_kamailio_trunk_auth_strip.py`.
+4. Appends `X-Trunk-ID`, `X-Customer-ID`, `X-Max-Channels` (and `X-SBC-ID`) for FreeSWITCH — after `remove_hf()` of any PBX-sent copy (2026-11): mod_sofia keeps the FIRST instance of a repeated X- header as `sip_h_<name>`, and our append lumps land after the PBX's headers, so an unstripped PBX copy would set FS's trunk_id/customer_id/max_channels. Every other FS-bound INVITE ingress (static carriers, `route[CARRIER_TRUST]`, both SIPp test branches) strips the same four before stamping X-SBC-ID, so only TRUNK_AUTH can ever produce X-Trunk-ID (public.xml sends ANY INVITE with a numeric X-Trunk-ID to trunk_outbound.lua). Static check: `tests/test_kamailio_trunk_auth_strip.py`.
 5. Dispatches to FreeSWITCH on port 5080 (same path as carrier inbound).
 6. If no trunk matches, returns (does not exit), and caller falls through to CARRIER_TRUST, then 403.
 
