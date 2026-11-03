@@ -125,6 +125,8 @@ Per-VM software is identical **per role** — see §2.5 for the role → contain
 | `east-fs-2` | FS-2 (hot standby) | e2-standard-8 (machine-image clone of FS-1) | 192.168.10.3 | 35.196.226.123 | voip-media | bypass-vpn, voip-media | `east-fs-2` | 201 |
 | `services` | PG **primary** + PgBouncer + API + UI + Homer stack + VictoriaMetrics + x5u | **e2-highmem-4 (32 GB — resized 2026-09-02)** | 10.142.0.103 | 34.26.57.37 | default | lb-health-check, voip-services | `services` | — |
 | `east-db-standby` | PG hot standby (HA; **us-east1-c**) | e2-standard-4 | 10.142.0.87 | — | default | bypass-vpn, voip-db-standby | — | — |
+| `east-vz-gw-a` | Verizon IPsec gateway A (dark, 2026-10-30) | n2-standard-2 | 192.168.11.2 | none (IKE 35.231.206.85 via protocol forwarding `east-vz-gw-a-fwd`) | vz-ipsec-east | bypass-vpn, vz-ipsec | — | — |
+| `east-vz-gw-b` | Verizon IPsec gateway B (**us-east1-c**) | n2-standard-2 | 192.168.11.3 | none (IKE 34.26.69.151, `east-vz-gw-b-fwd`) | vz-ipsec-east | bypass-vpn, vz-ipsec | — | — |
 
 Notes:
 - `services` resize: PG retuned via `conf.d` drop-in `90-revup-32gb`
@@ -145,6 +147,8 @@ Notes:
 | `west-fs-2` | FS-2 (hot standby) | e2-standard-8 (clone) | 192.168.20.3 | 35.197.95.171 | voip-media-west | bypass-vpn, voip-media | `west-fs-2` | 211 |
 | `west-db` | PG replica + PgBouncer | e2-standard-4 | 10.138.0.2 | 136.118.180.103 | default | bypass-vpn, voip-db-standby | `west-db` | — |
 | `west-loadtest` | SIPp load-gen (**banked**, excluded from monitoring) | e2-standard-4 | 10.138.0.3 | 104.198.3.25 | default | bypass-vpn, voip-loadtest | — | — |
+| `west-vz-gw-a` | Verizon IPsec gateway A (dark, 2026-10-30) | n2-standard-2 | 192.168.21.2 | none (IKE 8.231.131.118, `west-vz-gw-a-fwd`) | vz-ipsec-west | bypass-vpn, vz-ipsec | — | — |
+| `west-vz-gw-b` | Verizon IPsec gateway B (**us-west1-c**) | n2-standard-2 | 192.168.21.3 | none (IKE 136.66.170.29, `west-vz-gw-b-fwd`) | vz-ipsec-west | bypass-vpn, vz-ipsec | — | — |
 
 ### 2.3 Central — us-central1-b
 
@@ -155,6 +159,8 @@ Notes:
 | `central-fs` | FS-1 (ACTIVE) + Redis | e2-standard-8 | 192.168.30.2 | 35.253.103.114 | voip-media-central (192.168.30.0/24) | bypass-vpn, voip-media | `central-fs-1` | 220 |
 | `central-fs-2` | FS-2 (hot standby) | e2-standard-8 (clone) | 192.168.30.3 | 34.63.100.161 | voip-media-central | bypass-vpn, voip-media | `central-fs-2` | 221 |
 | `central-db` | PG replica + PgBouncer | e2-standard-4 | 10.128.0.2 | **34.69.170.41** (current) | default | bypass-vpn, voip-db-standby | `central-db` | — |
+| `central-vz-gw-a` | Verizon IPsec gateway A (dark, 2026-10-30; **us-central1-a** — b/c had no n2 stock) | n2-standard-2 | 192.168.31.4 | none (IKE 34.68.252.50, `central-vz-gw-a-fwd`) | vz-ipsec-central | bypass-vpn, vz-ipsec | — | — |
+| `central-vz-gw-b` | Verizon IPsec gateway B (**us-central1-f**) | n2-standard-2 | 192.168.31.5 | none (IKE 34.171.191.175, `central-vz-gw-b-fwd`) | vz-ipsec-central | bypass-vpn, vz-ipsec | — | — |
 
 Note: `central-db`'s reserved external IP `136.112.210.141` **detached during a
 2026-09-01 stop/start**; the VM currently runs on ephemeral `34.69.170.41`.
@@ -365,6 +371,9 @@ Single global VPC `default`; media subnets are dedicated and
 | voip-media | 192.168.10.0/24 | East | fs-media-v2, east-fs-2 |
 | voip-media-west | 192.168.20.0/24 | West | west-fs, west-fs-2 |
 | voip-media-central | 192.168.30.0/24 | Central | central-fs, central-fs-2 |
+| vz-ipsec-east | 192.168.11.0/28 | East | east-vz-gw-a/-b, `east-vz-gw-ilb` 192.168.11.4 (Verizon IPsec, built 2026-10-30, dark; PGA on, never in Cloud NAT) |
+| vz-ipsec-west | 192.168.21.0/28 | West | west-vz-gw-a/-b, `west-vz-gw-ilb` 192.168.21.4 |
+| vz-ipsec-central | 192.168.31.0/28 | Central | central-vz-gw-a/-b, `central-vz-gw-ilb` 192.168.31.2 |
 
 ### 3.2 External NLB VIPs (carrier inbound)
 
@@ -410,6 +419,12 @@ legacy per-SBC behavior (rolling-safe).
   internal signaling-VIP addresses (.250 per zone).
 - **Drift:** `central-db`'s reserved `136.112.210.141` is currently detached
   (§2.3, §12).
+- **Verizon IPsec (reserved 2026-10-30, unattached):** `{zone}-vz-ike-a`/`-b`
+  (gateway IKE peers, bound by protocol forwarding, not attached to a NIC)
+  and `{zone}-vz-sip` (in-tunnel SIP source, **never attach**): East
+  35.231.206.85 / 34.26.69.151 / 34.148.100.185; West 8.231.131.118 /
+  136.66.170.29 / 136.86.242.57; Central 34.68.252.50 / 34.171.191.175 /
+  35.184.132.124. Plus the three internal `.251` SBC Verizon VIPs.
 - Not yet under OpenTofu state (Phase 5 import pending —
   `infra/OPENTOFU_PLAN.md`).
 
@@ -466,6 +481,10 @@ Audited 2026-08 (VoIP VMs are NOT internet-exposed beyond these;
 | x5u public | 0.0.0.0/0 | tcp:80,443 | voip-services — STIR x5u + ACME |
 | voip-uptime-sip / voip-uptime-web | GCM uptime prober IPs (managed by `infra/monitoring/main.tf`) | tcp:5060 (VIPs), API/UI ports | uptime checks |
 | allow-ssh-iap | 35.235.240.0/20 | tcp:22 | all — SSH via IAP only |
+| vz-ipsec-allow-iap-ssh | 35.235.240.0/20 | tcp:22 | vz-ipsec — gateways have no public IP (2026-10-30) |
+| vz-ipsec-allow-hc | 35.191.0.0/16, 130.211.0.0/22 | tcp:8081 | vz-ipsec — next-hop ILB health check |
+| vz-ipsec-allow-internal-fwd | all zone + media + vz-ipsec subnets | all | vz-ipsec — forwarded SIP/RTP toward the tunnel |
+| *(pending Verizon prefixes)* vz-ipsec-allow-ike / vz-allow-verizon-sip / vz-allow-verizon-rtp | Verizon IKE peers / SIP prefixes / media prefixes | udp:500+esp / 5060 / udp:16384-49151 | vz-ipsec / voip-sbc / voip-media |
 
 Health-probe reference: `~/.claude` memory + `infra/monitoring/main.tf`;
 rule-by-rule ground truth lives in GCP (operator-managed — Claude never
