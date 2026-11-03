@@ -98,6 +98,7 @@ class FakeClickHouse:
             self.rows.extend(rows)
         self.fail = set(fail)     # {"fetch", "scan", "fpmap"}
         self.calls = []           # [(kind, sql, params)]
+        self.probes = []          # number-index probes [(sql, params)]
 
     def add(self, rows):
         self.rows.extend(rows)
@@ -114,6 +115,12 @@ class FakeClickHouse:
 
     def handle(self, sql, params=None):
         """Return (status_code, text)."""
+        if "system.tables" in sql or "sip_number_index" in sql:
+            # Number-index capability probe / lookup (no index in this fake):
+            # recorded apart from ``calls`` so query-count assertions keep
+            # meaning "the correlation/fetch queries the router issued".
+            self.probes.append((sql, dict(params or {})))
+            return 200, ""
         k = self.kind(sql)
         self.calls.append((k, sql, dict(params or {})))
         if k in self.fail:

@@ -32,11 +32,13 @@ import json
 import os
 import logging
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from auth.dependencies import require_support_or_admin
@@ -54,6 +56,9 @@ from .homer_pcap import build_pcap, is_edge_packet
 # Pure (stdlib-only) correlation helpers: X-CID parsing, A-leg windows, the
 # ClickHouse SQL builders, grouping/attempt numbering, status bookkeeping.
 from . import homer_correlation as hc
+# Pure (stdlib-only) number-index helpers: SQL builders (query parameters
+# only), coverage computation, ClickHouse limit-error classification.
+from . import homer_index as hx
 
 from .homer_pipeline import (
     _deduplicate_results,
@@ -396,6 +401,10 @@ async def _query_qryn(
             resp.status_code,
             resp.text[:500],
         )
+        # qryn relays ClickHouse's error text: a memory/limit stop means the
+        # scan was too broad (422 search_too_broad upstream), not an outage.
+        if hx.is_cap_error(hx.error_code(None, resp.text), resp.text):
+            raise ClickHouseLimitError(hx.error_code(None, resp.text))
         raise HTTPException(
             status_code=502,
             detail=f"qryn query returned HTTP {resp.status_code}",
@@ -413,6 +422,28 @@ async def _query_qryn(
     return _parse_loki_response(loki_data)
 
 
+class ClickHouseLimitError(HTTPException):
+    """A ClickHouse/qryn query was stopped by a limit (memory, bytes or rows
+    read, execution time) — the search was too broad, ClickHouse is fine."""
+
+    def __init__(self, code: Optional[int]) -> None:
+        super().__init__(status_code=502,
+                         detail=f"ClickHouse query stopped by a limit (code {code})")
+        self.code = code
+
+
+# Caps on every direct ClickHouse read this router issues (fetch by Call-ID,
+# X-CID scan, fingerprint map): far below the global 4e9 per-query memory
+# limit (clickhouse-users.xml), so one request can never OOM the server.
+# readonly=2: these requests can only read.
+CH_QUERY_CAPS: dict[str, str] = {
+    "readonly": "2",
+    "max_execution_time": "10",
+    "max_memory_usage": "2000000000",
+    "max_bytes_to_read": "4000000000",
+}
+
+
 async def _clickhouse_post(
     client: httpx.AsyncClient,
     sql: str,
@@ -422,8 +453,12 @@ async def _clickhouse_post(
 
     Raises HTTPException (503 unreachable / timed out, 502 non-200) — the
     same contract every ClickHouse caller in this router has always had.
-    ``params`` are ClickHouse settings passed as URL parameters (e.g.
-    max_execution_time) — never data.
+    ``params`` are URL parameters: ClickHouse settings (max_execution_time,
+    caps, readonly) and ``param_<name>`` query-parameter VALUES for
+    ``{name:Type}`` placeholders — user data only ever travels that way.
+    A query stopped by a ClickHouse limit (memory, bytes/rows read, time)
+    raises ClickHouseLimitError (an HTTPException subclass, still 502 for
+    callers that do not care) so the search can answer 422 search_too_broad.
     """
     try:
         resp = await client.post(
@@ -448,6 +483,9 @@ async def _clickhouse_post(
             resp.status_code,
             resp.text[:500],
         )
+        code = hx.error_code(resp.headers, resp.text)
+        if hx.is_cap_error(code, resp.text):
+            raise ClickHouseLimitError(code)
         raise HTTPException(
             status_code=502,
             detail=f"ClickHouse query returned HTTP {resp.status_code}",
@@ -540,7 +578,7 @@ async def _query_clickhouse_by_callids(
         FORMAT JSONEachRow
     """
 
-    text = await _clickhouse_post(client, sql)
+    text = await _clickhouse_post(client, sql, CH_QUERY_CAPS)
 
     # Parse JSONEachRow response — one JSON object per line
     results: list[dict[str, Any]] = []
@@ -663,11 +701,14 @@ async def _fetch_legs(
     *,
     chunk_limit: Optional[int] = None,
     max_pages: Optional[int] = None,
+    errors: Optional[list[BaseException]] = None,
 ) -> list[dict[str, Any]]:
     """Fetch every stored message for ``call_ids`` — chunked, paginated.
 
     Never raises: failures/caps are recorded on ``health``.  All chunks
     failing marks the correlation degraded (the ClickHouse backbone is down).
+    ``errors`` (optional) collects the chunk exceptions for callers that must
+    tell a limit hit from an outage (the number-index seed fetch).
     """
     # Resolved at call time (module constants are tunable/monkeypatchable).
     chunk_limit = chunk_limit or FETCH_CHUNK_LIMIT
@@ -713,6 +754,8 @@ async def _fetch_legs(
         if isinstance(res, BaseException):
             failures += 1
             health.add(_failure_reason(res))
+            if errors is not None:
+                errors.append(res)
             logger.warning("Homer correlation: leg fetch chunk failed: %s", res)
         else:
             rows.extend(res)
@@ -729,7 +772,7 @@ async def _xcid_scan(
     """Source (b): A -> B via X-CID in samples_v3, bounded to A windows."""
     items = sorted(windows.items())
     chunks = [items[i:i + XCID_SCAN_CHUNK] for i in range(0, len(items), XCID_SCAN_CHUNK)]
-    ch_params = {"max_execution_time": CLICKHOUSE_MAX_EXECUTION_S}
+    ch_params = {**CH_QUERY_CAPS, "max_execution_time": CLICKHOUSE_MAX_EXECUTION_S}
     sem = asyncio.Semaphore(CLICKHOUSE_CONCURRENCY)
 
     async def one(chunk: list[tuple[str, tuple[int, int]]]) -> list[hc.ScanHit]:
@@ -1012,6 +1055,319 @@ async def _attach_attestations(data: list[dict[str, Any]]) -> None:
         m["attestation"] = by_callid.get(m.get("callid") or "")
 
 
+# ---------------------------------------------------------------------------
+# Number index (C-IDX-1..3): capability, lookup, seed fetch, refusals
+# ---------------------------------------------------------------------------
+
+# Index path page size: Call-IDs matched in the index per response (newest
+# first). Their full SIP is fetched by Call-ID, then correlated as before.
+INDEX_CALL_LIMIT = 50
+# Page-boundary expansion (see _search_via_index): rounds and Call-IDs/round.
+INDEX_EXPAND_ROUNDS = 2
+INDEX_EXPAND_LIMIT = 100
+# Capture-clock slack before a call's first indexed message for its fetch.
+INDEX_FETCH_SLACK_NS = 5 * 1_000_000_000
+# Capability cache: a healthy answer for 60 s, a failed probe for 10 s.
+CAPABILITY_TTL_S = 60.0
+CAPABILITY_FAIL_TTL_S = 10.0
+_NS = 1_000_000_000
+_capability_cache: dict[str, Any] = {"cap": None, "expires": 0.0}
+
+
+def _reset_capability_cache() -> None:
+    """Forget the cached capability (index query failed; tests)."""
+    _capability_cache["cap"] = None
+    _capability_cache["expires"] = 0.0
+
+
+async def _get_capability(client: httpx.AsyncClient) -> hx.Capability:
+    """Is the number index present, and from when is it complete? Cached.
+
+    Two tiny reads: system.tables (do the MV and table exist, when was the
+    MV created) and the coverage table (which days the backfill finished).
+    Any failure means "no index" (cached briefly): the search then uses the
+    bounded scan, so a ClickHouse hiccup can never widen a search.
+    """
+    now = time.monotonic()
+    if _capability_cache["cap"] is not None and now < _capability_cache["expires"]:
+        return _capability_cache["cap"]
+    ttl = CAPABILITY_TTL_S
+    try:
+        st = hx.build_state_sql(CLICKHOUSE_DB)
+        tables = hx.parse_state(await _clickhouse_post(
+            client, st.sql, {**st.params, **hx.STATE_QUERY_SETTINGS}))
+        coverage: list[dict[str, Any]] = []
+        if hx.COVERAGE_TABLE in tables and hx.INDEX_MV in tables and hx.INDEX_TABLE in tables:
+            coverage = hx.parse_rows(await _clickhouse_post(
+                client, hx.build_coverage_sql(CLICKHOUSE_DB), dict(hx.STATE_QUERY_SETTINGS)))
+        cap = hx.compute_capability(
+            tables, coverage, int(datetime.now(timezone.utc).timestamp() * _NS))
+    except HTTPException as exc:
+        logger.warning("Homer search: number-index capability probe failed: %s", exc.detail)
+        cap = hx.Capability(False, None, "unavailable")
+        ttl = CAPABILITY_FAIL_TTL_S
+    _capability_cache["cap"] = cap
+    _capability_cache["expires"] = now + ttl
+    return cap
+
+
+class _IndexUnavailable(Exception):
+    """The index lookup failed for a reason other than a limit."""
+
+
+def _refusal(code: str, detail: str) -> JSONResponse:
+    """422 with the contract shape {detail, code, max_scan_hours}."""
+    return JSONResponse(status_code=422, content={
+        "detail": detail, "code": code, "max_scan_hours": hx.MAX_SCAN_HOURS})
+
+
+async def _index_lookup(
+    client: httpx.AsyncClient,
+    needles: list[tuple[str, str]],
+    start_ns: int,
+    end_ns: int,
+    limit: int,
+    *,
+    first_ns_at_least: Optional[int] = None,
+) -> list[hx.IndexHit]:
+    """Call-IDs matching every needle in [start_ns, end_ns), newest first.
+
+    Values reach ClickHouse ONLY as query parameters (hx.build_lookup);
+    caps + readonly ride along (hx.INDEX_QUERY_SETTINGS). A limit hit raises
+    ClickHouseLimitError (-> 422 search_too_broad); any other failure raises
+    _IndexUnavailable (-> bounded scan when the window allows it).
+    """
+    if end_ns <= start_ns:
+        return []
+    q = hx.build_lookup(CLICKHOUSE_DB, needles, start_ns, end_ns, limit,
+                        first_ns_at_least=first_ns_at_least)
+    try:
+        text = await _clickhouse_post(client, q.sql, {**q.params, **hx.INDEX_QUERY_SETTINGS})
+    except ClickHouseLimitError:
+        raise
+    except HTTPException as exc:
+        raise _IndexUnavailable(str(exc.detail)) from exc
+    return hx.parse_lookup(text)
+
+
+async def _fetch_index_seed(
+    client: httpx.AsyncClient,
+    hits: list[hx.IndexHit],
+    start_ns: int,
+    end_ns: int,
+    health: hc.CorrelationHealth,
+) -> list[dict[str, Any]]:
+    """Every message of the selected calls in the window, by Call-ID.
+
+    One fetch window for all of them: [oldest first indexed message - slack,
+    window end) — a call's later messages (BYE hours later) lie after its
+    last *matched* message when the number was only in the INVITE (PAI,
+    Diversion, R-URI). The fetch is gin-indexed by Call-ID, so a wide window
+    costs only the narrow fingerprint/timestamp columns. Partial failures are
+    recorded on ``health``; if EVERY chunk failed the search fails loudly
+    (422 when a limit stopped it, else 502) instead of returning no calls.
+    """
+    cids = {h.call_id for h in hits if hc.is_safe_callid(h.call_id)}
+    if not cids:
+        return []
+    lo = max(start_ns, min(h.first_ns for h in hits) - INDEX_FETCH_SLACK_NS)
+    errors: list[BaseException] = []
+    local = hc.CorrelationHealth()
+    rows = await _fetch_legs(client, cids, lo, end_ns, local, errors=errors)
+    if local.degraded:
+        if any(isinstance(e, ClickHouseLimitError) for e in errors):
+            raise ClickHouseLimitError(241)
+        raise HTTPException(status_code=502,
+                            detail="ClickHouse fetch by Call-ID failed for the number search")
+    for r in local.reasons:
+        health.add(r)
+    health.truncated = health.truncated or local.truncated
+    return rows
+
+
+def _page_rows(
+    rows: list[dict[str, Any]],
+    before_ns: Optional[int],
+    whole_calls: Optional[set[str]] = None,
+) -> list[dict[str, Any]]:
+    """The strict cursor bound: rows with timestamp_ns < before_ns, except
+    rows of ``whole_calls`` (index path: the page's own calls, returned
+    whole)."""
+    if before_ns is None:
+        return rows
+    keep = whole_calls or set()
+    return [r for r in rows
+            if r.get("timestamp_ns", 0) < before_ns or r.get("callid") in keep]
+
+
+def _oldest_ns(rows: list[dict[str, Any]], before_ns: Optional[int]) -> Optional[int]:
+    vals = [r.get("timestamp_ns") or 0 for r in rows]
+    vals = [v for v in vals if v > 0 and (before_ns is None or v < before_ns)]
+    return min(vals) if vals else None
+
+
+async def _search_via_index(
+    client: httpx.AsyncClient,
+    body: "HomerSearchRequest",
+    needles: list[tuple[str, str]],
+    start_ns: int,
+    end_ns: int,
+    window_end_ns: int,
+) -> tuple[list[dict[str, Any]], Optional["_Correlation"], bool, set[str]]:
+    """Index path: Call-IDs from the index, then the unchanged pipeline.
+
+    1. Up to INDEX_CALL_LIMIT (+1 to detect more) calls whose first matching
+       message is in [start_ns, end_ns) (end_ns = end_time clamped by
+       before_ns), newest first by that first matching message.
+    2. Fetch those calls by Call-ID over the WHOLE window (to window_end_ns =
+       end_time): a page returns whole calls, so a call that started before
+       the cursor still shows its later 200 OK / BYE. Correlate exactly like
+       the scan path (the selected calls are the fully fetched seed).
+    3. Page boundary: the response cursor (oldest_ts_ns) is the oldest
+       returned message, which a correlated A leg can pull below the oldest
+       selected call's start. Calls starting in that gap would otherwise be
+       skipped by the next page, so they are added to this page (bounded
+       rounds) before answering.
+    4. has_more = some matching call starts before the cursor.
+    Returns (rows, correlation, has_more, selected Call-IDs). Rows of the
+    selected calls are exempt from the strict before_ns filter: no earlier
+    page can hold them (a call on an earlier page started at or after that
+    page's cursor, so it is never selected again).
+    """
+    seed_health = hc.CorrelationHealth()
+    hits = await _index_lookup(client, needles, start_ns, end_ns, INDEX_CALL_LIMIT + 1)
+    more = len(hits) > INDEX_CALL_LIMIT
+    selected = [h for h in hits[:INDEX_CALL_LIMIT] if hc.is_safe_callid(h.call_id)]
+    if not selected:
+        return [], (_Correlation() if body.correlate else None), False, set()
+    ids = {h.call_id for h in selected}
+    seed = await _fetch_index_seed(client, selected, start_ns, window_end_ns, seed_health)
+
+    async def correlate() -> tuple[list[dict[str, Any]], Optional[_Correlation]]:
+        if not body.correlate:
+            return list(seed), None
+        c = await _correlate_legs(client, seed, start_ns, window_end_ns, prefetched=set(ids))
+        return c.rows, c
+
+    rows, corr = await correlate()
+    has_more = False
+    if more:
+        for _round in range(INDEX_EXPAND_ROUNDS):
+            cursor = _oldest_ns(_page_rows(rows, body.before_ns, {h.call_id for h in selected}), None)
+            boundary = min(h.first_ns for h in selected)
+            if cursor is None or cursor >= boundary:
+                break
+            extra = await _index_lookup(client, needles, start_ns, boundary,
+                                        INDEX_EXPAND_LIMIT, first_ns_at_least=cursor)
+            present = {r.get("callid") for r in rows}
+            new = [h for h in extra if h.call_id not in ids and h.call_id not in present
+                   and hc.is_safe_callid(h.call_id)]
+            ids |= {h.call_id for h in extra}
+            if not new:
+                break
+            selected += new
+            seed += await _fetch_index_seed(client, new, start_ns, window_end_ns, seed_health)
+            rows, corr = await correlate()
+        cursor = _oldest_ns(_page_rows(rows, body.before_ns, {h.call_id for h in selected}), None)
+        if cursor is None:
+            cursor = min(h.first_ns for h in selected)
+        has_more = bool(await _index_lookup(client, needles, start_ns, cursor, 1))
+    if corr is not None:
+        for r in seed_health.reasons:
+            corr.health.add(r)
+        corr.health.truncated = corr.health.truncated or seed_health.truncated
+    return rows, corr, has_more, {h.call_id for h in selected}
+
+
+async def _build_response(
+    body: "HomerSearchRequest",
+    results: list,
+    corr: Optional["_Correlation"],
+    *,
+    disabled: bool,
+    has_more: bool,
+    meta: dict[str, Any],
+    whole_calls: Optional[set[str]] = None,
+) -> dict:
+    """The one response envelope every search path returns.
+
+    Runs the full post-processing pipeline (dedup, SIP-causality ordering,
+    hairpin marking, seq) so the UI gets the same per-message contract from
+    every path, then adds the paging fields and ``meta`` (search_path,
+    index_covered_from, max_scan_hours).
+    """
+    # Belt-and-braces strict cursor bound: end_ns clamping already scoped
+    # every upstream fetch, but correlation refetches merge rows from multiple
+    # queries — enforce the page boundary on the final set so adjacent pages
+    # can never share a row. Index path: the page's own calls are whole.
+    results = _page_rows(results, body.before_ns, whole_calls)
+    data, pipeline_warnings = _finalize_pipeline(results)
+    # Additive: stamp each message with its call's STIR/SHAKEN attestation
+    # (or null). One batched, failure-isolated lookup.
+    await _attach_attestations(data)
+    # True min over what was RETURNED (0 = unparseable-timestamp sentinel,
+    # excluded — it is not a usable cursor position).
+    oldest_ts_ns = min(
+        (m["timestamp_ns"] for m in data if m.get("timestamp_ns")),
+        default=None,
+    )
+    if corr is not None:
+        # Groups/legs cover exactly the Call-IDs present in data.
+        correlations, legs = hc.build_groups(
+            {m["callid"] for m in data if m.get("callid")},
+            corr.graph, _rows_by_callid(data),
+        )
+        status, reason = corr.health.status, corr.health.reason
+        truncated = corr.health.truncated
+    else:
+        correlations, legs = {}, {}
+        status, reason = "ok", ("disabled" if disabled else None)
+        truncated = False
+    return {
+        "data": data,
+        "correlations": correlations,
+        "legs": legs,
+        "correlation_status": status,
+        "correlation_reason": reason,
+        "pipeline_warnings": pipeline_warnings,
+        # Additive cursor-paging fields (always present).
+        "oldest_ts_ns": oldest_ts_ns,
+        "has_more": has_more,
+        # DEPRECATED back-compat flag: only present when True.
+        **({"correlation_truncated": True} if truncated else {}),
+        **meta,
+    }
+
+
+def _capabilities_body(cap: hx.Capability) -> dict[str, Any]:
+    return {
+        "number_index": cap.number_index,
+        "index_covered_from": cap.covered_from_iso,
+        "max_scan_hours": hx.MAX_SCAN_HOURS,
+        "max_window_days": hx.MAX_WINDOW_DAYS,
+    }
+
+
+# Literal path, registered BEFORE POST /search (and before any future
+# /search/{param} route) so it can never be captured by a parameter.
+@router.get("/search/capabilities")
+async def search_capabilities(user: dict = Depends(require_support_or_admin)):
+    """What the number search can do right now (C-IDX-3).
+
+    {"number_index": bool, "index_covered_from": ISO-8601 UTC | null,
+     "max_scan_hours": 24, "max_window_days": 7}
+
+    number_index: the ClickHouse number index exists and is being filled.
+    index_covered_from: the oldest moment from which it is complete up to
+    now; a number search whose start_time is at or after it uses the index
+    for any window, anything older is limited to max_scan_hours. Cached for
+    up to 60 s; never raises (a ClickHouse failure reads as no index).
+    """
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        cap = await _get_capability(client)
+    return _capabilities_body(cap)
+
+
 @router.post("/search")
 async def search_sip_traces(
     body: HomerSearchRequest,
@@ -1147,6 +1503,34 @@ async def search_sip_traces(
     stored timestamps as the tiebreak — ingest-stamped rows carry timestamps
     15-20 ms late, so timestamp order alone is NOT trustworthy (see
     tests/fixtures/homer_ground_truth_20260610.md).
+
+    SEARCH PATHS (C-IDX-2) — response adds ``search_path`` ("call_id" |
+    "index" | "scan"), ``index_covered_from`` (ISO-8601 UTC | null) and
+    ``max_scan_hours`` (24) on every 200:
+      call_id      label path (above), unchanged, any window.
+      index        number/from_user/to_user with the ClickHouse number index
+                   present and start_time >= index_covered_from: Call-IDs come
+                   from qryn.sip_number_index (substring of stored digits;
+                   from_user = From/P-Asserted-Identity, to_user = To/R-URI,
+                   number = any of those or Diversion), INDEX_CALL_LIMIT calls
+                   per page newest first (by each call's first matching
+                   message), then the same fetch-by-Call-ID + correlation +
+                   pipeline. Paging uses before_ns = oldest_ts_ns as above,
+                   but a page returns WHOLE calls: page N+1 selects calls
+                   whose first matching message is older than before_ns and
+                   returns all their messages in the window (a long call's
+                   BYE may be newer than before_ns); correlated legs keep the
+                   strict bound. Pages never share a row and never skip a
+                   call. has_more = a matching call starts before
+                   oldest_ts_ns.
+      scan         otherwise, when end_time - start_time <= 24 h: the qryn
+                   text scan above, unchanged.
+    Refusals (JSON {"detail", "code", "max_scan_hours"}, HTTP 422):
+      window_too_wide   a number search that the index does not cover and
+                        that is wider than max_scan_hours.
+      search_too_broad  a ClickHouse limit (memory / bytes / rows / time)
+                        stopped the index lookup, the fetch, or (relayed by
+                        qryn) the scan — fewer matches needed, not a retry.
     """
     if (
         not body.number
@@ -1168,14 +1552,9 @@ async def search_sip_traces(
     number_needle = _needle_or_422("number", body.number)
     from_needle = _needle_or_422("from_user", body.from_user)
     to_needle = _needle_or_422("to_user", body.to_user)
-
-    # Build LogQL query
-    logql = _build_logql_query(
-        from_user=from_needle,
-        to_user=to_needle,
-        call_id=body.call_id,
-        number=number_needle,
-    )
+    # (field, digits) for the index path; same order as the LogQL filters.
+    needles = [(f, n) for f, n in (("from_user", from_needle), ("to_user", to_needle),
+                                   ("number", number_needle)) if n]
 
     # Convert timestamps to Unix nanoseconds
     try:
@@ -1186,116 +1565,124 @@ async def search_sip_traces(
             status_code=400,
             detail=f"Invalid timestamp format: {exc}",
         )
+    window_ns = end_ns - start_ns
+    window_end_ns = end_ns          # end_time itself (before_ns clamps end_ns)
 
-    # Cursor paging: before_ns is a STRICT upper bound (timestamp_ns <
-    # before_ns). Clamping end_ns propagates the bound to every fetch step
-    # (qryn Steps 1/2 and the ClickHouse Step 3, whose range predicate is
-    # already exclusive: ``timestamp_ns < end_ns``); a Python-side strict
-    # filter in _respond() guarantees it regardless of qryn's end-boundary
-    # semantics. end_time behavior is untouched when before_ns is absent.
-    if body.before_ns is not None:
-        end_ns = min(end_ns, body.before_ns)
-        if end_ns <= start_ns:
-            # Cursor paged past the window start — nothing older can exist.
-            return {
-                "data": [],
-                "correlations": {},
-                "legs": {},
-                "correlation_status": "ok",
-                "correlation_reason": None,
-                "pipeline_warnings": [],
-                "oldest_ts_ns": None,
-                "has_more": False,
-            }
-
-    # INITIAL_LIMIT (500) caps the Step-1 number search. It is ALSO the
-    # guardrail for broad partial needles: a 3-digit needle like "617" can
-    # match thousands of messages in a busy window, but Step 1 simply
-    # truncates (has_more tells the UI to page). Correlation is bounded per A
-    # call (MAX_CORRELATE_A_CALLS, windows, chunking) and every upstream query
-    # carries the 15s httpx timeout. The time WINDOW span itself is
-    # client-chosen and not capped server-side.
+    # INITIAL_LIMIT (500) caps the Step-1 number search on the SCAN path. It
+    # is ALSO the guardrail for broad partial needles: a 3-digit needle like
+    # "617" can match thousands of messages in a busy window, but Step 1
+    # simply truncates (has_more tells the UI to page). The scan window is
+    # capped at hx.MAX_SCAN_HOURS. The index path pages by Call-ID instead
+    # (INDEX_CALL_LIMIT calls per page) and every query carries caps.
     INITIAL_LIMIT = 500
 
     async with httpx.AsyncClient(timeout=15.0) as client:
-        # Step 1: Initial query — phone number regex match
-        initial_results = await _query_qryn(
-            client, logql, start_ns, end_ns, limit=INITIAL_LIMIT,
-        )
+        cap = await _get_capability(client)
 
-        # Paging truth: qryn (Loki-compatible) defaults to direction=backward,
-        # returning the NEWEST entries when the limit truncates — so a
-        # full-limit Step-1 response means older data exists in the window
-        # beyond what was returned, and the next page is reached by bounding
-        # below this page's oldest timestamp (before_ns). Under-limit means
-        # the base fetch saw the whole window. Measured PRE-dedup/PRE-filter:
-        # it reflects what the store actually handed back.
-        base_truncated = len(initial_results) >= INITIAL_LIMIT
+        # Which path answers (C-IDX-2):
+        #   call_id given            -> label path, unchanged, any window
+        #   index covers start_time  -> number index, any window
+        #   window <= max_scan_hours -> the old qryn text scan
+        #   otherwise                -> 422 window_too_wide (never an OOM)
+        if body.call_id:
+            search_path = "call_id"
+        elif cap.covers(start_ns):
+            search_path = "index"
+        elif window_ns <= hx.MAX_SCAN_HOURS * 3600 * _NS:
+            search_path = "scan"
+        else:
+            return _refusal("window_too_wide", hx.window_too_wide_sentence(cap))
+        meta: dict[str, Any] = {
+            "search_path": search_path,
+            "index_covered_from": cap.covered_from_iso,
+            "max_scan_hours": hx.MAX_SCAN_HOURS,
+        }
 
-        # Every return path runs the full post-processing pipeline (dedup,
-        # SIP-causality ordering, hairpin marking, seq assignment) so the UI
-        # receives the same per-message contract regardless of which path
-        # produced the data.
-        async def _respond(
-            results: list,
-            corr: Optional[_Correlation] = None,
-            disabled: bool = False,
-        ) -> dict:
-            if body.before_ns is not None:
-                # Belt-and-braces strict cursor bound: end_ns clamping already
-                # scoped every upstream fetch, but correlation refetches merge
-                # rows from multiple queries — enforce the page boundary on
-                # the final set so adjacent pages can never share a row.
-                results = [
-                    r for r in results
-                    if r.get("timestamp_ns", 0) < body.before_ns
-                ]
-            data, pipeline_warnings = _finalize_pipeline(results)
-            # Additive: stamp each message with its call's STIR/SHAKEN
-            # attestation (or null). One batched, failure-isolated lookup — it
-            # never raises and never blocks the search on a DB hiccup.
-            await _attach_attestations(data)
-            # True min over what was RETURNED (0 = unparseable-timestamp
-            # sentinel, excluded — it is not a usable cursor position).
-            oldest_ts_ns = min(
-                (m["timestamp_ns"] for m in data if m.get("timestamp_ns")),
-                default=None,
+        # Cursor paging: before_ns is a STRICT upper bound (timestamp_ns <
+        # before_ns). Clamping end_ns propagates the bound to every fetch step
+        # (qryn Step 1, the index lookup and the ClickHouse fetches, whose
+        # range predicate is already exclusive: ``timestamp_ns < end_ns``); a
+        # Python-side strict filter in _build_response() guarantees it
+        # regardless of qryn's end-boundary semantics. end_time behavior is
+        # untouched when before_ns is absent.
+        if body.before_ns is not None:
+            end_ns = min(end_ns, body.before_ns)
+            if end_ns <= start_ns:
+                # Cursor paged past the window start — nothing older exists.
+                return {
+                    "data": [],
+                    "correlations": {},
+                    "legs": {},
+                    "correlation_status": "ok",
+                    "correlation_reason": None,
+                    "pipeline_warnings": [],
+                    "oldest_ts_ns": None,
+                    "has_more": False,
+                    **meta,
+                }
+
+        try:
+            if search_path == "index":
+                try:
+                    rows, corr, has_more, whole = await _search_via_index(
+                        client, body, needles, start_ns, end_ns, window_end_ns)
+                except _IndexUnavailable as exc:
+                    # Rollback / race: forget the capability and fall back to
+                    # the bounded scan when the window allows it.
+                    logger.warning("Homer search: number index unavailable (%s)", exc)
+                    _reset_capability_cache()
+                    if window_ns > hx.MAX_SCAN_HOURS * 3600 * _NS:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="The number index could not be read; retry, or search at most "
+                                   f"{hx.MAX_SCAN_HOURS} hours at a time.")
+                    meta["search_path"] = "scan"
+                else:
+                    return await _build_response(
+                        body, rows, corr, disabled=not body.correlate,
+                        has_more=has_more, meta=meta, whole_calls=whole)
+
+            # Scan / Call-ID paths: LogQL exactly as before.
+            logql = _build_logql_query(
+                from_user=from_needle,
+                to_user=to_needle,
+                call_id=body.call_id,
+                number=number_needle,
             )
-            if corr is not None:
-                # Groups/legs cover exactly the Call-IDs present in data.
-                correlations, legs = hc.build_groups(
-                    {m["callid"] for m in data if m.get("callid")},
-                    corr.graph, _rows_by_callid(data),
-                )
-                status, reason = corr.health.status, corr.health.reason
-                truncated = corr.health.truncated
-            else:
-                correlations, legs = {}, {}
-                status, reason = "ok", ("disabled" if disabled else None)
-                truncated = False
-            return {
-                "data": data,
-                "correlations": correlations,
-                "legs": legs,
-                "correlation_status": status,
-                "correlation_reason": reason,
-                "pipeline_warnings": pipeline_warnings,
-                # Additive cursor-paging fields (always present).
-                "oldest_ts_ns": oldest_ts_ns,
-                "has_more": base_truncated,
-                # DEPRECATED back-compat flag: only present when True.
-                **({"correlation_truncated": True} if truncated else {}),
-            }
+            # Step 1: Initial query — phone number regex match (or label).
+            initial_results = await _query_qryn(
+                client, logql, start_ns, end_ns, limit=INITIAL_LIMIT,
+            )
 
-        if not body.correlate:
-            return await _respond(initial_results, disabled=True)
-        if not initial_results:
-            return await _respond(initial_results, _Correlation())
+            # Paging truth: qryn (Loki-compatible) defaults to
+            # direction=backward, returning the NEWEST entries when the limit
+            # truncates — so a full-limit Step-1 response means older data
+            # exists in the window beyond what was returned, and the next
+            # page is reached by bounding below this page's oldest timestamp
+            # (before_ns). Under-limit means the base fetch saw the whole
+            # window. Measured PRE-dedup/PRE-filter: it reflects what the
+            # store actually handed back.
+            base_truncated = len(initial_results) >= INITIAL_LIMIT
 
-        # Steps 2-3: deterministic, bounded A/B correlation + leg fetch.
-        # Never raises; failures surface as correlation_status/_reason.
-        corr = await _correlate_legs(client, initial_results, start_ns, end_ns)
-        return await _respond(corr.rows, corr)
+            if not body.correlate:
+                return await _build_response(
+                    body, initial_results, None, disabled=True,
+                    has_more=base_truncated, meta=meta)
+            if not initial_results:
+                return await _build_response(
+                    body, initial_results, _Correlation(), disabled=False,
+                    has_more=base_truncated, meta=meta)
+
+            # Steps 2-3: deterministic, bounded A/B correlation + leg fetch.
+            # Never raises; failures surface as correlation_status/_reason.
+            corr = await _correlate_legs(client, initial_results, start_ns, end_ns)
+            return await _build_response(
+                body, corr.rows, corr, disabled=False,
+                has_more=base_truncated, meta=meta)
+        except ClickHouseLimitError as exc:
+            logger.warning("Homer search refused as too broad (%s path, code %s)",
+                           meta["search_path"], exc.code)
+            return _refusal("search_too_broad", hx.too_broad_sentence(needles))
 
 
 # ---------------------------------------------------------------------------

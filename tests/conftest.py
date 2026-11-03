@@ -20,3 +20,15 @@ def _fresh_user_status_cache():
     if mod is not None:
         mod.reset()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _fresh_homer_capability_cache():
+    """routers.homer caches the number-index capability for 60 s per process;
+    a value cached by one test must not route the next test's search."""
+    mod = sys.modules.get("routers.homer")
+    if mod is not None:
+        mod._reset_capability_cache()
+    yield
+    if mod is not None:
+        mod._reset_capability_cache()

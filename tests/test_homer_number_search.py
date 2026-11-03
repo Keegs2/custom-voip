@@ -197,9 +197,14 @@ class _UpstreamMock:
 
     def __init__(self, loki_json=None):
         self.requests = []
+        self.probes = []   # number-index capability probes (no index here)
         self.loki_json = loki_json if loki_json is not None else {"data": {"result": []}}
 
     def _handle(self, request):
+        if "/loki/" not in request.url.path and (
+                b"system.tables" in request.content or b"sip_number_index" in request.content):
+            self.probes.append(request)
+            return httpx.Response(200, text="")
         self.requests.append(request)
         if "/loki/api/v1/query_range" in request.url.path:
             return httpx.Response(200, json=self.loki_json)
@@ -410,7 +415,14 @@ def test_response_shape_unchanged_with_results(api, monkeypatch):
     assert set(body.keys()) == {
         "data", "correlations", "pipeline_warnings", "oldest_ts_ns", "has_more",
         "legs", "correlation_status", "correlation_reason",
+        # C-IDX-2 additive fields (always present).
+        "search_path", "index_covered_from", "max_scan_hours",
     }
+    # No number index in this harness (ClickHouse answers empty): the 1-hour
+    # window is served by the old qryn scan.
+    assert body["search_path"] == "scan"
+    assert body["index_covered_from"] is None
+    assert body["max_scan_hours"] == 24
     assert body["correlations"] == {}
     # correlate=false: no correlation ran — empty legs, status ok/"disabled".
     assert body["legs"] == {}
@@ -611,7 +623,8 @@ def test_before_ns_adjacent_pages_share_zero_rows(api, monkeypatch):
 @needs_web
 def test_before_ns_at_or_before_window_start_short_circuits(api, monkeypatch):
     # Cursor paged past start_time: nothing older can exist — empty envelope,
-    # NO upstream I/O at all.
+    # NO search I/O at all (the number-index capability probe is recorded
+    # apart, in mock.probes).
     r, mock = _search(
         api, monkeypatch, number="6174544217", before_ns=START_NS)
     assert r.status_code == 200, r.text
@@ -624,6 +637,9 @@ def test_before_ns_at_or_before_window_start_short_circuits(api, monkeypatch):
         "pipeline_warnings": [],
         "oldest_ts_ns": None,
         "has_more": False,
+        "search_path": "scan",
+        "index_covered_from": None,
+        "max_scan_hours": 24,
     }
     assert mock.requests == []
 
