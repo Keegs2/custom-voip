@@ -1,0 +1,21 @@
+# Installed verbatim by install.sh -> /etc/systemd/system/vz-routes.service
+# Oneshot: forwarded-IP addressing, src-selected default/VPC routes, ILB probe address on lo, Verizon prefix routes.
+# Plan §3.1 (addressing), §3.2 (static routes), §3.5 (VIP-addressed health probes).
+# Runs after the network is online (ens4 has its DHCP address + gateway route) and after networkd has created xfrm-vz,
+# and BEFORE charon, so charon enumerates the IKE IP on ens4 at start (it also tracks address changes live, so a late
+# re-run — `systemctl restart vz-routes` — is always safe).
+
+[Unit]
+Description=Verizon IPsec gateway addressing and static routes (plan §3.1/§3.2/§3.5)
+After=network-online.target systemd-networkd.service
+Wants=network-online.target
+Before=strongswan.service vz-healthd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/vz-ipsec/vz-gateway.env
+ExecStart=/usr/local/sbin/vz-routes.sh
+
+[Install]
+WantedBy=multi-user.target

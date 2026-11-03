@@ -1,0 +1,55 @@
+# Rendered by install.sh -> /etc/swanctl/conf.d/vz.conf
+# Verizon IKEv2 Route-Based tunnel, profile "IKE v2 H19 RM Opt2" (plan §1.3, §3.2).
+# One connection per gateway. The PSK is NOT here: /etc/swanctl/conf.d/secrets.conf (mode 600, operator-created).
+# Every setting below maps to a row of the §3.2 table; do not "tune" without re-reading it.
+
+connections {
+    vz {
+        version = 2                                 # IKEv2 only (§1.3)
+        local_addrs  = ${VZ_IKE_IP}                 # §3.1 (2): IKE + ESP outer source = the forwarded IKE IP, never the NIC IP
+        remote_addrs = ${VZ_PEER_IP}                # Verizon's IKE peer for THIS tunnel (§10 input)
+
+        proposals = aes256-sha384-ecp256            # IKE: aes256cbc / sha384 / DH group 19 — the ONLY proposal offered (§3.2 row 1)
+        rekey_time = 27000s                         # IKE soft rekey 7.5 h; hard limit 28800 s = 8 h (§3.2 row 1)
+        over_time  = 1800s                          # 27000 + 1800 = 28800 s; IKE_SA has no life_time, over_time is the hard margin
+
+        dpd_delay = 5s                              # DPD only when idle: charon sends DPD only after 5 s with nothing received (§3.2 "DPD 5 s")
+        keyingtries = 0                             # retry forever — "tunnel established immediately", never give up (§3.2)
+        mobike = no                                 # no MOBIKE => no NAT-T probing, no 4500 flip (§3.2 "No NAT-T")
+        encap = no                                  # never force UDP encapsulation; the §3.4 MTU arithmetic has 4 B of margin and needs raw ESP
+
+        local {
+            auth = psk
+            id = ${VZ_LOCAL_ID}                     # "General IKE-ID" = our IKE IP (§3.2) — CONFIRM with Verizon
+        }
+        remote {
+            auth = psk
+            id = ${VZ_PEER_ID}                      # Verizon's peer IP as its IKE-ID (§3.2) — CONFIRM with Verizon
+        }
+
+        children {
+            vz {
+                local_ts  = 0.0.0.0/0               # Option 2 / single proxy-ID, route-based (§3.2 "Option 2 proxy ID")
+                remote_ts = 0.0.0.0/0
+
+                esp_proposals = aes256gcm16-ecp256  # ESP: AES-256-GCM (16 B ICV) with PFS group 19 (§3.2 row 2)
+                mode = tunnel                       # tunnel mode (§3.2 row 2)
+                rekey_time = 3240s                  # ESP soft rekey 54 min (§3.2 row 2)
+                life_time  = 3600s                  # ESP hard life 1 h (§3.2 row 2)
+
+                dpd_action   = restart              # on dead peer: re-establish (§3.2 "DPD")
+                start_action = start                # establish immediately at load (§3.2 "Establish immediately")
+                close_action = start                # peer closed it? bring it straight back (§3.2)
+
+                copy_df = no                        # clear DF on the outer header (§3.2 "Clear DF", §3.4)
+                if_id_in  = ${VZ_IF_ID}             # bind the SAs to the xfrm-vz interface (IP-unnumbered, §3.2 "IP unnumbered")
+                if_id_out = ${VZ_IF_ID}
+                replay_window = 128                 # anti-replay on; 128 (default 32 drops under RTP reorder bursts, §3.2 "Anti-replay")
+                # No ESN: `esn` is NOT a child option (charon rejects the whole connection — verified 5.9.8);
+                # ESN is negotiated via the proposal keyword and `noesn` is the default (§3.6: SA rekeys long before 2^32 pkts).
+            }
+        }
+    }
+}
+
+# Credentials live in /etc/swanctl/conf.d/secrets.conf — see templates/secrets.conf.example. Never in git.

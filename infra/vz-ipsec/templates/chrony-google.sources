@@ -1,0 +1,4 @@
+# Installed verbatim by install.sh -> /etc/chrony/sources.d/vz-google.sources   (plan §3.2 "chrony -> metadata")
+# Debian 12 chrony.conf has `sourcedir /etc/chrony/sources.d`, so this is additive and survives package upgrades.
+# IKE lifetimes and log correlation with Homer depend on the gateways agreeing on time with the rest of the fleet.
+server metadata.google.internal iburst prefer

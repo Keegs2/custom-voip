@@ -1,0 +1,25 @@
+# Installed verbatim by install.sh -> /etc/systemd/system/vz-healthd.service
+# GET /healthz on 0.0.0.0:8081 for the next-hop ILB health check (plan §3.5) + node_exporter textfile metrics.
+# Runs as root: `swanctl --list-sas` needs the vici socket and `nft list table` needs CAP_NET_ADMIN.
+# Keep it running even when charon is down — "503 with the failed checks" is the signal the ILB needs.
+
+[Unit]
+Description=Verizon IPsec gateway health endpoint :8081/healthz (plan §3.5)
+After=vz-routes.service nftables.service strongswan.service
+Wants=vz-routes.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/vz-ipsec/vz-gateway.env
+ExecStart=/usr/bin/python3 -I /usr/local/sbin/vz-healthd.py
+Restart=always
+RestartSec=2
+# Hardening that does not get in the way of swanctl/nft/ip:
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ReadWritePaths=/var/lib/node_exporter/textfile_collector /run
+
+[Install]
+WantedBy=multi-user.target
