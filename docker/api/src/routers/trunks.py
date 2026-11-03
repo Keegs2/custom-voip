@@ -546,9 +546,10 @@ async def add_trunk_did(trunk_id: int, did: TrunkDID, admin: dict = Depends(requ
 
 
 #: Pool states a former trunk DID may be moved to 'reserved' from. A DID that
-#: is porting in/out or suspended keeps that lifecycle state (the delete
-#: still removes the subscriber); the drift report then shows it.
-_RESERVABLE_POOL_STATUSES = ("available", "assigned", "reserved", "release_requested")
+#: is porting in/out, suspended or release_requested (a customer release
+#: awaiting admin approval) keeps that lifecycle state (the delete still
+#: removes the subscriber); the drift report then shows it.
+_RESERVABLE_POOL_STATUSES = ("available", "assigned", "reserved")
 
 
 async def _reserve_former_trunk_dids(conn, dids: list[str], customer_id: int,
@@ -561,7 +562,8 @@ async def _reserve_former_trunk_dids(conn, dids: list[str], customer_id: int,
     existing row is reset only when it still describes this trunk DID or
     nothing (product_type NULL or 'trunk') and is in a reservable state; a row
     that names another product (rcf/voicemail/ivr/api — the DID was in two
-    product tables) or is porting/suspended is left exactly as it is.
+    product tables) or is porting / suspended / release_requested is left
+    exactly as it is.
     Returns the DIDs actually reserved, in input order.
     """
     if not dids:

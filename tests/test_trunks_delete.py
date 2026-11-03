@@ -14,7 +14,8 @@ C1  DELETE /v1/trunks/{id}
       the exact contract fields (status, customer_id, product_type /
       product_ref_id / assigned_at NULL, notes 'reserved: trunk <id> deleted');
       a DID with no pool row gets one (source='manual'); a pool row that names
-      ANOTHER product, or is porting/suspended, is left alone.
+      ANOTHER product, or is porting / suspended / release_requested, is left
+      alone.
     * the exact 200 body.
 C2  DELETE /v1/trunks/{id}/dids/{trunk_did_id}
     * 404 {"detail":"Trunk DID not found"} when the row is on another trunk /
@@ -44,6 +45,7 @@ D_NOPOOL = "+16175557002"      # no pool row -> inserted reserved, source manual
 D_OTHER_PRODUCT = "+16175557003"   # pool names rcf -> kept
 D_PORTING = "+16175557004"     # pool porting_out -> kept
 D_MISMATCH = "+16175557005"    # pool assigned/trunk to another customer -> reserved for B
+D_RELEASE = "+16175557006"     # pool release_requested -> kept (pending release approval)
 E_POOL = "+16175557011"        # on the enabled trunk, pool assigned
 E_NOPOOL = "+16175557012"      # on the enabled trunk, no pool row
 F_OTHER = "+16175557021"       # on T_OTHER (customer A)
@@ -67,7 +69,7 @@ class TrunkHarness(AdminHarness):
                 INSERT INTO trunk_dids (id, trunk_id, did) VALUES
                   (9001, {T_OFF}, '{D_POOL}'), (9002, {T_OFF}, '{D_NOPOOL}'),
                   (9003, {T_OFF}, '{D_OTHER_PRODUCT}'), (9004, {T_OFF}, '{D_PORTING}'),
-                  (9005, {T_OFF}, '{D_MISMATCH}'),
+                  (9005, {T_OFF}, '{D_MISMATCH}'), (9006, {T_OFF}, '{D_RELEASE}'),
                   (9011, {T_ON}, '{E_POOL}'), (9012, {T_ON}, '{E_NOPOOL}'),
                   (9021, {T_OTHER}, '{F_OTHER}');
                 INSERT INTO did_inventory (did, customer_id, product_type, status, assigned_at,
@@ -76,6 +78,7 @@ class TrunkHarness(AdminHarness):
                   ('{D_OTHER_PRODUCT}', {CUST_A}, 'rcf', 'assigned', '2026-10-01T00:00:00Z', 'rcf row', NULL, NULL, 'bandwidth_sync'),
                   ('{D_PORTING}', {CUST_B}, 'trunk', 'porting_out', NULL, 'porting', NULL, NULL, 'bandwidth_sync'),
                   ('{D_MISMATCH}', {CUST_A}, 'trunk', 'assigned', NULL, NULL, NULL, NULL, 'bandwidth_sync'),
+                  ('{D_RELEASE}', {CUST_B}, 'trunk', 'release_requested', NULL, 'release asked', NULL, NULL, 'bandwidth_sync'),
                   ('{E_POOL}', {CUST_B}, 'trunk', 'assigned', '2026-10-02T00:00:00Z', NULL, NULL, NULL, 'bandwidth_sync');
                 INSERT INTO live_trunk_stats (customer_id, trunk_id, sbc_id, trunk_name)
                 VALUES ({CUST_B}, {T_OFF}, 'east-sbc-1', 'pbx-old'),
@@ -122,14 +125,14 @@ def test_delete_trunk_guards(h):
     for who in ("support", "user_b", "ro_a"):
         assert h.delete(f"/v1/trunks/{T_OFF}", who=who).status_code == 403, who
     # nothing changed by the refused calls
-    assert h.val(f"SELECT count(*) FROM trunk_dids WHERE trunk_id = {T_OFF}") == 5
+    assert h.val(f"SELECT count(*) FROM trunk_dids WHERE trunk_id = {T_OFF}") == 6
     assert h.val(f"SELECT count(*) FROM sip_trunks WHERE id = {T_ON}") == 1
 
 
 def test_delete_disabled_trunk(h):
     before_routing = h.val(
         f"SELECT count(*) FROM number_routing WHERE trunk_id = {T_OFF}")
-    assert before_routing == 5
+    assert before_routing == 6
     r = h.delete(f"/v1/trunks/{T_OFF}")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -149,7 +152,7 @@ def test_delete_disabled_trunk(h):
     assert h.val(f"SELECT count(*) FROM live_trunk_stats WHERE trunk_id = {T_ON}") == 1
     assert h.val(f"SELECT count(*) FROM trunk_dids WHERE trunk_id = {T_ON}") == 2
     assert h.val("SELECT count(*) FROM number_routing WHERE did = ANY($1::varchar[])",
-                 [D_POOL, D_NOPOOL, D_OTHER_PRODUCT, D_PORTING, D_MISMATCH]) == 0
+                 [D_POOL, D_NOPOOL, D_OTHER_PRODUCT, D_PORTING, D_MISMATCH, D_RELEASE]) == 0
     # CDR history keeps the plain trunk_id
     assert h.val("SELECT trunk_id FROM cdrs WHERE uuid = 'cdr-old-trunk'") == T_OFF
 
@@ -168,6 +171,10 @@ def test_delete_disabled_trunk(h):
         ("assigned", CUST_A, "rcf", "rcf row")
     p = _pool(h, D_PORTING)
     assert (p["status"], p["product_type"], p["notes"]) == ("porting_out", "trunk", "porting")
+    # a customer release awaiting approval is not overridden by the delete
+    p = _pool(h, D_RELEASE)
+    assert (p["status"], p["customer_id"], p["product_type"], p["notes"]) == \
+        ("release_requested", CUST_B, "trunk", "release asked")
 
     # gone means gone
     assert h.delete(f"/v1/trunks/{T_OFF}").status_code == 404
