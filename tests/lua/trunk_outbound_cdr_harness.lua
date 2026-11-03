@@ -41,6 +41,10 @@ local function run(sc, script_path)
         cps_limit          = "10",
         ["sip_h_X-SBC-ID"] = "east-sbc-1",
     }
+    if sc.no_kamailio then
+        -- IP-lookup fallback path: Kamailio set no X-Trunk-ID / X-Customer-ID.
+        vars.trunk_id, vars.customer_id, vars.max_channels, vars.cps_limit = nil, nil, nil, nil
+    end
     local results, idx = sc.bridge_results or { "SUCCESS" }, 0
     local session = {}
     function session:getVariable(k) return vars[k] end
@@ -59,6 +63,9 @@ local function run(sc, script_path)
             vars.originate_disposition = results[idx] or "NORMAL_TEMPORARY_FAILURE"
         else
             captured.executes[#captured.executes+1] = { app = app, data = data }
+            if app == "respond" then
+                captured.executes_respond[#captured.executes_respond + 1] = data
+            end
         end
     end
 
@@ -71,6 +78,36 @@ local function run(sc, script_path)
         end,
         get_connection = function() return nil end,
     }
+    fake_db.lookup_trunk_by_ip = function(ip)
+        if sc.no_kamailio then
+            return { trunk_id = "7", customer_id = "42", max_channels = "10",
+                     cps_limit = sc.trunk_cps or "20", traffic_grade = "enterprise" }
+        end
+        return nil
+    end
+    -- CPS scenarios: a fake redis_client (spy on the per-trunk cps_check) and
+    -- a redis_cps that would refuse every call (the old 5 CPS customer cap).
+    local fake_redis, fake_redis_cps
+    if sc.redis then
+        captured.cps_checks, captured.redis_cps_calls = {}, 0
+        fake_redis = {
+            check_prefix = function() return false end,
+            cps_check = function(id, limit, prefix)
+                captured.cps_checks[#captured.cps_checks + 1] =
+                    tostring(id) .. "/" .. tostring(limit) .. "/" .. tostring(prefix)
+                return sc.cps_allow ~= false, 21
+            end,
+            acquire_channel = function() return true, 1, 10 end,
+            velocity_check = function() return true end,
+            release_channel = function() end,
+        }
+        fake_redis_cps = setmetatable({}, { __index = function()
+            return function()
+                captured.redis_cps_calls = captured.redis_cps_calls + 1
+                return { allowed = false, current_cps = 5, limit = 5, tier = "free", tier_name = "Free" }
+            end
+        end })
+    end
     -- 8YY scenarios: carrier_trunks rows + the trunk customer's row.
     if sc.term_trunks then
         fake_db.get_termination_trunks = function(_) return sc.term_trunks end
@@ -108,7 +145,8 @@ local function run(sc, script_path)
     env.loadfile = function(path)
         if type(path) == "string" then
             if path:match("db_client") then return function() return fake_db end end
-            if path:match("redis") then return function() return nil end end
+            if path:match("redis_cps") then return function() return fake_redis_cps end end
+            if path:match("redis") then return function() return fake_redis end end
             local lib = path:match("/lib/([%w_]+)%.lua$")
             if lib then return loadfile(LIB_DIR .. lib .. ".lua", "t", env) end
         end
@@ -117,6 +155,7 @@ local function run(sc, script_path)
     env.package = setmetatable({ path = package.path, cpath = package.cpath,
         loadlib = function() return nil, "stubbed" end, loaded = {} }, { __index = package })
 
+    captured.executes_respond = {}
     local chunk, err = loadfile(script_path or SCRIPT, "t", env)
     if not chunk then error("loadfile failed: " .. tostring(err)) end
     local ok, e = pcall(chunk)
@@ -298,6 +337,26 @@ do
     check("7d non-8YY LD: Bandwidth primary path unchanged, customer never read",
           c.bridges[1] and c.bridges[1]:find("sip_h_X-Carrier=primary", 1, true)
               and c.customer_lookups == 0, c.bridges[1])
+end
+
+do
+    print("[8] CPS: per trunk (Kamailio), never the per-customer 5 CPS default")
+    local c = run({ redis = true, bridge_results = { "SUCCESS" } })
+    check("8a Kamailio-authenticated: no FS CPS check at all",
+          #c.cps_checks == 0 and c.redis_cps_calls == 0,
+          table.concat(c.cps_checks, ",") .. " / redis_cps=" .. c.redis_cps_calls)
+    check("8a Kamailio-authenticated: the call bridges (no 503)",
+          #c.bridges == 1 and #c.executes_respond == 0, #c.bridges)
+    c = run({ redis = true, no_kamailio = true, trunk_cps = "20", bridge_results = { "SUCCESS" } })
+    check("8b IP fallback: one per-TRUNK check with the trunk's own cps_limit",
+          table.concat(c.cps_checks, ",") == "7/20/trunk" and c.redis_cps_calls == 0,
+          table.concat(c.cps_checks, ","))
+    check("8b IP fallback under the limit: bridges", #c.bridges == 1, #c.bridges)
+    c = run({ redis = true, no_kamailio = true, trunk_cps = "20", cps_allow = false })
+    check("8c IP fallback over the trunk limit: 503, no bridge",
+          #c.bridges == 0 and c.executes_respond[1] == "503 Service Unavailable"
+              and c.setvars.blocked_reason == "CPS_EXCEEDED",
+          tostring(c.executes_respond[1]))
 end
 
 local BASE = os.getenv("BASELINE_TRUNK")

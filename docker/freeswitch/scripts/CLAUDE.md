@@ -594,7 +594,7 @@ Call flow:
 2. Validate destination (normalize to E.164)
 3. Validate caller DID belongs to this trunk (`trunk_dids` table). If caller's From number isn't in trunk_dids, look up any DID for this trunk as fallback. Reject if no valid DID found.
 4. [If Redis available] Check high-risk prefix fraud database
-5. [If Redis available] CPS check with tier support via redis_cps.check_cps_with_tier()
+5. CPS: per TRUNK. A Kamailio-authenticated call (X-Trunk-ID) is not checked again — route[TRUNK_AUTH] already enforced `sip_trunks.cps_limit`. Only the IP-lookup fallback path runs `redis_client.cps_check(trunk_id, <trunk cps_limit>)`. (Until 2026-11 this step ran the per-customer `redis_cps.check_cps_with_tier`, whose never-written `account:<id>:limits` key left every trunk customer at the 5 CPS "free" default.)
 6. [If Redis available] Acquire channel (concurrent call limit via Redis sorted set)
 7. [If Redis available] Velocity check (CPM/daily limits)
 8. Set caller ID: outbound_caller_id = trunk DID (carrier auth), effective_caller_id = PBX original
