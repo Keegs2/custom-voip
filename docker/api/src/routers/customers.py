@@ -215,11 +215,19 @@ async def compute_billing_estimate(conn, customer_id: int) -> dict:
 TRAFFIC_GRADES = ("enterprise", "premium")
 
 
+#: Pre-63 values that TED builds already in production still send (their
+#: edit dialog echoes the grade): stored as 'enterprise', never a 422.
+LEGACY_TRAFFIC_GRADES = ("standard", "economy")
+
+
 def _traffic_grade(v):
-    """traffic_grade input: exactly 'enterprise' or 'premium' (422 otherwise,
-    never the CHECK's 500). The pre-63 'standard' / 'economy' are refused."""
+    """traffic_grade input: 'enterprise' or 'premium'; the legacy 'standard' /
+    'economy' are stored as 'enterprise'; anything else is a 422 (never the
+    CHECK's 500)."""
     if v is None or v in TRAFFIC_GRADES:
         return v
+    if v in LEGACY_TRAFFIC_GRADES:
+        return "enterprise"
     raise ValueError("traffic_grade must be 'enterprise' or 'premium'")
 
 

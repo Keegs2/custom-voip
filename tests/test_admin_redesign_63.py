@@ -10,9 +10,10 @@ C5 traffic pattern (customers.traffic_grade):
     enterprise; exactly one CHECK on traffic_grade, allowing only
     enterprise | premium (a direct 'standard' INSERT is refused);
   * POST /v1/customers without traffic_grade stores enterprise and takes
-    premium; create and PUT accept ONLY enterprise | premium — anything else
-    (incl. the old standard / economy) is a 422, never the CHECK's 500; list /
-    get return it; the tenant view still hides it.
+    premium; create and PUT also accept the legacy standard / economy (TED
+    builds already in production) and store them as enterprise; anything else
+    is a 422, never the CHECK's 500; list / get return it; the tenant view
+    still hides it.
 C6 Tier 1 carriers (carrier_trunks.tier1, 64):
   * Bandwidth rows seeded true, every other row false; a re-run never
     clobbers an edit; the freeswitch role can read it;
@@ -127,7 +128,13 @@ def test_create_customer_traffic_grade(h):
                                      "traffic_grade": "premium"}))
     assert c["traffic_grade"] == "premium"
     assert h.val("SELECT traffic_grade FROM customers WHERE name = 'New Ent'") == "enterprise"
-    for bad in ("standard", "economy", "gold", None):
+    # TED builds already in production still send the pre-63 names
+    for legacy in ("standard", "economy"):
+        c = _ok(h.post("/v1/customers", {"name": f"Old TED {legacy}", "account_type": "rcf",
+                                         "traffic_grade": legacy}))
+        assert c["traffic_grade"] == "enterprise"
+        assert h.val("SELECT traffic_grade FROM customers WHERE id = $1", c["id"]) == "enterprise"
+    for bad in ("gold", "Premium", "STANDARD", "", None, 3):
         r = h.post("/v1/customers", {"name": "Bad", "account_type": "rcf", "traffic_grade": bad})
         assert r.status_code == 422, (bad, r.text)
     assert h.val("SELECT count(*) FROM customers WHERE name = 'Bad'") == 0
@@ -146,7 +153,12 @@ def test_update_customer_traffic_grade(h):
     assert mine and all("traffic_grade" not in c for c in mine)
     assert _ok(h.put(f"/v1/customers/{CUST_A}", {"traffic_grade": "enterprise"}))[
         "traffic_grade"] == "enterprise"
-    for bad in ("standard", "economy", "Premium", "gold", "", 3):
+    for legacy in ("standard", "economy"):
+        _ok(h.put(f"/v1/customers/{CUST_A}", {"traffic_grade": "premium"}))
+        assert _ok(h.put(f"/v1/customers/{CUST_A}", {"traffic_grade": legacy}))[
+            "traffic_grade"] == "enterprise"
+        assert h.val(f"SELECT traffic_grade FROM customers WHERE id = {CUST_A}") == "enterprise"
+    for bad in ("Premium", "Standard", "gold", "", 3):
         r = h.put(f"/v1/customers/{CUST_A}", {"traffic_grade": bad})
         assert r.status_code == 422, (bad, r.text)
     # other fields still update without touching the grade
