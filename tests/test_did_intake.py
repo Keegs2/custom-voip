@@ -74,6 +74,7 @@ MIG_CARRIER_TRUNKS = INIT / "40_carrier_trunks.sql"
 MIG_DID_CARRIER = INIT / "41_did_carrier_source.sql"
 MIG_CARRIER_PRIORITIES = INIT / "42_carrier_priorities.sql"
 MIG_SINCH_TERMINATION = INIT / "44_sinch_termination.sql"
+MIG_CARRIER_TIER1 = INIT / "64_carrier_tier1.sql"
 
 sys.path.insert(0, str(API_SRC))
 
@@ -268,6 +269,9 @@ def intake_db():
             # + the two Sinch termination seed rows.
             await conn.execute(MIG_SINCH_TERMINATION.read_text())
             await conn.execute(MIG_SINCH_TERMINATION.read_text())
+            # 64: carrier_trunks.tier1 (the carrier-trunks router SELECTs it).
+            await conn.execute(MIG_CARRIER_TIER1.read_text())
+            await conn.execute(MIG_CARRIER_TIER1.read_text())
         await owner.close()
         db.pool = await asyncpg.create_pool(
             host=pg.sock, port=pg.port, user="api", password="api_secret",

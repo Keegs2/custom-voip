@@ -1,4 +1,5 @@
-"""Migration 63_admin_redesign.sql + the API fields it backs — full stack.
+"""Migrations 63_admin_redesign.sql + 64_carrier_tier1.sql and the API fields
+they back — full stack.
 
 Real chain (tests/admin_redesign_harness.py) with customers seeded BEFORE 63
 in every pre-63 traffic_grade value, then 63 applied TWICE (idempotency).
@@ -11,7 +12,12 @@ C5 traffic pattern (customers.traffic_grade):
     premium; create and PUT accept ONLY enterprise | premium — anything else
     (incl. the old standard / economy) is a 422, never the CHECK's 500; list /
     get return it; the tenant view still hides it.
-check_migrations.sql reports 63 MISSING before and applied after.
+C6 Tier 1 carriers (carrier_trunks.tier1, 64):
+  * Bandwidth rows seeded true, every other row false; a re-run never
+    clobbers an edit; the freeswitch role can read it;
+  * /v1/carrier-trunks list / get / create / update return and accept it
+    (default false, explicit null -> 422).
+check_migrations.sql reports 63 and 64 MISSING before and applied after.
 
 Run:  TEST_PG_BIN=/opt/homebrew/opt/postgresql@16/bin python3 -m pytest tests/test_admin_redesign_63.py -q
 """
@@ -25,7 +31,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from admin_redesign_harness import AdminHarness, asyncpg  # noqa: E402
 from voicemail_api_harness import CUST_A  # noqa: E402
-from voicemail_db import CHECK_MIGRATIONS  # noqa: E402
+from voicemail_db import CHECK_MIGRATIONS, INIT  # noqa: E402
 
 PORT = 55542  # admin-redesign range 55540-55549
 
@@ -33,7 +39,7 @@ PRE = {201: "standard", 202: "economy", 203: "premium", 204: None}
 
 
 class MigrationHarness(AdminHarness):
-    EXTRA_MIGRATIONS = ("63_admin_redesign.sql",)
+    EXTRA_MIGRATIONS = ("63_admin_redesign.sql", "64_carrier_tier1.sql")
 
     async def before_extra(self, conn) -> None:
         for cid, grade in PRE.items():
@@ -63,9 +69,10 @@ def _ok(r):
 # Migration
 # ---------------------------------------------------------------------------
 def test_check_migrations_row(h):
-    assert h.check_before["63_admin_redesign"] == "*** MISSING ***"
     after = {r["migration"]: r["status"] for r in h.rows(CHECK_MIGRATIONS.read_text())}
-    assert after["63_admin_redesign"] == "applied"
+    for m in ("63_admin_redesign", "64_carrier_tier1"):
+        assert h.check_before[m] == "*** MISSING ***", m
+        assert after[m] == "applied", m
 
 
 def test_traffic_grade_values_mapped(h):
@@ -131,3 +138,64 @@ def test_update_customer_traffic_grade(h):
     assert body["traffic_grade"] == "enterprise"
     assert h.put(f"/v1/customers/{CUST_A}", {"traffic_grade": "premium"},
                  who="support").status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Tier 1 carriers (C6)
+# ---------------------------------------------------------------------------
+def test_tier1_seed_and_rerun(h):
+    rows = {(r["carrier"], r["pop"]): r["tier1"] for r in h.rows(
+        "SELECT carrier, pop, tier1 FROM carrier_trunks")}
+    assert rows[("bandwidth", "dallas")] is True and rows[("bandwidth", "la")] is True
+    others = {k: v for k, v in rows.items() if k[0] != "bandwidth"}
+    assert others and not any(others.values())
+    h.sql("UPDATE carrier_trunks SET tier1 = false WHERE carrier = 'bandwidth' AND pop = 'la'")
+    h.sql((INIT / "64_carrier_tier1.sql").read_text())
+    try:
+        assert h.val("SELECT tier1 FROM carrier_trunks WHERE carrier = 'bandwidth' "
+                     "AND pop = 'la'") is False
+    finally:
+        h.sql("UPDATE carrier_trunks SET tier1 = true WHERE carrier = 'bandwidth' AND pop = 'la'")
+    col = h.rows("SELECT data_type, is_nullable, column_default FROM information_schema.columns "
+                 "WHERE table_name = 'carrier_trunks' AND column_name = 'tier1'")
+    assert col == [{"data_type": "boolean", "is_nullable": "NO", "column_default": "false"}]
+
+
+def test_tier1_readable_by_freeswitch(h):
+    async def go():
+        conn = await asyncpg.connect(host=h.pg.sock, port=h.pg.port, user="freeswitch",
+                                     password="fs_secret", database="postgres",
+                                     statement_cache_size=0)
+        try:
+            return await conn.fetch(
+                "SELECT carrier, pop, tier1 FROM carrier_trunks "
+                "WHERE direction IN ('outbound','both') AND enabled = true")
+        finally:
+            await conn.close()
+    rows = h.run(go())
+    assert {(r["carrier"], r["tier1"]) for r in rows} >= {("bandwidth", True), ("sinch", False)}
+
+
+def test_carrier_trunks_api_tier1(h):
+    listed = _ok(h.get("/v1/carrier-trunks"))["trunks"]
+    assert listed and all(isinstance(t["tier1"], bool) for t in listed)
+    dallas = next(t for t in listed if (t["carrier"], t["pop"]) == ("bandwidth", "dallas"))
+    assert dallas["tier1"] is True
+    assert _ok(h.get(f"/v1/carrier-trunks/{dallas['id']}"))["tier1"] is True
+    made = _ok(h.post("/v1/carrier-trunks", {
+        "carrier": "acme", "pop": "nyc", "source_ip": "198.51.100.77",
+        "direction": "outbound", "traffic_class": "ld"}))
+    assert made["tier1"] is False
+    premium = _ok(h.post("/v1/carrier-trunks", {
+        "carrier": "acme", "pop": "chi", "source_ip": "198.51.100.78",
+        "direction": "outbound", "traffic_class": "ld", "tier1": True}))
+    assert premium["tier1"] is True
+    assert _ok(h.put(f"/v1/carrier-trunks/{made['id']}", {"tier1": True}))["tier1"] is True
+    upd = _ok(h.put(f"/v1/carrier-trunks/{made['id']}", {"tier1": False, "cps_limit": 7}))
+    assert (upd["tier1"], upd["cps_limit"]) == (False, 7)
+    r = h.put(f"/v1/carrier-trunks/{made['id']}", {"tier1": None})
+    assert r.status_code == 422, r.text
+    assert h.put(f"/v1/carrier-trunks/{made['id']}", {"tier1": True},
+                 who="support").status_code == 403
+    for t in (made, premium):
+        assert _ok(h.delete(f"/v1/carrier-trunks/{t['id']}"))["status"] == "deleted"

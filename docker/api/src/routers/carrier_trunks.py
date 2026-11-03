@@ -35,7 +35,8 @@ EXACTLY:
     ORDER BY eff_priority, id
 
 ** so those four priority column names and traffic_class are load-bearing
-too. ** Disabling a
+too (and tier1, migration 63: FreeSWITCH also selects it and restricts a
+'premium' customer's attempts to tier1 rows). ** Disabling a
 trunk here removes it from every zone's termination list on the next call —
 carrier redundancy is operated from this CRUD, no config push. (source_ip
 doubles as the termination signaling target; a future term_ip column is the
@@ -78,7 +79,7 @@ router = APIRouter()
 # text ('206.146.100.24') for clean JSON in any response class.
 _RETURN_COLS = (
     "id, carrier, pop, trunk_group, host(source_ip) AS source_ip, test_tn, "
-    "direction, traffic_class, cps_limit, enabled, "
+    "direction, traffic_class, cps_limit, enabled, tier1, "
     "priority, priority_east, priority_west, priority_central, "
     "notes, created_at, updated_at"
 )
@@ -130,6 +131,9 @@ class CarrierTrunkCreate(BaseModel):
     traffic_class: Literal["any", "ld", "tollfree"] = "any"
     cps_limit: int = 100
     enabled: bool = True
+    # Tier 1 carrier (migration 63): a 'premium' customer's calls terminate
+    # only on tier1 rows (FreeSWITCH falls back to all rows when none is left).
+    tier1: bool = False
     # Termination ordering (migration 42): lower = tried first; the zone
     # overrides are nullable (NULL = inherit `priority`).
     priority: int = 100
@@ -201,6 +205,8 @@ class CarrierTrunkUpdate(BaseModel):
     traffic_class: Optional[Literal["any", "ld", "tollfree"]] = None
     cps_limit: Optional[int] = None
     enabled: Optional[bool] = None
+    # tier1 is NOT NULL — an explicit null is rejected in the endpoint.
+    tier1: Optional[bool] = None
     # priority is NOT NULL in the schema — an explicit null is rejected in the
     # endpoint (can't be told from "absent" here). Zone overrides ARE nullable:
     # explicit null clears the override back to inheriting `priority`.
@@ -343,16 +349,16 @@ async def create_carrier_trunk(
                 (carrier, pop, trunk_group, source_ip, test_tn,
                  direction, traffic_class, cps_limit, enabled,
                  priority, priority_east, priority_west, priority_central,
-                 notes)
+                 notes, tier1)
             VALUES ($1::varchar, $2::varchar, $3::varchar, $4::inet, $5::varchar,
                     $6::varchar, $7::text, $8::int, $9::bool,
-                    $10::int, $11::int, $12::int, $13::int, $14::text)
+                    $10::int, $11::int, $12::int, $13::int, $14::text, $15::bool)
             RETURNING {_RETURN_COLS}
             """,
             body.carrier, body.pop, body.trunk_group, body.source_ip,
             body.test_tn, body.direction, body.traffic_class, body.cps_limit,
             body.enabled, body.priority, body.priority_east,
-            body.priority_west, body.priority_central, body.notes,
+            body.priority_west, body.priority_central, body.notes, body.tier1,
         )
     except asyncpg.UniqueViolationError as e:
         raise _conflict_409(e)
@@ -403,13 +409,15 @@ async def update_carrier_trunk(
         raise HTTPException(
             status_code=422,
             detail="traffic_class cannot be null (use 'any' to unrestrict)")
+    if "tier1" in update_data and update_data["tier1"] is None:
+        raise HTTPException(status_code=422, detail="tier1 cannot be null (true or false)")
 
     # Explicit per-column casts (asyncpg + PgBouncer: no type inference).
     casts = {
         "pop": "varchar", "trunk_group": "varchar", "source_ip": "inet",
         "test_tn": "varchar", "direction": "varchar",
         "traffic_class": "text", "cps_limit": "int",
-        "enabled": "bool", "priority": "int", "priority_east": "int",
+        "enabled": "bool", "tier1": "bool", "priority": "int", "priority_east": "int",
         "priority_west": "int", "priority_central": "int", "notes": "text",
     }
     updates = []

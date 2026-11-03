@@ -22,6 +22,7 @@
 --          customers_traffic_grade_check CHECK (traffic_grade IN
 --          ('enterprise', 'premium')) — VARCHAR(10) still fits 'enterprise'.
 --      Historic cdrs.traffic_grade values are left alone (no CHECK there).
+--   (Tier 1 carriers, C6, are 64_carrier_tier1.sql: carrier_trunks only.)
 --
 -- LOCKING: customers is read on the call path (and the lock is WAL-replayed
 -- on every zone replica). The CHECK swap takes a brief ACCESS EXCLUSIVE lock

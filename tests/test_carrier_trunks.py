@@ -71,6 +71,7 @@ MIG_TRUNK_STATUS = REPO / "docker" / "postgres" / "init" / "25_carrier_trunk_sta
 MIG_CARRIER_TRUNKS = REPO / "docker" / "postgres" / "init" / "40_carrier_trunks.sql"
 MIG_CARRIER_PRIORITIES = REPO / "docker" / "postgres" / "init" / "42_carrier_priorities.sql"
 MIG_SINCH_TERMINATION = REPO / "docker" / "postgres" / "init" / "44_sinch_termination.sql"
+MIG_CARRIER_TIER1 = REPO / "docker" / "postgres" / "init" / "64_carrier_tier1.sql"
 
 # cdrs-column migrations (23, 47, ...) live in ONE place so a new column does
 # not have to be hand-added to every module's inline CREATE TABLE cdrs.
@@ -325,6 +326,9 @@ def trunks_db():
             await conn.execute(MIG_CARRIER_PRIORITIES.read_text())
             await conn.execute(MIG_SINCH_TERMINATION.read_text())
             await conn.execute(MIG_SINCH_TERMINATION.read_text())
+            # 64: carrier_trunks.tier1 (the carrier-trunks router SELECTs it).
+            await conn.execute(MIG_CARRIER_TIER1.read_text())
+            await conn.execute(MIG_CARRIER_TIER1.read_text())
             # The cdrs-only migrations (23 on-net, 47 STIR outcome), each twice
             # — so the ingest INSERT's $50-$57 bind against columns that came
             # from the REAL migration files, not a hand-copied DDL.
