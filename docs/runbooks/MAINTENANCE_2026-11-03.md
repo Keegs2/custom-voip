@@ -3,9 +3,9 @@
 One low-traffic window (ET overnight). The owner runs every command by hand. Structure follows
 `docs/runbooks/MAINTENANCE_2026-09-23.md` and `MAINTENANCE_2026-10_ALL_OPEN_PRS.md`.
 
-> **GATE — set `TARGET_SHA` first.** After #174 merges, run `git -C ~/custom-voip fetch -q origin && git -C ~/custom-voip log --oneline -3 origin/RCF-V1` and confirm the top line is the #174 merge (`Merge pull request #174 …`); then `git -C ~/custom-voip rev-parse origin/RCF-V1` is the full 40-character **`TARGET_SHA`**. Replace every `<TARGET_SHA>` below with it (full SHA in every `merge --ff-only` / `test … =` line; the first 7 characters where a line says "Expect `<TARGET_SHA>`"). Do not start without it.
+> **Pinned 2026-11-03: `TARGET_SHA` = `c7f21a2e1c549046a42d3768fef70a82f65f8173`** (`c7f21a2`, "Merge pull request #174 from Keegs2/feat/homer-number-index"). Before the window, confirm CI is green on it: `gh run list -R Keegs2/custom-voip --branch RCF-V1 --limit 1` → `completed success c7f21a2`.
 
-**Target: `RCF-V1` = `<TARGET_SHA>`, the #174 merge commit. Every VM ends on exactly this commit.**
+**Target: `RCF-V1` = `c7f21a2e1c549046a42d3768fef70a82f65f8173`, the #174 merge commit. Every VM ends on exactly this commit.**
 It is `b329831` (the #172 merge: `caeb2ff` = #168, #169, #170 with #171, plus #172 head `43c8c89`; CI passed on it [V])
 plus #174. #174 changes only the services VM (API, ClickHouse number index, docs/tests); it touches no SBC,
 media or compose file [V, `git diff --name-only b329831..` of the #174 branch].
@@ -24,7 +24,7 @@ production.
 
 **Pre-window gates (workstation)**
 - #172 is merged (`b329831`), and CI is green on it [V, 2026-11-03].
-- **#174 is merged, CI is green on its merge commit, and `TARGET_SHA` is set** (the GATE above).
+- **#174 is merged, CI is green on its merge commit, and `TARGET_SHA` is pinned** (above: `c7f21a2`).
 - Confirm that `RCF-V1` has not moved past it: `git -C ~/custom-voip fetch -q origin && git -C ~/custom-voip rev-parse origin/RCF-V1` → `TARGET_SHA`.
   - If it moved, still deploy `TARGET_SHA`: the pull lines below fast-forward to that exact SHA.
   - Tell the owner what landed after it.
@@ -58,9 +58,9 @@ production.
   index. **No SIP capture pause:** ClickHouse is never restarted.
 
 **Conventions** (CLAUDE.md "Deployment Model")
-- **Pinned pull.** CLAUDE.md's `sudo git pull` is written here as `sudo git fetch -q origin && sudo git merge --ff-only <TARGET_SHA>`.
+- **Pinned pull.** CLAUDE.md's `sudo git pull` is written here as `sudo git fetch -q origin && sudo git merge --ff-only c7f21a2e1c549046a42d3768fef70a82f65f8173`.
   - Like a pull, it moves the VM's `RCF-V1` branch forward.
-  - Unlike a pull, it stops at exactly `<TARGET_SHA>` even if `RCF-V1` moves later.
+  - Unlike a pull, it stops at exactly `c7f21a2e1c549046a42d3768fef70a82f65f8173` even if `RCF-V1` moves later.
   - The `test "$(sudo git rev-parse HEAD)" = …` that follows fails the line if HEAD is anything else.
 - Every command is one line, uses `sudo`, and runs on the host named in **bold**.
 - Commands are hostname-guarded: if the guard does not match, nothing runs and nothing prints.
@@ -118,10 +118,10 @@ On each host, replace `<HOST>`:
    - **Record the SHA as that VM's `PRE_SHA`.** It is the rollback target.
 2. **<HOST>** `hostname | grep -q '^<HOST>$' && sudo grep -c '^VERIZON_' /opt/revup/.env`
    - Expect `0` on all 13 VMs.
-3. **<HOST>** `hostname | grep -q '^<HOST>$' && sudo git -C /opt/revup fetch -q origin && sudo git -C /opt/revup log --oneline -1 origin/RCF-V1 && sudo git -C /opt/revup rev-list --count HEAD..<TARGET_SHA>`
-   - Expect `<TARGET_SHA>` (`origin/RCF-V1` may be ahead if someone merged since; we still deploy `<TARGET_SHA>`). A fetch changes no files.
+3. **<HOST>** `hostname | grep -q '^<HOST>$' && sudo git -C /opt/revup fetch -q origin && sudo git -C /opt/revup log --oneline -1 origin/RCF-V1 && sudo git -C /opt/revup rev-list --count HEAD..c7f21a2e1c549046a42d3768fef70a82f65f8173`
+   - Expect `c7f21a2e1c549046a42d3768fef70a82f65f8173` (`origin/RCF-V1` may be ahead if someone merged since; we still deploy `c7f21a2e1c549046a42d3768fef70a82f65f8173`). A fetch changes no files.
 4. **Media VMs only** (6). Confirm no FreeSWITCH service definition change:
-   `hostname | grep -q '^<HOST>$' && sudo git -C /opt/revup diff --stat HEAD <TARGET_SHA> -- docker-compose.media.yml docker/freeswitch/Dockerfile docker/freeswitch/patches`
+   `hostname | grep -q '^<HOST>$' && sudo git -C /opt/revup diff --stat HEAD c7f21a2e1c549046a42d3768fef70a82f65f8173 -- docker-compose.media.yml docker/freeswitch/Dockerfile docker/freeswitch/patches`
    - Expect **empty output**. That is true from `29fd90f` [V].
    - If this VM's `PRE_SHA` is older and the output is not empty, **stop**. That FS needs a planned
      recreate (Gotcha 14), which is not in this runbook.
@@ -156,7 +156,7 @@ also ships every change between `PRE_SHA` and `29fd90f`. Read
 
 ### 0.3 Services VM: database baseline
 
-1. **services** `hostname | grep -q '^services$' && sudo git -C /opt/revup show <TARGET_SHA>:scripts/db/check_migrations.sql | sudo -u postgres psql -d voip -f -`
+1. **services** `hostname | grep -q '^services$' && sudo git -C /opt/revup show c7f21a2e1c549046a42d3768fef70a82f65f8173:scripts/db/check_migrations.sql | sudo -u postgres psql -d voip -f -`
    - This is the new 22..65 checker, read from the fetched commit; the working tree is not touched.
    - Expect every row up to `61_ivr_assist` `applied`, and `62_verizon_trunks`, `63_admin_redesign`,
      `64_carrier_tier1` and `65_cdr_premium_fallback` `*** MISSING ***`.
@@ -215,8 +215,8 @@ NLB flip compounds call-setup loss.
 
 **Steps:**
 
-1. **services** `hostname | grep -q '^services$' && cd /opt/revup && sudo git fetch -q origin && sudo git merge --ff-only <TARGET_SHA> && test "$(sudo git rev-parse HEAD)" = <TARGET_SHA> && git log --oneline -1`
-   - Expect `<TARGET_SHA> Merge pull request #174 …`. A non-fast-forward or a HEAD mismatch prints an error and stops.
+1. **services** `hostname | grep -q '^services$' && cd /opt/revup && sudo git fetch -q origin && sudo git merge --ff-only c7f21a2e1c549046a42d3768fef70a82f65f8173 && test "$(sudo git rev-parse HEAD)" = c7f21a2e1c549046a42d3768fef70a82f65f8173 && git log --oneline -1`
+   - Expect `c7f21a2e1c549046a42d3768fef70a82f65f8173 Merge pull request #174 …`. A non-fast-forward or a HEAD mismatch prints an error and stops.
    - Code only: running containers are unchanged. heplify, vmalert and the API read their new files
      only on restart.
 2. **Pre-build the API image now**, so the 63→API gap is seconds:
@@ -327,7 +327,7 @@ NLB flip compounds call-setup loss.
   - Then recreate `cdr-exporter` as in 2.4.
 - The old API creates customers as `standard`, which 63's CHECK refuses. Either restore 63 (the
   Phase 1 rollback command), or keep customer creates frozen until you roll forward again.
-- Return to the target with `sudo git checkout RCF-V1 && test "$(sudo git rev-parse HEAD)" = <TARGET_SHA>`, plus the same
+- Return to the target with `sudo git checkout RCF-V1 && test "$(sudo git rev-parse HEAD)" = c7f21a2e1c549046a42d3768fef70a82f65f8173`, plus the same
   rebuild.
 
 ---
@@ -341,7 +341,7 @@ already contains #174 and falls back (≤ 24 h scan, 422 above) while the index 
 **Pre-checks — do not deploy 2b if any threshold is exceeded** (skip 2b, continue with Phase 3, and
 report the numbers):
 
-1. Gate: **services** `hostname | grep -q '^services$' && test "$(sudo git -C /opt/revup rev-parse HEAD)" = <TARGET_SHA> && test -f /opt/revup/docker/homer/clickhouse/10_sip_number_index.sql && echo GATE_OK`
+1. Gate: **services** `hostname | grep -q '^services$' && test "$(sudo git -C /opt/revup rev-parse HEAD)" = c7f21a2e1c549046a42d3768fef70a82f65f8173 && test -f /opt/revup/docker/homer/clickhouse/10_sip_number_index.sql && echo GATE_OK`
 2. qryn insert block sizes and 24 h rate: **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() AS inserts_24h, round(count() / 86400, 2) AS per_s, max(written_rows) AS max_rows, quantile(0.99)(written_rows) AS p99_rows, formatReadableSize(max(written_bytes)) AS max_bytes, max(memory_usage) AS max_mem FROM system.query_log WHERE type = 'QueryFinish' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 1 DAY"`
    - **Stop if** `max_rows` > 50000, `max_bytes` > 100 MB or `per_s` > 20. `written_rows` also counts
      qryn's own `metrics_15s_mv` rows, so it overstates (safe).
@@ -398,7 +398,7 @@ Carriers spread calls over all 3 VIPs, so the other two zones must be serving.
   to pull unless `docker-compose.stir-key.yml` is in that list.
 
 **Per-SBC rebuild line** (`<SBC>` = the host):
-`hostname | grep -q '^<SBC>$' && cd /opt/revup && F=$(sudo docker inspect voip-kamailio --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' | sed 's/,/ -f /g') && echo "F=$F" && echo "$F" | grep -q 'docker-compose.stir-key.yml' && sudo git fetch -q origin && sudo git merge --ff-only <TARGET_SHA> && test "$(sudo git rev-parse HEAD)" = <TARGET_SHA> && sudo docker compose -f $F up -d --build kamailio || echo "STOPPED - read the output above"`
+`hostname | grep -q '^<SBC>$' && cd /opt/revup && F=$(sudo docker inspect voip-kamailio --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' | sed 's/,/ -f /g') && echo "F=$F" && echo "$F" | grep -q 'docker-compose.stir-key.yml' && sudo git fetch -q origin && sudo git merge --ff-only c7f21a2e1c549046a42d3768fef70a82f65f8173 && test "$(sudo git rev-parse HEAD)" = c7f21a2e1c549046a42d3768fef70a82f65f8173 && sudo docker compose -f $F up -d --build kamailio || echo "STOPPED - read the output above"`
 
 **Per-SBC gate block** (run each line after the rebuild):
 - G1 `sleep 20; sudo docker exec voip-kamailio kamailio -c -f /etc/kamailio/kamailio.cfg`
@@ -494,7 +494,7 @@ Carriers spread calls over all 3 VIPs, so the other two zones must be serving.
 3. Rebuilding a primary is one flip; do it drained (step 2) if it is still serving.
 4. If that zone's media VMs were already pulled (Phase 4), roll them back too. Their CPS-skip
    trusts `X-Trunk-ID` only because the new SBC strips received copies [V, #172 body].
-5. Return later with `sudo git checkout RCF-V1 && test "$(sudo git rev-parse HEAD)" = <TARGET_SHA>` in the same line as the
+5. Return later with `sudo git checkout RCF-V1 && test "$(sudo git rev-parse HEAD)" = c7f21a2e1c549046a42d3768fef70a82f65f8173` in the same line as the
    rebuild.
 
 ---
@@ -515,8 +515,8 @@ Order: `west-fs-2` → `west-fs` → `central-fs-2` → `central-fs` → `east-f
 **Per node** (`<FS>`):
 1. **<FS>** `hostname | grep -q '^<FS>$' && sudo docker exec voip-freeswitch sh -c '/usr/local/freeswitch/bin/fs_cli -p "$ESL_PASSWORD" -x "show calls count"'`
    - Record the count.
-2. **<FS>** `hostname | grep -q '^<FS>$' && cd /opt/revup && sudo git fetch -q origin && sudo git merge --ff-only <TARGET_SHA> && test "$(sudo git rev-parse HEAD)" = <TARGET_SHA> && git log --oneline -1`
-   - Expect `<TARGET_SHA>`.
+2. **<FS>** `hostname | grep -q '^<FS>$' && cd /opt/revup && sudo git fetch -q origin && sudo git merge --ff-only c7f21a2e1c549046a42d3768fef70a82f65f8173 && test "$(sudo git rev-parse HEAD)" = c7f21a2e1c549046a42d3768fef70a82f65f8173 && git log --oneline -1`
+   - Expect `c7f21a2e1c549046a42d3768fef70a82f65f8173`.
 3. **<FS>** `hostname | grep -q '^<FS>$' && sudo docker kill -s HUP voip-vmagent && sleep 5 && curl -s http://127.0.0.1:8429/targets | grep -c vz_gateway`
    - Expect ≥ 1: this zone's 2 gateways, `up=0` until #169 is installed, which is harmless.
    - **If `0`:** `scrape-media.yml` is a single-file bind mount. `git pull` replaces the file, and a
