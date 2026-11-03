@@ -14,8 +14,9 @@
 -- untouched: qryn already runs its own MV on samples_v3 (metrics_15s_mv).
 --
 -- PREREQUISITE: materialized_views_ignore_errors = 1 live for qryn's user
--- (docker/homer/clickhouse-users.xml, needs a ClickHouse restart) so a
--- failing MV leaves an index gap instead of failing qryn's insert.
+-- (docker/homer/clickhouse-users.xml, written in place inside the container
+-- and hot-reloaded — never restart ClickHouse for it) so a failing MV leaves
+-- an index gap instead of failing qryn's insert.
 --
 -- APPLY (services VM, single line, idempotent — every statement is
 -- IF NOT EXISTS / guarded, so re-running changes nothing):

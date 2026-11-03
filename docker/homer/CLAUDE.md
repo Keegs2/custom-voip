@@ -123,6 +123,12 @@ database:
   `from`, `to`, `pai`, `diversion`. Every other message (responses, ACK, BYE,
   re-INVITE — where a callee-sent request has From/To swapped and R-URI = the
   caller's Contact) stores its numbers with role `other`.
+- **Exact-match limitation:** a 10+ digit needle matches the canonical NANP forms
+  only (10 digits; an 11-digit 1-prefixed number is stored with and without the 1).
+  A dial-9 form (`915087282017`), `011`/`00` international prefixes and
+  national-format foreign numbers are stored as dialed, so a full-number search does
+  not match them exactly — those legs are still found through the correlated carrier
+  leg (X-CID). Partial (< 10 digit) needles still match substrings of every form.
 - **Matching:** the API needle is `normalize_number_needle` (strip non-digits;
   exactly 11 digits with a leading 1 -> drop it). Stored: an 11-digit number starting
   with 1 is kept with and without the 1. A **full number (10+ digits) matches
@@ -164,7 +170,12 @@ well under 100 ms; partials read the whole index in the window (up to ~2-3 GB, <
   (8 KiB header, no RE2 `{m,n}` repetition — it made inserts 3x slower). Proven with
   2,010 junk/random-byte/oversized rows and 5,000 SIP-shaped random-byte messages.
 - `clickhouse-users.xml` sets **`materialized_views_ignore_errors = 1`** for the
-  default profile (the user qryn inserts as). Proven on 23.3.22: a throwing MV and an
+  default profile (the user qryn inserts as). ClickHouse 23.3 hot-reloads the users
+  config within seconds; the only obstacle is the single-file bind mount (`git pull`
+  writes a new inode, the container keeps the old file), so the deploy writes the
+  file in place inside the container — **never restart ClickHouse for it**: a restart
+  pauses SIP capture for 10-60 s and nothing buffers it (those traces are lost).
+  Verified locally: in-place write -> setting 0 -> 1 within 10 s, no restart. Proven on 23.3.22: a throwing MV and an
   MV over its memory limit (200k-row block at `max_memory_usage` 1.5e9) both leave the
   `samples_v3` insert intact; the failure is logged in `system.query_views_log`
   (`status = 'ExceptionWhileProcessing'`). **An index gap is preferred to trace loss.**
@@ -201,12 +212,19 @@ on both pages. `has_more` always comes with a non-null `oldest_ts_ns`.
 
 ### Pre-deploy check (owner, read-only) — do not deploy if a threshold is exceeded
 
-`sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() AS inserts_24h, round(count() / 86400, 2) AS per_s, max(written_rows) AS max_rows, quantile(0.99)(written_rows) AS p99_rows, formatReadableSize(max(written_bytes)) AS max_bytes, max(memory_usage) AS max_mem FROM system.query_log WHERE type = 'QueryFinish' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 1 DAY"`
+1. Block sizes and the 24 h average rate: `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() AS inserts_24h, round(count() / 86400, 2) AS per_s, max(written_rows) AS max_rows, quantile(0.99)(written_rows) AS p99_rows, formatReadableSize(max(written_bytes)) AS max_bytes, max(memory_usage) AS max_mem FROM system.query_log WHERE type = 'QueryFinish' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 1 DAY"`
+2. Peak rate per minute (the 24 h average hides bursts): `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT max(c) AS peak_inserts_per_min, max(r) AS peak_rows_per_min FROM (SELECT toStartOfMinute(event_time) AS m, count() AS c, sum(written_rows) AS r FROM system.query_log WHERE type = 'QueryFinish' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 1 DAY GROUP BY m)"`
+3. That the log sees qryn's inserts at all (samples written in the last hour): `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM qryn.samples_v3 WHERE timestamp_ns > toUnixTimestamp64Nano(now64(9)) - 3600000000000"`
 
 Don't deploy if `max_rows` > 50000 or `max_bytes` > 100 MB (the MV would add
-> ~700 MiB and > 1 s to such an insert) or `per_s` > 20 (~0.3 core of MV CPU at ~15 ms
-per insert). Expected on this platform: hundreds of rows per insert, about one insert
-per second.
+> ~700 MiB and > 1 s to such an insert), or `per_s` > 20 or `peak_inserts_per_min` >
+1200 (~0.3 core of MV CPU at ~15 ms per insert). Expected on this platform: hundreds of
+rows per insert, about one insert per second.
+
+Caveats: `written_rows` also counts the rows qryn's own `metrics_15s_mv` writes, so it
+overstates the block size (safe direction). **If `inserts_24h` is about 0 while check 3
+shows samples growing, qryn is using async inserts and this check is invalid — stop
+and ask; do not deploy.**
 
 ### Deploy (services VM, single lines, after Phase 2 of `docs/runbooks/MAINTENANCE_2026-11-03.md`)
 
@@ -214,13 +232,14 @@ Not during SBC flips or another step that loads the services VM. ClickHouse firs
 
 1. `cd /opt/revup && sudo git pull`
 2. Run the pre-check above; stop if a threshold is exceeded.
-3. Turn on `materialized_views_ignore_errors` — the bind-mounted `clickhouse-users.xml` is only re-read on restart (git replaces the file, the container keeps the old inode). SIP capture pauses for the ~10-30 s restart: `sudo docker restart voip-clickhouse`
-4. Verify it is `1` (do NOT continue otherwise): `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT value FROM system.settings WHERE name = 'materialized_views_ignore_errors'"`, and that qryn writes again: `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM qryn.samples_v3 WHERE timestamp_ns > toUnixTimestamp64Nano(now64(9)) - 60000000000"` (> 0).
-5. Apply the DDL (coverage table -> index table -> MV -> "MV started" row; idempotent): `sudo docker exec -i voip-clickhouse clickhouse-client --multiquery < /opt/revup/docker/homer/clickhouse/10_sip_number_index.sql`
-6. After a minute: rows grow — `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() AS rows, uniqExact(call_id) AS calls FROM qryn.sip_number_index"`; qryn inserts not failing (must be 0) — `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM system.query_log WHERE type = 'ExceptionWhileProcessing' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 15 MINUTE"`; MV healthy (no `ExceptionWhileProcessing`; p99 under 200 ms, else roll back) — `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT status, count(), quantile(0.99)(view_duration_ms) AS p99_ms, formatReadableSize(max(peak_memory_usage)) AS peak FROM system.query_views_log WHERE view_name = 'qryn.sip_number_index_mv' AND event_time > now() - INTERVAL 15 MINUTE GROUP BY status"`
-7. Backfill, newest day first (resumable; re-run the same line after any failure): `sudo bash /opt/revup/scripts/homer/backfill_sip_number_index.sh` — about 15-60 s per day (~0.6 GiB of SIP/day at ~50 MB/s, 2 threads, 5e8 memory per hourly insert), under 10 minutes for 8 days.
-8. Rebuild the API: `cd /opt/revup && sudo docker compose -f docker-compose.services.yml up -d --build --no-deps api`
-9. Verify coverage: `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT kind, day, started_at, index_rows FROM qryn.sip_number_index_coverage FINAL ORDER BY kind, day DESC"`; then a Last-7-days number search in TED/Troubleshooting answers with `search_path: "index"`.
+3. Check the new users file is well-formed XML (a broken file would be rejected by the hot reload): `python3 -c "import sys,xml.dom.minidom;xml.dom.minidom.parse(sys.argv[1])" /opt/revup/docker/homer/clickhouse-users.xml && echo XML_OK`
+4. Write it in place inside the container (the compose mount target is `/etc/clickhouse-server/users.d/custom-users.xml`; `git pull` gave the host file a new inode the container cannot see). ClickHouse hot-reloads it, no restart, no ingest pause: `sudo docker exec -i voip-clickhouse sh -c 'cat > /etc/clickhouse-server/users.d/custom-users.xml' < /opt/revup/docker/homer/clickhouse-users.xml`
+5. Verify — expect `materialized_views_ignore_errors 1` and `max_memory_usage 4000000000`; do NOT apply the DDL until it reads 1: `sleep 10; sudo docker exec voip-clickhouse clickhouse-client --query "SELECT name, value FROM system.settings WHERE name IN ('materialized_views_ignore_errors','max_memory_usage')"`. Never `docker restart voip-clickhouse` for this: a restart pauses SIP capture 10-60 s with no durable buffer (traces lost).
+6. Apply the DDL (coverage table -> index table -> MV -> "MV started" row; idempotent): `sudo docker exec -i voip-clickhouse clickhouse-client --multiquery < /opt/revup/docker/homer/clickhouse/10_sip_number_index.sql`
+7. After a minute: rows grow — `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() AS rows, uniqExact(call_id) AS calls FROM qryn.sip_number_index"`; qryn inserts not failing (must be 0) — `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM system.query_log WHERE type = 'ExceptionWhileProcessing' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 15 MINUTE"`; MV healthy (no `ExceptionWhileProcessing`; p99 under 200 ms, else roll back) — `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT status, count(), quantile(0.99)(view_duration_ms) AS p99_ms, formatReadableSize(max(peak_memory_usage)) AS peak FROM system.query_views_log WHERE view_name = 'qryn.sip_number_index_mv' AND event_time > now() - INTERVAL 15 MINUTE GROUP BY status"`
+8. Backfill, newest day first (resumable; re-run the same line after any failure): `sudo bash /opt/revup/scripts/homer/backfill_sip_number_index.sh` — about 15-60 s per day (~0.6 GiB of SIP/day at ~50 MB/s, 2 threads, 5e8 memory per hourly insert), under 10 minutes for 8 days.
+9. Rebuild the API: `cd /opt/revup && sudo docker compose -f docker-compose.services.yml up -d --build --no-deps api`
+10. Verify coverage: `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT kind, day, started_at, index_rows FROM qryn.sip_number_index_coverage FINAL ORDER BY kind, day DESC"`; then a Last-7-days number search in TED/Troubleshooting answers with `search_path: "index"`.
 
 ### Verify (read-only, any time)
 
@@ -238,6 +257,19 @@ Not during SBC flips or another step that loads the services VM. ClickHouse firs
 2. Verify it is gone (must print 0) and qryn inserts succeed (must print 0): `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database = 'qryn' AND name = 'sip_number_index_mv'"` and `sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM system.query_log WHERE type = 'ExceptionWhileProcessing' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 5 MINUTE"`
 3. Only then the tables: `sudo docker exec voip-clickhouse clickhouse-client --multiquery --query "DROP TABLE IF EXISTS qryn.sip_number_index; DROP TABLE IF EXISTS qryn.sip_number_index_coverage"`. The API notices within 60 s and falls back to the 24 h scan.
 4. API back (only if the API itself misbehaves — the new API works with no index): `cd /opt/revup && sudo git checkout <this PR's merge commit>^1 && sudo docker compose -f docker-compose.services.yml up -d --build --no-deps api` (detached HEAD; `sudo git checkout RCF-V1` before the next deploy). `materialized_views_ignore_errors` can stay on.
+
+### Known low risks (follow-ups)
+
+- **Freshness at night:** if, for 15 min, the only INVITEs captured are scanner INVITEs
+  without user digits, the freshness check sees no matching index rows and marks the
+  index stale. Fails safe: 7-day number searches answer 422 `window_too_wide`, <= 24 h
+  scans still work; it clears on the next normal call.
+- **AND searches across UTC midnight:** a call whose matching rows for different needles
+  fall on two UTC days can be ordered by the earlier day's row only; a paging edge case
+  (the call still appears), not a correctness loss.
+- **More than 20 calls tied to the same nanosecond** at a page boundary: only the first
+  20 ties stay together (INDEX_TIE_EXTRA); practically impossible with µs HEP stamps.
+- **`max_server_memory_usage` ~5e9** — below.
 
 ### Follow-up (owner-approved, not in this PR): `max_server_memory_usage`
 
