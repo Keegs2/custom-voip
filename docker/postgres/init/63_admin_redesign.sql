@@ -12,10 +12,11 @@
 --      'enterprise' | 'premium' (owner decision: it decides ONLY which carriers
 --      deliver the customer's calls; Premium = Tier 1 carriers first, then
 --      the others, so the call still completes when Tier 1 fails).
---        * existing 'standard' / 'economy' / NULL -> 'enterprise'; 'premium'
---          stays 'premium' — NOTE: a customer already 'premium' (14's
---          Granite Telephony seed) switches to Tier-1-only routing as soon
---          as the FreeSWITCH Lua of the same release is pulled;
+--        * EVERY existing customer -> 'enterprise', 'premium' included
+--          (owner decision: the old grade never changed anything; Premium
+--          is set deliberately from TED). This blanket remap runs ONCE, in
+--          the run that installs the new CHECK, so a re-run never resets a
+--          customer TED later set to 'premium'; NULL -> 'enterprise' always;
 --        * DEFAULT 'enterprise';
 --        * the CHECK (02's inline customers_traffic_grade_check, found by
 --          definition, name-agnostic) is replaced by
@@ -65,41 +66,45 @@ $$;
 -- --------------------------------------------------------------------------
 -- 2. customers.traffic_grade: 'enterprise' | 'premium' (C5).
 -- --------------------------------------------------------------------------
+-- The blanket "every customer -> enterprise" runs ONCE: only in the run that
+-- installs the two-value CHECK (customers_traffic_grade_check whose
+-- definition names 'enterprise' is the marker). A re-run finds the marker
+-- and never touches a customer TED has since set to 'premium'.
 DO $$
 DECLARE
     con RECORD;
 BEGIN
-    -- Drop every CHECK on customers that constrains traffic_grade and is not
-    -- already the new two-value rule (re-runs keep the new one).
-    FOR con IN
-        SELECT c.conname
-          FROM pg_constraint c
-         WHERE c.conrelid = 'customers'::regclass
-           AND c.contype = 'c'
-           AND pg_get_constraintdef(c.oid) LIKE '%traffic_grade%'
-           AND pg_get_constraintdef(c.oid) NOT LIKE '%enterprise%'
-    LOOP
-        EXECUTE format('ALTER TABLE customers DROP CONSTRAINT %I', con.conname);
-    END LOOP;
-END
-$$;
-
-UPDATE customers
-   SET traffic_grade = 'enterprise'
- WHERE traffic_grade IS DISTINCT FROM 'premium'
-   AND traffic_grade IS DISTINCT FROM 'enterprise';
-
-ALTER TABLE customers ALTER COLUMN traffic_grade SET DEFAULT 'enterprise';
-
-DO $$
-BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint
                     WHERE conrelid = 'customers'::regclass
-                      AND conname = 'customers_traffic_grade_check') THEN
+                      AND conname = 'customers_traffic_grade_check'
+                      AND pg_get_constraintdef(oid) LIKE '%enterprise%') THEN
+        -- Drop every old CHECK that constrains traffic_grade (02's inline
+        -- customers_traffic_grade_check, found by definition).
+        FOR con IN
+            SELECT c.conname
+              FROM pg_constraint c
+             WHERE c.conrelid = 'customers'::regclass
+               AND c.contype = 'c'
+               AND pg_get_constraintdef(c.oid) LIKE '%traffic_grade%'
+        LOOP
+            EXECUTE format('ALTER TABLE customers DROP CONSTRAINT %I', con.conname);
+        END LOOP;
+
+        -- Owner decision: the old grade never changed routing, so EVERY
+        -- existing customer starts as 'enterprise' (premium included);
+        -- Premium is then set deliberately from TED.
+        UPDATE customers SET traffic_grade = 'enterprise'
+         WHERE traffic_grade IS DISTINCT FROM 'enterprise';
+
         ALTER TABLE customers ADD CONSTRAINT customers_traffic_grade_check
             CHECK (traffic_grade IN ('enterprise', 'premium'));
     END IF;
 END
 $$;
+
+-- Every run: a NULL (the CHECK allows it) reads as enterprise.
+UPDATE customers SET traffic_grade = 'enterprise' WHERE traffic_grade IS NULL;
+
+ALTER TABLE customers ALTER COLUMN traffic_grade SET DEFAULT 'enterprise';
 
 COMMIT;

@@ -5,7 +5,8 @@ Real chain (tests/admin_redesign_harness.py) with customers seeded BEFORE 63
 in every pre-63 traffic_grade value, then 63 applied TWICE (idempotency).
 
 C5 traffic pattern (customers.traffic_grade):
-  * standard / economy / NULL -> enterprise, premium stays; DEFAULT
+  * EVERY pre-63 value (standard / economy / premium / NULL) -> enterprise,
+    once: a re-run never resets a customer later set to premium; DEFAULT
     enterprise; exactly one CHECK on traffic_grade, allowing only
     enterprise | premium (a direct 'standard' INSERT is refused);
   * POST /v1/customers without traffic_grade stores enterprise and takes
@@ -78,7 +79,8 @@ def test_check_migrations_row(h):
 def test_traffic_grade_values_mapped(h):
     got = {r["id"]: r["traffic_grade"] for r in h.rows(
         "SELECT id, traffic_grade FROM customers WHERE id = ANY($1::int[])", list(PRE))}
-    assert got == {201: "enterprise", 202: "enterprise", 203: "premium", 204: "enterprise"}
+    # owner decision: EVERY pre-63 customer becomes enterprise, premium included
+    assert got == {201: "enterprise", 202: "enterprise", 203: "enterprise", 204: "enterprise"}
     # the harness's own customers (02's default 'standard') too
     assert h.val(f"SELECT traffic_grade FROM customers WHERE id = {CUST_A}") == "enterprise"
 
@@ -99,6 +101,20 @@ def test_traffic_grade_default_and_check(h):
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         h.sql("INSERT INTO customers (name, account_type, traffic_grade) "
               "VALUES ('x', 'rcf', 'standard')")
+
+
+def test_rerun_keeps_premium_set_later(h):
+    """After 63, TED sets a customer to premium; re-running 63 (and 64) never
+    resets it — the blanket remap only runs with the CHECK swap."""
+    h.sql("UPDATE customers SET traffic_grade = 'premium' WHERE id = 203")
+    h.sql("UPDATE customers SET traffic_grade = NULL WHERE id = 204")
+    for _ in range(2):
+        h.sql((INIT / "63_admin_redesign.sql").read_text())
+    got = {r["id"]: r["traffic_grade"] for r in h.rows(
+        "SELECT id, traffic_grade FROM customers WHERE id IN (203, 204)")}
+    assert got == {203: "premium", 204: "enterprise"}
+    assert h.val("SELECT count(*) FROM pg_constraint WHERE conrelid = 'customers'::regclass "
+                 "AND pg_get_constraintdef(oid) LIKE '%traffic_grade%'") == 1
 
 
 # ---------------------------------------------------------------------------
