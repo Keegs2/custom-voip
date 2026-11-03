@@ -1024,9 +1024,9 @@ Init scripts run only on first initdb; on prod they're applied on the primary
 | 56 | 56_voicemail_transcription.sql | Voicemail transcription (per-mailbox opt-in, sealed transcripts) |
 | 57 | 57_trunk_dids_trunk_index.sql | `idx_trunk_dids_trunk` — the `number_routing` trunk arm's customer path |
 
-Check state on the primary with `scripts/db/check_migrations.sql` (22..57).
-Since 45, replaying 40/44/45/52 fails on the `carrier_trunk_health` view, so
-re-apply 53 last. Replaying 50 reverts 55, so re-apply 55 after it.
+Check state on the primary with `scripts/db/check_migrations.sql` (22..62).
+Since 45, replaying 40/44/45/52 fails on the `carrier_trunk_health` view, and
+replaying 53 silently drops 62's Verizon arms, so re-apply 53 and then 62 last. Replaying 50 reverts 55, so re-apply 55 after it.
 
 ### 8.4 CDR pipeline
 
