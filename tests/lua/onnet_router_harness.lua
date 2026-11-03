@@ -1350,7 +1350,7 @@ do
     trunks[#trunks + 1] = T.bw_la
     local c = run_scenario(premium_scenario(13, "premium", "+17745550177", trunks, {}))
     local ips = bridged_ips(c)
-    check("14g: Tier 1 first, then all 6 others (x2 SBCs, Verizon x1) — 15 attempts",
+    check("14g: Tier 1 first, then all 6 others (x2 SBCs, Verizon x1) — 13 attempts",
           ips == "216.82.238.134,216.82.238.134,206.146.98.26,206.146.98.26,"
               .. "198.51.100.1,198.51.100.1,198.51.100.2,198.51.100.2,198.51.100.3,198.51.100.3,"
               .. "198.51.100.4,198.51.100.4,192.0.2.11", ips)
