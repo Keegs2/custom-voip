@@ -31,6 +31,7 @@ lifecycle record) comes from the number_routing view through
 services/customer_numbers.py: GET /owned (admin roll-up) and the fallback arm
 of GET /my. Assign / unassign / reconcile stay per product by design.
 """
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -555,6 +556,224 @@ async def get_owned_numbers(admin: dict = Depends(require_admin)):
     """
     rows = await db.fetch_all(cn.owned_counts_sql())
     return cn.shape_owned_counts(rows)
+
+
+# ---------------------------------------------------------------------------
+# Subscribers vs the DID pool, and drift between them (TED contract C3/C4)
+# ---------------------------------------------------------------------------
+# A SUBSCRIBER is a DID built into a product: one row of the number_routing
+# view (every product arm, enabled or not — the same oracle FreeSWITCH routes
+# on). The POOL is did_inventory. They are maintained by different write paths
+# (POST /rcf and POST /trunks/{id}/dids never write the pool; DELETE
+# /customers/{id} never releases it), so they drift. Drift kinds, evaluated in
+# THIS order (the first match is the row's kind):
+#   duplicate_product            the DID is in more than one product arm
+#   subscriber_not_in_pool       subscriber, no pool row
+#   subscriber_pool_not_assigned subscriber, pool status not assigned /
+#                                release_requested
+#   orphan_pool_assignment       no subscriber, pool status assigned /
+#                                release_requested ('reserved' with no
+#                                subscriber is NOT drift: a number held for a
+#                                customer, e.g. after a trunk delete)
+#   customer_mismatch / product_mismatch / ref_mismatch
+#                                both present, the pool disagrees with the
+#                                subscriber (the subscriber is the truth, as in
+#                                POST /reconcile)
+# Each endpoint is ONE SQL statement, so every count and row comes from the
+# same snapshot. Both scan number_routing + did_inventory in full on the East
+# primary: fine at the platform's scale (thousands of numbers).
+DRIFT_KINDS = (
+    "duplicate_product", "subscriber_not_in_pool", "subscriber_pool_not_assigned",
+    "orphan_pool_assignment", "customer_mismatch", "product_mismatch", "ref_mismatch",
+)
+SUBSCRIBER_PRODUCTS = ("rcf", "trunk", "api", "voicemail", "ivr")
+
+# Shared SQL. `sub` carries arms = how many product arms list the DID (over
+# the WHOLE view, before any filter). `j` joins a subscriber row (s_*) and a
+# pool row (p_*) by DID; _DRIFT_CASE reads j's columns.
+_SUB_CTE = """
+    sub AS (
+        SELECT nr.did, nr.product_type, nr.customer_id, nr.product_ref_id,
+               nr.product_name, nr.product_enabled, nr.trunk_id,
+               count(*) OVER (PARTITION BY nr.did) AS arms
+          FROM number_routing nr
+    )"""
+_DRIFT_CASE = """
+    CASE
+        WHEN j.s_product IS NOT NULL AND j.arms > 1 THEN 'duplicate_product'
+        WHEN j.s_product IS NOT NULL AND j.p_did IS NULL THEN 'subscriber_not_in_pool'
+        WHEN j.s_product IS NOT NULL
+             AND j.p_status NOT IN ('assigned', 'release_requested')
+             THEN 'subscriber_pool_not_assigned'
+        WHEN j.s_product IS NULL AND j.p_status IN ('assigned', 'release_requested')
+             THEN 'orphan_pool_assignment'
+        WHEN j.s_product IS NOT NULL AND j.p_customer_id IS DISTINCT FROM j.s_customer_id
+             THEN 'customer_mismatch'
+        WHEN j.s_product IS NOT NULL AND j.p_product IS DISTINCT FROM j.s_product
+             THEN 'product_mismatch'
+        WHEN j.s_product IS NOT NULL AND j.p_ref IS DISTINCT FROM j.s_ref
+             THEN 'ref_mismatch'
+    END"""
+_J_COLS = """
+               s.product_type AS s_product, s.customer_id AS s_customer_id,
+               s.product_ref_id AS s_ref, s.product_name AS s_name,
+               s.product_enabled AS s_enabled, s.trunk_id AS s_trunk_id, s.arms,
+               p.did AS p_did, p.status AS p_status, p.product_type AS p_product,
+               p.customer_id AS p_customer_id, p.product_ref_id AS p_ref"""
+
+
+def _q_digits(q: Optional[str]) -> Optional[str]:
+    """`q` -> its digits (substring match on the DID), None when absent; 422
+    when it carries fewer than 3 digits (a 1-2 digit substring matches
+    nearly every number)."""
+    if q is None or not q.strip():
+        return None
+    digits = "".join(ch for ch in q if ch.isdigit())
+    if len(digits) < 3:
+        raise HTTPException(status_code=422, detail="q must contain at least 3 digits")
+    return digits
+
+
+# Literal GET paths: no clash with the /{did}/... routes (all have a suffix).
+@router.get("/subscribers")
+async def list_subscribers(
+    admin: dict = Depends(require_admin),
+    customer_id: Optional[int] = Query(None, description="Subscriber's customer"),
+    product_type: Optional[str] = Query(None, description="rcf|trunk|api|voicemail|ivr"),
+    q: Optional[str] = Query(None, description="DID digits (>= 3), substring"),
+    drift_only: bool = Query(False, description="Only rows with a drift kind"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Every subscriber (number_routing, all product arms) with its pool row
+    (did_inventory, LEFT JOIN by DID) and its drift kind. Admin only.
+
+    `drift` is null or the first matching subscriber kind of DRIFT_KINDS
+    (orphan_pool_assignment never applies to a subscriber). `pool_*` are null
+    when the DID has no pool row. A DID in two product arms is two rows, both
+    `duplicate_product`. Ordered by DID, then product.
+    """
+    if product_type is not None and product_type not in SUBSCRIBER_PRODUCTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"product_type must be one of {', '.join(SUBSCRIBER_PRODUCTS)}")
+    digits = _q_digits(q)
+    rows = await db.fetch_all(
+        f"""
+        WITH {_SUB_CTE},
+        j AS (
+            SELECT s.did AS did, {_J_COLS}
+              FROM sub s
+              LEFT JOIN did_inventory p ON p.did = s.did
+        ),
+        k AS (
+            SELECT j.*, {_DRIFT_CASE} AS drift
+              FROM j
+             WHERE ($1::int IS NULL OR j.s_customer_id = $1::int)
+               AND ($2::varchar IS NULL OR j.s_product = $2::varchar)
+               AND ($3::text IS NULL OR j.did LIKE '%' || $3::text || '%')
+        )
+        SELECT k.did, k.s_product AS product_type, k.s_customer_id AS customer_id,
+               c.name AS customer_name, k.s_ref AS product_ref_id,
+               k.s_name AS product_name, k.s_enabled AS product_enabled,
+               k.s_trunk_id AS trunk_id, k.p_status AS pool_status,
+               k.p_customer_id AS pool_customer_id, k.p_product AS pool_product_type,
+               k.drift, count(*) OVER () AS total_count
+          FROM k
+          LEFT JOIN customers c ON c.id = k.s_customer_id
+         WHERE (NOT $4::bool OR k.drift IS NOT NULL)
+         ORDER BY k.did, k.s_product
+         LIMIT $5::int OFFSET $6::int
+        """,
+        customer_id, product_type, digits, drift_only, limit, offset,
+    )
+    total = rows[0]["total_count"] if rows else 0
+    if not rows and offset > 0:
+        # Past the end: the window count is empty, so count the filtered set.
+        total = await db.fetch_one(
+            f"""
+            WITH {_SUB_CTE},
+            j AS (SELECT s.did AS did, {_J_COLS} FROM sub s
+                  LEFT JOIN did_inventory p ON p.did = s.did)
+            SELECT count(*) AS n FROM j
+             WHERE ($1::int IS NULL OR j.s_customer_id = $1::int)
+               AND ($2::varchar IS NULL OR j.s_product = $2::varchar)
+               AND ($3::text IS NULL OR j.did LIKE '%' || $3::text || '%')
+               AND (NOT $4::bool OR ({_DRIFT_CASE}) IS NOT NULL)
+            """,
+            customer_id, product_type, digits, drift_only,
+        )
+        total = total["n"]
+    items = []
+    for r in rows:
+        item = dict(r)
+        item.pop("total_count", None)
+        items.append(item)
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/drift")
+async def get_number_drift(
+    admin: dict = Depends(require_admin),
+    kind: Optional[str] = Query(None, description="One drift kind"),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    """Drift between subscribers (number_routing) and the DID pool
+    (did_inventory): FULL JOIN by DID, one SQL statement (consistent snapshot).
+    Admin only.
+
+    summary = items per kind over the whole snapshot (all seven kinds, zeros
+    included; `kind` filters only items/total). A DID in two product arms is
+    one item per arm. Items ordered by DID, then subscriber product.
+    """
+    if kind is not None and kind not in DRIFT_KINDS:
+        raise HTTPException(status_code=422,
+                            detail=f"kind must be one of {', '.join(DRIFT_KINDS)}")
+    row = await db.fetch_one(
+        f"""
+        WITH {_SUB_CTE},
+        j AS (
+            SELECT COALESCE(s.did, p.did) AS did, {_J_COLS}
+              FROM sub s
+              FULL JOIN did_inventory p ON p.did = s.did
+        ),
+        k AS MATERIALIZED (
+            SELECT j.*, {_DRIFT_CASE} AS kind FROM j
+        ),
+        d AS MATERIALIZED (
+            SELECT k.did, k.kind, k.s_product AS sub_product,
+                   k.s_customer_id AS sub_customer_id, sc.name AS sub_customer_name,
+                   k.s_enabled AS product_enabled, k.p_status AS pool_status,
+                   k.p_product AS pool_product, k.p_customer_id AS pool_customer_id,
+                   pc.name AS pool_customer_name
+              FROM k
+              LEFT JOIN customers sc ON sc.id = k.s_customer_id
+              LEFT JOIN customers pc ON pc.id = k.p_customer_id
+             WHERE k.kind IS NOT NULL
+        )
+        SELECT
+            (SELECT COALESCE(json_object_agg(kind, n), '{{}}'::json)
+               FROM (SELECT kind, count(*) AS n FROM d GROUP BY kind) g) AS summary,
+            (SELECT count(*) FROM d WHERE $1::text IS NULL OR d.kind = $1::text) AS total,
+            (SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.did, x.sub_product), '[]'::json)
+               FROM (SELECT * FROM d WHERE $1::text IS NULL OR d.kind = $1::text
+                      ORDER BY d.did, d.sub_product
+                      LIMIT $2::int OFFSET $3::int) x) AS items,
+            statement_timestamp() AS generated_at
+        """,
+        kind, limit, offset,
+    )
+    counts = json.loads(row["summary"]) if isinstance(row["summary"], str) else row["summary"]
+    items = json.loads(row["items"]) if isinstance(row["items"], str) else row["items"]
+    return {
+        "summary": {k: int(counts.get(k, 0)) for k in DRIFT_KINDS},
+        "items": items,
+        "total": row["total"],
+        "limit": limit,
+        "offset": offset,
+        "generated_at": row["generated_at"].isoformat(),
+    }
 
 
 @router.post("/sync")
