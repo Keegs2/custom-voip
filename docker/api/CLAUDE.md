@@ -476,7 +476,8 @@ SIP trace search via qryn (Loki-compatible API over ClickHouse). Homer 10 — no
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/homer/aliases` | Static IP-to-name alias map for ladder diagrams |
-| `POST` | `/v1/homer/search` | Search SIP traces with A/B-leg correlation (qryn LogQL number search + bounded ClickHouse X-CID scan + CDR B rows); adds `legs` / `correlation_status` / `correlation_reason` |
+| `GET` | `/v1/homer/search/capabilities` | `{number_index, index_covered_from, max_scan_hours: 24, max_window_days: 7}` — is the ClickHouse number index present and from when is it complete (cached ≤ 60 s) |
+| `POST` | `/v1/homer/search` | Search SIP traces with A/B-leg correlation. Number search reads the ClickHouse number index when it covers `start_time` (any window), else the qryn LogQL scan for windows ≤ 24 h, else 422 `window_too_wide`; a ClickHouse limit → 422 `search_too_broad`. Adds `legs` / `correlation_status` / `correlation_reason` / `search_path` / `index_covered_from` / `max_scan_hours` |
 
 ### Onboarding
 New-customer intake pipeline (`pending → completed`, or `→ rejected` — status-only since migration 27; billing/provisioning are external). Backed by `onboarding_requests`.
