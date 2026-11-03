@@ -1207,25 +1207,33 @@ end
 -- Traffic pattern of the PAYING customer (migration 63, TED contract C7)
 -- ================================================================
 -- The carrier leg of an RCF forward / IVR transfer is paid by the customer
--- of the terminal RCF hop (dest.customer_id = the CDR customer_id). On a
--- single-hop call (and a directly dialed IVR) that is the STEP-1 customer,
--- whose grade the STEP-1 lookup already selected (ctx.traffic_grade). Only
--- an on-net chain that ends on ANOTHER customer's RCF DID (or an IVR reached
--- on-net) costs one lookup_customer read, memoized per call. Any failure
--- reads as "not premium" (today's routing). Returns the grade or nil.
-local function paying_traffic_grade(ctx, customer_id)
+-- of the terminal RCF hop (dest.customer_id = the CDR customer_id). Sources,
+-- cheapest first, all without an extra query except the last:
+--   1. the STEP-1 customer (single-hop calls, a directly dialed IVR): its
+--      grade came with the STEP-1 lookup (ctx.traffic_grade);
+--   2. a grade the hop already carries (an IVR transfer's pseudo-hop: the
+--      IVR's ivr_fs_number row joins customers.traffic_grade);
+--   3. only an on-net chain that ends on ANOTHER customer's RCF DID: one
+--      db.lookup_customer_grade point read on the connection already in use
+--      (never connects or reconnects), memoized per call.
+-- No handle, an error or no row -> nil = enterprise (today's routing) at
+-- once — premium routing can never delay or break a call.
+local function paying_traffic_grade(ctx, customer_id, carried_grade)
     local cid = tonumber(customer_id)
     if cid == nil or cid == tonumber(ctx.origin_customer_id) then
         return ctx.traffic_grade
+    end
+    if carried_grade ~= nil then
+        return carried_grade
     end
     ctx.paying_grades = ctx.paying_grades or {}
     local known = ctx.paying_grades[cid]
     if known == nil then
         known = false
-        if db and db.lookup_customer then
-            local ok, row = pcall(db.lookup_customer, cid)
-            if ok and type(row) == "table" and row.traffic_grade then
-                known = row.traffic_grade
+        if db and db.lookup_customer_grade then
+            local ok, grade = pcall(db.lookup_customer_grade, cid)
+            if ok and type(grade) == "string" then
+                known = grade
             end
         end
         ctx.paying_grades[cid] = known
@@ -1834,7 +1842,7 @@ local function terminate_rcf(dest, ctx)
         -- other grade gets the SAME list back: enterprise is unchanged.
         local premium_routing = false
         do
-            local paying_grade = paying_traffic_grade(ctx, dest.customer_id)
+            local paying_grade = paying_traffic_grade(ctx, dest.customer_id, dest.traffic_grade)
             if paying_grade == "premium" then
                 eligible_trunks, premium_routing =
                     term_trunks_lib.apply_traffic_pattern(eligible_trunks, paying_grade)
@@ -2738,6 +2746,7 @@ local function ivr_transfer(ivr, spec, ctx)
         ring_timeout    = spec.ring_timeout,
         max_channels    = 0,
         product_name    = nil,     -- no customer text in any SIP header
+        traffic_grade   = ivr.traffic_grade,   -- the payer's (premium routing)
     }
     freeswitch.consoleLog("INFO", string.format(
         "[%s] IVR transfer: %s -> %s (kind=%s pass_cid=%s ring=%ss)\n",
@@ -2970,7 +2979,9 @@ local function terminate_ivr(dest, ctx)
             local n = 0 for _ in pairs(plan.nodes) do n = n + 1 end return n end)(),
         #plan.prompts, state.depth))
 
-    local ivr = { did = dest.did, customer_id = row_customer }
+    -- traffic_grade: the IVR owner's (ivr_fs_number JOIN customers) — the
+    -- payer of a transfer's carrier leg, so terminate_rcf needs no lookup.
+    local ivr = { did = dest.did, customer_id = row_customer, traffic_grade = row.traffic_grade }
     local ok, err = pcall(engine.run, session, {
         plan = plan, state = state, prompts = prompts, schedule = schedule,
         rules = rules, number_utils = number_utils,

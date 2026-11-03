@@ -476,9 +476,16 @@ local function run_scenario(sc, script_path)
     -- the function does not exist (every pre-premium scenario).
     if sc.customers then
         captured.customer_lookups = {}
-        fake_db.lookup_customer = function(id)
+        fake_db.lookup_customer_grade = function(id)
             captured.customer_lookups[#captured.customer_lookups + 1] = tostring(id)
-            return sc.customers[tonumber(id)]
+            if sc.customers == "raise" then error("server closed the connection unexpectedly") end
+            local row = sc.customers[tonumber(id)]
+            return row and row.traffic_grade or nil
+        end
+        -- the reconnecting lookup must never be used on the call path
+        fake_db.lookup_customer = function()
+            captured.slow_lookup = true
+            return nil
         end
     end
 
@@ -1387,6 +1394,24 @@ do
     local c3 = run_scenario(sc3)
     check("14e: unknown terminal customer -> enterprise routing",
           bridged_ips(c3) == "206.146.98.26,206.146.98.26,67.231.2.12,67.231.2.12", bridged_ips(c3))
+    check("14e: never the reconnecting lookup_customer",
+          not c.slow_lookup and not c2.slow_lookup and not c3.slow_lookup)
+    -- FAILURE PATH: the grade read raises (dead connection) -> enterprise at once
+    local sc4 = premium_scenario(9, "enterprise", "+16170000091", { T.atl_ld, T.bw_dal }, ALL_FAIL)
+    sc4.oracle = sc.oracle
+    sc4.customers = "raise"
+    local c4 = run_scenario(sc4)
+    check("14e: lookup error -> enterprise routing, call still attempted",
+          bridged_ips(c4) == "206.146.98.26,206.146.98.26,67.231.2.12,67.231.2.12", bridged_ips(c4))
+    check("14e: lookup error -> read once, no retry",
+          table.concat(c4.customer_lookups or {}, ",") == "77", table.concat(c4.customer_lookups or {}, ","))
+    check("14e: lookup error -> no premium flag", c4.setvars["term_premium_fallback"] == nil)
+    -- no lookup function at all (old db_client) -> enterprise
+    local sc5 = premium_scenario(10, "enterprise", "+16170000091", { T.atl_ld, T.bw_dal }, ALL_FAIL)
+    sc5.oracle = sc.oracle
+    local c5 = run_scenario(sc5)
+    check("14e: no grade lookup available -> enterprise routing",
+          bridged_ips(c5) == "206.146.98.26,206.146.98.26,67.231.2.12,67.231.2.12", bridged_ips(c5))
 end
 
 do

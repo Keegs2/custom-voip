@@ -677,6 +677,32 @@ function M.get_termination_trunks(zone)
     return trunks
 end
 
+-- Traffic pattern of ONE customer (customers.traffic_grade, migration 63) for
+-- premium routing on a cross-customer on-net chain (inbound_router.lua
+-- paying_traffic_grade). Deliberately CHEAP and FAIL-SAFE, unlike every other
+-- lookup here: it only runs on the connection this call is already using
+-- (the chain's resolve_destination just ran on it) and NEVER connects,
+-- reconnects or probes. No live handle, a query error or no row -> nil, which
+-- the caller reads as enterprise (today's routing) at once, with no
+-- connect_timeout on the call path. One PK point read.
+function M.lookup_customer_grade(customer_id)
+    local id = tonumber(customer_id)
+    if not id or id ~= math.floor(id) or id < 1 or not conn then
+        return nil
+    end
+    local ok, cursor = pcall(function()
+        return conn:execute(string.format(
+            "SELECT traffic_grade FROM customers WHERE id = %d LIMIT 1", math.floor(id)))
+    end)
+    if not ok or not cursor or type(cursor) ~= "userdata" and type(cursor) ~= "table" then
+        return nil
+    end
+    local row = nil
+    pcall(function() row = cursor:fetch({}, "a") end)
+    pcall(function() cursor:close() end)
+    return row and row.traffic_grade or nil
+end
+
 -- Insert CDR (async via background job in production)
 function M.insert_cdr(cdr)
     -- Validate required fields
