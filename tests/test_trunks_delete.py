@@ -5,7 +5,7 @@ Real routers behind the real JWT middleware on an ephemeral PostgreSQL 16
 live_trunk_stats, 41 did_inventory.source and 59's number_routing).
 
 C1  DELETE /v1/trunks/{id}
-    * 404 unknown; 409 while enabled (two-step: disable first); 403 for
+    * 404 {"detail":"Trunk not found"} unknown; 409 while enabled (two-step: disable first); 403 for
       support / tenant users.
     * one transaction: trunk, trunk_dids, trunk_auth_ips and live_trunk_stats
       rows gone; CDR history (plain trunk_id) untouched; the DIDs vanish from
@@ -17,7 +17,9 @@ C1  DELETE /v1/trunks/{id}
       ANOTHER product, or is porting/suspended, is left alone.
     * the exact 200 body.
 C2  DELETE /v1/trunks/{id}/dids/{trunk_did_id}
-    * 404 when the row is on another trunk / unknown; one row removed, pool
+    * 404 {"detail":"Trunk DID not found"} when the row is on another trunk /
+      unknown, 404 {"detail":"Trunk not found"} for an unknown trunk (never
+      the bare "Not Found" TED reads as "not deployed"); one row removed, pool
       reserved exactly as C1, with or without an existing pool row; works on
       an enabled trunk; exact 200 body; 403 for support.
 
@@ -201,10 +203,14 @@ def test_reserved_dids_show_in_the_customers_numbers(h):
 # C2 — DELETE /v1/trunks/{id}/dids/{trunk_did_id}
 # ---------------------------------------------------------------------------
 def test_delete_trunk_did_guards(h):
-    r = h.delete(f"/v1/trunks/{T_ON}/dids/9021")      # row is on another trunk
-    assert r.status_code == 404
-    assert h.delete(f"/v1/trunks/{T_ON}/dids/424242").status_code == 404
-    assert h.delete(f"/v1/trunks/999999/dids/9011").status_code == 404
+    # CRAG's own 404s are never FastAPI's bare "Not Found" (TED reads that
+    # as "route not deployed yet").
+    for path in (f"/v1/trunks/{T_ON}/dids/9021",      # row is on another trunk
+                 f"/v1/trunks/{T_ON}/dids/424242"):   # no such row
+        r = h.delete(path)
+        assert r.status_code == 404 and r.json() == {"detail": "Trunk DID not found"}, path
+    r = h.delete("/v1/trunks/999999/dids/9011")
+    assert r.status_code == 404 and r.json() == {"detail": "Trunk not found"}
     for who in ("support", "user_b"):
         assert h.delete(f"/v1/trunks/{T_ON}/dids/9011", who=who).status_code == 403
     assert h.val("SELECT count(*) FROM trunk_dids WHERE id IN (9011, 9021)") == 2

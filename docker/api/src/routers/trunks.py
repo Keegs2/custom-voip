@@ -597,7 +597,8 @@ async def delete_trunk_did(trunk_id: int, trunk_did_id: int,
                            admin: dict = Depends(require_admin)):
     """Remove ONE DID from a trunk (contract C2). Admin-only: provisioning.
 
-    Deletes the trunk_dids row (404 when it is not on this trunk) and, in the
+    Deletes the trunk_dids row (404 "Trunk not found" for an unknown trunk,
+    404 "Trunk DID not found" when the row is not on this trunk) and, in the
     same transaction, moves the DID's pool row to 'reserved' for the trunk's
     customer, whether or not it had a pool row (_reserve_former_trunk_dids).
     Inbound calls to the DID stop reaching the PBX on the next call
@@ -606,6 +607,11 @@ async def delete_trunk_did(trunk_id: int, trunk_did_id: int,
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            # Distinct 404 texts: TED reads a bare {"detail":"Not Found"} as
+            # "route not deployed", so CRAG's own 404s never use it.
+            if await conn.fetchval("SELECT 1 FROM sip_trunks WHERE id = $1::int",
+                                   trunk_id) is None:
+                raise HTTPException(status_code=404, detail="Trunk not found")
             row = await conn.fetchrow(
                 """
                 DELETE FROM trunk_dids td
@@ -616,7 +622,7 @@ async def delete_trunk_did(trunk_id: int, trunk_did_id: int,
                 trunk_did_id, trunk_id,
             )
             if not row:
-                raise HTTPException(status_code=404, detail="DID not found on this trunk")
+                raise HTTPException(status_code=404, detail="Trunk DID not found")
             await _reserve_former_trunk_dids(
                 conn, [row["did"]], row["customer_id"],
                 f"reserved: removed from trunk {trunk_id}")

@@ -293,7 +293,7 @@ All endpoints are mounted at both `/v1/<path>` and `/<path>` (backward compatibi
 | `POST` | `/v1/trunks/{id}/dids` | Assign DID to trunk |
 | `GET` | `/v1/trunks/{id}/dids` | List trunk DIDs |
 | `DELETE` | `/v1/trunks/{id}` | Admin. Delete a DISABLED trunk (409 `Disable the trunk before deleting it` while enabled; 404 unknown). One transaction: trunk_dids, trunk_auth_ips, live_trunk_stats (needs 63's grant; skipped without it), sip_trunks; every former DID's pool row → `reserved` for the trunk's customer (inserted `source=manual` when missing; a row naming another product, or porting/suspended, is left alone). `{status, trunk_id, customer_id, reserved_dids, removed_ips}` (TED contract C1) |
-| `DELETE` | `/v1/trunks/{id}/dids/{trunk_did_id}` | Admin. Remove one trunk DID (404 if not on that trunk); pool row → `reserved` for the trunk's customer as above. `{status, trunk_id, did}` (C2) |
+| `DELETE` | `/v1/trunks/{id}/dids/{trunk_did_id}` | Admin. Remove one trunk DID (404 `Trunk not found` / `Trunk DID not found` — never the bare `Not Found`, which TED reads as "route not deployed"); pool row → `reserved` for the trunk's customer as above. `{status, trunk_id, did}` (C2) |
 | `GET` | `/v1/trunks/{id}/stats` | Real-time trunk stats (ESL + DB) |
 
 ### CDRs
