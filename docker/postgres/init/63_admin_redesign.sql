@@ -1,0 +1,117 @@
+-- ==========================================================================
+-- 63_admin_redesign.sql
+-- TED CRAG Admin redesign (owner decisions 2026-11-03; TED <-> CRAG contract
+-- C1-C7).
+--
+-- WHAT THIS DOES (one transaction, idempotent — re-running is a no-op):
+--   1. GRANT DELETE ON live_trunk_stats TO api — DELETE /v1/trunks/{id} (C1)
+--      removes the deleted trunk's live-stats rows (26 granted the api role
+--      SELECT/INSERT/UPDATE only). Without this grant the API skips that
+--      delete and the rows just turn `stale` in live_trunk_health.
+--   2. Traffic pattern (C5): customers.traffic_grade becomes exactly
+--      'enterprise' | 'premium' (owner decision: it decides ONLY which carriers
+--      deliver the customer's calls; Premium = Tier 1 carriers first, then
+--      the others, so the call still completes when Tier 1 fails).
+--        * EVERY existing customer -> 'enterprise', 'premium' included
+--          (owner decision: the old grade never changed anything; Premium
+--          is set deliberately from TED). This blanket remap runs ONCE, in
+--          the run that installs the new CHECK, so a re-run never resets a
+--          customer TED later set to 'premium'; NULL -> 'enterprise' always;
+--        * DEFAULT 'enterprise';
+--        * the CHECK (02's inline customers_traffic_grade_check, found by
+--          definition, name-agnostic) is replaced by
+--          customers_traffic_grade_check CHECK (traffic_grade IN
+--          ('enterprise', 'premium')) — VARCHAR(10) still fits 'enterprise'.
+--      Historic cdrs.traffic_grade values are left alone (no CHECK there).
+--   (Tier 1 carriers, C6, are 64_carrier_tier1.sql: carrier_trunks only.)
+--
+-- LOCKING: customers is read on the call path — East FreeSWITCH and the API
+-- read the PRIMARY directly, and the lock is WAL-replayed on every zone
+-- replica. The CHECK swap takes a brief ACCESS EXCLUSIVE lock on customers
+-- (a tiny table: the validating scan is milliseconds), and a WAITING
+-- ACCESS EXCLUSIVE request already queues every new call-setup read behind
+-- it. lock_timeout = 1s bounds that queue: the migration fails fast instead.
+-- Before applying:
+--   * apply at low traffic;
+--   * check for long or idle-in-transaction sessions holding customers:
+--       sudo -u postgres psql -d voip -c "SELECT pid, state, xact_start, query FROM pg_stat_activity WHERE state LIKE 'idle in transaction%' OR (xact_start < now() - interval '10 seconds' AND state <> 'idle')"
+--   * on "canceling statement due to lock timeout", just re-run the file —
+--     it is one transaction (nothing half-applied) and idempotent.
+--
+-- ORDER: apply BEFORE the API build of the same release (that build creates
+-- customers with traffic_grade 'enterprise', which the old CHECK refuses).
+-- The OLD API keeps working on reads; between this migration and the API
+-- rebuild an old-API customer CREATE (it sends 'standard') would fail the new
+-- CHECK, so rebuild the API right after applying this file.
+--
+-- PRODUCTION NOTE: init scripts only run on the first initdb of a fresh data
+-- directory. Apply MANUALLY on the bare-metal East primary (services VM) as a
+-- SUPERUSER; it replicates to every zone replica:
+--     hostname | grep -q '^services$' && sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f /opt/revup/docker/postgres/init/63_admin_redesign.sql
+--
+-- Verification (after applying):
+--     sudo -u postgres psql -d voip -f /opt/revup/scripts/db/check_migrations.sql
+--   Expect "63_admin_redesign | applied".
+-- ==========================================================================
+
+BEGIN;
+
+SET LOCAL lock_timeout = '1s';
+
+-- --------------------------------------------------------------------------
+-- 1. live_trunk_stats: the api role may delete a deleted trunk's rows (C1).
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+    IF to_regclass('public.live_trunk_stats') IS NOT NULL
+       AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'api') THEN
+        GRANT DELETE ON live_trunk_stats TO api;
+    END IF;
+END
+$$;
+
+-- --------------------------------------------------------------------------
+-- 2. customers.traffic_grade: 'enterprise' | 'premium' (C5).
+-- --------------------------------------------------------------------------
+-- The blanket "every customer -> enterprise" runs ONCE: only in the run that
+-- installs the two-value CHECK (customers_traffic_grade_check whose
+-- definition names 'enterprise' is the marker). A re-run finds the marker
+-- and never touches a customer TED has since set to 'premium'.
+DO $$
+DECLARE
+    con RECORD;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                    WHERE conrelid = 'customers'::regclass
+                      AND conname = 'customers_traffic_grade_check'
+                      AND pg_get_constraintdef(oid) LIKE '%enterprise%') THEN
+        -- Drop every old CHECK that constrains traffic_grade (02's inline
+        -- customers_traffic_grade_check, found by definition).
+        FOR con IN
+            SELECT c.conname
+              FROM pg_constraint c
+             WHERE c.conrelid = 'customers'::regclass
+               AND c.contype = 'c'
+               AND pg_get_constraintdef(c.oid) LIKE '%traffic_grade%'
+        LOOP
+            EXECUTE format('ALTER TABLE customers DROP CONSTRAINT %I', con.conname);
+        END LOOP;
+
+        -- Owner decision: the old grade never changed routing, so EVERY
+        -- existing customer starts as 'enterprise' (premium included);
+        -- Premium is then set deliberately from TED.
+        UPDATE customers SET traffic_grade = 'enterprise'
+         WHERE traffic_grade IS DISTINCT FROM 'enterprise';
+
+        ALTER TABLE customers ADD CONSTRAINT customers_traffic_grade_check
+            CHECK (traffic_grade IN ('enterprise', 'premium'));
+    END IF;
+END
+$$;
+
+-- Every run: a NULL (the CHECK allows it) reads as enterprise.
+UPDATE customers SET traffic_grade = 'enterprise' WHERE traffic_grade IS NULL;
+
+ALTER TABLE customers ALTER COLUMN traffic_grade SET DEFAULT 'enterprise';
+
+COMMIT;

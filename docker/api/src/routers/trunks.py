@@ -545,6 +545,158 @@ async def add_trunk_did(trunk_id: int, did: TrunkDID, admin: dict = Depends(requ
         raise
 
 
+#: Pool states a former trunk DID may be moved to 'reserved' from. A DID that
+#: is porting in/out, suspended or release_requested (a customer release
+#: awaiting admin approval) keeps that lifecycle state (the delete still
+#: removes the subscriber); the drift report then shows it.
+_RESERVABLE_POOL_STATUSES = ("available", "assigned", "reserved")
+
+
+async def _reserve_former_trunk_dids(conn, dids: list[str], customer_id: int,
+                                     note: str) -> list[str]:
+    """Pool rows of DIDs that just left a trunk -> 'reserved' for the trunk's
+    customer (owner decision 2026-11-03: the numbers stay with the customer).
+
+    One statement in the caller's transaction. A DID with no pool row gets one
+    (source='manual': the platform held it without the pool knowing). An
+    existing row is reset only when it still describes this trunk DID or
+    nothing (product_type NULL or 'trunk') and is in a reservable state; a row
+    that names another product (rcf/voicemail/ivr/api — the DID was in two
+    product tables) or is porting / suspended / release_requested is left
+    exactly as it is.
+    Returns the DIDs actually reserved, in input order.
+    """
+    if not dids:
+        return []
+    rows = await conn.fetch(
+        """
+        INSERT INTO did_inventory (did, customer_id, product_type, product_ref_id,
+                                   status, assigned_at, assigned_by, notes, source,
+                                   updated_at)
+        SELECT d, $2::int, NULL, NULL, 'reserved', NULL, NULL, $3::text, 'manual', NOW()
+          FROM unnest($1::varchar[]) AS d
+        ON CONFLICT (did) DO UPDATE
+           SET customer_id = EXCLUDED.customer_id,
+               product_type = NULL,
+               product_ref_id = NULL,
+               status = 'reserved',
+               assigned_at = NULL,
+               assigned_by = NULL,
+               notes = EXCLUDED.notes,
+               updated_at = NOW()
+         WHERE did_inventory.status = ANY($4::varchar[])
+           AND (did_inventory.product_type IS NULL OR did_inventory.product_type = 'trunk')
+        RETURNING did
+        """,
+        dids, customer_id, note, list(_RESERVABLE_POOL_STATUSES),
+    )
+    reserved = {r["did"] for r in rows}
+    return [d for d in dids if d in reserved]
+
+
+@router.delete("/{trunk_id}/dids/{trunk_did_id}")
+async def delete_trunk_did(trunk_id: int, trunk_did_id: int,
+                           admin: dict = Depends(require_admin)):
+    """Remove ONE DID from a trunk (contract C2). Admin-only: provisioning.
+
+    Deletes the trunk_dids row (404 "Trunk not found" for an unknown trunk,
+    404 "Trunk DID not found" when the row is not on this trunk) and, in the
+    same transaction, moves the DID's pool row to 'reserved' for the trunk's
+    customer, whether or not it had a pool row (_reserve_former_trunk_dids).
+    Inbound calls to the DID stop reaching the PBX on the next call
+    (number_routing / trunk_dids are read live per call; replicas lag seconds).
+    """
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Distinct 404 texts: TED reads a bare {"detail":"Not Found"} as
+            # "route not deployed", so CRAG's own 404s never use it.
+            if await conn.fetchval("SELECT 1 FROM sip_trunks WHERE id = $1::int",
+                                   trunk_id) is None:
+                raise HTTPException(status_code=404, detail="Trunk not found")
+            row = await conn.fetchrow(
+                """
+                DELETE FROM trunk_dids td
+                 USING sip_trunks t
+                 WHERE td.id = $1::int AND td.trunk_id = $2::int AND t.id = td.trunk_id
+                RETURNING td.did, t.customer_id
+                """,
+                trunk_did_id, trunk_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Trunk DID not found")
+            await _reserve_former_trunk_dids(
+                conn, [row["did"]], row["customer_id"],
+                f"reserved: removed from trunk {trunk_id}")
+    logger.info("trunk DID removed: trunk=%s did=%s customer=%s by_user=%s",
+                trunk_id, row["did"], row["customer_id"], admin.get("sub"))
+    return {"status": "deleted", "trunk_id": trunk_id, "did": row["did"]}
+
+
+@router.delete("/{trunk_id}")
+async def delete_trunk(trunk_id: int, admin: dict = Depends(require_admin)):
+    """Delete a SIP trunk for good (contract C1). Admin-only: deprovisioning.
+
+    Two-step safety: the trunk must already be disabled (409 otherwise), so
+    Kamailio has stopped admitting its PBX before the rows go. In ONE
+    transaction: lock the trunk, collect its DIDs and auth IPs, delete
+    trunk_dids, trunk_auth_ips, live_trunk_stats and the trunk itself, and
+    move every former DID's pool row to 'reserved' for the trunk's customer
+    (the numbers stay with the customer; _reserve_former_trunk_dids).
+    CDR history keeps the plain trunk_id (no FK). After commit, best-effort
+    invalidation of the API-side trunk_ip:<ip> cache keys. Kamailio and
+    FreeSWITCH read the trunk tables live per call: nothing else to reload.
+    """
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            trunk = await conn.fetchrow(
+                "SELECT id, customer_id, enabled FROM sip_trunks WHERE id = $1::int FOR UPDATE",
+                trunk_id,
+            )
+            if not trunk:
+                raise HTTPException(status_code=404, detail="Trunk not found")
+            if trunk["enabled"]:
+                raise HTTPException(status_code=409,
+                                    detail="Disable the trunk before deleting it")
+            customer_id = trunk["customer_id"]
+            dids = [r["did"] for r in await conn.fetch(
+                "SELECT did FROM trunk_dids WHERE trunk_id = $1::int ORDER BY did", trunk_id)]
+            ips = [r["ip"] for r in await conn.fetch(
+                "SELECT host(ip_address) AS ip FROM trunk_auth_ips "
+                "WHERE trunk_id = $1::int ORDER BY id", trunk_id)]
+            await conn.execute("DELETE FROM trunk_dids WHERE trunk_id = $1::int", trunk_id)
+            await conn.execute("DELETE FROM trunk_auth_ips WHERE trunk_id = $1::int", trunk_id)
+            # live_trunk_stats (26) granted the api role no DELETE until 63;
+            # without it the stale rows only age out of the view (`stale`).
+            if await conn.fetchval(
+                    "SELECT CASE WHEN to_regclass('public.live_trunk_stats') IS NULL THEN false "
+                    "ELSE has_table_privilege('public.live_trunk_stats', 'DELETE') END"):
+                await conn.execute(
+                    "DELETE FROM live_trunk_stats WHERE trunk_id = $1::int", trunk_id)
+            await conn.execute("DELETE FROM sip_trunks WHERE id = $1::int", trunk_id)
+            reserved = await _reserve_former_trunk_dids(
+                conn, dids, customer_id, f"reserved: trunk {trunk_id} deleted")
+
+    for ip in ips:
+        try:
+            await cache.invalidate_trunk_cache(ip)
+        except Exception as exc:  # noqa: BLE001 — the delete is already committed
+            logger.warning("trunk delete: cache invalidation failed for %s: %s", ip, exc)
+    kept = [d for d in dids if d not in reserved]
+    logger.info(
+        "trunk deleted: trunk=%s customer=%s dids=%d reserved=%d pool_state_kept=%s "
+        "ips=%d by_user=%s", trunk_id, customer_id, len(dids), len(reserved), kept,
+        len(ips), admin.get("sub"))
+    return {
+        "status": "deleted",
+        "trunk_id": trunk_id,
+        "customer_id": customer_id,
+        "reserved_dids": reserved,
+        "removed_ips": ips,
+    }
+
+
 @router.get("/{trunk_id}/dids")
 async def list_trunk_dids(
     trunk_id: int, customer_filter: int | None = Depends(get_customer_filter)

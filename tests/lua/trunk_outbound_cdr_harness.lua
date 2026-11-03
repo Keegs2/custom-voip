@@ -41,6 +41,10 @@ local function run(sc, script_path)
         cps_limit          = "10",
         ["sip_h_X-SBC-ID"] = "east-sbc-1",
     }
+    if sc.no_kamailio then
+        -- IP-lookup fallback path: Kamailio set no X-Trunk-ID / X-Customer-ID.
+        vars.trunk_id, vars.customer_id, vars.max_channels, vars.cps_limit = nil, nil, nil, nil
+    end
     local results, idx = sc.bridge_results or { "SUCCESS" }, 0
     local session = {}
     function session:getVariable(k) return vars[k] end
@@ -59,6 +63,9 @@ local function run(sc, script_path)
             vars.originate_disposition = results[idx] or "NORMAL_TEMPORARY_FAILURE"
         else
             captured.executes[#captured.executes+1] = { app = app, data = data }
+            if app == "respond" then
+                captured.executes_respond[#captured.executes_respond + 1] = data
+            end
         end
     end
 
@@ -71,11 +78,60 @@ local function run(sc, script_path)
         end,
         get_connection = function() return nil end,
     }
+    fake_db.lookup_trunk_by_ip = function(ip)
+        if sc.no_kamailio then
+            return { trunk_id = "7", customer_id = "42", max_channels = "10",
+                     cps_limit = sc.trunk_cps or "20", traffic_grade = "enterprise" }
+        end
+        return nil
+    end
+    -- CPS scenarios: a fake redis_client (spy on the per-trunk cps_check) and
+    -- a redis_cps that would refuse every call (the old 5 CPS customer cap).
+    local fake_redis, fake_redis_cps
+    if sc.redis then
+        captured.cps_checks, captured.redis_cps_calls = {}, 0
+        fake_redis = {
+            check_prefix = function() return false end,
+            cps_check = function(id, limit, prefix)
+                captured.cps_checks[#captured.cps_checks + 1] =
+                    tostring(id) .. "/" .. tostring(limit) .. "/" .. tostring(prefix)
+                return sc.cps_allow ~= false, 21
+            end,
+            acquire_channel = function() return true, 1, 10 end,
+            velocity_check = function() return true end,
+            release_channel = function() end,
+        }
+        fake_redis_cps = setmetatable({}, { __index = function()
+            return function()
+                captured.redis_cps_calls = captured.redis_cps_calls + 1
+                return { allowed = false, current_cps = 5, limit = 5, tier = "free", tier_name = "Free" }
+            end
+        end })
+    end
+    -- 8YY scenarios: carrier_trunks rows + the trunk customer's row.
+    if sc.term_trunks then
+        fake_db.get_termination_trunks = function(_) return sc.term_trunks end
+    end
+    if sc.customer_grade ~= nil then
+        captured.customer_lookups = 0
+        fake_db.lookup_customer = function(id)
+            captured.customer_lookups = captured.customer_lookups + 1
+            if tostring(id) == "42" and sc.customer_grade then
+                return { id = "42", traffic_grade = sc.customer_grade, status = "active" }
+            end
+            return nil
+        end
+    end
+    local sbc_up = string.format("up:%d", os.time())
     local env = setmetatable({
         session = session,
         freeswitch = {
             consoleLog = function() end,
-            getGlobalVariable = function() return nil end,
+            getGlobalVariable = function(k)
+                -- 8YY scenarios: both SBCs "up" (no real TCP probe)
+                if sc.term_trunks and k:match("^sbc_health_") then return sbc_up end
+                return nil
+            end,
             setGlobalVariable = function() end,
         },
         os = setmetatable({ getenv = function(k)
@@ -89,7 +145,8 @@ local function run(sc, script_path)
     env.loadfile = function(path)
         if type(path) == "string" then
             if path:match("db_client") then return function() return fake_db end end
-            if path:match("redis") then return function() return nil end end
+            if path:match("redis_cps") then return function() return fake_redis_cps end end
+            if path:match("redis") then return function() return fake_redis end end
             local lib = path:match("/lib/([%w_]+)%.lua$")
             if lib then return loadfile(LIB_DIR .. lib .. ".lua", "t", env) end
         end
@@ -98,6 +155,7 @@ local function run(sc, script_path)
     env.package = setmetatable({ path = package.path, cpath = package.cpath,
         loadlib = function() return nil, "stubbed" end, loaded = {} }, { __index = package })
 
+    captured.executes_respond = {}
     local chunk, err = loadfile(script_path or SCRIPT, "t", env)
     if not chunk then error("loadfile failed: " .. tostring(err)) end
     local ok, e = pcall(chunk)
@@ -238,6 +296,71 @@ do
         check(label .. ": sofia_session_timeout NOT in any B-leg dial string", #leaked == 0,
               table.concat(leaked, " | "))
     end
+end
+
+do
+    print("[7] 8YY premium traffic pattern (TED contract C7)")
+    local TF = { carrier = "sinch", pop = "denver-tf", term_ip = "206.146.100.26",
+                 traffic_class = "tollfree", tier1 = "f" }
+    local TF1 = { carrier = "acme", pop = "tf1", term_ip = "198.51.100.5",
+                  traffic_class = "tollfree", tier1 = "t" }
+    local BWR = { carrier = "bandwidth", pop = "dallas", term_ip = "67.231.2.12",
+                  traffic_class = "ld", tier1 = "t" }
+    local function tf_ips(c)
+        local out = {}
+        for _, b in ipairs(c.bridges) do out[#out + 1] = b:match("sip_h_X%-Carrier%-IP=([^,}]+)") end
+        return table.concat(out, ",")
+    end
+    local fail4 = { "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE",
+                    "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE" }
+    local c = run({ dest = "+18885550100", term_trunks = { BWR, TF, TF1 },
+                    customer_grade = "premium", bridge_results = fail4 })
+    check("7a premium, Tier 1 failing: Tier 1 TF first (x2 SBCs), then Sinch TF",
+          tf_ips(c) == "198.51.100.5,198.51.100.5,206.146.100.26,206.146.100.26", tf_ips(c))
+    check("7a premium: customer read once", c.customer_lookups == 1, c.customer_lookups)
+    check("7a premium: term_premium_fallback=1 (Sinch was tried)",
+          c.setvars.term_premium_fallback == "1", c.setvars.term_premium_fallback)
+    c = run({ dest = "+18885550100", term_trunks = { BWR, TF, TF1 }, customer_grade = "premium",
+              bridge_results = { "SUCCESS" } })
+    check("7a2 premium, Tier 1 answers: one attempt, no flag",
+          tf_ips(c) == "198.51.100.5" and c.setvars.term_premium_fallback == nil, tf_ips(c))
+    c = run({ dest = "+18885550100", term_trunks = { BWR, TF }, customer_grade = "premium",
+              bridge_results = { "SUCCESS" } })
+    check("7b premium, no Tier 1 TF row: straight to the TF row + fallback=1",
+          tf_ips(c) == "206.146.100.26" and c.setvars.term_premium_fallback == "1",
+          tf_ips(c) .. " / " .. tostring(c.setvars.term_premium_fallback))
+    for _, g in ipairs({ "enterprise", false }) do
+        c = run({ dest = "+18885550100", term_trunks = { BWR, TF, TF1 }, customer_grade = g,
+                  bridge_results = fail4 })
+        check("7c " .. tostring(g) .. ": every TF row in priority order, no flag",
+              tf_ips(c) == "206.146.100.26,206.146.100.26,198.51.100.5,198.51.100.5"
+                  and c.setvars.term_premium_fallback == nil, tf_ips(c))
+    end
+    c = run({ dest = "+17745550199", term_trunks = { BWR, TF }, customer_grade = "premium",
+              bridge_results = { "SUCCESS" } })
+    check("7d non-8YY LD: Bandwidth primary path unchanged, customer never read",
+          c.bridges[1] and c.bridges[1]:find("sip_h_X-Carrier=primary", 1, true)
+              and c.customer_lookups == 0, c.bridges[1])
+end
+
+do
+    print("[8] CPS: per trunk (Kamailio), never the per-customer 5 CPS default")
+    local c = run({ redis = true, bridge_results = { "SUCCESS" } })
+    check("8a Kamailio-authenticated: no FS CPS check at all",
+          #c.cps_checks == 0 and c.redis_cps_calls == 0,
+          table.concat(c.cps_checks, ",") .. " / redis_cps=" .. c.redis_cps_calls)
+    check("8a Kamailio-authenticated: the call bridges (no 503)",
+          #c.bridges == 1 and #c.executes_respond == 0, #c.bridges)
+    c = run({ redis = true, no_kamailio = true, trunk_cps = "20", bridge_results = { "SUCCESS" } })
+    check("8b IP fallback: one per-TRUNK check with the trunk's own cps_limit",
+          table.concat(c.cps_checks, ",") == "7/20/trunk" and c.redis_cps_calls == 0,
+          table.concat(c.cps_checks, ","))
+    check("8b IP fallback under the limit: bridges", #c.bridges == 1, #c.bridges)
+    c = run({ redis = true, no_kamailio = true, trunk_cps = "20", cps_allow = false })
+    check("8c IP fallback over the trunk limit: 503, no bridge",
+          #c.bridges == 0 and c.executes_respond[1] == "503 Service Unavailable"
+              and c.setvars.blocked_reason == "CPS_EXCEEDED",
+          tostring(c.executes_respond[1]))
 end
 
 local BASE = os.getenv("BASELINE_TRUNK")

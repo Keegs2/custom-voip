@@ -60,7 +60,9 @@ LINE_TERMINATOR = "\r\n"
 
 # Columns pulled for export — the COMPLETE set of data columns on the `cdrs`
 # table (every column EXCEPT the `exported_at` watermark, which is NULL at
-# export time and is the selection cursor). We export all information we store
+# export time and is the selection cursor, and the 65 routing breadcrumb
+# `term_premium_fallback`, kept out so the Equinox file is unchanged — the
+# drift guard lists it in _NOT_EXPORTED). We export all information we store
 # per CDR; downstream consumes what it needs. This list is the contract between
 # the SELECT and the formatter's source keys (formatter._FIELD_DEFS) — the
 # drift-guard test (tests/test_cdr_export.py) fails loudly if a future

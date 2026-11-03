@@ -985,6 +985,43 @@ async def _apply_ivr_columns(call_uuid: str, start_time: Optional[datetime],
 
 
 # ---------------------------------------------------------------------------
+# Premium routing fallback (migration 65; TED contract C7)
+# ---------------------------------------------------------------------------
+# FreeSWITCH sets term_premium_fallback=1 on the A-leg when a 'premium'
+# customer's call had no Tier 1 carrier and used the full carrier list. ONE
+# UPDATE of the A row after its INSERT, only when the variable is "1" (every
+# other CDR: no statement); uuid AND start_time pinned (one chunk). Never
+# raises; a missing column is logged (rate-limited) with the remedy.
+_PREMIUM_FALLBACK_SQL = """
+    UPDATE cdrs SET term_premium_fallback = true
+     WHERE uuid = $1::varchar AND start_time = $2::timestamptz
+"""
+_premium_last_logged_mono = _NEVER_LOGGED
+
+
+async def _apply_premium_fallback(call_uuid: str, start_time: Optional[datetime],
+                                  variables: dict) -> None:
+    global _premium_last_logged_mono
+    if _var_str(variables, "term_premium_fallback") != "1" or start_time is None:
+        return
+    try:
+        await db.execute(_PREMIUM_FALLBACK_SQL, str(call_uuid), start_time)
+    except Exception as exc:  # noqa: BLE001 — must never break ingest
+        now = time.monotonic()
+        if now - _premium_last_logged_mono >= _PRE47_LOG_INTERVAL_SEC:
+            _premium_last_logged_mono = now
+            if isinstance(exc, asyncpg.exceptions.UndefinedColumnError):
+                logger.error(
+                    "CDR ingest: cdrs.term_premium_fallback is missing (%s) — premium fallback "
+                    "NOT recorded for uuid=%s. Apply on the East primary: sudo -u postgres psql "
+                    "-d voip -v ON_ERROR_STOP=on -f "
+                    "/opt/revup/docker/postgres/init/65_cdr_premium_fallback.sql", exc, call_uuid)
+            else:
+                logger.warning("CDR ingest: premium fallback update failed for uuid=%s (%s: %s)",
+                               call_uuid, type(exc).__name__, exc)
+
+
+# ---------------------------------------------------------------------------
 # Leg-split helpers (docs/CDR_LEG_SPLIT_CONTRACT.md)
 # ---------------------------------------------------------------------------
 
@@ -1557,6 +1594,9 @@ async def _process_cdr_body(body: dict) -> dict:
         # ---- Visual IVR outcome (migration 60) -----------------------------
         # No-op (no statement) unless the CDR carries an ivr_* var.
         await _apply_ivr_columns(str(call_uuid), start_time, variables)
+        # ---- Premium routing fallback (migration 65) -----------------------
+        # No-op (no statement) unless term_premium_fallback=1.
+        await _apply_premium_fallback(str(call_uuid), start_time, variables)
 
         # ---- Call-level quality (worse direction; plan §C) ----------------
         # Own statement AFTER the INSERT committed, inserted OR duplicate

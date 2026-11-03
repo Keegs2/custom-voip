@@ -21,7 +21,8 @@ bridge_progress_timeout = math.floor(bridge_progress_timeout)
 -- Call Flow:
 -- 1. Read trunk_id and customer_id (set by Kamailio IP auth or dialplan)
 -- 2. Validate the caller's DID belongs to this trunk (trunk_dids table)
--- 3. Check CPS (calls per second) via tier-aware Redis limiting
+-- 3. CPS: enforced per trunk by Kamailio (sip_trunks.cps_limit); checked here
+--    only on the IP-lookup fallback path
 -- 4. Acquire channel (concurrent call limit)
 -- 5. Validate destination (fraud checks)
 -- 6. Set proper caller ID (trunk DID for carrier, original for display)
@@ -61,7 +62,6 @@ local function load_module(name)
 end
 
 local redis = load_module("redis_client")
-local redis_cps = load_module("redis_cps")
 local db = load_module("db_client")
 -- Shared canonical normalizer (Lua/Python/TS same algorithm). See
 -- lib/number_utils.lua. normalize_destination / normalize_did / to_10digit
@@ -345,6 +345,11 @@ local source_ip = get_var("sip_received_ip", get_var("network_addr", ""))
 local sip_call_id = session:getVariable("sip_call_id") or uuid
 local trunk_id = get_var("trunk_id", nil)
 local customer_id_str = get_var("customer_id", nil)
+-- trunk_id arrives pre-set only from Kamailio route[TRUNK_AUTH] (X-Trunk-ID,
+-- copied by the dialplan), which admits the INVITE only after its per-trunk
+-- CPS gate on sip_trunks.cps_limit. Recorded before the IP fallback below
+-- can fill trunk_id in.
+local cps_enforced_by_kamailio = (trunk_id ~= nil)
 
 freeswitch.consoleLog("INFO", string.format(
     "[%s] Trunk Outbound: from=%s sip_from=%s to=%s trunk_id=%s customer_id=%s ip=%s\n",
@@ -368,7 +373,7 @@ if not trunk_id or trunk_id == "" then
             set_var("customer_id", tostring(trunk_data.customer_id))
             set_var("max_channels", tostring(trunk_data.max_channels or 50))
             set_var("cps_limit", tostring(trunk_data.cps_limit or 10))
-            set_var("traffic_grade", trunk_data.traffic_grade or "standard")
+            set_var("traffic_grade", trunk_data.traffic_grade or "enterprise")
             customer_id_str = tostring(trunk_data.customer_id)
         else
             freeswitch.consoleLog("WARNING", string.format(
@@ -387,7 +392,7 @@ end
 local customer_id = tonumber(customer_id_str or get_var("customer_id", "0"))
 local max_channels = tonumber(get_var("max_channels", "50"))
 local cps_limit = tonumber(get_var("cps_limit", "10"))
-local traffic_grade = get_var("traffic_grade", "standard")
+local traffic_grade = get_var("traffic_grade", "enterprise")
 
 -- Set standard variables
 set_var("product_type", "trunk")
@@ -602,61 +607,28 @@ if redis then
 end
 
 -- ============================================
--- STEP 5: Check CPS (Calls Per Second) Limit with Tier Support
+-- STEP 5: Check CPS (Calls Per Second) Limit — per TRUNK, the trunk's own cps_limit
 -- ============================================
-if redis_cps and customer_id and customer_id > 0 then
-    local cps_ok, cps_result = pcall(function()
-        return redis_cps.check_cps_with_tier(customer_id, "trunk")
-    end)
-
-    if not cps_ok then
-        -- pcall caught an exception (e.g. Redis down) -- fail open
-        freeswitch.consoleLog("WARNING", string.format(
-            "[%s] CPS check exception (failing OPEN): %s\n",
-            uuid, tostring(cps_result)
-        ))
-        cps_result = { allowed = true, current_cps = 0, limit = 0, tier = "unknown", tier_name = "Unknown" }
-    end
-
-    if not cps_result.allowed then
-        freeswitch.consoleLog("WARNING", string.format(
-            "[%s] CPS limit exceeded: customer=%d trunk=%s tier=%s current=%d limit=%d\n",
-            uuid, customer_id, trunk_id, cps_result.tier_name or "unknown",
-            cps_result.current_cps or 0, cps_result.limit or 0
-        ))
-
-        set_var("blocked_reason", "CPS_EXCEEDED")
-        set_var("cps_tier", cps_result.tier or "unknown")
-        set_var("cps_tier_name", cps_result.tier_name or "Unknown")
-        set_var("cps_current", tostring(cps_result.current_cps or 0))
-        set_var("cps_limit", tostring(cps_result.limit or 0))
-
-        if cps_result.upgrade_message then
-            set_var("sip_h_X-CPS-Upgrade", cps_result.upgrade_message)
-        end
-
-        pcall(function()
-            session:execute("respond", "503 Service Unavailable")
-        end)
-        return
-    end
-
+-- CPS is sold per trunk, per contract (sip_trunks.cps_limit, TED). Kamailio
+-- route[TRUNK_AUTH] already enforced it for every call it admitted (htable
+-- trunk_cps, 1 s window, 503 over the limit), so a Kamailio-authenticated
+-- call is NOT checked again here. This step used to run a per-CUSTOMER check
+-- (redis_cps.check_cps_with_tier(customer_id, "trunk")) whose limit came from
+-- Redis account:<id>:limits — a key nothing writes — so it always fell back
+-- to the hard-coded "free" tier of 5 CPS per customer per media node and
+-- 503'd trunks sold above 5 CPS. Only the IP-lookup fallback path (no
+-- X-Trunk-ID: Kamailio did not authenticate the call) is checked here, per
+-- trunk, against the trunk's own cps_limit from the DB.
+if cps_enforced_by_kamailio then
     freeswitch.consoleLog("DEBUG", string.format(
-        "[%s] CPS check passed: customer=%d tier=%s current=%d/%d\n",
-        uuid, customer_id, cps_result.tier_name or "unknown",
-        cps_result.current_cps or 0, cps_result.limit or 0
-    ))
-
-    set_var("cps_tier", cps_result.tier or "free")
-    set_var("cps_tier_name", cps_result.tier_name or "Free")
-
+        "[%s] CPS: trunk %s already limited by Kamailio (sip_trunks.cps_limit)\n",
+        uuid, tostring(trunk_id)))
 elseif redis and cps_limit > 0 then
-    -- Fallback to legacy CPS check if redis_cps not available
     local cps_ok, current_cps = redis.cps_check(trunk_id, cps_limit, "trunk")
 
     if not cps_ok then
         freeswitch.consoleLog("WARNING", string.format(
-            "[%s] CPS limit exceeded (legacy): trunk=%s current=%d limit=%d\n",
+            "[%s] CPS limit exceeded: trunk=%s current=%d limit=%d\n",
             uuid, trunk_id, current_cps, cps_limit
         ))
         set_var("blocked_reason", "CPS_EXCEEDED")
@@ -916,10 +888,24 @@ if dest_class == "tollfree" then
     set_var("hangup_after_bridge", "true")
     set_var("lua_routed", "true")
 
-    local tf_trunks, tf_source = nil, "fallback"
+    -- Traffic pattern of the paying customer (migration 63, TED contract
+    -- C7): the trunk's customer. Kamailio's X-Customer-ID path sets no
+    -- traffic_grade, so it is read here, once, only for 8YY. A lookup
+    -- failure reads as enterprise (today's routing).
+    local paying_grade = get_var("traffic_grade", nil)
+    if paying_grade == nil and db and db.lookup_customer and customer_id and customer_id > 0 then
+        local ok, row = pcall(db.lookup_customer, customer_id)
+        if ok and type(row) == "table" then
+            paying_grade = row.traffic_grade
+        end
+    end
+
+    -- premium: Tier 1 tollfree rows first, then the others; run_attempts
+    -- sets term_premium_fallback=1 when a non-Tier-1 attempt is launched.
+    local tf_trunks, tf_source, tf_premium = nil, "fallback", false
     if term_trunks_lib then
-        tf_trunks, tf_source = term_trunks_lib.select_tollfree(
-            term_trunks_lib.zone(), db, "trunk_outbound")
+        tf_trunks, tf_source, tf_premium = term_trunks_lib.select_tollfree(
+            term_trunks_lib.zone(), db, "trunk_outbound", paying_grade)
     end
     set_var("term_trunks_source", tf_source)
 
@@ -951,6 +937,7 @@ if dest_class == "tollfree" then
         leg_block = cdr_b_leg_block,  -- CDR leg split: [cdr_*], attempt = launched count
         stir_reset = stir_outcome_reset,
         stir_capture = stir_outcome_capture,
+        premium = tf_premium,
     })
 
     if tf_disposition ~= "SUCCESS" then
@@ -967,6 +954,12 @@ if dest_class == "tollfree" then
     return
 end
 
+-- Non-8YY long distance stays on the zone's Bandwidth primary/secondary path
+-- below for EVERY traffic pattern: it never reads carrier_trunks, so the
+-- premium Tier 1 filter (TED contract C7) does not apply here. Bandwidth is
+-- Tier 1 by seed (migration 64), so a premium trunk customer already gets Tier
+-- 1 carriers only; moving this path onto the table-driven loop is a separate
+-- change.
 -- Build dial string using external profile to ensure public IP in Via/Contact/SDP.
 -- X-Carrier tells Kamailio which Bandwidth IP to route to.
 local dial_string = string.format(

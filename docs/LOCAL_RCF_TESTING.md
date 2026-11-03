@@ -115,7 +115,7 @@ curl -X POST http://localhost:8080/customers \
     "name": "Test RCF Customer",
     "account_type": "rcf",
     "credit_limit": 100,
-    "traffic_grade": "standard"
+    "traffic_grade": "enterprise"
   }'
 ```
 

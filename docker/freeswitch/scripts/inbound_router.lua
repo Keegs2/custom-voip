@@ -529,11 +529,11 @@ end
 -- (freeswitch.get/setGlobalVariable — the exact SBC-health-cache
 -- pattern above) for TERM_TRUNKS_TTL seconds: within the TTL no call
 -- touches the DB; steady state is ~1 query/minute per FS.
--- Cache entry: "term_trunks_<zone>" = "<epoch>|carrier,pop,ip,class;..."
+-- Cache entry: "term_trunks2_<zone>" = "<epoch>|carrier,pop,ip,class,t1;..."
 -- ("<epoch>|FALLBACK" is the negative-cache sentinel: DB error or
--- zero rows, re-checked after the same TTL). A 3-field pre-44 entry
--- (no class) still parses, as class 'any' — covers the one stale
--- cache generation across a rolling Lua deploy.
+-- zero rows, re-checked after the same TTL). The 4-field (pre-64, no
+-- Tier 1 flag) and 3-field (pre-44, class 'any') forms still parse —
+-- lib/term_trunks.lua owns the format.
 --
 -- FAIL-OPEN (non-negotiable): DB error, zero usable rows, or an
 -- unparsable cache entry all return nil, and the caller runs the
@@ -597,7 +597,7 @@ end
 -- The trunk-list fetch/cache/validation, class coercion and destination
 -- classifier live in lib/term_trunks.lua (shared with trunk_outbound.lua /
 -- api_outbound.lua 8YY egress — ONE implementation, same process-wide
--- "term_trunks_<zone>" cache entry and format). These local wrappers keep
+-- "term_trunks2_<zone>" cache entry and format). These local wrappers keep
 -- the call sites below unchanged; log lines keep the "[inbound_router]"
 -- tag, so output is byte-identical to the pre-extraction script.
 --
@@ -791,7 +791,7 @@ freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Normalized DID: " .. normalized
 local product_type = nil
 local customer_id = nil
 local forward_to = nil
-local traffic_grade = "standard"
+local traffic_grade = "enterprise"
 local cpm_limit = 60
 local daily_limit = 500
 local ring_timeout = 30
@@ -811,7 +811,7 @@ local function lookup_rcf()
                 product_type = "rcf",
                 customer_id = tonumber(rcf_db.customer_id),
                 forward_to = rcf_db.forward_to,
-                traffic_grade = rcf_db.traffic_grade or "standard",
+                traffic_grade = rcf_db.traffic_grade or "enterprise",
                 cpm_limit = tonumber(rcf_db.cpm_limit) or 60,
                 daily_limit = tonumber(rcf_db.daily_limit) or 500,
                 pass_caller_id = rcf_db.pass_caller_id == "t" or rcf_db.pass_caller_id == true,
@@ -836,7 +836,7 @@ local function lookup_api_did()
         return {
             product_type = "api",
             customer_id = tonumber(api_did.customer_id),
-            traffic_grade = api_did.traffic_grade or "standard",
+            traffic_grade = api_did.traffic_grade or "enterprise",
             cpm_limit = tonumber(api_did.cpm_limit) or 60,
             daily_limit = tonumber(api_did.daily_limit) or 500,
             voice_url = api_did.voice_url,
@@ -858,7 +858,7 @@ local function lookup_trunk_did()
             product_type = "trunk",
             customer_id = tonumber(trunk_did.customer_id),
             trunk_id = trunk_did.trunk_id,
-            traffic_grade = trunk_did.traffic_grade or "standard"
+            traffic_grade = trunk_did.traffic_grade or "enterprise"
         }
     end
 
@@ -884,7 +884,7 @@ local function lookup_voicemail_did()
             product_ref_id = tonumber(vm_row.product_ref_id),   -- mailbox id
             product_enabled = (vm_row.product_enabled == "t" or vm_row.product_enabled == true),
             customer_status = vm_row.customer_status,
-            traffic_grade = vm_row.traffic_grade or "standard",
+            traffic_grade = vm_row.traffic_grade or "enterprise",
         }
     end
 
@@ -913,7 +913,7 @@ local function lookup_ivr_did()
             -- ivr_fs_number.enabled already folds in customers.status='active'
             product_enabled = en and ivr_row.plan_json ~= nil,
             customer_status = "active",
-            traffic_grade = ivr_row.traffic_grade or "standard",
+            traffic_grade = ivr_row.traffic_grade or "enterprise",
             max_channels = tonumber(ivr_row.max_channels) or 0,
             ivr_row = ivr_row,
         }
@@ -954,7 +954,7 @@ freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Routing found: type=" .. tostri
 product_type = routing.product_type
 customer_id = routing.customer_id
 forward_to = routing.forward_to
-traffic_grade = routing.traffic_grade or "standard"
+traffic_grade = routing.traffic_grade or "enterprise"
 cpm_limit = routing.cpm_limit or 60
 daily_limit = routing.daily_limit or 500
 pass_caller_id = routing.pass_caller_id
@@ -1201,6 +1201,44 @@ local function cdr_b_leg_block(attempt_no)
         end
     end
     return "[" .. table.concat(parts, ",") .. "]"
+end
+
+-- ================================================================
+-- Traffic pattern of the PAYING customer (migration 63, TED contract C7)
+-- ================================================================
+-- The carrier leg of an RCF forward / IVR transfer is paid by the customer
+-- of the terminal RCF hop (dest.customer_id = the CDR customer_id). Sources,
+-- cheapest first, all without an extra query except the last:
+--   1. the STEP-1 customer (single-hop calls, a directly dialed IVR): its
+--      grade came with the STEP-1 lookup (ctx.traffic_grade);
+--   2. a grade the hop already carries (an IVR transfer's pseudo-hop: the
+--      IVR's ivr_fs_number row joins customers.traffic_grade);
+--   3. only an on-net chain that ends on ANOTHER customer's RCF DID: one
+--      db.lookup_customer_grade point read on the connection already in use
+--      (never connects or reconnects), memoized per call.
+-- No handle, an error or no row -> nil = enterprise (today's routing) at
+-- once — premium routing can never delay or break a call.
+local function paying_traffic_grade(ctx, customer_id, carried_grade)
+    local cid = tonumber(customer_id)
+    if cid == nil or cid == tonumber(ctx.origin_customer_id) then
+        return ctx.traffic_grade
+    end
+    if carried_grade ~= nil then
+        return carried_grade
+    end
+    ctx.paying_grades = ctx.paying_grades or {}
+    local known = ctx.paying_grades[cid]
+    if known == nil then
+        known = false
+        if db and db.lookup_customer_grade then
+            local ok, grade = pcall(db.lookup_customer_grade, cid)
+            if ok and type(grade) == "string" then
+                known = grade
+            end
+        end
+        ctx.paying_grades[cid] = known
+    end
+    return known or nil
 end
 
 -- ================================================================
@@ -1795,6 +1833,25 @@ local function terminate_rcf(dest, ctx)
                 uuid, dest_class))
             eligible_trunks = term_trunks
         end
+        -- Traffic pattern (migration 63/64, TED contract C7): a 'premium'
+        -- paying customer's list is its Tier 1 rows (carrier_trunks.tier1)
+        -- first, then the other class-filtered rows, each in zone priority
+        -- order, before the cap — when every Tier 1 attempt fails the call
+        -- still reaches the others. term_premium_fallback=1 is set when an
+        -- attempt on a non-Tier-1 carrier is actually launched (below). Any
+        -- other grade gets the SAME list back: enterprise is unchanged.
+        local premium_routing = false
+        do
+            local paying_grade = paying_traffic_grade(ctx, dest.customer_id, dest.traffic_grade)
+            if paying_grade == "premium" then
+                eligible_trunks, premium_routing =
+                    term_trunks_lib.apply_traffic_pattern(eligible_trunks, paying_grade)
+                local t1 = #term_trunks_lib.filter_for_tier1(eligible_trunks)
+                freeswitch.consoleLog(t1 > 0 and "INFO" or "WARNING", string.format(
+                    "[%s] Premium customer %s: %d Tier 1 of %d eligible %s trunk(s), Tier 1 first\n",
+                    uuid, tostring(dest.customer_id), t1, #eligible_trunks, dest_class))
+            end
+        end
         -- No attempt cap: every eligible trunk is tried, in eff_priority
         -- order (see the TERM_TRUNKS comment block near the top).
 
@@ -1845,6 +1902,10 @@ local function terminate_rcf(dest, ctx)
                 -- carrier_used reflects the WINNING attempt (same semantics
                 -- as the legacy loop, new value shape "<carrier>-<pop>").
                 set_var("carrier_used", attempt.carrier_label)
+                if premium_routing and attempt.tier1 ~= true then
+                    -- premium call actually tried on a non-Tier-1 carrier
+                    set_var("term_premium_fallback", "1")
+                end
 
                 freeswitch.consoleLog("INFO", string.format(
                     "[%s] RCF bridge attempt %d/%d (%s): %s -> %s@%s carrier_ip=%s\n",
@@ -2685,6 +2746,7 @@ local function ivr_transfer(ivr, spec, ctx)
         ring_timeout    = spec.ring_timeout,
         max_channels    = 0,
         product_name    = nil,     -- no customer text in any SIP header
+        traffic_grade   = ivr.traffic_grade,   -- the payer's (premium routing)
     }
     freeswitch.consoleLog("INFO", string.format(
         "[%s] IVR transfer: %s -> %s (kind=%s pass_cid=%s ring=%ss)\n",
@@ -2917,7 +2979,9 @@ local function terminate_ivr(dest, ctx)
             local n = 0 for _ in pairs(plan.nodes) do n = n + 1 end return n end)(),
         #plan.prompts, state.depth))
 
-    local ivr = { did = dest.did, customer_id = row_customer }
+    -- traffic_grade: the IVR owner's (ivr_fs_number JOIN customers) — the
+    -- payer of a transfer's carrier leg, so terminate_rcf needs no lookup.
+    local ivr = { did = dest.did, customer_id = row_customer, traffic_grade = row.traffic_grade }
     local ok, err = pcall(engine.run, session, {
         plan = plan, state = state, prompts = prompts, schedule = schedule,
         rules = rules, number_utils = number_utils,

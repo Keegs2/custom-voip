@@ -1,0 +1,61 @@
+-- ==========================================================================
+-- 64_carrier_tier1.sql
+-- Tier 1 carriers (TED CRAG Admin redesign, contract C6; owner decision
+-- 2026-11-03).
+--
+-- WHAT THIS DOES (one transaction, idempotent — re-running is a no-op):
+--   carrier_trunks.tier1 BOOLEAN NOT NULL DEFAULT false (metadata-only ADD
+--   COLUMN on PG >= 11, no rewrite). The Bandwidth rows are seeded true ONLY
+--   in the run that adds the column, so a re-run never clobbers a TED edit.
+--
+-- WHO READS IT: FreeSWITCH selects it with the per-zone termination list
+-- (lib/db_client.lua get_termination_trunks). For a customer whose traffic
+-- pattern is 'premium' (customers.traffic_grade, 63) the class-filtered
+-- carrier list is reordered Tier 1 rows first, then the other rows (each in
+-- zone priority order); when an attempt on a non-Tier-1 row is actually
+-- launched the call sets term_premium_fallback=1 (65 records it on the
+-- CDR). Enterprise
+-- customers never look at it. The API (/v1/carrier-trunks) returns and
+-- accepts it. tier1 joins the load-bearing carrier_trunks column names —
+-- never rename it. The freeswitch role's table-level SELECT covers it.
+--
+-- LOCKING: brief ACCESS EXCLUSIVE lock on the tiny carrier_trunks table
+-- (Kamailio CARRIER_TRUST / X-Carrier-IP lookups and the FS termination
+-- fetch read it — East reads the primary — and the lock is WAL-replayed on
+-- every replica). lock_timeout = 1s makes it fail fast instead of queueing
+-- those reads; apply at low traffic, check pg_stat_activity for
+-- idle-in-transaction sessions first (see 63), and on a lock timeout just
+-- re-run it (one transaction, idempotent).
+--
+-- ORDER: apply BEFORE the API build (it SELECTs tier1 on every carrier-trunk
+-- route) and before the media-VM pull. If the Lua runs first it retries the
+-- pre-64 SELECT, so termination keeps working, without premium routing.
+--
+-- PRODUCTION NOTE: apply MANUALLY on the bare-metal East primary (services VM)
+-- as a SUPERUSER; it replicates to every zone replica. Requires 40/44:
+--     hostname | grep -q '^services$' && sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f /opt/revup/docker/postgres/init/64_carrier_tier1.sql
+-- Verify: scripts/db/check_migrations.sql -> "64_carrier_tier1 | applied".
+-- Rollback: UPDATE carrier_trunks SET tier1 = true (premium then behaves like
+-- enterprise). Never DROP the column while the Lua selects it.
+-- ==========================================================================
+
+BEGIN;
+
+SET LOCAL lock_timeout = '1s';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'carrier_trunks'
+                      AND column_name = 'tier1') THEN
+        ALTER TABLE carrier_trunks ADD COLUMN tier1 BOOLEAN NOT NULL DEFAULT false;
+        UPDATE carrier_trunks SET tier1 = true, updated_at = NOW()
+         WHERE carrier = 'bandwidth';
+    END IF;
+END
+$$;
+
+COMMENT ON COLUMN carrier_trunks.tier1 IS
+    'Tier 1 carrier (64): a premium customer''s calls try tier1 rows first, then the others; a launched non-tier1 attempt sets term_premium_fallback=1.';
+
+COMMIT;

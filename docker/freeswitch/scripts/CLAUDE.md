@@ -376,7 +376,7 @@ inbound_router.lua (product_type == "rcf"):
      through `lib/term_trunks.lua`:
        SELECT ... WHERE direction IN ('outbound','both') AND enabled = true
        ORDER BY COALESCE(priority_<FS_ZONE>, priority), id
-     The list is cached 60s process-wide as `term_trunks_<zone>`.
+     The list is cached 60s process-wide as `term_trunks2_<zone>` (5-field, with tier1; the key changed from `term_trunks_<zone>` with migration 64).
      a. db path (term_trunks_source=db):
         - Filter by classify_destination(forward_to). LD → 'any'/'ld' rows.
           NANP 8YY → ONLY 'tollfree' rows; if there are none →
@@ -594,7 +594,7 @@ Call flow:
 2. Validate destination (normalize to E.164)
 3. Validate caller DID belongs to this trunk (`trunk_dids` table). If caller's From number isn't in trunk_dids, look up any DID for this trunk as fallback. Reject if no valid DID found.
 4. [If Redis available] Check high-risk prefix fraud database
-5. [If Redis available] CPS check with tier support via redis_cps.check_cps_with_tier()
+5. CPS: per TRUNK. A Kamailio-authenticated call (X-Trunk-ID) is not checked again — route[TRUNK_AUTH] already enforced `sip_trunks.cps_limit`. Only the IP-lookup fallback path runs `redis_client.cps_check(trunk_id, <trunk cps_limit>)`. (Until 2026-11 this step ran the per-customer `redis_cps.check_cps_with_tier`, whose never-written `account:<id>:limits` key left every trunk customer at the 5 CPS "free" default.)
 6. [If Redis available] Acquire channel (concurrent call limit via Redis sorted set)
 7. [If Redis available] Velocity check (CPM/daily limits)
 8. Set caller ID: outbound_caller_id = trunk DID (carrier auth), effective_caller_id = PBX original
@@ -635,7 +635,7 @@ Call flow:
 (NPAs 800/833/844/855/866/877/888 — `number_utils.classify_destination`) over the
 `carrier_trunks` `tollfree` rows with the SAME machinery as the RCF loop
 (`lib/term_trunks.lua`): same SQL, same 60s process-wide cache entry
-(`term_trunks_<zone>`, one DB fetch serves all three scripts), per-zone priority
+(`term_trunks2_<zone>`, one DB fetch serves all three scripts), per-zone priority
 (`FS_ZONE`), strict class filter, no attempt cap (removed 2026-10-30), trunk-major attempts
 × {`SBC_PROXY_IP`, `SBC_PROXY_IP_FAILOVER`} with the cached TCP pre-check (a dead
 SBC is skipped and not counted in `cdr_leg_attempt`), `X-Carrier-IP` /
@@ -889,13 +889,14 @@ Loaded with `loadfile()`; uses the mod_lua `freeswitch` global; no Redis.
 
 | Function | Purpose |
 |---|---|
-| `get(zone, db, tag)` | Cached (60s, `term_trunks_<zone>` = `<epoch>\|carrier,pop,ip,class;...`, negative `\|FALLBACK`) validated trunk list in SQL order, or nil (DB error / zero usable rows / unparsable cache). `tag` keeps each script's log prefix. |
+| `get(zone, db, tag)` | Cached (60s, `term_trunks2_<zone>` = `<epoch>\|carrier,pop,ip,class,t1;...` — t1 = tier1 1/0; the 4-field pre-64 and 3-field pre-44 forms still parse — negative `\|FALLBACK`) validated trunk list in SQL order, or nil (DB error / zero usable rows / unparsable cache). `tag` keeps each script's log prefix. |
 | `classify_destination(n, number_utils)` | `tollfree` (NANP 8YY) / `ld`; delegates to number_utils, identical inline fallback. |
 | `filter_for_class(list, cls)` | Strict TF: `tollfree` → only `tollfree` rows; `ld` → `any`/`ld`. |
 | `build_attempts(list, sbc1, sbc2)` | Trunk-major {SBC-1, SBC-2} attempts, label `<carrier>-<pop>`. No cap (`M.MAX`/`cap()` removed 2026-10-30). Rows whose carrier is in `VIP_ONLY_CARRIERS` (`verizon`) emit the SBC-1 (signaling VIP) attempt only. |
 | `dial_string(lead, attempt, call_id, leg, dest)` | `{<lead>,sip_h_X-Carrier-IP=..,sip_h_X-Carrier-Label=..,sip_h_X-CID=..,<inert timer trio>}<leg>sofia/external/<dest>@<sbc>:5060` |
 | `is_sbc_reachable(ip, port, tag)` | Cached TCP pre-check, same `sbc_health_<ip>` cache as inbound_router's inline copy. |
-| `select_tollfree(zone, db, tag)` / `run_attempts(opts)` | Trunk/API 8YY: eligible list + `db`/`fallback` source; the failover loop (pre-check, `carrier_used`, SUCCESS/ready breaks, stir reset/capture callbacks). |
+| `filter_for_tier1(list)` / `apply_traffic_pattern(list, grade)` | Premium traffic pattern (migrations 63/64, TED contract C7): `premium` → tier1 rows first, then the other class-filtered rows (each in zone priority order); `term_premium_fallback=1` (CDR column 65) is set when a non-Tier-1 attempt is actually launched (Tier 1 failed or none eligible); a reached phone (486 / ring-out) is still not re-dialed; any other grade → the SAME table (enterprise unchanged). Applied after the class filter, before the cap: RCF forwards + IVR transfers (paying customer = the terminal RCF hop's customer; `paying_traffic_grade()`: the STEP-1 grade, else a grade the hop carries — an IVR transfer's pseudo-hop has the IVR owner's — else one `db.lookup_customer_grade` PK read on the connection already in use that never connects/reconnects; any failure = enterprise at once) and trunk/API 8YY. Customer SIP-trunk non-8YY LD stays on the Bandwidth primary/secondary path (Bandwidth is Tier 1 by seed). |
+| `select_tollfree(zone, db, tag, grade)` / `run_attempts(opts)` | Trunk/API 8YY: eligible list (after the traffic pattern) + `db`/`fallback` source + premium-fallback flag; the failover loop (pre-check, `carrier_used`, SUCCESS/ready breaks, stir reset/capture callbacks). |
 
 The list is never keyed by IP, so two rows sharing a `source_ip` (migration 53:
 an inbound 8XX-T orig row + an outbound redundant termination row) never

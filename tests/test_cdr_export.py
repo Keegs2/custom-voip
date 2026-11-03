@@ -306,6 +306,22 @@ def test_formatter_boolean_on_net_rendering():
     assert fmt.format_record(make_row(on_net=None)).split(",")[idx["on_net"]] == ""
 
 
+def test_formatter_traffic_grade_keeps_the_old_words_for_equinox():
+    """Owner decision 2026-11-03: cdrs.traffic_grade stores enterprise|premium
+    (migration 63), but Equinox keeps receiving the old words — enterprise is
+    exported as 'standard'; premium and every historic value pass through."""
+    fmt = EquinoxFormatter()
+    idx = {n: i for i, n in enumerate(FIELDS)}
+    assert idx["traffic_grade"] == 31            # column 32 of the file
+    got = {g: fmt.format_record(make_row(traffic_grade=g)).split(",")[idx["traffic_grade"]]
+           for g in ("enterprise", "premium", "standard", "economy")}
+    assert got == {"enterprise": "standard", "premium": "premium",
+                   "standard": "standard", "economy": "economy"}
+    assert fmt.format_record(make_row(traffic_grade=None)).split(",")[idx["traffic_grade"]] == ""
+    # the raw DB value is not rewritten anywhere else: header label unchanged
+    assert fmt.header().split(",")[idx["traffic_grade"]] == "traffic_grade"
+
+
 def test_formatter_none_becomes_empty_string():
     fmt = EquinoxFormatter()
     row = make_row(answer_time=None, trunk_id=None, rate_per_min=None,
@@ -626,6 +642,11 @@ _INIT = pathlib.Path(__file__).resolve().parents[1] / "docker" / "postgres" / "i
 # The watermark column is the selection cursor (NULL at export time); it is
 # deliberately NOT exported.
 _WATERMARK_EXCLUDED = {"exported_at"}
+#: Columns deliberately NOT in the Equinox export (the file stays
+#: byte-identical): routing breadcrumbs that carry no billing meaning.
+#:   term_premium_fallback (65) — a premium customer's call used non-Tier-1
+#:   carriers because Tier 1 failed or none was eligible (staff-only).
+_NOT_EXPORTED = {"term_premium_fallback"}
 
 # Non-column tokens that can start a line inside the CREATE TABLE body.
 _NOT_A_COLUMN = {"primary", "constraint", "unique", "check", "foreign", "like"}
@@ -698,8 +719,9 @@ def _all_cdrs_columns() -> list[str]:
         + _cdrs_added_columns("48_cdr_call_legs.sql")
         + _cdrs_added_columns("50_cdr_quality_accuracy.sql")
         + _cdrs_added_columns("60_cdr_ivr.sql")
+        + _cdrs_added_columns("65_cdr_premium_fallback.sql")
     ):
-        if col in _WATERMARK_EXCLUDED or col in seen:
+        if col in _WATERMARK_EXCLUDED or col in _NOT_EXPORTED or col in seen:
             continue
         seen.add(col)
         ordered.append(col)
@@ -751,6 +773,7 @@ def test_drift_guard_covers_every_cdrs_add_column_migration():
                "23_onnet_cdr_columns.sql", "40_carrier_trunks.sql",
                "47_cdr_stir_outcome.sql", "48_cdr_call_legs.sql",
                "50_cdr_quality_accuracy.sql", "60_cdr_ivr.sql",
+               "65_cdr_premium_fallback.sql",  # _NOT_EXPORTED (routing breadcrumb)
                "21_cdr_export.sql"}   # 21 = exported_at watermark (excluded)
     for f in sorted(_INIT.glob("*.sql")):
         code = "\n".join(line.split("--", 1)[0] for line in f.read_text().splitlines())

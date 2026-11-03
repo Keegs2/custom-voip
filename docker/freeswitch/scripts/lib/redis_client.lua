@@ -329,7 +329,7 @@ function M.set_rcf_cache(did, forward_to, customer_id, pass_caller_id, traffic_g
             "forward_to", tostring(forward_to),
             "customer_id", tostring(customer_id),
             "pass_caller_id", pass_caller_id and "1" or "0",
-            "traffic_grade", traffic_grade or "standard",
+            "traffic_grade", traffic_grade or "enterprise",
             "ring_timeout", tostring(ring_timeout or 30)
         )
         r:expire(key, ttl)

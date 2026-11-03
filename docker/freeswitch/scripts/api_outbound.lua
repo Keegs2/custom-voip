@@ -503,7 +503,7 @@ end
 -- ============================================
 -- API calls use carrier_primary (same carrier as all products in 2-carrier model)
 -- traffic_grade is retained as a secondary factor for priority within the trunk
-local traffic_grade = get_var("traffic_grade", "standard")
+local traffic_grade = get_var("traffic_grade", "enterprise")
 local gateway = "carrier_primary"
 
 freeswitch.consoleLog("INFO", string.format(
@@ -759,10 +759,12 @@ elseif api_dest_class == "tollfree" then
     -- Failure semantics after attempts are this script's: log only, no
     -- explicit hangup (same as the Bandwidth path).
     set_var("lua_routed", "true")
-    local tf_trunks, tf_source = nil, "fallback"
+    -- Traffic pattern (TED contract C7): the API customer's grade, carried
+    -- on the originate as the traffic_grade channel variable.
+    local tf_trunks, tf_source, tf_premium = nil, "fallback", false
     if term_trunks_lib then
-        tf_trunks, tf_source = term_trunks_lib.select_tollfree(
-            term_trunks_lib.zone(), db, "api_outbound")
+        tf_trunks, tf_source, tf_premium = term_trunks_lib.select_tollfree(
+            term_trunks_lib.zone(), db, "api_outbound", traffic_grade)
     end
     set_var("term_trunks_source", tf_source)
 
@@ -788,6 +790,7 @@ elseif api_dest_class == "tollfree" then
         dest = normalized_dest,  -- full +E.164, same as the Bandwidth path
         stir_reset = stir_outcome_reset,
         stir_capture = stir_outcome_capture,
+        premium = tf_premium,
     })
     if tf_disposition ~= "SUCCESS" then
         freeswitch.consoleLog("WARNING", string.format(

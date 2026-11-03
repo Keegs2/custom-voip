@@ -117,6 +117,22 @@ def _fmt_bool(value: Any) -> str:
     return "true" if value else "false"
 
 
+#: Equinox keeps receiving the pre-63 traffic_grade words (owner decision
+#: 2026-11-03): cdrs.traffic_grade stores the new traffic pattern
+#: ('enterprise' | 'premium'), and the export renders 'enterprise' as the old
+#: 'standard'. Every other value (premium, and the historic standard /
+#: economy / premium rows) passes through unchanged.
+_EQUINOX_TRAFFIC_GRADE = {"enterprise": "standard"}
+
+
+def _fmt_traffic_grade(value: Any) -> str:
+    """traffic_grade for Equinox: 'enterprise' -> 'standard', else as stored."""
+    if value is None:
+        return ""
+    text = str(value)
+    return _EQUINOX_TRAFFIC_GRADE.get(text, text)
+
+
 def _fmt_plain(value: Any) -> str:
     """Default renderer: None -> '', everything else -> str(value).
 
@@ -202,7 +218,7 @@ _FIDELITY_BLOCK: list[tuple[str, str, Callable[[Any], str]]] = [
     ("carrier_cost",                   "carrier_cost",                   _fmt_money),
     ("margin",                         "margin",                         _fmt_money),
     ("rated_at",                       "rated_at",                       _fmt_ts),
-    ("traffic_grade",                  "traffic_grade",                  _fmt_plain),
+    ("traffic_grade",                  "traffic_grade",                  _fmt_traffic_grade),
     ("fraud_score",                    "fraud_score",                    _fmt_plain),
     ("fraud_flags",                    "fraud_flags",                    _fmt_json),
     ("freeswitch_node",                "freeswitch_node",                _fmt_plain),

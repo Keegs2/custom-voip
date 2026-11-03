@@ -760,7 +760,7 @@ local function execute_dial(verb)
     local gateway = "carrier_primary"
     log_info(uuid, string.format(
         "Dial: using gateway %s (product: api, traffic_grade: %s)",
-        gateway, get_var("traffic_grade", "standard")
+        gateway, get_var("traffic_grade", "enterprise")
     ))
 
     for _, target in ipairs(dial_targets) do

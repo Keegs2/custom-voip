@@ -65,6 +65,9 @@ CDR_COLUMN_MIGRATIONS = (
     # Visual IVR outcome columns (ivr_flow_id ... ivr_seconds): ADD COLUMN IF
     # NOT EXISTS + COMMENTs + role-guarded grants only.
     "60_cdr_ivr.sql",
+    # Premium routing fallback flag (term_premium_fallback): ADD COLUMN IF NOT
+    # EXISTS + COMMENT + role-guarded grants only.
+    "65_cdr_premium_fallback.sql",
 )
 
 

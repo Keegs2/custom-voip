@@ -11,6 +11,9 @@
 --                                 (nil => DB error / zero usable rows / bad cache)
 --   classify_destination(n, nu)   'tollfree' (NANP 8YY) | 'ld'
 --   filter_for_class(list, cls)   per-call traffic_class filter (strict TF)
+--   filter_for_tier1(list)        Tier 1 rows only (carrier_trunks.tier1, 64)
+--   apply_traffic_pattern(l, g)   premium customer -> Tier 1 rows first, then
+--                                 the others; any other grade -> the same list
 --   build_attempts(list, s1, s2)  trunk-major {SBC-1, SBC-2} attempt table
 --                                 (carrier 'verizon' rows: SBC-1/VIP only)
 --   dial_string(lead, a, cid, leg, dest)   per-attempt carrier dial string
@@ -22,8 +25,9 @@
 -- globals `freeswitch` (consoleLog, get/setGlobalVariable) and `os.time`.
 -- No Redis anywhere (RCF path constraint).
 --
--- Selection SQL (db_client.get_termination_trunks, unchanged):
---   SELECT carrier, pop, host(source_ip) AS term_ip, traffic_class,
+-- Selection SQL (db_client.get_termination_trunks; tier1 since migration 64,
+-- with a retry of the pre-64 SELECT while the column is missing):
+--   SELECT carrier, pop, host(source_ip) AS term_ip, traffic_class, tier1,
 --          COALESCE(priority_<zone>, priority) AS eff_priority
 --   FROM carrier_trunks
 --   WHERE direction IN ('outbound','both') AND enabled = true
@@ -37,9 +41,14 @@
 --
 -- Process-wide cache (FreeSWITCH global variable, shared by all three
 -- scripts — same key, same format):
---   "term_trunks_<zone>" = "<epoch>|carrier,pop,ip,class;..."  (TTL 60s)
---   "<epoch>|FALLBACK"   = negative cache (DB error / zero usable rows)
--- A 3-field pre-44 entry (no class) still parses as class 'any'.
+--   "term_trunks2_<zone>" = "<epoch>|carrier,pop,ip,class,t1;..."  (TTL 60s)
+--   "<epoch>|FALLBACK"    = negative cache (DB error / zero usable rows)
+-- t1 is 1 (Tier 1) or 0. The key changed with the 5-field format (it was
+-- "term_trunks_<zone>" with 4 fields) so a call still running the previous
+-- Lua during a git pull never reads a 5-field entry it cannot parse (which
+-- would negative-cache the legacy loop for a minute) and the new code never
+-- reads an old entry that carries no Tier 1 flag. parse() still accepts the
+-- 4-field (tier1 = false) and 3-field pre-44 (class 'any') forms.
 
 local M = {}
 
@@ -105,11 +114,18 @@ end
 function M.parse(payload)
     local trunks = {}
     for seg in payload:gmatch("[^;]+") do
-        local carrier, pop, ip, class = seg:match("^([%w%._%-]+),([%w%._%-]*),(%d+%.%d+%.%d+%.%d+),(%a+)$")
+        local carrier, pop, ip, class, t1 = seg:match(
+            "^([%w%._%-]+),([%w%._%-]*),(%d+%.%d+%.%d+%.%d+),(%a+),([01])$")
+        if not carrier then
+            -- 4-field pre-64 entry: no Tier 1 flag (tier1 = false).
+            carrier, pop, ip, class = seg:match("^([%w%._%-]+),([%w%._%-]*),(%d+%.%d+%.%d+%.%d+),(%a+)$")
+            t1 = "0"
+        end
         if not carrier then
             -- 3-field pre-44 cache entry: parses as class 'any'.
             carrier, pop, ip = seg:match("^([%w%._%-]+),([%w%._%-]*),(%d+%.%d+%.%d+%.%d+)$")
             class = "any"
+            t1 = "0"
         end
         if not carrier then
             return nil
@@ -117,6 +133,7 @@ function M.parse(payload)
         trunks[#trunks + 1] = {
             carrier = carrier, pop = pop, term_ip = ip,
             traffic_class = M.class(class),
+            tier1 = (t1 == "1"),
         }
     end
     if #trunks == 0 then
@@ -131,7 +148,7 @@ end
 -- keeps the RCF log text byte-identical to the pre-extraction script).
 function M.get(zone, db, tag)
     tag = tag or "term_trunks"
-    local cache_key = "term_trunks_" .. zone
+    local cache_key = "term_trunks2_" .. zone
     local now = os.time()
 
     -- Cache check — fresh entries (TTL 60s) never touch the DB.
@@ -202,7 +219,7 @@ function M.get(zone, db, tag)
             end
         else
             parts[#parts + 1] = carrier .. "," .. pop .. "," .. ip .. ","
-                .. M.class(row.traffic_class)
+                .. M.class(row.traffic_class) .. "," .. (M.is_true(row.tier1) and "1" or "0")
         end
     end
 
@@ -251,6 +268,48 @@ end
 -- goes into X-Carrier-Label / carrier_used), lower-case exact match.
 M.VIP_ONLY_CARRIERS = { verizon = true }
 
+-- filter_for_tier1(trunks) -> Tier 1 rows only (order preserved, may be empty).
+function M.filter_for_tier1(trunks)
+    local t1 = {}
+    for _, trunk in ipairs(trunks or {}) do
+        if trunk.tier1 == true then
+            t1[#t1 + 1] = trunk
+        end
+    end
+    return t1
+end
+
+-- apply_traffic_pattern(eligible, traffic_grade) -> list, premium
+-- The paying customer's traffic pattern (customers.traffic_grade, 63), applied
+-- AFTER the destination-class filter (the list is not capped; owner
+-- decision 2026-11-03, "Tier 1 first, then the others" — no cap for Premium
+-- either):
+--   * anything but exactly 'premium' (enterprise, nil, a pre-63 value) ->
+--     the SAME table back, premium=false — enterprise attempts are
+--     byte-for-byte what they were;
+--   * 'premium' -> the Tier 1 rows of `eligible` (zone priority order)
+--     FOLLOWED BY its other rows (zone priority order), premium=true. When
+--     every Tier 1 attempt fails, the call still reaches the other carriers.
+--     The caller sets term_premium_fallback=1 only when an attempt on a
+--     non-Tier-1 carrier is actually launched (attempt.tier1 ~= true).
+function M.apply_traffic_pattern(eligible, traffic_grade)
+    if traffic_grade ~= "premium" then
+        return eligible, false
+    end
+    local ordered = M.filter_for_tier1(eligible)
+    for _, trunk in ipairs(eligible or {}) do
+        if trunk.tier1 ~= true then
+            ordered[#ordered + 1] = trunk
+        end
+    end
+    return ordered, true
+end
+
+-- is_true(v): a luasql boolean ('t'/'f' strings) or a Lua boolean.
+function M.is_true(v)
+    return v == true or v == "t" or v == "true" or v == "1" or v == 1
+end
+
 -- build_attempts(trunks, sbc1, sbc2): trunk-major attempt table — for each
 -- trunk (eff_priority order) try SBC-1 (sbc1 = signaling VIP), then SBC-2
 -- (sbc2 = SBC-1 direct IP). VIP_ONLY_CARRIERS rows emit the sbc1 attempt
@@ -265,11 +324,13 @@ function M.build_attempts(trunks, sbc1, sbc2)
         attempts[#attempts + 1] = {
             sbc = sbc1, ip = trunk.term_ip, carrier_label = carrier_label,
             label = "SBC-1 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
+            tier1 = (trunk.tier1 == true),
         }
         if not M.VIP_ONLY_CARRIERS[string.lower(trunk.carrier)] then
             attempts[#attempts + 1] = {
                 sbc = sbc2, ip = trunk.term_ip, carrier_label = carrier_label,
                 label = "SBC-2 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
+                tier1 = (trunk.tier1 == true),
             }
         end
     end
@@ -379,25 +440,30 @@ function M.zone()
     return z
 end
 
--- select_tollfree(zone, db, tag) -> attempts-ready trunk list or nil, source
--- For the trunk/API 8YY egress: STRICT 'tollfree' rows only, every eligible
--- row (no cap).
+-- select_tollfree(zone, db, tag, traffic_grade) -> list or nil, source,
+-- premium.
+-- For the trunk/API 8YY egress: STRICT 'tollfree' rows only, then the paying
+-- customer's traffic pattern (apply_traffic_pattern; omitted/enterprise =
+-- unchanged), every eligible row (no cap). premium=true -> pass `premium = true` to
+-- run_attempts so it records term_premium_fallback=1 on a non-Tier-1 launch.
 -- Returns (list, "db") when at least one enabled tollfree trunk exists;
 -- (nil, "db") when the table resolved but carries no tollfree trunk;
 -- (nil, "fallback") when the table could not be resolved (DB error / zero
 -- outbound rows / unparsable cache). The callers FAIL CLOSED on both nil
 -- cases — unlike inbound_router's class-blind legacy loop, these products
 -- never had an 8YY route, so there is nothing to fail open TO.
-function M.select_tollfree(zone, db, tag)
+function M.select_tollfree(zone, db, tag, traffic_grade)
     local trunks = M.get(zone, db, tag)
     if not trunks then
-        return nil, "fallback"
+        return nil, "fallback", false
     end
     local eligible = M.filter_for_class(trunks, "tollfree")
     if #eligible == 0 then
-        return nil, "db"
+        return nil, "db", false
     end
-    return eligible, "db"
+    local premium
+    eligible, premium = M.apply_traffic_pattern(eligible, traffic_grade)
+    return eligible, "db", premium
 end
 
 -- run_attempts(opts): failover loop for trunk/API 8YY egress. Same shape
@@ -410,6 +476,7 @@ end
 --   * break when the A-leg is gone (session:ready() false).
 -- opts: session, get_var, set_var, tag, uuid, attempts, lead_vars,
 --       call_id, dest, leg_block(n) (optional), stir_reset(), stir_capture(uuid, label)
+--       premium (optional: set term_premium_fallback=1 on a non-Tier-1 launch)
 -- Returns the final originate_disposition ("" when nothing launched).
 function M.run_attempts(opts)
     local session = opts.session
@@ -430,6 +497,10 @@ function M.run_attempts(opts)
             end
             local dial = M.dial_string(opts.lead_vars, attempt, opts.call_id, leg, opts.dest)
             opts.set_var("carrier_used", attempt.carrier_label)
+            if opts.premium and attempt.tier1 ~= true then
+                -- premium call actually tried on a non-Tier-1 carrier
+                opts.set_var("term_premium_fallback", "1")
+            end
             log("INFO", string.format(
                 "[%s] [%s] 8YY bridge attempt %d/%d (%s): -> %s@%s carrier_ip=%s\n",
                 opts.tag, opts.uuid, i, total, attempt.label, opts.dest, attempt.sbc, attempt.ip))

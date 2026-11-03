@@ -71,6 +71,7 @@ MIG_TRUNK_STATUS = REPO / "docker" / "postgres" / "init" / "25_carrier_trunk_sta
 MIG_CARRIER_TRUNKS = REPO / "docker" / "postgres" / "init" / "40_carrier_trunks.sql"
 MIG_CARRIER_PRIORITIES = REPO / "docker" / "postgres" / "init" / "42_carrier_priorities.sql"
 MIG_SINCH_TERMINATION = REPO / "docker" / "postgres" / "init" / "44_sinch_termination.sql"
+MIG_CARRIER_TIER1 = REPO / "docker" / "postgres" / "init" / "64_carrier_tier1.sql"
 
 # cdrs-column migrations (23, 47, ...) live in ONE place so a new column does
 # not have to be hand-added to every module's inline CREATE TABLE cdrs.
@@ -92,7 +93,7 @@ SBC_CONTRACT_SQL = (
 # contract + 44's traffic_class). If the table or column names drift, THIS
 # test must fail.
 TERM_CONTRACT_SQL = (
-    "SELECT carrier, pop, host(source_ip) AS term_ip, traffic_class, "
+    "SELECT carrier, pop, host(source_ip) AS term_ip, traffic_class, tier1, "
     "COALESCE(priority_{zone}, priority) AS eff_priority "
     "FROM carrier_trunks "
     "WHERE direction IN ('outbound','both') AND enabled = true "
@@ -325,6 +326,9 @@ def trunks_db():
             await conn.execute(MIG_CARRIER_PRIORITIES.read_text())
             await conn.execute(MIG_SINCH_TERMINATION.read_text())
             await conn.execute(MIG_SINCH_TERMINATION.read_text())
+            # 64: carrier_trunks.tier1 (the carrier-trunks router SELECTs it).
+            await conn.execute(MIG_CARRIER_TIER1.read_text())
+            await conn.execute(MIG_CARRIER_TIER1.read_text())
             # The cdrs-only migrations (23 on-net, 47 STIR outcome), each twice
             # — so the ingest INSERT's $50-$57 bind against columns that came
             # from the REAL migration files, not a hand-copied DDL.
@@ -861,7 +865,8 @@ def test_termination_contract_per_zone(trunks_db):
     `freeswitch` DB role, returns the Bandwidth PoPs in TODAY'S order
     (East/Central Dallas-first, West LA-first) with source_ip doubling as
     term_ip, followed in EVERY zone by the class-restricted Sinch termination
-    rows at strictly lower precedence (30/40 — zero live-traffic shift) —
+    rows at strictly lower precedence (30/40 — zero live-traffic shift),
+    Bandwidth Tier 1 and Sinch not (migration 64) —
     and the Sinch ORIGINATION rows (direction='inbound') structurally
     ABSENT."""
     pg = trunks_db["pg"]
@@ -869,10 +874,10 @@ def test_termination_contract_per_zone(trunks_db):
     SINCH_TERM_TAIL = [
         {"carrier": "sinch", "pop": "atlanta-ld",
          "term_ip": "206.146.98.26", "traffic_class": "ld",
-         "eff_priority": 30},
+         "tier1": False, "eff_priority": 30},
         {"carrier": "sinch", "pop": "denver-tf",
          "term_ip": "206.146.100.26", "traffic_class": "tollfree",
-         "eff_priority": 40},
+         "tier1": False, "eff_priority": 40},
     ]
 
     async def go():
@@ -882,20 +887,20 @@ def test_termination_contract_per_zone(trunks_db):
             assert [dict(r) for r in rows] == [
                 {"carrier": "bandwidth", "pop": "dallas",
                  "term_ip": "67.231.2.12", "traffic_class": "any",
-                 "eff_priority": 10},
+                 "tier1": True, "eff_priority": 10},
                 {"carrier": "bandwidth", "pop": "la",
                  "term_ip": "216.82.238.134", "traffic_class": "any",
-                 "eff_priority": 20},
+                 "tier1": True, "eff_priority": 20},
             ] + SINCH_TERM_TAIL, f"zone {zone}"
 
         rows = await _fetch_term(pg, "west")
         assert [dict(r) for r in rows] == [
             {"carrier": "bandwidth", "pop": "la",
              "term_ip": "216.82.238.134", "traffic_class": "any",
-             "eff_priority": 10},
+             "tier1": True, "eff_priority": 10},
             {"carrier": "bandwidth", "pop": "dallas",
              "term_ip": "67.231.2.12", "traffic_class": "any",
-             "eff_priority": 20},
+             "tier1": True, "eff_priority": 20},
         ] + SINCH_TERM_TAIL
 
         # Sinch ORIGINATION never terminates while direction='inbound'.
@@ -1135,6 +1140,30 @@ def test_ingest_absent_inbound_carrier_is_null(trunks_db, client):
         assert row is not None
         assert row["inbound_carrier"] is None
         assert row["inbound_carrier_pop"] is None
+
+    _run(go())
+
+
+def test_migration65_ingest_premium_fallback(trunks_db, client):
+    """term_premium_fallback=1 on the A-leg -> cdrs.term_premium_fallback true
+    (migration 65, one guarded UPDATE); absent / any other value -> NULL."""
+    db = trunks_db["db"]
+
+    async def go():
+        for uuid, extra in (("ct-prem-fb-1", {"term_premium_fallback": "1"}),
+                            ("ct-prem-fb-0", {"term_premium_fallback": "0"}),
+                            ("ct-prem-none", None)):
+            r = await client.post("/v1/cdrs/ingest", json=_ingest_payload(uuid, extra))
+            assert r.status_code == 200 and r.json()["status"] == "ok", r.text
+        got = {r["uuid"]: r["term_premium_fallback"] for r in await db.fetch_all(
+            "SELECT uuid, term_premium_fallback FROM cdrs WHERE uuid LIKE 'ct-prem-%'")}
+        assert got == {"ct-prem-fb-1": True, "ct-prem-fb-0": None, "ct-prem-none": None}
+        # a re-ingest of the same CDR is idempotent
+        r = await client.post("/v1/cdrs/ingest", json=_ingest_payload(
+            "ct-prem-fb-1", {"term_premium_fallback": "1"}))
+        assert r.status_code == 200
+        n = await db.fetch_one("SELECT count(*) AS n FROM cdrs WHERE uuid = 'ct-prem-fb-1'")
+        assert n["n"] == 1
 
     _run(go())
 

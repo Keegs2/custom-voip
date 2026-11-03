@@ -134,6 +134,7 @@ FORBIDDEN_TENANT_CDR_KEYS: frozenset[str] = frozenset({
     "fraud_score", "fraud_flags", "traffic_grade",
     # routing / supplier / infrastructure internals
     "carrier_used", "inbound_carrier", "inbound_carrier_pop", "on_net",
+    "term_premium_fallback",
     "on_net_hops", "origin_customer_id", "terminating_customer_id",
     "network_addr", "sip_user_agent", "freeswitch_node", "sbc_id",
     "bridge_uuid",

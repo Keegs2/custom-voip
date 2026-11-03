@@ -622,27 +622,39 @@ end
 -- against the closed 3-value set BEFORE interpolation (SQL-injection
 -- guard, same posture as validate_did) — anything else queries as east.
 --
--- Returns an array of { carrier, pop, term_ip, traffic_class } in
+-- Returns an array of { carrier, pop, term_ip, traffic_class, tier1 } in
 -- eff_priority order ({} when there are no enabled outbound rows), or nil
 -- on any DB error. traffic_class (migration 44: any|ld|tollfree) is the
--- destination-class restriction the caller filters on per call.
+-- destination-class restriction the caller filters on per call; tier1
+-- (migration 64, luasql 't'/'f') marks the Tier 1 carriers a 'premium'
+-- customer is restricted to.
+-- Rolling safety: if the tier1 SELECT fails on a live connection (64 not
+-- applied / not yet replicated), the pre-64 SELECT runs once more and every row reads as
+-- tier1=nil (not Tier 1) — termination never depends on the new column.
 -- The caller treats {} and nil alike as "use the legacy fallback
 -- attempts" (fail-open) but logs them differently.
+local TERM_TRUNKS_SQL = [[
+        SELECT carrier, pop, host(source_ip) AS term_ip, traffic_class,%s
+               COALESCE(priority_%s, priority) AS eff_priority
+        FROM carrier_trunks
+        WHERE direction IN ('outbound','both') AND enabled = true
+        ORDER BY eff_priority, id
+    ]]
+
 function M.get_termination_trunks(zone)
     if zone ~= "east" and zone ~= "west" and zone ~= "central" then
         freeswitch.consoleLog("WARN", "Invalid zone for termination trunk lookup: " .. tostring(zone) .. " — using east\n")
         zone = "east"
     end
 
-    local sql = string.format([[
-        SELECT carrier, pop, host(source_ip) AS term_ip, traffic_class,
-               COALESCE(priority_%s, priority) AS eff_priority
-        FROM carrier_trunks
-        WHERE direction IN ('outbound','both') AND enabled = true
-        ORDER BY eff_priority, id
-    ]], zone)
-
-    local cursor, err = execute_query(sql)
+    local cursor, err = execute_query(string.format(TERM_TRUNKS_SQL, " tier1,", zone))
+    if not cursor and err ~= "NO_CONNECTION" then
+        -- A query error with a live connection (never a DB-down retry, which
+        -- would double the connect timeout on this call).
+        freeswitch.consoleLog("WARNING", "Termination trunk lookup with tier1 failed (" .. tostring(err)
+            .. ") — retrying without tier1 (migration 64 missing?)\n")
+        cursor, err = execute_query(string.format(TERM_TRUNKS_SQL, "", zone))
+    end
     if not cursor then
         freeswitch.consoleLog("ERR", "Termination trunk lookup failed: " .. tostring(err) .. "\n")
         return nil
@@ -656,12 +668,39 @@ function M.get_termination_trunks(zone)
             pop = row.pop,
             term_ip = row.term_ip,
             traffic_class = row.traffic_class,
+            tier1 = row.tier1,
         })
         row = cursor:fetch({}, "a")
     end
     cursor:close()
 
     return trunks
+end
+
+-- Traffic pattern of ONE customer (customers.traffic_grade, migration 63) for
+-- premium routing on a cross-customer on-net chain (inbound_router.lua
+-- paying_traffic_grade). Deliberately CHEAP and FAIL-SAFE, unlike every other
+-- lookup here: it only runs on the connection this call is already using
+-- (the chain's resolve_destination just ran on it) and NEVER connects,
+-- reconnects or probes. No live handle, a query error or no row -> nil, which
+-- the caller reads as enterprise (today's routing) at once, with no
+-- connect_timeout on the call path. One PK point read.
+function M.lookup_customer_grade(customer_id)
+    local id = tonumber(customer_id)
+    if not id or id ~= math.floor(id) or id < 1 or not conn then
+        return nil
+    end
+    local ok, cursor = pcall(function()
+        return conn:execute(string.format(
+            "SELECT traffic_grade FROM customers WHERE id = %d LIMIT 1", math.floor(id)))
+    end)
+    if not ok or not cursor or type(cursor) ~= "userdata" and type(cursor) ~= "table" then
+        return nil
+    end
+    local row = nil
+    pcall(function() row = cursor:fetch({}, "a") end)
+    pcall(function() cursor:close() end)
+    return row and row.traffic_grade or nil
 end
 
 -- Insert CDR (async via background job in production)
@@ -691,7 +730,7 @@ function M.insert_cdr(cdr)
         sql_number(cdr.duration_ms or 0),
         sql_string(cdr.hangup_cause or "NORMAL_CLEARING"),
         sql_string(cdr.carrier_used or "default"),
-        sql_string(cdr.traffic_grade or "standard")
+        sql_string(cdr.traffic_grade or "enterprise")
     )
 
     local cursor, err = execute_query(sql)
