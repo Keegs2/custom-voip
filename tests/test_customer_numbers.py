@@ -39,6 +39,7 @@ Run:  JWT_SECRET_KEY=x python -m pytest -q -p no:cacheprovider tests/test_custom
 import asyncio
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -171,8 +172,10 @@ def test_migration_57_header_and_check_migrations_row():
     assert ("sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f "
             "/opt/revup/docker/postgres/init/57_trunk_dids_trunk_index.sql") in txt
     chk = (REPO / "scripts" / "db" / "check_migrations.sql").read_text()
-    assert chk.splitlines()[0].startswith(
-        "-- Read-only: reports which hand-applied migrations (22..61)")
+    # The header's range must cover 57 (later migrations extend it).
+    m = re.match(r"-- Read-only: reports which hand-applied migrations \(22\.\.(\d+)\)",
+                 chk.splitlines()[0])
+    assert m and int(m.group(1)) >= 57
     assert ("('57_trunk_dids_trunk_index', to_regclass('public.idx_trunk_dids_trunk') "
             "IS NOT NULL)") in chk
     assert "| `57_trunk_dids_trunk_index.sql` |" in (
