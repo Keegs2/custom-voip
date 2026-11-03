@@ -315,14 +315,18 @@ do
                     "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE" }
     local c = run({ dest = "+18885550100", term_trunks = { BWR, TF, TF1 },
                     customer_grade = "premium", bridge_results = fail4 })
-    check("7a premium: only the Tier 1 tollfree row (x2 SBCs)",
-          tf_ips(c) == "198.51.100.5,198.51.100.5", tf_ips(c))
+    check("7a premium, Tier 1 failing: Tier 1 TF first (x2 SBCs), then Sinch TF",
+          tf_ips(c) == "198.51.100.5,198.51.100.5,206.146.100.26,206.146.100.26", tf_ips(c))
     check("7a premium: customer read once", c.customer_lookups == 1, c.customer_lookups)
-    check("7a premium: no fallback flag", c.setvars.term_premium_fallback == nil,
-          c.setvars.term_premium_fallback)
+    check("7a premium: term_premium_fallback=1 (Sinch was tried)",
+          c.setvars.term_premium_fallback == "1", c.setvars.term_premium_fallback)
+    c = run({ dest = "+18885550100", term_trunks = { BWR, TF, TF1 }, customer_grade = "premium",
+              bridge_results = { "SUCCESS" } })
+    check("7a2 premium, Tier 1 answers: one attempt, no flag",
+          tf_ips(c) == "198.51.100.5" and c.setvars.term_premium_fallback == nil, tf_ips(c))
     c = run({ dest = "+18885550100", term_trunks = { BWR, TF }, customer_grade = "premium",
               bridge_results = { "SUCCESS" } })
-    check("7b premium, no Tier 1 TF row: every TF row + fallback=1",
+    check("7b premium, no Tier 1 TF row: straight to the TF row + fallback=1",
           tf_ips(c) == "206.146.100.26" and c.setvars.term_premium_fallback == "1",
           tf_ips(c) .. " / " .. tostring(c.setvars.term_premium_fallback))
     for _, g in ipairs({ "enterprise", false }) do

@@ -1275,19 +1275,41 @@ local ALL_FAIL = {}
 for i = 1, 8 do ALL_FAIL[i] = "NORMAL_TEMPORARY_FAILURE" end
 
 do
-    print("[14a] premium LD -> Tier 1 (Bandwidth) rows only, no fallback flag")
+    print("[14a] premium LD, Tier 1 failing -> Tier 1 first, then Sinch LD; flag=1")
     local T = P_TRUNKS
     local c = run_scenario(premium_scenario(1, "premium", "+17745550170",
         { T.bw_dal, T.atl_ld, T.bw_la, T.den_tf }, ALL_FAIL))
-    check("14a: only Tier 1 trunks attempted (x2 SBCs), Sinch LD never",
-          bridged_ips(c) == "67.231.2.12,67.231.2.12,216.82.238.134,216.82.238.134", bridged_ips(c))
-    check("14a: no term_premium_fallback", c.setvars["term_premium_fallback"] == nil,
-          c.setvars["term_premium_fallback"])
+    check("14a: Bandwidth (Tier 1) x2 SBCs each, THEN Sinch atlanta-ld",
+          bridged_ips(c) == "67.231.2.12,67.231.2.12,216.82.238.134,216.82.238.134,"
+              .. "206.146.98.26,206.146.98.26", bridged_ips(c))
+    check("14a: term_premium_fallback=1 (a non-Tier-1 carrier was tried)",
+          c.setvars["term_premium_fallback"] == "1", c.setvars["term_premium_fallback"])
     check("14a: table path", c.setvars["term_trunks_source"] == "db", c.setvars["term_trunks_source"])
 end
 
 do
-    print("[14b] premium 8YY, only non-Tier-1 tollfree rows -> all tollfree rows + fallback=1")
+    print("[14a2] premium LD, Tier 1 answers -> no non-Tier-1 attempt, no flag")
+    local T = P_TRUNKS
+    local c = run_scenario(premium_scenario(11, "premium", "+17745550175",
+        { T.atl_ld, T.bw_dal, T.bw_la }, { "NORMAL_TEMPORARY_FAILURE", "SUCCESS" }))
+    check("14a2: Tier 1 Dallas first (even though Sinch has the lower priority)",
+          bridged_ips(c) == "67.231.2.12,67.231.2.12", bridged_ips(c))
+    check("14a2: no term_premium_fallback", c.setvars["term_premium_fallback"] == nil,
+          c.setvars["term_premium_fallback"])
+end
+
+do
+    print("[14a3] premium LD, Tier 1 reached a BUSY phone -> not re-dialed on Sinch")
+    local T = P_TRUNKS
+    local c = run_scenario(premium_scenario(12, "premium", "+17745550176",
+        { T.bw_dal, T.atl_ld }, { "USER_BUSY" }))
+    check("14a3: one attempt only", bridged_ips(c) == "67.231.2.12", bridged_ips(c))
+    check("14a3: no term_premium_fallback", c.setvars["term_premium_fallback"] == nil,
+          c.setvars["term_premium_fallback"])
+end
+
+do
+    print("[14b] premium 8YY, only non-Tier-1 tollfree rows -> straight to them, flag=1")
     local T = P_TRUNKS
     local c = run_scenario(premium_scenario(2, "premium", "+18885550170",
         { T.bw_dal, T.den_tf, T.atl_ld }, { "SUCCESS" }))
@@ -1299,7 +1321,7 @@ do
 end
 
 do
-    print("[14c] premium LD with NO Tier 1 row -> full class list + fallback=1")
+    print("[14c] premium LD with NO Tier 1 row -> straight to the others, flag=1")
     local T = P_TRUNKS
     local c = run_scenario(premium_scenario(3, "premium", "+17745550171",
         { T.atl_ld, T.den_tf }, { "SUCCESS" }))
@@ -1349,8 +1371,8 @@ do
     check("14e: terminal customer 77 looked up once",
           table.concat(c.customer_lookups or {}, ",") == "77",
           table.concat(c.customer_lookups or {}, ","))
-    check("14e: premium applied (Bandwidth only)",
-          bridged_ips(c) == "67.231.2.12,67.231.2.12", bridged_ips(c))
+    check("14e: premium applied (Bandwidth first, then Sinch)",
+          bridged_ips(c) == "67.231.2.12,67.231.2.12,206.146.98.26,206.146.98.26", bridged_ips(c))
     -- and the reverse: premium origin forwarding onto an ENTERPRISE customer's DID
     local sc2 = premium_scenario(7, "premium", "+16170000091", { T.atl_ld, T.bw_dal }, ALL_FAIL)
     sc2.oracle = sc.oracle

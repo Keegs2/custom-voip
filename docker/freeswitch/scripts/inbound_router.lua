@@ -1826,27 +1826,22 @@ local function terminate_rcf(dest, ctx)
             eligible_trunks = term_trunks
         end
         -- Traffic pattern (migration 63/64, TED contract C7): a 'premium'
-        -- paying customer terminates on Tier 1 carriers only
-        -- (carrier_trunks.tier1). No Tier 1 row in the class-filtered list
-        -- -> the full class-filtered list (the call still completes) and
-        -- term_premium_fallback=1 (CDR, migration 65). Any other grade gets
-        -- the SAME list back: enterprise attempts are unchanged.
+        -- paying customer's list is its Tier 1 rows (carrier_trunks.tier1)
+        -- first, then the other class-filtered rows, each in zone priority
+        -- order, before the cap — when every Tier 1 attempt fails the call
+        -- still reaches the others. term_premium_fallback=1 is set when an
+        -- attempt on a non-Tier-1 carrier is actually launched (below). Any
+        -- other grade gets the SAME list back: enterprise is unchanged.
+        local premium_routing = false
         do
             local paying_grade = paying_traffic_grade(ctx, dest.customer_id)
             if paying_grade == "premium" then
-                local premium_fallback
-                eligible_trunks, premium_fallback =
+                eligible_trunks, premium_routing =
                     term_trunks_lib.apply_traffic_pattern(eligible_trunks, paying_grade)
-                if premium_fallback then
-                    set_var("term_premium_fallback", "1")
-                    freeswitch.consoleLog("WARNING", string.format(
-                        "[%s] Premium customer %s: no Tier 1 %s trunk enabled — falling back to all %d eligible trunks (term_premium_fallback=1)\n",
-                        uuid, tostring(dest.customer_id), dest_class, #eligible_trunks))
-                else
-                    freeswitch.consoleLog("INFO", string.format(
-                        "[%s] Premium customer %s: %d Tier 1 %s trunk(s)\n",
-                        uuid, tostring(dest.customer_id), #eligible_trunks, dest_class))
-                end
+                local t1 = #term_trunks_lib.filter_for_tier1(eligible_trunks)
+                freeswitch.consoleLog(t1 > 0 and "INFO" or "WARNING", string.format(
+                    "[%s] Premium customer %s: %d Tier 1 of %d eligible %s trunk(s), Tier 1 first\n",
+                    uuid, tostring(dest.customer_id), t1, #eligible_trunks, dest_class))
             end
         end
         -- No attempt cap: every eligible trunk is tried, in eff_priority
@@ -1899,6 +1894,10 @@ local function terminate_rcf(dest, ctx)
                 -- carrier_used reflects the WINNING attempt (same semantics
                 -- as the legacy loop, new value shape "<carrier>-<pop>").
                 set_var("carrier_used", attempt.carrier_label)
+                if premium_routing and attempt.tier1 ~= true then
+                    -- premium call actually tried on a non-Tier-1 carrier
+                    set_var("term_premium_fallback", "1")
+                end
 
                 freeswitch.consoleLog("INFO", string.format(
                     "[%s] RCF bridge attempt %d/%d (%s): %s -> %s@%s carrier_ip=%s\n",

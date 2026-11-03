@@ -900,18 +900,14 @@ if dest_class == "tollfree" then
         end
     end
 
-    local tf_trunks, tf_source, tf_premium_fallback = nil, "fallback", false
+    -- premium: Tier 1 tollfree rows first, then the others; run_attempts
+    -- sets term_premium_fallback=1 when a non-Tier-1 attempt is launched.
+    local tf_trunks, tf_source, tf_premium = nil, "fallback", false
     if term_trunks_lib then
-        tf_trunks, tf_source, tf_premium_fallback = term_trunks_lib.select_tollfree(
+        tf_trunks, tf_source, tf_premium = term_trunks_lib.select_tollfree(
             term_trunks_lib.zone(), db, "trunk_outbound", paying_grade)
     end
     set_var("term_trunks_source", tf_source)
-    if tf_premium_fallback then
-        set_var("term_premium_fallback", "1")
-        freeswitch.consoleLog("WARNING", string.format(
-            "[%s] Premium customer %s: no Tier 1 tollfree trunk enabled — using every tollfree trunk (term_premium_fallback=1)\n",
-            uuid, tostring(customer_id)))
-    end
 
     if not tf_trunks then
         freeswitch.consoleLog("ERR", string.format(
@@ -941,6 +937,7 @@ if dest_class == "tollfree" then
         leg_block = cdr_b_leg_block,  -- CDR leg split: [cdr_*], attempt = launched count
         stir_reset = stir_outcome_reset,
         stir_capture = stir_outcome_capture,
+        premium = tf_premium,
     })
 
     if tf_disposition ~= "SUCCESS" then

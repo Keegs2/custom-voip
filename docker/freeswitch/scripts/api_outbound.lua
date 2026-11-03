@@ -761,15 +761,12 @@ elseif api_dest_class == "tollfree" then
     set_var("lua_routed", "true")
     -- Traffic pattern (TED contract C7): the API customer's grade, carried
     -- on the originate as the traffic_grade channel variable.
-    local tf_trunks, tf_source, tf_premium_fallback = nil, "fallback", false
+    local tf_trunks, tf_source, tf_premium = nil, "fallback", false
     if term_trunks_lib then
-        tf_trunks, tf_source, tf_premium_fallback = term_trunks_lib.select_tollfree(
+        tf_trunks, tf_source, tf_premium = term_trunks_lib.select_tollfree(
             term_trunks_lib.zone(), db, "api_outbound", traffic_grade)
     end
     set_var("term_trunks_source", tf_source)
-    if tf_premium_fallback then
-        set_var("term_premium_fallback", "1")
-    end
 
     if not tf_trunks then
         freeswitch.consoleLog("ERR", string.format(
@@ -793,6 +790,7 @@ elseif api_dest_class == "tollfree" then
         dest = normalized_dest,  -- full +E.164, same as the Bandwidth path
         stir_reset = stir_outcome_reset,
         stir_capture = stir_outcome_capture,
+        premium = tf_premium,
     })
     if tf_disposition ~= "SUCCESS" then
         freeswitch.consoleLog("WARNING", string.format(

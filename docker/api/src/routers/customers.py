@@ -210,7 +210,7 @@ async def compute_billing_estimate(conn, customer_id: int) -> dict:
 
 #: Traffic pattern (migration 63, TED contract C5): decides ONLY which carriers
 #: deliver the customer's calls. 'premium' = Tier 1 carriers only
-#: (carrier_trunks.tier1), falling back to every carrier when none is left;
+#: (carrier_trunks.tier1) first, then the other carriers if Tier 1 fails;
 #: 'enterprise' = all carriers by zone priority. Stored in traffic_grade.
 TRAFFIC_GRADES = ("enterprise", "premium")
 

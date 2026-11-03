@@ -10,8 +10,8 @@
 --      delete and the rows just turn `stale` in live_trunk_health.
 --   2. Traffic pattern (C5): customers.traffic_grade becomes exactly
 --      'enterprise' | 'premium' (owner decision: it decides ONLY which carriers
---      deliver the customer's calls; Premium = Tier 1 carriers only, with a
---      fall back to every carrier when no Tier 1 carrier is left).
+--      deliver the customer's calls; Premium = Tier 1 carriers first, then
+--      the others, so the call still completes when Tier 1 fails).
 --        * existing 'standard' / 'economy' / NULL -> 'enterprise'; 'premium'
 --          stays 'premium' — NOTE: a customer already 'premium' (14's
 --          Granite Telephony seed) switches to Tier-1-only routing as soon

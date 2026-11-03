@@ -1,8 +1,8 @@
 export type AccountType = 'rcf' | 'api' | 'trunk' | 'hybrid' | 'ucaas';
 export type CustomerStatus = 'active' | 'suspended' | 'closed';
 /** Traffic pattern (migration 63): which carriers deliver the customer's
- *  calls. 'premium' = Tier 1 carriers only (falls back to all carriers when
- *  none is left); 'enterprise' = all carriers by zone priority. */
+ *  calls. 'premium' = Tier 1 carriers first (then the other carriers when
+ *  Tier 1 fails); 'enterprise' = all carriers by zone priority. */
 export type TrafficGrade = 'enterprise' | 'premium';
 /** CDRs written before migration 63 keep the old grade names. */
 export type CdrTrafficGrade = TrafficGrade | 'standard' | 'economy';

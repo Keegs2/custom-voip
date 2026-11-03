@@ -629,7 +629,7 @@ _WATERMARK_EXCLUDED = {"exported_at"}
 #: Columns deliberately NOT in the Equinox export (the file stays
 #: byte-identical): routing breadcrumbs that carry no billing meaning.
 #:   term_premium_fallback (65) — a premium customer's call used non-Tier-1
-#:   carriers because no Tier 1 carrier was eligible (staff-only).
+#:   carriers because Tier 1 failed or none was eligible (staff-only).
 _NOT_EXPORTED = {"term_premium_fallback"}
 
 # Non-column tokens that can start a line inside the CREATE TABLE body.

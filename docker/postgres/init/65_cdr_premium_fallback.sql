@@ -3,9 +3,9 @@
 -- Premium routing fallback on the CDR (TED CRAG Admin redesign, contract C7).
 --
 -- cdrs.term_premium_fallback BOOLEAN — true on the A-leg row of a call whose
--- paying customer is 'premium' (customers.traffic_grade, 63) but whose
--- carrier attempts had to use the full class-filtered list because no Tier 1
--- carrier (carrier_trunks.tier1, 64) was eligible. FreeSWITCH sets the
+-- paying customer is 'premium' (customers.traffic_grade, 63) and that was
+-- actually attempted on a carrier NOT marked Tier 1 (carrier_trunks.tier1,
+-- 64) — every Tier 1 attempt failed, or none was eligible. FreeSWITCH sets the
 -- channel variable term_premium_fallback=1 (inbound_router.lua RCF / IVR
 -- egress, trunk_outbound.lua / api_outbound.lua 8YY); the CDR ingest writes
 -- it with ONE guarded UPDATE of the A row, only when the variable is present
@@ -27,7 +27,7 @@
 ALTER TABLE cdrs ADD COLUMN IF NOT EXISTS term_premium_fallback BOOLEAN;
 
 COMMENT ON COLUMN cdrs.term_premium_fallback IS
-    'Premium routing fell back to all carriers (no Tier 1 carrier eligible) — A-leg; NULL otherwise (65).';
+    'Premium call attempted on a non-Tier-1 carrier (Tier 1 failed or none eligible) — A-leg; NULL otherwise (65).';
 
 DO $$
 BEGIN

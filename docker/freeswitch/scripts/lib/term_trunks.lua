@@ -12,8 +12,8 @@
 --   classify_destination(n, nu)   'tollfree' (NANP 8YY) | 'ld'
 --   filter_for_class(list, cls)   per-call traffic_class filter (strict TF)
 --   filter_for_tier1(list)        Tier 1 rows only (carrier_trunks.tier1, 64)
---   apply_traffic_pattern(l, g)   premium customer -> Tier 1 rows, else the
---                                 same list; empty -> full list + fallback flag
+--   apply_traffic_pattern(l, g)   premium customer -> Tier 1 rows first, then
+--                                 the others; any other grade -> the same list
 --   build_attempts(list, s1, s2)  trunk-major {SBC-1, SBC-2} attempt table
 --                                 (carrier 'verizon' rows: SBC-1/VIP only)
 --   dial_string(lead, a, cid, leg, dest)   per-attempt carrier dial string
@@ -279,24 +279,30 @@ function M.filter_for_tier1(trunks)
     return t1
 end
 
--- apply_traffic_pattern(eligible, traffic_grade) -> list, premium_fallback
+-- apply_traffic_pattern(eligible, traffic_grade) -> list, premium
 -- The paying customer's traffic pattern (customers.traffic_grade, 63), applied
--- AFTER the destination-class filter (the list is not capped):
+-- AFTER the destination-class filter (the list is not capped; owner
+-- decision 2026-11-03, "Tier 1 first, then the others" — no cap for Premium
+-- either):
 --   * anything but exactly 'premium' (enterprise, nil, a pre-63 value) ->
---     the SAME table back, fallback false — enterprise attempts are
+--     the SAME table back, premium=false — enterprise attempts are
 --     byte-for-byte what they were;
---   * 'premium' -> the Tier 1 rows of `eligible`; when there are none, the
---     full `eligible` list (the call still completes) and fallback true —
---     the caller sets term_premium_fallback=1 (CDR, migration 65).
+--   * 'premium' -> the Tier 1 rows of `eligible` (zone priority order)
+--     FOLLOWED BY its other rows (zone priority order), premium=true. When
+--     every Tier 1 attempt fails, the call still reaches the other carriers.
+--     The caller sets term_premium_fallback=1 only when an attempt on a
+--     non-Tier-1 carrier is actually launched (attempt.tier1 ~= true).
 function M.apply_traffic_pattern(eligible, traffic_grade)
     if traffic_grade ~= "premium" then
         return eligible, false
     end
-    local t1 = M.filter_for_tier1(eligible)
-    if #t1 == 0 then
-        return eligible, true
+    local ordered = M.filter_for_tier1(eligible)
+    for _, trunk in ipairs(eligible or {}) do
+        if trunk.tier1 ~= true then
+            ordered[#ordered + 1] = trunk
+        end
     end
-    return t1, false
+    return ordered, true
 end
 
 -- is_true(v): a luasql boolean ('t'/'f' strings) or a Lua boolean.
@@ -318,11 +324,13 @@ function M.build_attempts(trunks, sbc1, sbc2)
         attempts[#attempts + 1] = {
             sbc = sbc1, ip = trunk.term_ip, carrier_label = carrier_label,
             label = "SBC-1 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
+            tier1 = (trunk.tier1 == true),
         }
         if not M.VIP_ONLY_CARRIERS[string.lower(trunk.carrier)] then
             attempts[#attempts + 1] = {
                 sbc = sbc2, ip = trunk.term_ip, carrier_label = carrier_label,
                 label = "SBC-2 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
+                tier1 = (trunk.tier1 == true),
             }
         end
     end
@@ -433,10 +441,11 @@ function M.zone()
 end
 
 -- select_tollfree(zone, db, tag, traffic_grade) -> list or nil, source,
--- premium_fallback.
+-- premium.
 -- For the trunk/API 8YY egress: STRICT 'tollfree' rows only, then the paying
 -- customer's traffic pattern (apply_traffic_pattern; omitted/enterprise =
--- unchanged), every eligible row (no cap).
+-- unchanged), every eligible row (no cap). premium=true -> pass `premium = true` to
+-- run_attempts so it records term_premium_fallback=1 on a non-Tier-1 launch.
 -- Returns (list, "db") when at least one enabled tollfree trunk exists;
 -- (nil, "db") when the table resolved but carries no tollfree trunk;
 -- (nil, "fallback") when the table could not be resolved (DB error / zero
@@ -452,9 +461,9 @@ function M.select_tollfree(zone, db, tag, traffic_grade)
     if #eligible == 0 then
         return nil, "db", false
     end
-    local fallback
-    eligible, fallback = M.apply_traffic_pattern(eligible, traffic_grade)
-    return eligible, "db", fallback
+    local premium
+    eligible, premium = M.apply_traffic_pattern(eligible, traffic_grade)
+    return eligible, "db", premium
 end
 
 -- run_attempts(opts): failover loop for trunk/API 8YY egress. Same shape
@@ -467,6 +476,7 @@ end
 --   * break when the A-leg is gone (session:ready() false).
 -- opts: session, get_var, set_var, tag, uuid, attempts, lead_vars,
 --       call_id, dest, leg_block(n) (optional), stir_reset(), stir_capture(uuid, label)
+--       premium (optional: set term_premium_fallback=1 on a non-Tier-1 launch)
 -- Returns the final originate_disposition ("" when nothing launched).
 function M.run_attempts(opts)
     local session = opts.session
@@ -487,6 +497,10 @@ function M.run_attempts(opts)
             end
             local dial = M.dial_string(opts.lead_vars, attempt, opts.call_id, leg, opts.dest)
             opts.set_var("carrier_used", attempt.carrier_label)
+            if opts.premium and attempt.tier1 ~= true then
+                -- premium call actually tried on a non-Tier-1 carrier
+                opts.set_var("term_premium_fallback", "1")
+            end
             log("INFO", string.format(
                 "[%s] [%s] 8YY bridge attempt %d/%d (%s): -> %s@%s carrier_ip=%s\n",
                 opts.tag, opts.uuid, i, total, attempt.label, opts.dest, attempt.sbc, attempt.ip))

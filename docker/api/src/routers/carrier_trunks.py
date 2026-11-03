@@ -132,7 +132,7 @@ class CarrierTrunkCreate(BaseModel):
     cps_limit: int = 100
     enabled: bool = True
     # Tier 1 carrier (migration 63): a 'premium' customer's calls terminate
-    # only on tier1 rows (FreeSWITCH falls back to all rows when none is left).
+    # on tier1 rows first (FreeSWITCH then tries the other rows).
     tier1: bool = False
     # Termination ordering (migration 42): lower = tried first; the zone
     # overrides are nullable (NULL = inherit `priority`).

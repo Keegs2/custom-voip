@@ -10,10 +10,11 @@
 --
 -- WHO READS IT: FreeSWITCH selects it with the per-zone termination list
 -- (lib/db_client.lua get_termination_trunks). For a customer whose traffic
--- pattern is 'premium' (customers.traffic_grade, 63) the carrier attempts are
--- restricted to tier1 rows after the destination-class filter; when no tier1
--- row is eligible the call falls back to the full class-filtered list and
--- sets term_premium_fallback=1 (65 records it on the CDR). Enterprise
+-- pattern is 'premium' (customers.traffic_grade, 63) the class-filtered
+-- carrier list is reordered Tier 1 rows first, then the other rows (each in
+-- zone priority order); when an attempt on a non-Tier-1 row is actually
+-- launched the call sets term_premium_fallback=1 (65 records it on the
+-- CDR). Enterprise
 -- customers never look at it. The API (/v1/carrier-trunks) returns and
 -- accepts it. tier1 joins the load-bearing carrier_trunks column names —
 -- never rename it. The freeswitch role's table-level SELECT covers it.
@@ -52,6 +53,6 @@ END
 $$;
 
 COMMENT ON COLUMN carrier_trunks.tier1 IS
-    'Tier 1 carrier (64): a premium customer''s calls terminate only on tier1 rows; when none is eligible FreeSWITCH falls back to every row and sets term_premium_fallback=1.';
+    'Tier 1 carrier (64): a premium customer''s calls try tier1 rows first, then the others; a launched non-tier1 attempt sets term_premium_fallback=1.';
 
 COMMIT;

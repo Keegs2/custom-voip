@@ -13,10 +13,13 @@
 --       old-key entry is never read.
 --   [3] filter_for_tier1 / apply_traffic_pattern: enterprise, nil and any
 --       other grade get the SAME table back (no copy); premium gets the
---       Tier 1 rows, or the full list + fallback=true when there are none.
+--       Tier 1 rows first, then the others (a new table); build_attempts
+--       carries tier1 on each attempt.
 --   [4] select_tollfree(zone, db, tag, grade): strict tollfree first, then
---       the pattern; the third return is the fallback flag; omitted grade =
---       today's behaviour.
+--       the pattern (Tier 1 first, then the others); the third return says
+--       premium ordering applied; omitted grade = today's behaviour.
+--   [5] run_attempts(premium=true) sets term_premium_fallback=1 only when an
+--       attempt on a non-Tier-1 carrier is launched.
 --
 -- Usage: lua tests/lua/term_trunks_harness.lua
 
@@ -121,13 +124,20 @@ do
     local out, fb = M.apply_traffic_pattern(list, nil)
     check("nil grade -> the SAME table, no fallback", out == list and fb == false)
     out, fb = M.apply_traffic_pattern(list, "premium")
-    check("premium -> Tier 1 rows only", ips(out) == "67.231.2.12,216.82.238.134" and fb == false,
-          ips(out))
-    local none = { SL }
+    check("premium -> Tier 1 rows first, then the others (each in order)",
+          ips(out) == "67.231.2.12,216.82.238.134,206.146.98.26" and fb == true, ips(out))
+    check("premium -> a NEW table (the cached list is never reordered)", out ~= list
+          and ips(list) == "206.146.98.26,67.231.2.12,216.82.238.134")
+    local none = { SL, ST }
     out, fb = M.apply_traffic_pattern(none, "premium")
-    check("premium, no Tier 1 row -> full list + fallback", out == none and fb == true)
+    check("premium, no Tier 1 row -> the others in order", ips(out) == "206.146.98.26,206.146.100.26"
+          and fb == true, ips(out))
     out, fb = M.apply_traffic_pattern({}, "premium")
-    check("premium, empty list -> empty + fallback", #out == 0 and fb == true)
+    check("premium, empty list -> empty", #out == 0 and fb == true)
+    local att = M.build_attempts({ BW, SL }, "10.0.0.1", "10.0.0.2")
+    check("build_attempts carries tier1 per attempt",
+          att[1].tier1 == true and att[2].tier1 == true and att[3].tier1 == false
+          and att[4].tier1 == false)
     check("is_true: t/true/1 only", M.is_true("t") and M.is_true(true) and M.is_true("1")
           and not M.is_true("f") and not M.is_true(nil) and not M.is_true(false))
 end
@@ -142,16 +152,17 @@ do
     check("no grade: tollfree rows, source db, no fallback",
           ips(l) == "206.146.100.26" and src == "db" and fb == false)
     l, src, fb = M.select_tollfree("east", db, "h", "premium")
-    check("premium, Sinch TF not Tier 1 -> same TF rows + fallback",
+    check("premium, Sinch TF not Tier 1 -> the TF rows, premium=true",
           ips(l) == "206.146.100.26" and src == "db" and fb == true)
     rows = { BW, ST, { carrier = "x", pop = "tf1", term_ip = "198.51.100.5",
                        traffic_class = "tollfree", tier1 = true } }
     globals = {}
     l, src, fb = M.select_tollfree("east", db, "h", "premium")
-    check("premium with a Tier 1 TF row -> only it", ips(l) == "198.51.100.5" and fb == false,
-          ips(l))
+    check("premium with a Tier 1 TF row -> it first, then Sinch TF",
+          ips(l) == "198.51.100.5,206.146.100.26" and fb == true, ips(l))
     l, src, fb = M.select_tollfree("east", db, "h", "enterprise")
-    check("enterprise -> every TF row", ips(l) == "206.146.100.26,198.51.100.5" and fb == false)
+    check("enterprise -> every TF row in priority order", ips(l) == "206.146.100.26,198.51.100.5"
+          and fb == false)
     rows = { BW, SL }
     globals = {}
     l, src, fb = M.select_tollfree("east", db, "h", "premium")
@@ -160,6 +171,30 @@ do
     globals = {}
     local l2, src2, fb2 = M.select_tollfree("east", { }, "h", "premium")
     check("table unresolvable -> nil, fallback, no flag", l2 == nil and src2 == "fallback" and fb2 == false)
+end
+
+do
+    print("[5] run_attempts: term_premium_fallback=1 only when a non-Tier-1 attempt launches")
+    local function go(premium, results, trunks)
+        local vars, i = {}, 0
+        local session = { ready = function() return true end,
+                          execute = function() i = i + 1; vars.originate_disposition = results[i] end }
+        globals = { ["sbc_health_10.0.0.1"] = "up:" .. now, ["sbc_health_10.0.0.2"] = "up:" .. now }
+        M.run_attempts({
+            session = session, get_var = function(k, d) return vars[k] or d end,
+            set_var = function(k, v) vars[k] = v end, tag = "h", uuid = "u",
+            attempts = M.build_attempts(trunks, "10.0.0.1", "10.0.0.2"),
+            lead_vars = "x=1", call_id = "c", dest = "+18005550100", premium = premium,
+        })
+        return vars, i
+    end
+    local v, n = go(true, { "SUCCESS" }, { BW, ST })
+    check("Tier 1 answers: 1 attempt, no flag", n == 1 and v.term_premium_fallback == nil)
+    v, n = go(true, { "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE", "SUCCESS" }, { BW, ST })
+    check("Tier 1 fails on both SBCs -> Sinch tried, flag=1",
+          n == 3 and v.term_premium_fallback == "1" and v.carrier_used == "sinch-denver-tf")
+    v, n = go(false, { "NORMAL_TEMPORARY_FAILURE", "NORMAL_TEMPORARY_FAILURE", "SUCCESS" }, { BW, ST })
+    check("not premium: never flagged", n == 3 and v.term_premium_fallback == nil)
 end
 
 print("")
