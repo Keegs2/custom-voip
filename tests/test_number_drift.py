@@ -190,6 +190,19 @@ def test_drift_paging_and_filters(h):
         assert b["total"] == n == len(b["items"]) and {i["kind"] for i in b["items"]} == {k}
 
 
+def test_drift_summary_ignores_kind_limit_offset(h):
+    """summary always counts every kind platform-wide (TED reads it with
+    limit=1 and no kind); total is the count for the current kind filter."""
+    b = _ok(h.get("/v1/numbers/drift", limit=1))
+    assert b["summary"] == EXPECTED_SUMMARY and b["total"] == 10 and len(b["items"]) == 1
+    for params in ({"kind": "ref_mismatch"}, {"kind": "orphan_pool_assignment", "limit": 1,
+                                               "offset": 1}, {"limit": 3, "offset": 9},
+                   {"kind": "duplicate_product", "offset": 100}):
+        b = _ok(h.get("/v1/numbers/drift", **params))
+        assert b["summary"] == EXPECTED_SUMMARY, params
+        assert b["total"] == (EXPECTED_SUMMARY[params["kind"]] if "kind" in params else 10)
+
+
 def test_drift_validation_and_roles(h):
     assert h.get("/v1/numbers/drift", kind="nope").status_code == 422
     assert h.get("/v1/numbers/drift", limit=0).status_code == 422

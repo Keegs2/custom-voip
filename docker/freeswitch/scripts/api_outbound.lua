@@ -503,7 +503,7 @@ end
 -- ============================================
 -- API calls use carrier_primary (same carrier as all products in 2-carrier model)
 -- traffic_grade is retained as a secondary factor for priority within the trunk
-local traffic_grade = get_var("traffic_grade", "standard")
+local traffic_grade = get_var("traffic_grade", "enterprise")
 local gateway = "carrier_primary"
 
 freeswitch.consoleLog("INFO", string.format(

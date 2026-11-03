@@ -3346,9 +3346,8 @@
               <div class="form-group">
                 <label class="form-label">Traffic Grade</label>
                 <select class="form-control" id="cust-traffic-grade">
-                  <option value="standard">Standard</option>
+                  <option value="enterprise">Enterprise</option>
                   <option value="premium">Premium</option>
-                  <option value="economy">Economy</option>
                 </select>
               </div>
               <div class="form-group">
@@ -4199,7 +4198,7 @@ function renderCustomersTable() {
     const isExpanded = expandedCustomer === c.id;
     const acctBadge = `<span class="badge badge-${escHtml(c.account_type)}">${escHtml(c.account_type)}</span>`;
     const statusBadge = `<span class="badge badge-${escHtml(c.status || 'active')}">${escHtml(c.status || 'active')}</span>`;
-    const gradeBadge = `<span class="badge badge-${escHtml(c.traffic_grade || 'standard')}">${escHtml(c.traffic_grade || 'standard')}</span>`;
+    const gradeBadge = `<span class="badge badge-${escHtml(c.traffic_grade || 'enterprise')}">${escHtml(c.traffic_grade || 'enterprise')}</span>`;
 
     let expandHtml = '';
     if (isExpanded) {
@@ -4257,9 +4256,8 @@ function renderCustomersTable() {
                 </select></div>
               <div class="form-group"><label class="form-label">Traffic Grade</label>
                 <select class="form-control" id="edit-cust-grade-${c.id}">
-                  <option value="standard" ${c.traffic_grade==='standard'?'selected':''}>Standard</option>
+                  <option value="enterprise" ${c.traffic_grade!=='premium'?'selected':''}>Enterprise</option>
                   <option value="premium" ${c.traffic_grade==='premium'?'selected':''}>Premium</option>
-                  <option value="economy" ${c.traffic_grade==='economy'?'selected':''}>Economy</option>
                 </select></div>
               <div class="form-group"><label class="form-label">Credit Limit ($)</label>
                 <input class="form-control" id="edit-cust-credit-${c.id}" type="number" value="${c.credit_limit || 0}" /></div>

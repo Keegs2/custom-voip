@@ -368,7 +368,7 @@ if not trunk_id or trunk_id == "" then
             set_var("customer_id", tostring(trunk_data.customer_id))
             set_var("max_channels", tostring(trunk_data.max_channels or 50))
             set_var("cps_limit", tostring(trunk_data.cps_limit or 10))
-            set_var("traffic_grade", trunk_data.traffic_grade or "standard")
+            set_var("traffic_grade", trunk_data.traffic_grade or "enterprise")
             customer_id_str = tostring(trunk_data.customer_id)
         else
             freeswitch.consoleLog("WARNING", string.format(
@@ -387,7 +387,7 @@ end
 local customer_id = tonumber(customer_id_str or get_var("customer_id", "0"))
 local max_channels = tonumber(get_var("max_channels", "50"))
 local cps_limit = tonumber(get_var("cps_limit", "10"))
-local traffic_grade = get_var("traffic_grade", "standard")
+local traffic_grade = get_var("traffic_grade", "enterprise")
 
 -- Set standard variables
 set_var("product_type", "trunk")

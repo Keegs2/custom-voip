@@ -208,11 +208,26 @@ async def compute_billing_estimate(conn, customer_id: int) -> dict:
     }
 
 
+#: Traffic pattern (migration 63, TED contract C5): decides ONLY which carriers
+#: deliver the customer's calls. 'premium' = Tier 1 carriers only
+#: (carrier_trunks.tier1), falling back to every carrier when none is left;
+#: 'enterprise' = all carriers by zone priority. Stored in traffic_grade.
+TRAFFIC_GRADES = ("enterprise", "premium")
+
+
+def _traffic_grade(v):
+    """traffic_grade input: exactly 'enterprise' or 'premium' (422 otherwise,
+    never the CHECK's 500). The pre-63 'standard' / 'economy' are refused."""
+    if v is None or v in TRAFFIC_GRADES:
+        return v
+    raise ValueError("traffic_grade must be 'enterprise' or 'premium'")
+
+
 class CustomerCreate(BaseModel):
     name: str
     account_type: str = "rcf"  # rcf, api, trunk, hybrid, ucaas
     credit_limit: float = 0
-    traffic_grade: str = "standard"
+    traffic_grade: str = "enterprise"
     daily_limit: float = 500
     cpm_limit: int = 60
     ucaas_enabled: bool = False  # UCaaS add-on for api/trunk/hybrid customers
@@ -232,6 +247,11 @@ class CustomerCreate(BaseModel):
             )
         return v
 
+    @field_validator("traffic_grade", mode="before")
+    @classmethod
+    def validate_traffic_grade(cls, v):
+        return _traffic_grade(v)
+
 
 class CustomerUpdate(BaseModel):
     name: Optional[str] = None
@@ -241,6 +261,11 @@ class CustomerUpdate(BaseModel):
     daily_limit: Optional[float] = None
     cpm_limit: Optional[int] = None
     ucaas_enabled: Optional[bool] = None
+
+    @field_validator("traffic_grade", mode="before")
+    @classmethod
+    def validate_traffic_grade(cls, v):
+        return _traffic_grade(v)
 
 
 @router.get("")

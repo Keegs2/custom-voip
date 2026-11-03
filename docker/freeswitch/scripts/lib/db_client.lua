@@ -691,7 +691,7 @@ function M.insert_cdr(cdr)
         sql_number(cdr.duration_ms or 0),
         sql_string(cdr.hangup_cause or "NORMAL_CLEARING"),
         sql_string(cdr.carrier_used or "default"),
-        sql_string(cdr.traffic_grade or "standard")
+        sql_string(cdr.traffic_grade or "enterprise")
     )
 
     local cursor, err = execute_query(sql)

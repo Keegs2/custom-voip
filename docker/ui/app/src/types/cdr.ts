@@ -1,4 +1,4 @@
-import type { TrafficGrade } from './customer';
+import type { CdrTrafficGrade } from './customer';
 import type { StirBadgeFields } from './stir';
 import type { Grade, QualityStatus } from '../pages/calls/quality';
 
@@ -111,7 +111,7 @@ export interface Cdr extends StirBadgeFields {
   hangup_cause?: string | null;
   sip_code?: number | null;
   carrier_used?: string | null;
-  traffic_grade?: TrafficGrade | null;
+  traffic_grade?: CdrTrafficGrade | null;
   fraud_score?: number | null;
   rated_at?: string | null;
   trunk_id?: string | null;

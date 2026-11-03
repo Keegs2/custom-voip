@@ -63,11 +63,15 @@ class AdminHarness(Harness):
                 "GRANT ALL ON cdrs TO api; GRANT USAGE, SELECT ON cdrs_id_seq TO api;")
             for name in BASE_MIGRATIONS:
                 await conn.execute((INIT / name).read_text())
+            await self.before_extra(conn)
             for _ in range(2):
                 for name in self.EXTRA_MIGRATIONS:
                     await conn.execute((INIT / name).read_text())
         finally:
             await conn.close()
+
+    async def before_extra(self, conn) -> None:
+        """Hook: seed rows that must exist BEFORE EXTRA_MIGRATIONS run."""
 
     @staticmethod
     def build_app():

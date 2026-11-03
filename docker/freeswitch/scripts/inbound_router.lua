@@ -791,7 +791,7 @@ freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Normalized DID: " .. normalized
 local product_type = nil
 local customer_id = nil
 local forward_to = nil
-local traffic_grade = "standard"
+local traffic_grade = "enterprise"
 local cpm_limit = 60
 local daily_limit = 500
 local ring_timeout = 30
@@ -811,7 +811,7 @@ local function lookup_rcf()
                 product_type = "rcf",
                 customer_id = tonumber(rcf_db.customer_id),
                 forward_to = rcf_db.forward_to,
-                traffic_grade = rcf_db.traffic_grade or "standard",
+                traffic_grade = rcf_db.traffic_grade or "enterprise",
                 cpm_limit = tonumber(rcf_db.cpm_limit) or 60,
                 daily_limit = tonumber(rcf_db.daily_limit) or 500,
                 pass_caller_id = rcf_db.pass_caller_id == "t" or rcf_db.pass_caller_id == true,
@@ -836,7 +836,7 @@ local function lookup_api_did()
         return {
             product_type = "api",
             customer_id = tonumber(api_did.customer_id),
-            traffic_grade = api_did.traffic_grade or "standard",
+            traffic_grade = api_did.traffic_grade or "enterprise",
             cpm_limit = tonumber(api_did.cpm_limit) or 60,
             daily_limit = tonumber(api_did.daily_limit) or 500,
             voice_url = api_did.voice_url,
@@ -858,7 +858,7 @@ local function lookup_trunk_did()
             product_type = "trunk",
             customer_id = tonumber(trunk_did.customer_id),
             trunk_id = trunk_did.trunk_id,
-            traffic_grade = trunk_did.traffic_grade or "standard"
+            traffic_grade = trunk_did.traffic_grade or "enterprise"
         }
     end
 
@@ -884,7 +884,7 @@ local function lookup_voicemail_did()
             product_ref_id = tonumber(vm_row.product_ref_id),   -- mailbox id
             product_enabled = (vm_row.product_enabled == "t" or vm_row.product_enabled == true),
             customer_status = vm_row.customer_status,
-            traffic_grade = vm_row.traffic_grade or "standard",
+            traffic_grade = vm_row.traffic_grade or "enterprise",
         }
     end
 
@@ -913,7 +913,7 @@ local function lookup_ivr_did()
             -- ivr_fs_number.enabled already folds in customers.status='active'
             product_enabled = en and ivr_row.plan_json ~= nil,
             customer_status = "active",
-            traffic_grade = ivr_row.traffic_grade or "standard",
+            traffic_grade = ivr_row.traffic_grade or "enterprise",
             max_channels = tonumber(ivr_row.max_channels) or 0,
             ivr_row = ivr_row,
         }
@@ -954,7 +954,7 @@ freeswitch.consoleLog("DEBUG", "[" .. uuid .. "] Routing found: type=" .. tostri
 product_type = routing.product_type
 customer_id = routing.customer_id
 forward_to = routing.forward_to
-traffic_grade = routing.traffic_grade or "standard"
+traffic_grade = routing.traffic_grade or "enterprise"
 cpm_limit = routing.cpm_limit or 60
 daily_limit = routing.daily_limit or 500
 pass_caller_id = routing.pass_caller_id

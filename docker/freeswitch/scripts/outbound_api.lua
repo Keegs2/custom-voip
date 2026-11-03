@@ -109,7 +109,7 @@ local destination = get_var("destination_number", "")
 local from_did = get_var("caller_id_number", "")
 local customer_id = tonumber(get_var("customer_id", "0"))
 local webhook_url = get_var("webhook_url", "")
-local traffic_grade = get_var("traffic_grade", "standard")
+local traffic_grade = get_var("traffic_grade", "enterprise")
 local call_timeout = tonumber(get_var("call_timeout", "60"))
 
 -- Use the actual SIP Call-ID from the inbound INVITE for X-CID correlation.
