@@ -181,7 +181,7 @@ One `victoriametrics/vmagent:v1.103.0` per zone role, **host-net**, scrapes loca
 
 Scrape files (new `docker/vmagent/`), reconciled to the real ports, `external_labels` stamp `zone`+`reporting_instance`:
 - `scrape-sbc.yml`: `kamailio` → `127.0.0.1:8080`; `node` → `127.0.0.1:9100`
-- `scrape-media.yml`: `freeswitch` → `127.0.0.1:9102`; `freeswitch_esl` → `127.0.0.1:9103`; `node` → `127.0.0.1:9100`
+- `scrape-media.yml`: `freeswitch` → `127.0.0.1:9102`; `freeswitch_esl` → `127.0.0.1:9103`; `node` → `127.0.0.1:9100`; `vz_gateway` → the zone's two Verizon IPsec gateways at `<gateway NIC>:9100` (zone-selected by relabel; see "Verizon IPsec gateways" at the end)
 - `scrape-services.yml` / `scrape-db.yml`: `node` `:9100`, `postgres` `:9187`, `pgbouncer` `:9127` (via `host.docker.internal`)
 
 New `.env` keys: `METRICS_ZONE` (east|west|central), `METRICS_REMOTE_WRITE_HOST=10.142.0.103`; media adds `FS_NODE_ID`; SBC already has `SBC_ID`.
@@ -410,3 +410,26 @@ cd /opt/revup && sudo git pull
 ```
 
 Verify: `curl -s http://127.0.0.1:8880/api/v1/rules | grep -c record` (as of 2026-09-22: 22 recording rules + 3 alerts across 5 groups — noc_traffic 5, noc_concurrency 6, noc_sip_health 5, noc_stir 2, noc_teardown 4) and `curl -s 'http://127.0.0.1:8428/api/v1/query?query=fleet:freeswitch_calls_active_peak:sum'` returns one series and, after ~1 min, `curl -s 'http://127.0.0.1:8428/api/v1/query?query=zone:kamailio_trunk_cps:rate1m'` returns series. The legacy `voip:*` series simply stop updating (12-month retention keeps their history queryable).
+
+---
+
+# Verizon IPsec gateways (2026-10-30)
+
+Six plain Debian 12 VMs (`{east,west,central}-vz-gw-{a,b}`, `infra/vz-ipsec/`, inventory `docs/VERIZON_IPSEC_TRUNKS_PLAN.md` §4.1) — no Docker, so no vmagent of their own. Each runs `prometheus-node-exporter` on its NIC IP `:9100` with `--collector.xfrm` plus the textfile `vz-healthd` rewrites every 2 s.
+
+**Metrics** (all `vz_ipsec_*` carry `zone` + `gw=a|b`; the scrape adds `node=<instance name>`, `role=vz-gw`, and the external `zone`/`reporting_instance` — healthd's own `zone` lands as `exported_zone`):
+`vz_ipsec_healthy` (what the gateway ILB health check sees), `vz_ipsec_sa_up`, `vz_ipsec_xfrm_up`, `vz_ipsec_route_ok`, `vz_ipsec_nft_ok`, `vz_ipsec_nostates_ok`, `vz_ipsec_drained`, `vz_ipsec_udp_encap`, `vz_ipsec_xfrm_out_no_states_total` (counter), `vz_ipsec_healthd_timestamp_seconds` (heartbeat); kernel `node_xfrm_in_state_seq_error_packets_total` (replay drops) and `node_xfrm_out_no_states_packets_total` (black hole) from `--collector.xfrm` — those two names were verified against the `prom/node-exporter:v1.8.2` binary; the bare `node_xfrm_in_state_seq_error` / `node_xfrm_out_no_states` spellings do not exist.
+
+**Who scrapes:** the zone's **media vmagents** (`scrape-media.yml` job `vz_gateway`, both `*-fs` and `*-fs-2` — the series differ only by `reporting_instance`; every rule and panel must reduce with `max by (zone, node, gw)` first). One shared file lists all six targets; a `keep` relabel on `%{ZONE}` keeps only the local zone's pair. Firewall: `vz-ipsec-allow-internal-fwd` already admits the media subnets (`192.168.{10,20,30}.0/24`) to tag `vz-ipsec` on all ports — **no new rule**. Before `install.sh` has run on a gateway the target is `up=0` and nothing pages.
+
+**Rules** (`docker/vmalert/rules/vz_ipsec.yml`, group `vz_ipsec`, 30 s; all page through the vmalert pager → `revup-alert`, keyed `alertname|zone`): `VzIpsecGatewayDown` (warning, 2 m: healthy==0 and not drained, or unscrapable), `VzIpsecZoneDown` (**critical**, 1 m: no gateway in the zone healthy with a fresh heartbeat), `VzIpsecDrained` (info, 30 m), `VzIpsecReplayDrops` / `VzIpsecOutNoStates` (warning, `increase(...[5m]) > 0`), `VzIpsecUdpEncap` (warning: NAT-T engaged, §3.4 MTU margin gone), `VzIpsecHeartbeatStale` (warning, healthd sample > 90 s old). The down/dark rules fire only for a gateway/zone that has reported `vz_ipsec_healthy == 1` at least once in 30 d — pre-turn-up gateways are legitimately unhealthy (`route_ok` fails on empty `VZ_PREFIXES`) and must not page. VM death is additionally paged by `infra/monitoring` `vm_down` (the six names are in `var.instances`); disk/memory policies need the Ops Agent on the gateways (`scripts/monitoring/install_ops_agent.sh`, not part of `infra/vz-ipsec/install.sh`).
+
+**Deploy / confirm** (media VMs — all six, single lines; vmagent reloads on HUP, FreeSWITCH untouched):
+```
+cd /opt/revup && sudo git pull && sudo docker kill -s HUP voip-vmagent
+curl -s http://127.0.0.1:8429/targets | grep -c vz_gateway        # expect 2 (this zone's pair)
+curl -s http://<gateway NIC>:9100/metrics | grep vz_ipsec        # 10 series incl. vz_ipsec_healthy{zone="…",gw="a"}
+```
+Then on the services VM the usual vmalert recreate (Deploy section above) and `curl -s http://127.0.0.1:8880/api/v1/rules | grep -c VzIpsec` → 7.
+
+**Gotcha — node_exporter version:** `--collector.xfrm` exists from node_exporter **1.6**; Debian 12's packaged `prometheus-node-exporter` is **1.5.0** and exits with `unknown long flag '--collector.xfrm'` (verified against the `v1.5.0` image). With the drop-in as written in `infra/vz-ipsec/` that means **no** node_exporter at all on the gateway — `curl …:9100` refused, `up=0`, and every `vz_ipsec_*`/`node_*` series absent. Fix on the gateway side (bookworm-backports or the upstream 1.8.x binary), not here; until then `VzIpsecOutNoStates` still works off healthd's `vz_ipsec_xfrm_out_no_states_total`, `VzIpsecReplayDrops` cannot.

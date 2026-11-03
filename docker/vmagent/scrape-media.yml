@@ -42,3 +42,77 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["127.0.0.1:9105"]
+
+  # ---------------------------------------------------------------------------
+  # vz_gateway — the zone's two Verizon IPsec gateways (infra/vz-ipsec; as-built
+  # inventory docs/VERIZON_IPSEC_TRUNKS_PLAN.md §4.1). Plain Debian VMs with no
+  # Docker and therefore no vmagent of their own: node_exporter listens on the
+  # gateway NIC IP :9100 with --collector.xfrm (kernel node_xfrm_* counters) plus
+  # the textfile vz-healthd rewrites every 2 s (vz_ipsec_*{zone,gw}; gw = a|b =
+  # gateway-ILB primary|failover). This media vmagent is the scraper: it is the
+  # zone-local host-net vmagent on a subnet the gateway firewall already admits
+  # (vz-ipsec-allow-internal-fwd: zone/media/gateway subnets -> tag vz-ipsec,
+  # all ports) — no new firewall rule, no cross-zone scrape.
+  #
+  # ONE shared file serves all three zones, so every gateway is listed with a
+  # __tmp_zone selector and the keep-relabel keeps only THIS vmagent's zone
+  # (%{ZONE} — the same env expansion external_labels uses; unset ZONE keeps
+  # nothing). `zone` on the stored series is the external label; vz-healthd's
+  # identical zone label survives as exported_zone (honor_labels is off).
+  # `node` is the GCE instance name (what infra/monitoring's vm_down and the
+  # pager text use); `role` tags the series for dashboards.
+  #
+  # BOTH media VMs of a zone (*-fs and the *-fs-2 hot standby) run this file,
+  # so each gateway is scraped twice and the series differ only by
+  # reporting_instance. Deliberate: gateway visibility survives either FS VM
+  # dying. Every rule in docker/vmalert/rules/vz_ipsec.yml reduces with
+  # max by (zone, node, gw) FIRST so the duplicate never double-counts; do the
+  # same on any dashboard panel over these series. Before infra/vz-ipsec/
+  # install.sh has run on a gateway the target is simply up=0 (harmless, like
+  # vm_forwarder above); the rules gate on "ever healthy" so nothing pages.
+  #
+  # Confirm after deploy (from the media VM, single line):
+  #   curl -s http://192.168.11.2:9100/metrics | grep -c '^vz_ipsec_'
+  # (expect 10) and curl -s http://127.0.0.1:8429/targets | grep vz_gateway.
+  - job_name: vz_gateway
+    metrics_path: /metrics
+    static_configs:
+      # East (us-east1) — ILB 192.168.11.4
+      - targets: ["192.168.11.2:9100"]
+        labels:
+          __tmp_zone: east
+          node: east-vz-gw-a
+          role: vz-gw
+      - targets: ["192.168.11.3:9100"]
+        labels:
+          __tmp_zone: east
+          node: east-vz-gw-b
+          role: vz-gw
+      # West (us-west1) — ILB 192.168.21.4
+      - targets: ["192.168.21.2:9100"]
+        labels:
+          __tmp_zone: west
+          node: west-vz-gw-a
+          role: vz-gw
+      - targets: ["192.168.21.3:9100"]
+        labels:
+          __tmp_zone: west
+          node: west-vz-gw-b
+          role: vz-gw
+      # Central (us-central1) — ILB 192.168.31.2; gw-a/-b are .4/.5 (b/c zones
+      # were stocked out of n2-standard-2, so the pair landed in -a/-f)
+      - targets: ["192.168.31.4:9100"]
+        labels:
+          __tmp_zone: central
+          node: central-vz-gw-a
+          role: vz-gw
+      - targets: ["192.168.31.5:9100"]
+        labels:
+          __tmp_zone: central
+          node: central-vz-gw-b
+          role: vz-gw
+    relabel_configs:
+      # Keep only the gateways of this vmagent's own zone.
+      - source_labels: [__tmp_zone]
+        regex: "%{ZONE}"
+        action: keep

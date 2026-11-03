@@ -1179,16 +1179,72 @@ do
           c.setvars["term_class_blocked"])
 end
 
+-- [13f-13h] No per-call attempt cap (owner decision 2026-10-29, Verizon
+-- plan section 7; TERM_TRUNKS_MAX / M.MAX / cap() removed). Every eligible
+-- row is hunted in eff_priority order on both SBC paths; the only bound is
+-- the 16-row cache cap (lib/term_trunks.lua M.CACHE_MAX). carrier 'verizon'
+-- rows get the signaling-VIP (SBC-1) attempt only.
+local function bridged_sbcs(c)
+    local sbcs = {}
+    for _, b in ipairs(c.bridges) do
+        sbcs[#sbcs + 1] = b:match("sofia/external/[^@]+@([%d%.]+):5060$") or "?"
+    end
+    return table.concat(sbcs, ",")
+end
+local function expected_hunt(n)
+    local ips, sbcs = {}, {}
+    for i = 1, n do
+        local ip = "198.51.100." .. i
+        ips[#ips + 1] = ip;  sbcs[#sbcs + 1] = "10.0.0.1"
+        ips[#ips + 1] = ip;  sbcs[#sbcs + 1] = "10.0.0.2"
+    end
+    return table.concat(ips, ","), table.concat(sbcs, ",")
+end
+
 do
-    print("[13f] LD destination, 5 eligible ld trunks -> attempt cap 4 (post-filter)")
+    print("[13f] LD destination, 5 eligible ld trunks -> NO attempt cap, all 5 x 2 SBCs in order")
     local trunks = {}
     for i = 1, 5 do
         trunks[i] = { carrier = "c" .. i, pop = "p", term_ip = "198.51.100." .. i, traffic_class = "ld" }
     end
     local c = run_scenario(tf_scenario(6, "+17745550162", trunks, {}))
-    check("13f: 8 attempts (first 4 trunks x 2 SBCs)", #c.bridges == 8, #c.bridges)
-    check("13f: 5th trunk never attempted",
-          not bridged_ips(c):find("198.51.100.5", 1, true), bridged_ips(c))
+    local want_ips, want_sbcs = expected_hunt(5)
+    check("13f: 10 attempts (5 trunks x 2 SBCs, no cap)", #c.bridges == 10, #c.bridges)
+    check("13f: every trunk attempted in priority order, trunk-major",
+          bridged_ips(c) == want_ips, bridged_ips(c))
+    check("13f: each trunk tried on SBC-1 then SBC-2",
+          bridged_sbcs(c) == want_sbcs, bridged_sbcs(c))
+    check("13f: 5th trunk attempted (old 4-trunk cap gone)",
+          bridged_ips(c):find("198.51.100.5", 1, true) ~= nil, bridged_ips(c))
+end
+
+do
+    print("[13g] LD destination, 17 eligible ld trunks -> only the 16-row cache cap bounds the hunt")
+    local trunks = {}
+    for i = 1, 17 do
+        trunks[i] = { carrier = "c" .. i, pop = "p", term_ip = "198.51.100." .. i, traffic_class = "ld" }
+    end
+    local c = run_scenario(tf_scenario(7, "+17745550163", trunks, {}))
+    local want_ips, want_sbcs = expected_hunt(16)
+    check("13g: 32 attempts (16 cached trunks x 2 SBCs)", #c.bridges == 32, #c.bridges)
+    check("13g: first 16 trunks attempted in priority order",
+          bridged_ips(c) == want_ips, bridged_ips(c))
+    check("13g: each trunk tried on SBC-1 then SBC-2",
+          bridged_sbcs(c) == want_sbcs, bridged_sbcs(c))
+    check("13g: 17th row (beyond CACHE_MAX) never attempted",
+          not bridged_ips(c):find("198.51.100.17", 1, true), bridged_ips(c))
+end
+
+do
+    print("[13h] LD destination, bandwidth + verizon rows -> verizon gets the SBC-1/VIP attempt only")
+    local T = TF_TRUNKS
+    local vz = { carrier = "verizon", pop = "east", term_ip = "192.0.2.11", traffic_class = "ld" }
+    local c = run_scenario(tf_scenario(8, "+17745550164", { T.bw_dal, vz }, {}))
+    check("13h: 3 attempts (bandwidth x 2 SBCs, verizon x 1)", #c.bridges == 3, #c.bridges)
+    check("13h: bandwidth then verizon, in priority order",
+          bridged_ips(c) == "67.231.2.12,67.231.2.12,192.0.2.11", bridged_ips(c))
+    check("13h: verizon attempt goes to SBC-1 only",
+          bridged_sbcs(c) == "10.0.0.1,10.0.0.2,10.0.0.1", bridged_sbcs(c))
 end
 
 local BASELINE = os.getenv("BASELINE_ROUTER")

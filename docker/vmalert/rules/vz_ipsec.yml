@@ -1,0 +1,262 @@
+# vmalert rules — Verizon IPsec gateway health (infra/vz-ipsec: six Debian VMs,
+# {east,west,central}-vz-gw-{a,b}, one gateway-ILB failover pair per zone).
+# Design: docs/VERIZON_IPSEC_TRUNKS_PLAN.md §2.3 (pair/ILB), §3.4 (MTU, NAT-T),
+# §3.5 (health checks). Scrape: docker/vmagent/scrape-media.yml job vz_gateway.
+# ---------------------------------------------------------------------------
+# See traffic.yml header for the load path and teardown.yml for how an `alert:`
+# rule reaches a human (vmalert -notifier.blackhole -> /api/v1/alerts ->
+# scripts/vmalert-pager -> one `revup-alert` syslog line per alertname|zone
+# transition -> GCM log-match -> email/Slack). The pager pages EVERY firing
+# alert; `severity` is a label the page carries, not a filter — so the `info`
+# rule below pages like a warning does. It stays `info` so the label is honest.
+#
+# SOURCE SERIES (labels: zone/node/role from the scrape; gw=a|b and a duplicate
+# zone, stored as exported_zone, from vz-healthd's textfile):
+#   vz_ipsec_healthy{zone,node,gw}   1 iff ALL §3.5 checks pass (sa_up, xfrm_up,
+#       route_ok, nft_ok, nostates_ok, not_drained) — exactly what the gateway
+#       ILB health check (:8081 /healthz) sees; 0 = the ILB has, or within ~10 s
+#       will have, taken this gateway out of service.
+#   vz_ipsec_drained                 1 while the operator drain file exists
+#                                    (deliberate failover; healthy reads 0 too).
+#   vz_ipsec_udp_encap               1 iff the SA negotiated NAT-T (UDP 4500).
+#                                    Must be 0: the §3.4 MTU margin (1400 on
+#                                    xfrm-vz) assumes plain ESP.
+#   vz_ipsec_healthd_timestamp_seconds   unix time of the last sampler run
+#       (every 2 s). node_exporter keeps serving the LAST textfile if healthd
+#       dies, so freshness has to be checked explicitly — a frozen healthy=1
+#       is not healthy.
+#   vz_ipsec_xfrm_out_no_states_total    raw XfrmOutNoStates copied by healthd.
+#   node_xfrm_in_state_seq_error_packets_total   kernel /proc/net/xfrm_stat via
+#   node_xfrm_out_no_states_packets_total        node_exporter --collector.xfrm.
+#       Names verified against the prom/node-exporter v1.8.2 binary (namespace
+#       node, subsystem xfrm, "<stat>_packets_total") — NOT the bare
+#       XfrmInStateSeqError / node_xfrm_out_no_states spellings. The collector
+#       exists from node_exporter 1.6; Debian 12's packaged 1.5.0 rejects the
+#       flag (see docs/OBSERVABILITY_METRICS_PLAN.md, Verizon section), which
+#       is why the black-hole rule also reads healthd's own counter.
+#
+# DEDUP: both media VMs of a zone (*-fs and the *-fs-2 hot standby) scrape the
+# gateways, so every raw series exists twice, differing only by
+# reporting_instance. Every expression reduces with max by (zone, node[, gw])
+# FIRST — a count/sum over raw series would read 2 gateways as 4.
+#
+# DEPLOY GUARD ("ever healthy"): the pre-turn-up state of a gateway is
+# legitimately UNHEALTHY — route_ok fails until Verizon's prefixes land in
+# VZ_PREFIXES and sa_up fails until the peer answers — and before install.sh
+# runs there is no series at all. Metrics cannot tell "not yet turned up" from
+# "all dead", so the down/dark rules fire only for a gateway (or zone) that has
+# reported vz_ipsec_healthy == 1 at least once in the last 30 d:
+#   max by (zone, node) (max_over_time(vz_ipsec_healthy[30d])) == 1
+# A zone with ZERO scraped gateways has no such series and cannot fire; a zone
+# that has never been healthy cannot fire; after the first healthy sample every
+# later unhealthy/absent state does. (A plain presence guard — count by (zone)
+# against the expected 2 — was rejected: the dual scrapers make raw counts
+# read 4, and presence alone would page every zone from install.sh until
+# Verizon turn-up.) Value-based rules (drained, udp_encap, heartbeat, counters)
+# need no guard: an absent series yields nothing and a present one is real.
+groups:
+  - name: vz_ipsec
+    interval: 30s
+    rules:
+      # ----- 1. one gateway down (zone still has its partner) ------------------
+      # Arm 1: the gateway reports itself unhealthy (what the ILB acts on) —
+      # unless it is deliberately drained (VzIpsecDrained covers forgetting).
+      # Arm 2: the gateway is not scrapable at all (VM/node_exporter/firewall)
+      # after having been healthy — vz_ipsec_* go absent (vmagent staleness
+      # markers), so arm 1 alone would go silent exactly when the VM dies.
+      # infra/monitoring vm_down also pages VM death, at 5 min.
+      - alert: VzIpsecGatewayDown
+        expr: |
+          (
+            (
+                max by (zone, node, gw) (vz_ipsec_healthy) == 0
+              and
+                max by (zone, node, gw) (max_over_time(vz_ipsec_healthy[30d])) == 1
+            )
+            unless
+              max by (zone, node, gw) (vz_ipsec_drained) == 1
+          )
+          or
+          (
+              max by (zone, node) (up{job="vz_gateway"}) == 0
+            and
+              max by (zone, node) (max_over_time(vz_ipsec_healthy[30d])) == 1
+          )
+        for: 2m
+        labels:
+          severity: warning
+          component: vz-gw
+        annotations:
+          summary: "Verizon IPsec gateway {{ $labels.node }} is DOWN in zone {{ $labels.zone }} (ILB on the partner gateway)"
+          description: >-
+            {{ $labels.node }} (zone {{ $labels.zone }}) has been unhealthy or
+            unscrapable for 2m: the gateway ILB has moved the zone's Verizon
+            tunnel to the partner gateway (both tunnels stay up; Verizon's side
+            follows after its DPD). Calls continue; the zone has NO gateway
+            redundancy until this one passes /healthz again. On the gateway:
+            `sudo /opt/revup/infra/vz-ipsec/vz-status.sh` and
+            `curl -s http://<nic>:8081/healthz` name the failed check (sa_up /
+            xfrm_up / route_ok / nft_ok / nostates_ok). If the VM is dead the
+            vm_down page fires too. Runbook: docs/VERIZON_IPSEC_TRUNKS_PLAN.md
+            §2.3 / §3.5.
+
+      # ----- 2. zone dark: no healthy gateway at all ---------------------------
+      # Left: zones that have had a healthy gateway in the last 30 d (deploy
+      # guard; value = how many of its gateways have ever been healthy).
+      # Right (removed by `unless`): zones with at least one gateway that is
+      # healthy NOW and whose healthd heartbeat is fresh (< 90 s) — a frozen
+      # textfile from a dead healthd must not count as healthy. Covers both
+      # gateways reporting 0, one 0 + one absent, and both absent.
+      - alert: VzIpsecZoneDown
+        expr: |
+          count by (zone) (
+            max by (zone, node) (max_over_time(vz_ipsec_healthy[30d])) == 1
+          )
+          unless
+          count by (zone) (
+              max by (zone, node) (vz_ipsec_healthy) == 1
+            and
+              max by (zone, node) (time() - vz_ipsec_healthd_timestamp_seconds) < 90
+          )
+        for: 1m
+        labels:
+          severity: critical
+          component: vz-gw
+        annotations:
+          summary: "Verizon trunk DARK in zone {{ $labels.zone }}: no healthy IPsec gateway (gateway ILB has no backend)"
+          description: >-
+            Neither Verizon IPsec gateway in zone {{ $labels.zone }} is healthy
+            (or reporting) — with drop-traffic-if-unhealthy the gateway ILB has
+            no backend and the VPC route is NOT withdrawn, so every packet to
+            Verizon's prefixes from this zone is dropped (plan §2.3 caveat):
+            Verizon-originated calls into the zone fail, termination via the
+            Verizon row of term_trunks fails. Bandwidth/Sinch traffic is
+            unaffected. Check both gateways (`vz-status.sh`, /healthz on
+            :8081), then `gcloud compute backend-services get-health
+            {{ $labels.zone }}-vz-gw-backend`. If both are drained on purpose,
+            VzIpsecDrained is the expected companion. Runbook:
+            docs/VERIZON_IPSEC_TRUNKS_PLAN.md §2.3.
+
+      # ----- 3. drain left in place ---------------------------------------------
+      # Draining (touching VZ_DRAIN_FILE) fails /healthz on purpose so the ILB
+      # moves the tunnel. 30 m is longer than any planned flip or maintenance.
+      - alert: VzIpsecDrained
+        expr: max by (zone, node, gw) (vz_ipsec_drained) == 1
+        for: 30m
+        labels:
+          severity: info
+          component: vz-gw
+        annotations:
+          summary: "Verizon IPsec gateway {{ $labels.node }} ({{ $labels.zone }}) has been DRAINED for 30m — undrain or the zone stays single-gateway"
+          description: >-
+            {{ $labels.node }} in zone {{ $labels.zone }} has had its drain
+            file present for 30 minutes. While drained its /healthz answers
+            503, the gateway ILB keeps the tunnel on the partner, and the zone
+            has no gateway redundancy. If the maintenance is over, remove the
+            drain file (VZ_DRAIN_FILE, default /run/vz-drain) on the gateway;
+            failback is automatic once /healthz passes.
+
+      # ----- 4. replay-window drops ---------------------------------------------
+      # XfrmInStateSeqError = inbound ESP rejected by the anti-replay window
+      # (packets arriving out of order beyond the window — Verizon spraying
+      # both tunnels, reordering in transit, or a window that is too small).
+      # No `for`: increase() over 5m is already a debounced signal.
+      # Deploy-time quirk: when a series first appears with a small non-zero
+      # value (< 10 and no next delta), VictoriaMetrics' increase() counts that
+      # initial value once — at most one spurious page per gateway at first
+      # scrape. Lives or dies with node_exporter --collector.xfrm.
+      - alert: VzIpsecReplayDrops
+        # Two sources: node_exporter's xfrm collector (>= 1.6 only; Debian 12 ships 1.5.0 without it)
+        # and vz-healthd's own copy of the same /proc/net/xfrm_stat counter (always present).
+        expr: >-
+          max by (zone, node) (increase(node_xfrm_in_state_seq_error_packets_total[5m])) > 0
+          or max by (zone, node) (increase(vz_ipsec_xfrm_in_state_seq_error_total[5m])) > 0
+        labels:
+          severity: warning
+          component: vz-gw
+        annotations:
+          summary: "Verizon IPsec replay-window drops on {{ $labels.node }} ({{ $labels.zone }}): {{ $value | humanize }} packets in 5m"
+          description: >-
+            The kernel dropped {{ $value | humanize }} inbound ESP packets on
+            {{ $labels.node }} (zone {{ $labels.zone }}) in the last 5m for
+            failing the anti-replay sequence check (XfrmInStateSeqError).
+            Expect RTP loss / one-way audio on Verizon calls in this zone while
+            it continues. Check `swanctl --list-sas` for the replay window,
+            whether Verizon is sending on both tunnels at once, and
+            `cat /proc/net/xfrm_stat` on the gateway.
+
+      # ----- 5. outbound black hole --------------------------------------------
+      # XfrmOutNoStates = packets matched an xfrm policy with NO usable SA (plan
+      # §3.5): outbound traffic to Verizon silently vanishes. healthd's
+      # nostates_ok fails /healthz on a 30 s delta > 0, so the ILB already
+      # flips; this rule is the page. Two sources `or`ed on the same (zone,
+      # node) labelset — node_exporter's xfrm counter and the copy healthd
+      # writes — so it keeps working if --collector.xfrm is unavailable.
+      - alert: VzIpsecOutNoStates
+        expr: |
+          (
+              max by (zone, node) (increase(node_xfrm_out_no_states_packets_total[5m])) > 0
+            or
+              max by (zone, node) (increase(vz_ipsec_xfrm_out_no_states_total[5m])) > 0
+          )
+        labels:
+          severity: warning
+          component: vz-gw
+        annotations:
+          summary: "Verizon IPsec outbound black hole on {{ $labels.node }} ({{ $labels.zone }}): {{ $value | humanize }} packets with no SA in 5m"
+          description: >-
+            {{ $labels.node }} (zone {{ $labels.zone }}) dropped
+            {{ $value | humanize }} outbound packets in 5m because the xfrm
+            policy matched but no SA was installed (XfrmOutNoStates, plan
+            §3.5) — traffic toward Verizon is being black-holed on this
+            gateway. The gateway's own nostates_ok check fails /healthz on
+            this, so the ILB should already be on the partner (expect
+            VzIpsecGatewayDown alongside). Check `swanctl --list-sas` (is the
+            CHILD_SA vz INSTALLED? rekey in progress?) and charon's journal.
+
+      # ----- 6. NAT-T engaged ----------------------------------------------------
+      # The SA negotiated UDP encapsulation (port 4500). It must not: the §3.4
+      # MTU budget (xfrm-vz mtu 1400) has no room for the extra UDP header,
+      # and it means a NAT sits between the IKE IP and Verizon (§3.1 forwarded
+      # IP sourcing broke, or Verizon's side changed). Stable per SA, so a
+      # short `for` only filters a scrape of a half-written textfile.
+      - alert: VzIpsecUdpEncap
+        expr: max by (zone, node, gw) (vz_ipsec_udp_encap) == 1
+        for: 2m
+        labels:
+          severity: warning
+          component: vz-gw
+        annotations:
+          summary: "Verizon IPsec SA on {{ $labels.node }} ({{ $labels.zone }}) is using NAT-T (UDP encap) — the MTU margin is gone"
+          description: >-
+            The IKE/ESP SA on {{ $labels.node }} (zone {{ $labels.zone }})
+            negotiated UDP encapsulation (NAT-T). Plan §3.4 sizes xfrm-vz at
+            MTU 1400 for plain ESP; with the extra UDP header large RTP/SIP
+            packets will fragment or drop. Something is NATing the IKE IP:
+            check `swanctl --list-sas` (encap/nat flags), that the forwarded
+            IKE IP is still the source (`ip addr show ens4`, plan §3.1), and
+            ask Verizon whether their side changed. Runbook: plan §3.1/§3.4.
+
+      # ----- 7. healthd heartbeat stale ----------------------------------------
+      # vz-healthd rewrites the textfile every 2 s. If it dies (or wedges)
+      # node_exporter keeps serving the last file, so every vz_ipsec_* value
+      # above is frozen — and /healthz (same process) is refusing connections,
+      # so the ILB has already failed this gateway over. 90 s = plan's §3.5
+      # staleness bound; `for: 1m` rides out a late remote-write flush.
+      - alert: VzIpsecHeartbeatStale
+        expr: max by (zone, node, gw) (time() - vz_ipsec_healthd_timestamp_seconds) > 90
+        for: 1m
+        labels:
+          severity: warning
+          component: vz-gw
+        annotations:
+          summary: "vz-healthd heartbeat stale on {{ $labels.node }} ({{ $labels.zone }}): last sample {{ $value | humanizeDuration }} ago — gateway metrics are frozen"
+          description: >-
+            vz-healthd on {{ $labels.node }} (zone {{ $labels.zone }}) has not
+            updated its textfile for {{ $value | humanizeDuration }}. Every
+            vz_ipsec_* value from this gateway is stale, and since /healthz is
+            served by the same process the gateway ILB has most likely already
+            failed this gateway over (expect VzIpsecGatewayDown via the
+            partner's view only if the zone also loses the partner). On the
+            gateway: `systemctl status vz-healthd` and
+            `journalctl -u vz-healthd -n 50`; `systemctl restart vz-healthd`.

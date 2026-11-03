@@ -543,13 +543,15 @@ end
 -- term_trunks_source channel variable (db|fallback) which lands in
 -- the CDR variables (same plain-channel-var path as inbound_carrier).
 -- (TTL 60s and the 16-row cache cap: lib/term_trunks.lua M.TTL / M.CACHE_MAX.)
--- Cap at 4 trunks (x 2 SBCs = 8 bridge attempts) to bound worst-case
--- PDD across a fully-failing attempt sweep. Applied AFTER the per-call
--- traffic-class filter (strict-TF 2026-10): capping the raw list first
--- could truncate the only 'tollfree' trunk once >4 outbound rows exist,
--- and 8YY now FAILS CLOSED without one. The cached list itself is bounded
--- separately (lib/term_trunks.lua M.CACHE_MAX) so the global-var payload stays small.
-local TERM_TRUNKS_MAX = 4
+-- NO per-call attempt cap (owner decision 2026-10-29, Verizon plan §7): the
+-- loop hunts through EVERY eligible row in eff_priority order, so a
+-- bottom-priority trunk (Verizon at 50) is reached once every row above it
+-- has failed. The only bound is the 16-row cache cap above. Worst case is
+-- N eligible rows x attempts-per-row x (progress_timeout + <=1s TCP probe);
+-- carrier 'verizon' rows emit the signaling-VIP attempt only (lib
+-- build_attempts), and attempts to an SBC that failed the cached TCP
+-- pre-check are skipped in <1s, so the long case is "every carrier
+-- silent", not "SBC down". The knob is BRIDGE_PROGRESS_TIMEOUT, not a cap.
 
 -- Deployment zone selects the per-zone priority override column
 -- (priority_east/west/central). Validated against the closed set;
@@ -1793,17 +1795,14 @@ local function terminate_rcf(dest, ctx)
                 uuid, dest_class))
             eligible_trunks = term_trunks
         end
-        -- Attempt cap (TERM_TRUNKS_MAX), post-filter: first N eligible in
-        -- eff_priority order. For <= 4 outbound rows this is a no-op.
-        if #eligible_trunks > TERM_TRUNKS_MAX then
-            freeswitch.consoleLog("WARNING", string.format(
-                "[%s] %d eligible %s trunks — trying the first %d (8-attempt cap)\n",
-                uuid, #eligible_trunks, dest_class, TERM_TRUNKS_MAX))
-            eligible_trunks = term_trunks_lib.cap(eligible_trunks, TERM_TRUNKS_MAX)
-        end
+        -- No attempt cap: every eligible trunk is tried, in eff_priority
+        -- order (see the TERM_TRUNKS comment block near the top).
 
         -- Trunk-major attempt table: for each trunk (already in
-        -- eff_priority order) try the primary SBC, then the failover SBC.
+        -- eff_priority order) try the primary SBC, then the failover SBC —
+        -- except carrier 'verizon' rows, which get the signaling-VIP attempt
+        -- only (all Verizon replies land on the ACTIVE SBC via the .251 ILB,
+        -- so an SBC-1-direct attempt can never see its reply).
         -- (lib/term_trunks.lua build_attempts — label "<carrier>-<pop>".)
         local bridge_attempts = term_trunks_lib.build_attempts(
             eligible_trunks, sbc_proxy_ip, sbc_proxy_ip_failover)

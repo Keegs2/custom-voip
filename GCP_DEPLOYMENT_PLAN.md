@@ -428,8 +428,9 @@ list from `carrier_trunks`:
 - **Filter:** per call by `traffic_class`. LD uses `any`/`ld` rows; NANP 8YY
   uses only `tollfree` rows and fails closed (`NO_ROUTE_DESTINATION`) when none
   is enabled.
-- **Attempts:** capped at 4 trunks × {signaling ILB VIP, SBC-1 direct}, so **up
-  to 8 attempts**, each with `X-Carrier-IP`.
+- **Attempts:** every eligible trunk (no cap since 2026-10-30; 16-row cache
+  bound) × {signaling ILB VIP, SBC-1 direct}, each with `X-Carrier-IP`;
+  `verizon` rows get the VIP attempt only.
 - **Kamailio:** it validates the IP and leaves failover to FS (flags 8+9).
 - **Changes:** disabling or reprioritising a trunk in TED takes effect in
   about 60 s, with no redeploy.

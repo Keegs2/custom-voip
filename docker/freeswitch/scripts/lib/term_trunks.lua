@@ -11,8 +11,8 @@
 --                                 (nil => DB error / zero usable rows / bad cache)
 --   classify_destination(n, nu)   'tollfree' (NANP 8YY) | 'ld'
 --   filter_for_class(list, cls)   per-call traffic_class filter (strict TF)
---   cap(list, max)                post-filter attempt cap
 --   build_attempts(list, s1, s2)  trunk-major {SBC-1, SBC-2} attempt table
+--                                 (carrier 'verizon' rows: SBC-1/VIP only)
 --   dial_string(lead, a, cid, leg, dest)   per-attempt carrier dial string
 --   is_sbc_reachable(ip, port, tag)        cached TCP pre-check (shared cache)
 --   run_attempts(opts)            the failover loop for trunk/API 8YY egress
@@ -44,7 +44,10 @@
 local M = {}
 
 M.TTL = 60          -- seconds a cached trunk list is trusted
-M.MAX = 4           -- trunk attempt cap (x 2 SBCs = 8 bridges), post-filter
+-- NO per-call attempt cap (owner decision 2026-10-29, Verizon plan §7): the
+-- hunt goes through EVERY eligible row in eff_priority order, so a
+-- bottom-priority trunk (Verizon at 50) is always reached once the rows above
+-- it have failed. The only bound is CACHE_MAX — the operator's real knob.
 M.CACHE_MAX = 16    -- max rows serialized into the global-var cache
 
 local SBC_HEALTH_UP_TTL = 30
@@ -177,8 +180,9 @@ function M.get(zone, db, tag)
     end
 
     -- Validate + serialize. Rows with an empty carrier or non-IPv4 term_ip
-    -- are dropped (WARN); rows beyond CACHE_MAX are ignored (WARN). The
-    -- attempt cap is applied per call, post-filter.
+    -- are dropped (WARN); rows beyond CACHE_MAX are ignored (WARN). There is
+    -- no further per-call cap: every cached row that passes the class
+    -- filter is attempted.
     local parts = {}
     local capped = false
     for _, row in ipairs(rows) do
@@ -238,21 +242,19 @@ function M.filter_for_class(trunks, dest_class)
     return eligible
 end
 
--- cap(list, max) -> first `max` entries (the same table when already <= max).
-function M.cap(list, max)
-    max = max or M.MAX
-    if #list <= max then
-        return list
-    end
-    local capped_list = {}
-    for i = 1, max do
-        capped_list[i] = list[i]
-    end
-    return capped_list
-end
+-- Carriers whose rows get ONLY the sbc1 (signaling-VIP) attempt. Verizon's
+-- replies all land on the ACTIVE SBC via the zone's .251 ILB rule, so an
+-- attempt sent to SBC-1's direct IP (sbc2 here) can never receive its reply
+-- while SBC-1 is standby — Kamailio answers such an INVITE 503 immediately
+-- (plan §8.1 item 3). Emitting the attempt would only add a wasted leg.
+-- Keyed on the SANITIZED row carrier (M.token output, the same value that
+-- goes into X-Carrier-Label / carrier_used), lower-case exact match.
+M.VIP_ONLY_CARRIERS = { verizon = true }
 
 -- build_attempts(trunks, sbc1, sbc2): trunk-major attempt table — for each
--- trunk (eff_priority order) try SBC-1, then SBC-2.
+-- trunk (eff_priority order) try SBC-1 (sbc1 = signaling VIP), then SBC-2
+-- (sbc2 = SBC-1 direct IP). VIP_ONLY_CARRIERS rows emit the sbc1 attempt
+-- only; every other carrier is byte-identical to before.
 function M.build_attempts(trunks, sbc1, sbc2)
     local attempts = {}
     for _, trunk in ipairs(trunks) do
@@ -264,10 +266,12 @@ function M.build_attempts(trunks, sbc1, sbc2)
             sbc = sbc1, ip = trunk.term_ip, carrier_label = carrier_label,
             label = "SBC-1 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
         }
-        attempts[#attempts + 1] = {
-            sbc = sbc2, ip = trunk.term_ip, carrier_label = carrier_label,
-            label = "SBC-2 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
-        }
+        if not M.VIP_ONLY_CARRIERS[string.lower(trunk.carrier)] then
+            attempts[#attempts + 1] = {
+                sbc = sbc2, ip = trunk.term_ip, carrier_label = carrier_label,
+                label = "SBC-2 + " .. carrier_label .. " (" .. trunk.term_ip .. ")",
+            }
+        end
     end
     return attempts
 end
@@ -376,7 +380,8 @@ function M.zone()
 end
 
 -- select_tollfree(zone, db, tag) -> attempts-ready trunk list or nil, source
--- For the trunk/API 8YY egress: STRICT 'tollfree' rows only, capped at MAX.
+-- For the trunk/API 8YY egress: STRICT 'tollfree' rows only, every eligible
+-- row (no cap).
 -- Returns (list, "db") when at least one enabled tollfree trunk exists;
 -- (nil, "db") when the table resolved but carries no tollfree trunk;
 -- (nil, "fallback") when the table could not be resolved (DB error / zero
@@ -392,7 +397,7 @@ function M.select_tollfree(zone, db, tag)
     if #eligible == 0 then
         return nil, "db"
     end
-    return M.cap(eligible, M.MAX), "db"
+    return eligible, "db"
 end
 
 -- run_attempts(opts): failover loop for trunk/API 8YY egress. Same shape

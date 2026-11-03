@@ -259,6 +259,7 @@ Handles BYE, re-INVITE, ACK, UPDATE, etc. for established calls. (CANCEL never g
 
 3. **Header cleanup**: Remove ALL FS-specific headers:
    - P-Asserted-Identity, User-Agent, X-FS-Support, Content-Disposition, Privacy, Supported, Allow-Events, Allow, Contact, Remote-Party-ID, Session-Expires, Min-SE
+   - Add our `Session-Expires: 1800;refresher=uac` + `Min-SE: 90` (RFC 4028) BEFORE `msg_apply_changes()` — they must be real headers of the rebuilt buffer so the 422 retry can replace them (§4.8).
    - Add clean Contact with Kamailio's address BEFORE `msg_apply_changes()`.
 
 4. **`msg_apply_changes()` + DOUBLE `record_route_preset()`**: Rebuild message
@@ -273,10 +274,13 @@ Handles BYE, re-INVITE, ACK, UPDATE, etc. for established calls. (CANCEL never g
 5. **Via handling**: Intentionally NO Via manipulation. FS's Via is preserved. Removing it causes SIP corruption (orphaned `;received=`/`;rport=` params merge with next header). Two Vias is valid per RFC 3261.
 
 6. **P-Asserted-Identity**: Built from `X-Original-CID` header (RCF caller ID passthrough) or falls back to From user.
+   Verizon destination + `VERIZON_NUMBER_FORMAT` (§8.15 "Verizon SE options"): Step 5b rewrites
+   the PAI/From/To users (R-URI, Contact and Diversion users earlier) to the chosen NANP form.
 
 7. **Clean outbound headers added**:
    - P-Asserted-Identity, User-Agent: VoicePlatform-SBC/1.0, Allow, Supported: timer,replaces
-   - Session-Expires: 1800;refresher=uac, Min-SE: 90 (RFC 4028)
+   - (Session-Expires / Min-SE are NOT here any more — Step 3, before `msg_apply_changes()`; see §4.8.
+     `refresher=uas` for a Verizon destination when `VERIZON_REFRESHER=uas`, §8.15 "Verizon SE options".)
 
 8. **SDP scrubbing**: Replace 172.28.x.x, 10.x.x.x, 127.x.x.x in the SDP body with
    **FS_PUBLIC_IP** (the FS VM's own public IP, where RTP actually flows), NOT
@@ -413,7 +417,60 @@ Called ONLY for inbound traffic from Bandwidth and re-INVITEs from external sour
 ### 4.8 Failure Routes
 
 **CARRIER_FAILURE**: Handles outbound carrier failures. Two-tier failover:
-- 422 (Session Interval Too Small): Retry with Session-Expires: 3600, Min-SE: 900.
+- 422 (Session Interval Too Small): ONE retry, to the PoP that sent the 422, with
+  exactly one `Session-Expires: 3600;refresher=uac` + `Min-SE: 900` (fixed values —
+  the 422's own Min-SE is not parsed). Toward Verizon, `refresher=uas` under `VERIZON_REFRESHER=uas`, and the
+  retry re-pins the `.251` socket (`udp:`, or `tcp:` + `;transport=tcp` `$du` under
+  `VERIZON_TRANSPORT=tcp`) after the R-URI re-arm/retarget below. Runs BEFORE the flag 8/9 checks, so it also
+  applies to table-driven (`X-Carrier-IP`) legs and to a 422 from a flipped/
+  cross-trunk branch. Same Call-ID/From-tag/CSeq, new Via branch (a proxy branch of
+  the same transaction). `t_on_failure` is NOT re-armed, so whatever the retry gets
+  (a second 422, a 5xx, a 408, a 486) is relayed to FS as the final and FS's attempt
+  loop moves on — no loop, no flip after a 422 retry. Fixed 2026-11; before that the
+  retry never existed on the wire — two stacked defects (below).
+  **Defect 1 — retry never left (tm `no branches for forwarding`).** tm's
+  `faked_env()` runs `ruri_mark_consumed()` before every failure route
+  (`tm/t_reply.c` ~779), and `t_forward_nonack()` only adds the R-URI as a branch
+  when `ruri_get_forking_state()` is set (`tm/t_fwd.c` ~1693); with no appended
+  branch it returns -1 and nothing is sent — FS just saw the 422. Any R-URI/`$du`
+  assignment calls `ruri_mark_new()` (`core/action.c` SET_URI_T/SET_HOST_T,
+  `pv_core.c` `pv_set_dsturi`), which is why the 5xx flips (they assign `$rd`/`$du`)
+  always sent. Fix: the 422 arm assigns the R-URI (`$ru = $ru`, or the recorded
+  flip target below). Chosen over `$du = $du` (skips `ruri_mark_new()` when `$du` is
+  empty) and `append_branch()` (snapshots `$du` at call time — would add a SECOND,
+  stale branch if any later line re-assigns `$du`, e.g. a per-carrier transport arm).
+  **Defect 2 — the retry would have carried BOTH pairs.** The 1800/90 pair was
+  appended in Step 6, AFTER `msg_apply_changes()` = a request-route lump. tm saves
+  those lumps into the transaction (`save_msg_lumps()`) and re-applies them to EVERY
+  branch it builds (`prepare_new_uac()` → `dup_lump_list()`); the failure route's
+  `remove_hf()` only walks the cloned request's PARSED headers, where a lump is not a
+  header — so 1800/90 rode next to 3600/900 (proven with an RCF-V1 + `$ru = $ru`
+  control build). Fix: append the pair in Step 3, BEFORE `msg_apply_changes()`, so it
+  is a real buffer header the retry's `remove_hf()` deletes. Header set/values of a
+  normal INVITE are unchanged; only the pair's position moves (now after FS's own
+  headers/Diversion instead of after `Supported:` — field order across names is not
+  significant, RFC 3261 §7.3.1). Considered and rejected: moving the pair into
+  `branch_route[TO_CARRIER_BRANCH]` driven by an AVP — tm resets `t->on_branch`
+  after the first forward, so every failure-route re-relay (5xx flip, cross-trunk,
+  422) would also need `t_on_branch()` or lose the pair (a regression trap), and it
+  moves the pair to the very end of the header block. The 5xx flip/cross-trunk
+  re-relays append nothing, so every request-route lump (Contact, PAI, UA, Allow,
+  Supported, X-CID, Identity, both Record-Routes) is rendered exactly ONCE per branch
+  — verified header-by-header on the wire for the flip and the 422 retry.
+  **Retry target after a flip.** `fake_req()` clones `$ru`/`$du` from the
+  transaction's request as `route[TO_CARRIER]` left it; a flip's `$rd`/`$du` writes
+  live only in that failure route's private copy. So the flip and cross-trunk arms
+  record their target in transaction AVPs `$avp(cf_ru)`/`$avp(cf_du)` (a failure
+  route's AVP writes land in the transaction's lists) and the 422 arm re-targets
+  there when set — otherwise a 422 from the alternate PoP would be retried at the
+  PoP that just 5xx'd. (The `Carrier delivery failed ... to $ru` WARN in a SECOND
+  failure route still prints the ORIGINAL R-URI for the same reason — cosmetic.)
+  **Bounded:** besides not re-arming `t_on_failure`, the original 422 branch cannot
+  be re-picked because tm's default `failure_reply_mode=3` drops earlier branches'
+  replies once a failure route adds a branch (`t_reply.c` ~1505-1530). Do not set
+  `failure_reply_mode` without re-checking this.
+  Runtime suite: `kamcheck/test_422.py` (docker harness) — 422 retry wire shape,
+  double-422, 503 flip, 503→422 at the alternate PoP, table-driven 422, normal call.
 - 500/503/408/480/404, **flag 8 not yet set** -> in-trunk failover to the OTHER IP
   of the same Bandwidth trunk config, then set flag 8 (one in-trunk retry):
   - TC4: Dallas (`BANDWIDTH_IP_1`) <-> LA (`BANDWIDTH_IP_2`)
@@ -481,6 +538,7 @@ Dispatcher groups (10 is the optional peer-SBC liveness group, §8.12):
 | 9 | sip:206.146.100.26:5060 (`__SINCH_TF_IP__`, duid=sinch-denver-tf) | Sinch Denver TF (OSAO 8YY) termination keepalive/health ONLY |
 | 11 | sip:206.146.100.25:5060 (`__SINCH_LD2_IP__`, duid=sinch-denver-ld) | Sinch Denver LD **redundant** termination (DENSBX21) keepalive/health ONLY |
 | 12 | sip:206.146.98.25:5060 (`__SINCH_TF2_IP__`, duid=sinch-atlanta-tf) | Sinch Atlanta TF (OSAO 8YY) **redundant** termination (ATLSBX21) keepalive/health ONLY |
+| 13 | `__VERIZON_DISPATCHER_LINES__` = one `sip:<ip>:5060` per `VERIZON_PROBE_IPS` entry, `duid=verizon-<zone>` (first IP; `verizon-<zone>-2`, … after — positional, a status-row key only: `carrier_trunk_health` maps group 13 to `carrier_trunks` by the probed IP, migration 62), `socket=udp:VERIZON_VIP:5060`, `ping_from=sip:ping@VERIZON_SIP_IP` | Verizon SIP Gateway (IPsec) keepalive/health ONLY — **Verizon mode only** (§8.15); renders as a comment otherwise. VERIZON_VIP-sourced probes: replies reach the ACTIVE SBC only, so the standby reads it UP only via the peer reply hand-off (a Verizon prerequisite). `VERIZON_TRANSPORT=tcp`: `sip:<ip>:5060;transport=tcp` + `socket=tcp:VERIZON_VIP:5060` — the standby then reads Inactive while it is standby (its SYN-ACK lands on the active, which RSTs it; §8.15 "Transport") |
 
 **Groups 11/12 share their IPs with the 8XX-T TF ORIGINATION trunks** (static
 trust `SINCH_TF_DEN_IP`/`SINCH_TF_ATL_IP`). They are templated exactly like
@@ -499,12 +557,12 @@ may read down (or "up" if Sinch answers 500 — 500 is in
 dispatcher state (checked `infra/monitoring`, `docker/vmalert/rules`), so a
 down probe on a disabled trunk cannot page.
 
-Groups 2-9 and 11-12 are NOT used for call routing (that's route[TO_CARRIER] via $rd/$du —
-Sinch termination egress is table-driven via X-Carrier-IP, §4.3 Step 1a).
+Groups 2-9 and 11-13 are NOT used for call routing (that's route[TO_CARRIER] via $rd/$du —
+Sinch and Verizon termination egress is table-driven via X-Carrier-IP, §4.3 Step 1a/1b).
 They exist solely for:
 - **NAT keepalive**: OPTIONS every 5s keeps GCE's UDP NAT pinhole open.
 - **Health monitoring**: Detects carrier unreachability. The carrier-monitor
-  sidecar reports groups 2, 3, 6-9, 11-12 (`CARRIER_SETIDS` in
+  sidecar reports groups 2, 3, 6-9, 11-13 (`CARRIER_SETIDS` in
   `docker/carrier-monitor/carrier_monitor.py`; `carrier_trunk_health`
   filters the same setids since migration 53) to the East API.
 
@@ -656,6 +714,15 @@ Set in `.env` file on each SBC VM. Passed via `docker-compose.sbc.yml`.
 | `SINCH_TF2_IP` | No (default 206.146.98.25) | — | Sinch Atlanta TF (OSAO 8YY) REDUNDANT termination (ATLSBX21) — dispatcher group 12 ONLY. Validated dotted-quad; garbage ⇒ WARNING + default. Same IP as `SINCH_TF_ATL_IP`. |
 | `TF_TEST_TNS` | No (default empty) | 5595335873,5595335908 | Toll-free ingress test-TN allowlist (§4.6.2): listed non-8YY TNs are admitted from TF orig trunks (rule=tf-test-tn-exempt). Strict 10-digit NANP validation; garbage dropped with WARNING. Delete once real TFNs are live. |
 | `TF_INGRESS_ENFORCE` | No (default on) | off | Toll-free ingress class split (§4.6.2): TF orig trunks accept only 8YY R-URIs, every other carrier accepts no 8YY R-URIs (404). Only exactly `off` disables (compiles out the ingress check; `route[TF_CLASSIFY]` stays for the Step 1a 8YY egress guard). Emergency rollback only — use `TF_TEST_TNS` for test TNs. |
+| `VERIZON_VIP` | No (unset = Verizon mode off, compiled out) | 10.128.0.251 | Verizon mode (§8.15): this zone's Verizon INTERNAL ILB address (third forwarding rule on the SBC active/standby backend). BOUND — loopback add + `listen=udp/tcp:VERIZON_VIP:5060 advertise VERIZON_SIP_IP:5060` + `listen=tcp:VERIZON_VIP:8080` (ILB /healthz) + `alias=`. Validated IPv4, must differ from every existing bind. |
+| `VERIZON_SIP_IP` | No (required for Verizon mode) | 35.184.132.124 | This zone's inside-tunnel public SIP address — ADVERTISE-ONLY, never bound (the IPsec gateways translate it to `VERIZON_VIP`). Every Verizon-visible address (Via from the forced socket, From/PAI/Diversion/Contact hosts, outer Record-Route, the Contact rewritten into FS replies/in-dialog requests) renders it. East 34.148.100.185 / West 136.86.242.57 / Central 35.184.132.124. |
+| `VERIZON_SIP_NETS` | No (required for Verizon mode) | 203.0.113.0/28,198.51.100.7 | Comma list of EVERY Verizon signaling source (SIP Gateway + ATF-IP SBCs + OPTIONS monitors) as IPv4 or IPv4/prefix (bare IPs → /32; invalid entries dropped with WARNING). Static trust (flag 5), carrier-ingress branch, `TO_CARRIER` egress selection, REPLY_HANDLER scrub gate, entrypoint MTU-hint routes (`mtu lock 1400`). |
+| `VERIZON_TF_IPS` | No (unset = MIXED class) | 198.51.100.7 | Optional ATF-IP (toll-free) sources if distinct from the SIP Gateway ones → `#!define VERIZON_TF_SPLIT`: those are the TF ingress class, other Verizon sources non-TF. Unset ⇒ the toll-free ingress class check is SKIPPED for Verizon sources (both products on shared IPs). |
+| `VERIZON_PROBE_IPS` | No (unset = no probe group, WARNING) | 203.0.113.10,203.0.113.11 | Verizon SIP Gateway HOST IPs to OPTIONS-probe — dispatcher group 13, one line per IP, VERIZON_VIP-sourced, any order (first gets `duid=verizon-<zone>`, then `-2`, …; the NOC identity comes from the `carrier_trunks` row carrying the IP — put the IP on that row in TED first, or the probe reads `verizon-unmapped-…`). |
+| `VERIZON_ZONE` | No (default from `VERIZON_VIP` octet: 10.142→east, 10.138→west, 10.128→central; else SBC_ID prefix) | central | Zone label → dispatcher `duid=verizon-<zone>` (status-row key only; migration 62 maps group 13 by IP) and `X-Inbound-PoP: <zone>-orig` on Verizon-originated calls (the `carrier_trunk_health` `orig_map` key). |
+| `VERIZON_TRANSPORT` | No (default udp) | tcp | Verizon mode only (§8.15 "Transport"): `tcp` ⇒ `#!define VERIZON_TCP` — every Verizon-bound request (Step 1b INVITE, 422 retry, FS-originated ACK/BYE/re-INVITE via `route[VZ_TCP_EGRESS]`, group-13 probes) leaves `tcp:VERIZON_VIP:5060`, and every Verizon-visible Contact / outer Record-Route carries `;transport=tcp`. `udp`/unset ⇒ every `#!ifdef VERIZON_TCP` block removed, render byte-identical. Anything else ⇒ WARNING + udp. With Verizon mode off: NOTE, inert. Inbound from Verizon is accepted on both transports in either mode. Set on BOTH SBCs of a zone. |
+| `VERIZON_REFRESHER` | No (default uac) | uas | Verizon mode only (§8.15 "Verizon SE options"): `uas` ⇒ `#!define VERIZON_REFRESHER_UAS` — a Verizon-bound INVITE offers `Session-Expires: 1800;refresher=uas` (Bandwidth/Sinch keep uac), the 422 retry toward Verizon `3600;refresher=uas`, and `REPLY_HANDLER` relays a Verizon answer that says `refresher=uas` with an interval we keep (90..1800) to FS unchanged, so FS does not refresh (a clamped interval still goes to FS as uac). `uac`/unset ⇒ every `#!ifdef VERIZON_REFRESHER_UAS` block removed, render byte-identical. Anything else ⇒ WARNING + uac. With Verizon mode off: NOTE, inert. Set on BOTH SBCs of a zone. |
+| `VERIZON_NUMBER_FORMAT` | No (default asis) | e164 | Verizon mode only (§8.15 "Verizon SE options"): `e164` (+1NXXNXXXXXX) / `11` (1NXXNXXXXXX) / `10` (NXXNXXXXXX) ⇒ `#!define VERIZON_NUMFMT` + `VERIZON_NUMFMT_E164`/`_11`/`_10` — on a Verizon-bound INVITE `route[VZ_NUMFMT]` rewrites the NANP user part of the R-URI, To, From, Contact, PAI and Diversion (non-NANP, short codes, user params: untouched); applied after `E164_EGRESS`, so it wins for Verizon. STIR claims stay canonical (`route[STIR_TN_CANON]`). Inbound and non-Verizon legs never change. `asis`/unset ⇒ every `VERIZON_NUMFMT*` block removed, render byte-identical. Anything else ⇒ WARNING + asis. With Verizon mode off: NOTE, inert. Set on BOTH SBCs of a zone. |
 | `VIP_EGRESS` | No (default off) | on | Carrier-bound INVITE egress from the external NLB VIP for INVITEs received on the signaling ILB VIP (`if ($Ri == "SIGNALING_VIP") { $fs = "udp:ADVERTISE_IP:5060"; }` in `route[TO_CARRIER]` Step 9, compiled in via `#!define VIP_EGRESS` + `SBC_SIGVIP_DEDICATED`). on/true/1 = ON, anything else = OFF; entrypoint forces OFF (warning) when `SBC_SIGNALING_VIP` is unset. Direct-IP ingress keeps own-public-IP egress — the 6 SBC public IPs stay whitelisted. BANDWIDTH destinations only: Sinch (any non-Bandwidth) INVITEs always keep own-public-IP egress. Enable on both SBCs of a zone. See "Carrier-bound INVITE egress" in §5 Dispatcher Configuration. |
 
 ## 7. SIP Call Flows
@@ -706,7 +773,7 @@ Kamailio (34.74.71.32:5060)
     4. msg_apply_changes(), then DOUBLE record_route_preset(VIP, SBC_INTERNAL_IP)
     5. (Via untouched - two Vias is valid)
     6. PAI from X-Original-CID
-    7. Add Supported: timer, Session-Expires: 1800
+    7. Add Supported: timer (Session-Expires: 1800 / Min-SE: 90 already added in step 3)
     8. SDP scrub -> FS_PUBLIC_IP (not VIP; RTP bypasses NLB)
     9. t_relay() with CARRIER_FAILURE failover
   |
@@ -1006,6 +1073,13 @@ Each zone's SBC pair is active/standby by NLB health check (identical config on 
 
 **Loop safety.** The copy reaches the peer from our `SBC_INTERNAL_IP` ⇒ `IS_INTERNAL_SOURCE` ⇒ the guard cannot fire again (and `$Ri` there is the NIC bind, not the VIP); a peer with no transaction either does today's via2 forward. A `send_data` failure also falls through (WARN).
 
+**Receiver-side classification — `route[REPLY_SRC]` (2026-10-30).** On the owner the handed-off reply arrives with `$si` = the peer's VPC IP, which `route(IS_INTERNAL_SOURCE)` matches (GCE_INTERNAL_NETWORK). Until this fix `onreply_route[REPLY_HANDLER]` therefore treated every handed-off CARRIER reply as an FS reply: Contact rewritten to the VIP, RFC1918 SDP scrubbed to FS_PUBLIC_IP, the Verizon scrub gate (§8.15 item 8) and the `X-Stir-Outcome` hand-back (§8.14) skipped. For Bandwidth this was masked downstream by the WITHINDIALOG self-loop reroute; for a Verizon dialog in the failback window it led to the §8.15 item-12 `481` path. Both onreply routes (`REPLY_HANDLER`, `PBX_REPLY_HANDLER`) now call `route[REPLY_SRC]` first, which sets two per-reply variables, and EVERY direction test in them reads these — `$si` survives only in wire-source xlogs:
+
+- `$var(reply_src)` — the ORIGINAL sender. `$si`, except when `$si == SBC_PEER_IP`: then the transaction's carrier destination — `$avp(carrier_ip)` (transaction-scoped; stamped by `route[TO_CARRIER]` right before `t_relay()` via the same `build_cell()` AVP-list move `$avp(stir_outcome)` relies on, refreshed by `failure_route[CARRIER_FAILURE]` on every PoP flip), else `$T_req($rd)` (tmx: the R-URI host of the transaction's request, evaluated on a per-process copy of `uas.request`) for transactions TO_CARRIER did not create — FS-originated in-dialog re-INVITEs relayed by `route[RELAY]` with r2 VIP egress, the `X-PBX-Dest` leg. A null fallback leaves it `0`: classified as an external carrier of unknown address, never as FS.
+- `$var(reply_internal)` — `1` = `route(IS_INTERNAL_SOURCE)` on `$si`, forced `0` for a hand-off (the sender's guard only hands off replies from an EXTERNAL source, so the peer's VPC IP can never be the real origin).
+
+Consumers: the 183/200 pass-through log guard, the SDP scrub direction (FS → FS_PUBLIC_IP / Verizon → none / carrier → ADVERTISE_IP), the FS Contact rewrite, the narrow FS-ish session-timer exemption (now on `$var(reply_src)`), and both `X-Stir-Outcome` hand-back guards — so a handed-off carrier reply now carries the hand-back too (§8.14 blind spot 2 is closed). A reply from the peer's VPC IP on a transaction this SBC owns can only be a hand-off (the peer's stateless via2 forward goes to FS's Via; group-10 probe replies are local tm transactions with no named onreply route). One INFO line per handed-off reply: `handed-off reply from peer <peer> for carrier <ip>: <code> <reason> for <method> (<callid>)`. The sending side is unchanged. Without `SBC_PEER_HANDOFF` the helper reduces exactly to `$si` / `IS_INTERNAL_SOURCE` and the three `$avp(carrier_ip)` stamps compile out (the helper itself renders in every mode). Harness-verified (2026-10-30, 5.8.8 image, Verizon ON, peer IP on `lo`): a Verizon 200 OK (RFC1918 SDP, `Session-Expires: 30`) delivered from the peer IP is relayed to FS with SDP and Contact intact and SE 1800 — same as the direct case; a handed-off Bandwidth 200 OK is byte-identical (ids canonicalised) to the direct relay; a handed-off 200 to an FS-originated in-dialog re-INVITE resolves the carrier via the `$T_req($rd)` fallback (carrier SE 600 kept, Contact intact). The pre-fix config fails the same checks (Contact → VIP, Verizon SDP scrubbed).
+
 **Dark when unset.** `SBC_PEER_INTERNAL_IP` unset, non-IPv4, or `== SBC_INTERNAL_IP` (WARNING) ⇒ every `#!ifdef SBC_PEER_HANDOFF` block compiles out, no `peerhealth` htable, the group-10 line renders as a comment — byte-identical config (render-diffed against pristine). Works in dedicated AND legacy signaling-VIP modes (the guard keys on the external VIP bind, present in both).
 
 **Verify (passive).** Once live on both SBCs: the STANDBY's `kamcmd dispatcher.list` shows Sinch orig groups 6/7 `AP` (Active) instead of the documented Inactive-forever; group 10 is `AP` on both SBCs. The active logs `peer hand-off: … handed raw to peer` at INFO for INVITE/CANCEL (DBG for OPTIONS). Homer: a handed-off reply is traced twice by design — the stateless-residue `sip_trace()` on the receiver plus `TMCB_RESPONSE_IN` on the owner. Drill: with both SBCs up, a call whose B-leg INVITE was VIP-sourced on the standby (failback window) completes with ONE carrier INVITE — no `VIP_EGRESS tripwire`, no alternate-PoP re-INVITE.
@@ -1215,7 +1289,7 @@ on (`t_reply.c:1977` → `2058` → `msg_translator.c:2446-2458`
 
 **FreeSWITCH side.** `inbound_router.lua` / `trunk_outbound.lua` /
 `api_outbound.lua` call `stir_outcome_reset()` before and `stir_outcome_capture()`
-after EVERY bridge attempt (every attempt of the RCF failover loop included — up to 8 table-driven, 4 legacy). The reset
+after EVERY bridge attempt (every attempt of the RCF failover loop included — every eligible trunk table-driven, 4 legacy). The reset
 clears only the RAW `sip_rh_`/`sip_ph_` capture slots, so a header left over from
 attempt N can never be read as N+1's; the CDR variable `stir_outcome` **retains the
 last non-empty outcome** and is overwritten only when a newer non-empty one is
@@ -1237,13 +1311,14 @@ carry NO `X-Stir-Outcome`, so the attempt they end contributes nothing to the CD
    408 (dead SBC / silent carrier — the FS `progress_timeout` case) and every
    `failure_route` `send_reply()` (e.g. the 503 in `CARRIER_FAILURE`) are built by
    tm, not received, so `REPLY_HANDLER` never sees them.
-2. **§8.12 peer-handed-off replies.** A carrier reply that landed on the OTHER
-   SBC during a failback/drain window is `send_data()`-relayed to the owner from
-   the sibling's internal IP; `REPLY_HANDLER`'s `!route(IS_INTERNAL_SOURCE)` guard
-   (correct — it keeps FS-sourced A-leg replies clean) then skips the append, so
-   that reply reaches FS without the header.
+2. **§8.12 peer-handed-off replies — CLOSED 2026-10-30.** A carrier reply that
+   landed on the OTHER SBC during a failback/drain window is `send_data()`-relayed
+   to the owner from the sibling's internal IP; the guard used to be
+   `!route(IS_INTERNAL_SOURCE)` on `$si` and skipped the append. It now reads
+   `$var(reply_internal) == 0` from `route[REPLY_SRC]` (§8.12), which is `0` for a
+   hand-off, so the handed-off reply carries the hand-back like a direct one.
 
-In both cases the CDR keeps the last real outcome (with `stir_outcome_attempt`
+In case 1 the CDR keeps the last real outcome (with `stir_outcome_attempt`
 naming the attempt it came from) or, if no attempt ever handed one back, stays
 empty and the ingest falls back to intent. Fail-soft by design; never affects the
 call.
@@ -1279,6 +1354,394 @@ container (From reverts to the RCF DID; no SBC change needed).
 empty and the ingest falls back to intent.
 
 
+### 8.15 Verizon mode — SIP Gateway (2-Way) + ATF-IP over self-built IPsec (`VERIZON_*`, default off)
+
+**Status: SHIPS DARK (2026-10-30; `VERIZON_TRANSPORT` 2026-11-02).** Implements
+`docs/VERIZON_IPSEC_TRUNKS_PLAN.md` §8.1 items 1-13 (item 11, TCP transport, is the
+opt-in `VERIZON_TRANSPORT=tcp`; UDP stays the default until plan §10 #7 is answered). The
+SBC side of the Verizon interconnect: Verizon's SIP Gateway (DID 2-Way) and ATF-IP
+(toll-free) SBCs reach each zone through two strongSwan gateways; the gateways
+translate, statelessly 1:1, Verizon-side addresses to VPC ones. Two addresses per
+zone, deliberately different in kind:
+
+| | What Verizon sees | What this SBC has | Rendered as |
+|---|---|---|---|
+| SIP signaling | `VERIZON_SIP_IP` (reserved Google IP, never attached anywhere) | `VERIZON_VIP` = the zone's third internal ILB forwarding rule on the SAME active/standby SBC backend (10.x.0.251) | `listen=udp/tcp:VERIZON_VIP:5060 advertise VERIZON_SIP_IP:5060`, `listen=tcp:VERIZON_VIP:8080`, `alias=` for both, `ip addr add VERIZON_VIP/32 dev lo` in the entrypoint |
+| Media | the FS public IPs (unchanged) | nothing on the SBC | no SBC change (plan §8.2) |
+
+**Env contract** (§6; all optional, every var passed through `docker-compose.sbc.yml`):
+`VERIZON_VIP`, `VERIZON_SIP_IP`, `VERIZON_SIP_NETS` (required for ON),
+`VERIZON_TF_IPS`, `VERIZON_PROBE_IPS`, `VERIZON_ZONE`, `VERIZON_TRANSPORT`, `VERIZON_REFRESHER`,
+`VERIZON_NUMBER_FORMAT` (optional). Mode is ON only
+when the three required vars validate AND `SBC_SIGVIP_MODE=dedicated` AND
+`SBC_PEER_INTERNAL_IP` is set; otherwise the entrypoint FORCES it OFF with a
+WARNING naming every failed prerequisite (same forcing `VIP_EGRESS` gets). Set the
+vars on BOTH SBCs of a zone.
+
+**Compiled out ⇒ byte-identical (stronger than the other toggles).** When OFF, the
+entrypoint deletes the `__VERIZON_MODE_DEFINE__` line and runs an awk pass that
+REMOVES every `#!ifdef VERIZON_MODE … #!endif` block from the rendered
+`kamailio.cfg`, keeping the `#!else` branch verbatim and tracking nested
+`#!ifdef` depth. The rendered config is byte-for-byte the pre-Verizon config —
+render-diffed against the pristine 29fd90f template with the production env
+(dedicated + peer), the legacy env, and both forced-off envs: `cmp` identical.
+(Since the §8.12 `route[REPLY_SRC]` fix, which renders in EVERY mode by design,
+the off render differs from 29fd90f by exactly that fix; the Verizon blocks
+themselves still contribute zero bytes.)
+`dispatcher.list` differs only by the group-13 comment block (the group-10
+convention). When ON, `#!define VERIZON_MODE` is emitted and Kamailio's own
+preprocessor resolves the blocks (`kamailio -c` clean on 5.8.8). Every new line
+of Verizon logic — including comments — lives inside a `#!ifdef VERIZON_MODE`
+block; sites that CHANGE an existing line carry the old line in `#!else`. Keep
+it that way or the OFF render stops being identical. `VERIZON_TCP` follows the
+same contract one level down: `__VERIZON_TCP_DEFINE__` sits in the Verizon
+define block, and unless `VERIZON_TRANSPORT=tcp` with Verizon mode ON the
+entrypoint deletes that line and removes every `#!ifdef VERIZON_TCP` block
+(same awk pass, `vz_strip_blocks`), keeping its `#!else`. Every TCP line,
+comments included, lives in a `VERIZON_TCP` block; a changed line keeps the
+UDP original in `#!else`. Nested inside a `VERIZON_MODE` if-branch a
+`VERIZON_TCP` block may have an `#!else`; a standalone one (helper routes, the
+new call sites) must not, or the OFF render changes. Consequence: the udp
+render keeps the pre-feature comment text verbatim (e.g. Step 1b's "Not
+implemented here"); the `VERIZON_TCP` branch next to it says so.
+`VERIZON_REFRESHER_UAS` and `VERIZON_NUMFMT` (+ `VERIZON_NUMFMT_E164`/`_11`/`_10`)
+follow the same contract (placeholders `__VERIZON_REFRESHER_DEFINE__` /
+`__VERIZON_NUMFMT_DEFINE__` in the Verizon define block; default ⇒ placeholder
+deleted, blocks removed, `#!else` kept). See "Verizon SE options" below.
+
+**What the blocks do (plan §8.1 item → cfg site):**
+1. *Listen + loopback*: the three `listen=` lines after the `SBC_SIGVIP_DEDICATED`
+   block; aliases after `alias=SIGNALING_VIP:5060`. The UDP listen forks 16 more
+   workers (`children`); `-m 16` per process; the compose 2G limit has headroom.
+2. *Every Verizon-visible address*: `$var(adv_ip)` (per request) and `$avp(adv_ip)`
+   (per transaction, for `onreply_route`). Set at the top of `request_route` from
+   `is_in_subnet($si, VERIZON_SIP_NETS_DEF)` (ipops takes the comma list directly),
+   refined in `route[WITHINDIALOG]` for FS-originated in-dialog requests from the
+   echoed Route set / R-URI host BEFORE `loose_route()`, and set in `TO_CARRIER`
+   Step 1b for Verizon destinations. Consumers: A-leg RR preset outer entry
+   (`record_route_preset("…", "$var(adv_ip):5060;fs=5080;lr")` — 5.8 rr accepts PV
+   args), `TO_CARRIER` `$fd`, Diversion, Contact, PAI, RR preset outer entry, the
+   three WITHINDIALOG Contact rewrites, and the `REPLY_HANDLER` Contact rewrite on
+   FS replies (`$avp(adv_ip)`, else ADVERTISE_IP). Non-Verizon traffic renders the
+   identical ADVERTISE_IP strings.
+3. *Egress*: `TO_CARRIER` Step 1b (right after Step 1a) — validated carrier IP in
+   `VERIZON_SIP_NETS_DEF` ⇒ `$var(vz_dst)=1`; Step 9 (after and outside the
+   `VIP_EGRESS` nest) forces `$fs = "udp:VERIZON_VIP:5060"`, so the Via renders the
+   socket's advertise. **Ingress guard:** `$Ri != "SIGNALING_VIP"` ⇒ immediate
+   `503 Verizon Trunk Requires Signaling VIP` (`t_newtran`+`t_reply`, the 8YY-guard
+   shape) — Verizon replies land on `VERIZON_VIP` = the NLB-ACTIVE SBC, and only
+   signaling-ILB ingress proves this SBC is active; a direct-IP (`SBC_INTERNAL_IP`,
+   127.0.0.1, external-VIP) attempt would strand its replies on the peer. Wider than
+   the plan's `$Ri == SBC_INTERNAL_IP` on purpose. The 422 retry in
+   `failure_route[CARRIER_FAILURE]` re-forces the socket from `$avp(adv_ip)`
+   (with `VERIZON_TRANSPORT=tcp` it re-pins `$du …;transport=tcp` too).
+4. *Peer reply hand-off guard* (`reply_route`): `($Ri == "ADVERTISE_IP" || $Ri ==
+   "VERIZON_VIP")` — the standby's VERIZON_VIP-sourced group-13 probe replies and
+   failback-window INVITE replies are handed to the peer's tm exactly like §8.12.
+   Hence `SBC_PEER_INTERNAL_IP` is a hard prerequisite (forced off without it).
+   TCP interaction: see item 11.
+5. *Static trust* (flag 5): `$var(vz_src) == 1` arm in the trust chain and
+   `|| $var(vz_src) == 1` on the carrier-ingress INVITE condition (parallel
+   conditions — keep in sync). Untrusted OPTIONS are flood-blocked after 20/60 s,
+   so `VERIZON_SIP_NETS` MUST include every Verizon OPTIONS-monitor source.
+6. *Attribution*: `X-Inbound-TC: tc4` (label `verizon`, joins the closed metric
+   enum), `X-Inbound-Carrier: verizon`, `X-Inbound-PoP: <zone>-orig` (substdef
+   `VERIZON_POP`) — keys migration 62's `carrier_trunk_health` `orig_map` (one
+   orig row per ZONE, whatever gateway IP the call came from). Dispatcher
+   `duid=verizon-<zone>` on the first probe IP (`verizon-<zone>-2`, … after) is
+   POSITIONAL and only keys the `carrier_trunk_status` rows: the view maps
+   group 13 to the Verizon `outbound`/`both` `carrier_trunks` row whose
+   `source_ip` is the probed IP (shown as `verizon-<pop>`, e.g. an extra
+   gateway row pop `east-2` = `verizon-east-2`; no row = `verizon-unmapped-<ip>`,
+   `trunk_enabled` NULL), so VERIZON_PROBE_IPS order never matters. The
+   sidecar's `CARRIER_SETIDS` includes 13 and `DUID_NAMES` has the three zone
+   duids (the view names group-13 rows itself).
+7. *Toll-free ingress class*: `VERIZON_TF_IPS` set ⇒ `#!define VERIZON_TF_SPLIT`,
+   listed sources `$var(tf_src)=1`, other Verizon sources 0 (ordinary
+   `TF_INGRESS_CHECK`). Unset ⇒ MIXED third class: `$var(tf_skip)=1`, the class
+   check is skipped for Verizon sources (ATF-IP and SIP Gateway share IPs). The
+   FS dialplan still 404s unprovisioned numbers. Plan §8.1 item 7's open question
+   (R-URI user = dialed TFN or translated DNIS) is unchanged by this.
+8. *RFC1918 scrub gate*: `REPLY_HANDLER` carrier-reply scrub has an
+   `else if (is_in_subnet($si, VERIZON_SIP_NETS_DEF))` arm that does nothing —
+   Verizon SDP `c=` lines in private space pass intact (live-verified).
+9. *Dispatcher*: group 13 (`__VERIZON_DISPATCHER_LINES__`, §5), comment when off.
+   `VERIZON_TRANSPORT=tcp` renders `sip:<ip>:5060;transport=tcp` + `socket=tcp:…`.
+10. *MTU hint*: entrypoint `ip route replace <net> via <default gw> dev <iface>
+    mtu lock 1400` per `VERIZON_SIP_NETS` entry (idempotent, logged, non-fatal).
+11. *Transport* (`VERIZON_TRANSPORT`, default `udp`; see "Transport" below).
+12. *Self-loop safety nets* (three sites): log the Route set / forced socket; for
+    a Verizon dialog (`$var(vz_dlg)`) answer `481` (drop for ACK) instead of
+    bouncing to `BANDWIDTH_IP_1`. Bandwidth/Sinch dialogs unchanged.
+13. *Caller ID*: PAI host renders `VERIZON_SIP_IP`. `E164_EGRESS` and
+    `RCF_FROM_PASSTHROUGH` are operator gates, not touched here — Verizon commonly
+    expects +1 E.164 and an on-account From/PAI TN; keep `RCF_FROM_PASSTHROUGH`
+    off for Verizon. The digit form Verizon wants is `VERIZON_NUMBER_FORMAT`
+    ("Verizon SE options"), which applies to Verizon legs only, so `E164_EGRESS`
+    no longer has to be decided for Verizon's sake.
+
+**Transport — `VERIZON_TRANSPORT=udp|tcp` (2026-11-02, default udp).** `tcp`
+(Verizon mode ON only) emits `#!define VERIZON_TCP`; everything else keeps the
+UDP-only render byte-for-byte (see "Compiled out" above). What `tcp` changes:
+
+| Site | udp (default) | tcp |
+|---|---|---|
+| `TO_CARRIER` Step 9 (Verizon destination) | `$fs = udp:VERIZON_VIP:5060`, `$du` UDP | `$du = sip:<gw>:5060;transport=tcp` AND `$fs = tcp:VERIZON_VIP:5060` (both are needed: a tcp `$fs` with a UDP `$du` is a proto mismatch that core `get_send_socket2()` silently resolves to the udp sibling bind) |
+| `failure_route[CARRIER_FAILURE]` 422 retry | re-forces `udp:` | re-pins `$du …;transport=tcp` + `tcp:` |
+| Contact (B-leg INVITE, `REPLY_HANDLER` on FS replies, the three WITHINDIALOG rewrites) | `;transport=udp` | `route[VZ_TP]`: `;transport=tcp` when `$var(adv_ip)` is `VERIZON_SIP_IP`, `udp` otherwise |
+| Outer Record-Route (A-leg + B-leg presets, all `fsn` variants) | `<sip:VERIZON_SIP_IP:5060;fs=…;lr>` | `<sip:VERIZON_SIP_IP:5060;transport=tcp;fs=…;lr>` (`$var(adv_rrtp)`, empty for non-Verizon) — Verizon sends its in-dialog requests over TCP, and the FS-side r2 double-pop resolves the second Route to the TCP bind |
+| FS-originated ACK/BYE/re-INVITE/UPDATE toward Verizon | r2-forced socket (U1, proved) + explicit `$fs = udp:VERIZON_VIP:5060` pin (loose_route tail + both no-Route FS arms, same gate as tcp), next hop = R-URI | `route[VZ_TCP_EGRESS]` (loose_route tail + both no-Route FS arms, gated `$var(vz_dlg) == 1`, non-self R-URI): next hop (`$du` if loose_route set one, else the R-URI) rebuilt `sip:host:port;transport=tcp`, `$fs = tcp:VERIZON_VIP:5060`. Needed because Verizon's Contact may omit `;transport=tcp`: without it the request falls back to UDP (proved by ablation) |
+| Group-13 probes | `socket=udp:…` | `sip:<ip>:5060;transport=tcp`, `socket=tcp:VERIZON_VIP:5060` |
+| Listens | udp + tcp `.251` | unchanged — inbound from Verizon accepted on either transport |
+
+Not changed: the 5xx in-trunk/cross-trunk flip (it never targets Verizon: Step 1a
+pre-sets flags 8+9 for every validated `X-Carrier-IP`, the only way into Step 1b),
+FS→SBC (UDP to `SBC_PROXY_IP`), every Bandwidth/Sinch/PBX path (live-verified identical).
+
+*Probes over TCP (decided).* The probe follows the trunk's transport: group 13
+then exercises exactly what calls use (Verizon's TCP listener, `tcp:5060` in the
+firewall rule, the gateway MSS clamp) and keeps a warm `.251` connection the next
+INVITE reuses (verified: the INVITE rode the probe's connection). The cost: TCP
+cannot complete from the STANDBY. Its SYN leaves `.251`, the SYN-ACK returns via
+`VERIZON_SIP_IP` → gateway → `VERIZON_VIP` → ILB → the ACTIVE SBC, which has no
+such socket and answers RST. So the standby reads group 13 Inactive for as long as
+it is standby, one `dispatcher:dst-down` per boot. The peer reply hand-off relays
+SIP replies; it cannot finish a TCP handshake. This is the documented Sinch 6/7
+posture before §8.12, and `carrier_trunk_health` is up-on-≥1-SBC (`bool_or`), so
+the zone signal stays correct. UDP probes would have kept the standby green but
+monitored a path the calls no longer take.
+
+*Peer hand-off and the stateless BYE forward with TCP.* In steady state a TCP reply
+arrives on the connection the sending SBC opened. Its segments go to
+`VERIZON_VIP` = the ILB-active SBC = that same SBC (Step 1b guard), so tm matches it
+locally and the hand-off never runs. The FS→Verizon BYE is `forward()`ed
+statelessly over TCP. Its 200 OK returns on that connection, has no transaction
+(BYE is excluded from the hand-off), and core `forward_reply()` sends it to FS by
+via2 over UDP (live-verified). After a flip, the ex-active's connections die: their
+segments now reach the new active, which RSTs them. Verizon then opens a new
+connection to `VERIZON_SIP_IP:5060` for in-dialog requests, which reaches the new
+active, and sends replies the same way (RFC 3261 §18.2.2). If such a reply belongs
+to a transaction the peer still owns (failback window), the existing guard
+(`$Ri == VERIZON_VIP`, a TCP listen's bind) hands `$mb`, one framed SIP message, to
+the peer over UDP via `send_data()`. The peer's tm matches by branch and ignores
+the transport (live-verified: byte-identical copy at the peer, no FS leak; a BYE
+reply over TCP is not handed off and goes to FS by via2). No hand-off code changed.
+A reply larger than the VPC MTU is IP-fragmented on that one internal hop.
+
+*Verizon TCP prerequisites (before setting `tcp` in a zone):*
+1. Verizon accepts inbound TCP 5060 from `VERIZON_SIP_IP` (plan §10 #7). With
+   `tcp_connection_lifetime=300`, an idle connection closes after 5 min, and the next
+   in-dialog request (BYE, session refresh) opens a fresh one from `.251`. Verizon
+   must not rely on an existing connection.
+2. GCP firewall `vz-allow-verizon-sip` (Verizon SIP prefixes → `voip-sbc`) includes
+   `tcp:5060`, not only `udp:5060`. Return traffic on our outbound connections is
+   covered by the stateful VPC firewall.
+3. The gateways' MTU 1400 / TCP-MSS 1350 clamp (nft `maxseg size set 1350`, plan
+   §3.3) applies to TCP SYNs in both directions. The SBC's `mtu lock 1400` hint
+   routes (item 10) also make the kernel advertise MSS 1360 on `.251` connections.
+   Large INVITEs (Identity + div + SDP) segment instead of fragmenting, which is the
+   reason to choose TCP (plan §12 "UDP fragmentation").
+4. Set `VERIZON_TRANSPORT=tcp` on BOTH SBCs of the zone (standby first), then
+   recreate kamailio. The entrypoint log line shows
+   `TRANSPORT=tcp VERIZON_TCP=on`; `kamcmd dispatcher.list` shows group 13 with
+   `;transport=tcp` / `socket=tcp:…` and `AP` on the active.
+
+*Verified (2026-11-02, Kamailio 5.8.8, docker harness, peers on `lo`).* udp:
+the render is `cmp`-identical to the pre-feature branch with Verizon on (`VERIZON_TRANSPORT`
+unset, `udp`, and garbage → WARNING), the off render is identical to the pre-feature
+branch (legacy, dedicated, and `tcp` with mode off → NOTE), dispatcher.list is
+identical, and the existing 46+5 live checks pass. tcp: `kamailio -c` is clean, and
+49/49 live checks + 2 log checks pass. Covered: probes over TCP from `.251` (Via
+`SIP/2.0/TCP VERIZON_SIP_IP`, dispatcher `AP`); the B-leg INVITE over TCP from `.251`
+with Contact/outer RR `;transport=tcp` and nothing on UDP; Verizon's 200 OK on that
+connection relayed to FS (SDP intact, SE 1800); FS ACK, re-INVITE and BYE over TCP
+with one SBC Via, even when Verizon's Contact had no `;transport`; the BYE 200
+stateless to FS; inbound INVITE over TCP to FS with the 200 OK back on the same
+connection (Contact `;transport=tcp`); the A-leg FS BYE over TCP; inbound over UDP
+still accepted; the 422 retry over TCP; the hand-off and BYE-forward behaviour
+described above; and the Bandwidth control leg unchanged (UDP, ADVERTISE_IP). Negative
+controls: the pre-feature config fails 9/24 of the same checks, and with
+`VZ_TCP_EGRESS` neutered, FS ACK/re-INVITE/BYE leave over UDP. *Not provable
+locally:* Verizon's TCP acceptance and timers, the GCP firewall/ILB path for TCP
+(SYN-ACK return through the gateway translation, plan U2), and the standby-RST
+behaviour on the real ILB.
+
+**Verified (2026-10-30, Kamailio 5.8.8 image, all peers on `lo`, throwaway
+Postgres):** `kamailio -c` on both ON renders (mixed + split); real boot in ON
+mode with `kamcmd dispatcher.list` showing group 13 on `socket=udp:10.128.0.251:5060`
+and `corex.list_sockets` the .251 bind advertising the SIP IP; 29/29 live SIP
+checks — OPTIONS from a Verizon source 200; inbound 8YY INVITE from a mixed-class
+source delivered to FS :5080 with RR `[SIGNALING_VIP;r2;fs=5080, VERIZON_SIP_IP;fs=5080]`,
+`X-Inbound-Carrier: verizon`, `X-Inbound-PoP: central-orig`, `X-Inbound-TC: tc4`,
+spoofed attribution stripped; FS 200 OK relayed with Contact host = VERIZON_SIP_IP;
+an INVITE from outside the nets not admitted as carrier ingress; B-leg INVITE
+with a Verizon `X-Carrier-IP` leaving from UDP source 10.128.0.251 with Via/From/
+Contact/PAI/Diversion/outer-RR = VERIZON_SIP_IP and internal headers stripped;
+Verizon 200 OK (RFC1918 SDP, `Session-Expires: 30`) relayed to FS with the SDP
+intact, SE normalized to 1800, Contact untouched; the same B-leg via the direct
+SBC IP rejected `503 Verizon Trunk Requires Signaling VIP` and never sent; a
+Bandwidth-bound control B-leg unchanged (VIP-sourced, all ADVERTISE_IP).
+
+**U1 — PROVED in the lab (2026-11-02, 5.8.8 harness, udp mode), plus a udp `$fs`
+pin.** Question: for FS→Verizon ACK/BYE (Route `[SIGNALING_VIP;r2=on, VERIZON_SIP_IP]`),
+does the r2 double-pop force the `.251` socket when the second Route's host is only
+*advertised*? Yes. Source (5.8.8): `after_loose()` (`rr/loose.c` ~924-934) sees `r2` on
+the first Route, parses the second and calls `rr_do_force_send_socket(…, rr2on=1)` —
+unconditionally, not gated on `force_send_socket` — which calls `grep_sock_info()`.
+For each socket, `grep_sock_info()` (`core/socket_info.c` ~712-790) compares the bind
+name, then the ADVERTISE name (`si->useinfo.name`), then extra addresses. The `.251`
+UDP bind is the only socket that advertises `VERIZON_SIP_IP`, so the first match
+can only be that bind (`proto` 0 ⇒ the UDP list is searched first). A miss would log
+`no socket found to match second RR` (WARN). Wire evidence, suite
+`kamcheck/test_u1.py` (fake FS/Verizon on `lo`, `recvfrom()` = the sending socket):
+`corex.list_sockets` shows `udp:10.128.0.251:5060 advertise udp:35.184.132.124:5060`,
+and nothing binds the SIP IP. B-leg ACK, re-INVITE and BYE, A-leg BYE (FS hangs up a
+Verizon-originated call), each with the Route set (a) hand-written and comma-joined
+(exact RR URIs incl. `ftag`/`did`, and the minimal shape) and (b) derived end-to-end
+the way a UA does (B-leg: the RR Verizon echoed in its 200, reversed; A-leg: the
+INVITE's RR in order). In every case: UDP source `10.128.0.251:5060`, top Via
+`SIP/2.0/UDP 35.184.132.124:5060`, exactly one SBC Via + FS's, no Route left,
+R-URI = Verizon's Contact, Contact = `VERIZON_SIP_IP`, one transaction, no copy back
+toward FS, no `routed to self` / rr WARN in the log. Verizon's 200 OK (sent to `.251`,
+standing in for the gateway translation) reached FS for both BYEs and the re-INVITE.
+This held on the HEAD config before the pin was added. Negative control: the same BYE
+with a second Route host that no socket binds or advertises left `udp:ADVERTISE_IP`
+with `Via: ADVERTISE_IP` and rr logged the WARN. That is the U1-failure shape (in GCP
+the NIC socket, same Via), and it shows the checks can fail.
+
+*udp pin (added with the proof).* `route[WITHINDIALOG]` now sets
+`$fs = "udp:VERIZON_VIP:5060"` in udp mode for FS-originated requests on Verizon
+dialogs (`$var(vz_dlg) == 1`, internal source, non-self R-URI), at the same three
+sites as the tcp `route[VZ_TCP_EGRESS]` calls. The sites are now
+`#!ifdef VERIZON_MODE` / `#!ifdef VERIZON_TCP` … `#!else` udp pin `#!endif` / `#!endif`.
+(a) **No-Route FS arms (the gap the TCP work noted):** a no-Route ACK/BYE has no r2
+pop, so mhomed chose the NIC socket with `Via: ADVERTISE_IP`, which Verizon cannot
+reach. This was reproduced on HEAD (G1 checks) and is fixed by the pin. FS normally
+cannot produce this shape, because both legs are always Record-Routed and an empty
+route set would make FS bypass the SBC. The pin costs nothing.
+(b) **loose_route tail:** a no-op on the proved path. It removes the dependency on the
+advertise-name lookup and on FS echoing the outer Route verbatim. With the pin, the
+negative-control BYE (unresolvable second Route) leaves `.251` anyway.
+Renders: Verizon-off (legacy, dedicated, tcp-with-mode-off) are `cmp`-identical to the
+pre-pin HEAD. The udp/unset/garbage renders gain only the pin (they are no longer
+identical to the pre-`VERIZON_TRANSPORT` branch). The tcp render changes only by
+directive lines and the inert `#!else`. `kamailio -c` rc=0 for every render. Live:
+test_u1 81/81 + 4/4 log checks (HEAD: 79/81 + 4/4, failing only the two no-Route gap checks); udp
+suite 46/46 + 5/5; tcp suite 49/49 + 2/2.
+*Still only provable on the GCP path:* that the `.251`-sourced packets actually take the
+next-hop-ILB route to the gateway and are translated to `VERIZON_SIP_IP` (U2), and that
+Verizon's replies to `Via: VERIZON_SIP_IP` come back through the gateway to the ACTIVE
+SBC's `.251` (the harness injects them straight to `.251`). Homer check at turn-up: an
+FS-side hangup shows the BYE from `10.x.0.251` with one `Via: <VERIZON_SIP_IP>`, and
+its 200 OK.
+
+**Verizon SE options — `VERIZON_REFRESHER` / `VERIZON_NUMBER_FORMAT` (2026-11-02, both
+default to today's behavior).** Two open questions to Verizon's SE (plan §8.6 U3, §10 #13
+and #17: "refresher=uac acceptable?", "+1 E.164, 11-digit or 10-digit in From/PAI/R-URI?")
+are `.env` changes, not code changes. Both apply only in Verizon mode and only to
+Verizon-bound requests (`$var(vz_dst)` / `$avp(adv_ip) == VERIZON_SIP_IP`). Both follow
+the `VERIZON_TCP` compile-out contract: at the default, the placeholder line is deleted
+and every block is removed (`vz_strip_blocks`), keeping each `#!else` (the old line).
+Set both on BOTH SBCs of a zone, then recreate kamailio. The entrypoint log line shows
+`REFRESHER=… VERIZON_REFRESHER_UAS=… NUMBER_FORMAT=… NUMFMT_EFFECTIVE=…`.
+
+| Site | Default | `VERIZON_REFRESHER=uas` |
+|---|---|---|
+| `TO_CARRIER` Step 3 (Verizon destination; the pair moved from Step 6 with #171) | `Session-Expires: 1800;refresher=uac` | `1800;refresher=uas` (Bandwidth/Sinch keep uac) |
+| `CARRIER_FAILURE` 422 retry toward Verizon | `3600;refresher=uac` | `3600;refresher=uas` (keyed on `$avp(adv_ip)`). Since #171 (merged in) the retry leaves over UDP and TCP and carries exactly one pair, §4.8 |
+| `REPLY_HANDLER`, Verizon answer with `refresher=uas` and an interval we keep (90..1800) | relayed to FS as `;refresher=uac` | relayed as `;refresher=uas` |
+| `REPLY_HANDLER`, Verizon answer we clamp (<90, >1800, unparseable) or that says uac | `1800`/kept`;refresher=uac` | unchanged (uac) |
+
+*What uas means for us (UAC side).* RFC 4028 §7.4: the request's `refresher` is a
+preference, and the UAS sets the final value in its 2xx. Today REPLY_HANDLER rewrites the
+`refresher` of EVERY carrier answer to `uac`, so FS always refreshes. If we only changed the
+offer, FS would still refresh at interval/2, and its refresh re-INVITE (`refresher=uac`)
+would take the refresher role back from Verizon every time. So with `uas`, a Verizon answer
+that says `uas` reaches FS unchanged. FS (sofia-sip on the external profile, `enable-timer`
+on) then does not refresh. It answers Verizon's re-INVITE/UPDATE refreshes, which arrive
+by the carrier in-dialog path (`route[FROM_NET_INDIALOG]`, stateless, any SBC). It sends
+BYE only if no refresh arrives by expiry (interval − min(32, interval/3)). The B-leg
+exports (`sip_session_timeout`/`sip_minimum_session_expires`/`enable_timer`) are inert: the
+B-leg timer is whatever the 2xx says. We keep `uac` when we change Verizon's interval. For
+example, if Verizon answers `3600;uas` and we relay `1800;uas`, FS's expiry (~1768 s) would
+come before Verizon's refresh (1800 s), so FS must be the refresher. This is the existing
+"lowering is always safe" rule. The trade-off: with `uas` the call depends on Verizon's
+refreshes reaching FS. A lost refresh ends the call at expiry, which is RFC behavior (today FS
+refreshes as well).
+
+*`VERIZON_NUMBER_FORMAT=asis|e164|11|10`.* `route[VZ_NUMFMT]` converts a NANP user part
+(`+1NXXNXXXXXX`, `1NXXNXXXXXX` or `NXXNXXXXXX`, the `^[2-9][0-9]{9}` rule of `TN_E164` /
+`STIR_TN_CANON`) to the chosen form. Anything else passes through untouched: international
+`+E.164`, short codes, `;npdi`-style user params, alpha users and empty values. What FS sends
+today on an RCF B-leg (`inbound_router.lua` terminate_rcf) is mixed: R-URI/To = `forward_to`
+(+E.164 from the DB), From and Diversion = the 10-digit RCF DID (`to_10digit`), and
+`X-Original-CID` (the PAI user) = +E.164. `asis` sends exactly that (or the `E164_EGRESS`
+result when that gate is on). Sites in `TO_CARRIER`, all gated on `$var(vz_dst) == 1`:
+- Step 2, after the `E164_EGRESS` block: `$var(from_e164)`, so the Contact user follows
+  From, and the R-URI user (`$rU` sets new_uri, not a lump, so a second write is safe).
+- Step 3: `$var(div_user)` before the Diversion rebuild.
+- Step 5b, after `msg_apply_changes()`: the PAI user, then `$fU` and `$tU`. These are
+  written here, not in Step 2, because with `E164_EGRESS` on, `$fU`/`$tU` already carry a
+  lump from Step 2, and a second write before `msg_apply_changes()` would stack two lumps
+  on the same bytes. After the rebuild, a re-read returns the E164 value, and this write is
+  the only lump on those bytes.
+The output depends only on the 10-digit national number, so `E164_EGRESS` + a format gives
+the format. In-dialog requests are not rewritten: FS's ACK/BYE/re-INVITE carry FS's own
+From/To users. This is the same as `E164_EGRESS` today. Dialogs match by tags (RFC 3261 §12),
+not by user parts.
+
+*STIR interaction.* Signing is unaffected by the wire form. Step 8.5 derives `orig` from
+`$var(pai_user)`, `dest` from `$rU` and `div` from `$var(div_user)`, each through
+`route[STIR_TN_CANON]` (strip `+`, NANP → `1NXXNXXXXXX`), so `+16175550101`, `16175550101`
+and `6175550101` all sign as `16175550101`. A Verizon verifier that canonicalizes the wire
+From/PAI per RFC 8224 §8.3 gets the same digits. The inbound chain is re-emitted verbatim
+(never rewritten).
+
+*Inbound is not affected and needs no setting.* Kamailio never rewrites the inbound R-URI.
+FS's dialplan (`inbound_handler` `^(\+?1?\d{10,15})$`) admits all three shapes, and
+`inbound_router.lua` `normalize_did` plus `db_client` `validate_did` (both
+`number_utils.to_e164`) turn the lookup key into canonical +E.164, which is what migration
+31's CHECK constraints force the stored DIDs to be. A DID or an ATF-IP 8YY delivered as
+10-digit, 11-digit or +E.164 is found in the same way.
+
+*Verified (2026-11-02, Kamailio 5.8.8 docker harness).* Renders: every default env
+(legacy, dedicated, Verizon udp/tcp/bogus-transport, explicit `uac`/`ASIS`, bogus values
+→ WARNING, options set with Verizon off → NOTE) is `cmp`-identical to the pre-change
+HEAD (kamailio.cfg and dispatcher.list). `kamailio -c` rc=0 for uas/uac × e164/11/10/asis
+× udp/tcp, and for STIR+E164_EGRESS on. Live suite `kamcheck/test_vzopts.py`
+(expectations read from the rendered defines): e164/udp/STIR 56/56, 11/udp/E164_EGRESS/STIR
+56/56, 10/tcp/STIR 68/68, uac+e164/udp 42/42, uas+asis/tcp/STIR 68/68, default/udp/STIR
+56/56. Covered: every header user per format on the INVITE and on the 422 retry
+(tcp), non-NANP untouched, the Bandwidth control leg unchanged in every mode (numbers,
+`refresher=uac`, a Bandwidth `uas` answer still relayed as uac), STIR base (gateway-C) and
+div claims canonical with the chain re-emitted verbatim, the three REPLY_HANDLER refresher
+cases, and inbound 10/11/+E.164 DID/8YY from a Verizon source delivered to FS unchanged. A
+negative control (pre-change config, expectations forced to uas+e164 / uac+10) fails 10/50
+and 9/62. Existing suites unchanged: 46/46+5/5, 49/49+2/2, 81/81+4/4. Inbound lookup: a
+Lua harness drives the real `inbound_router.lua` + `db_client.lua` + `number_utils.lua`
+against a Postgres built from `docker/postgres/init`: 46/46 (all six shapes found and
+bridged to `forward_to`, key `'+1…'`; unowned numbers 404 in every shape).
+*Not provable locally:* what Verizon accepts (that is the SE's answer). Also whether
+sofia-sip on the production build honours a relayed `refresher=uas` exactly as described:
+the harness has no FreeSWITCH. Check it at turn-up with one call that stays up past the
+interval: Homer shows Verizon's refresh re-INVITE/UPDATE, FS's 200, and no FS refresh.
+
+**Unverified in the lab (plan §8.6) — prove in the zone before turn-up:**
+U2 `.251`-sourced egress into the next-hop-ILB VPC route and ILB delivery of
+gateway-forwarded packets with a Verizon source; U3 Verizon's refresher
+expectation (now a `.env` answer: `VERIZON_REFRESHER`, "Verizon SE options"). Also: the ILB VIP-addressed `/healthz` on `VERIZON_VIP:8080` (same
+HC as the signaling ILB, so expected to pass the moment the bind exists).
+
+**Pre-existing quirk surfaced here — FIXED (2026-10-30, §8.12
+`route[REPLY_SRC]`):** a carrier reply the peer hands over raw (§8.12) arrives
+with `$si` = the peer's VPC IP, which `route(IS_INTERNAL_SOURCE)` classified as
+"from FS" in `REPLY_HANDLER`: Contact rewritten to our VIP, SDP scrubbed, the
+item-8 Verizon scrub gate (`is_in_subnet($si, VERIZON_SIP_NETS_DEF)`) never
+matching — for a Verizon dialog in the failback window that meant the item-12
+481 path. The onreply routes now classify by `$var(reply_src)` (the carrier
+destination of the transaction) / `$var(reply_internal)`; the item-8 gate reads
+`$var(reply_src)`. Harness-verified in the §8.12 paragraph (checks 6a-6g).
+
 ## 9. How to Modify
 
 ### Adding a New Carrier IP / Trunk Config
@@ -1311,9 +1774,9 @@ current production IPs). To add a NEW static carrier IP:
    `X-Inbound-Carrier`/`X-Inbound-PoP` attribution arm and (for a non-Bandwidth
    carrier) an `X-Inbound-TC` arm.
 3. Add a dispatcher group in `dispatcher.list` for keepalive (6-9 and 11-12
-   are Sinch, 10 is the peer SBC; next free group is 13):
+   are Sinch, 10 is the peer SBC, 13 is Verizon; next free group is 14):
    ```
-   13 sip:1.2.3.4:5060 0 0 weight=100;duid=carrier-pop
+   14 sip:1.2.3.4:5060 0 0 weight=100;duid=carrier-pop
    ```
    Add the setid to `CARRIER_SETIDS` + a `DUID_NAMES` entry in
    `docker/carrier-monitor/carrier_monitor.py` if it should be reported (and

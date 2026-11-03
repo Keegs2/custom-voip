@@ -4,7 +4,9 @@
 # Before this module: no metrics, no probes, no paging — outage detection was
 # "a customer calls Granite." After: GCP-native uptime checks on the customer-
 # visible front doors (all three zones' SIP VIPs + API + UI), VM-down/disk/
-# memory/CPU alerts on the 16 always-on production VMs across East/West/Central, and a
+# memory/CPU alerts on the 22 always-on production VMs across East/West/Central
+# (incl. the six Verizon IPsec gateways — their tunnel/datapath health is
+# paged via vmalert, docker/vmalert/rules/vz_ipsec.yml, not from here), and a
 # syslog "revup-alert" log-match policy that lets ANY on-VM script/unit page by
 # writing one logger line (backups + slot-WAL watchdog use it).
 #
@@ -364,7 +366,7 @@ resource "google_monitoring_alert_policy" "vm_down" {
   documentation {
     mime_type = "text/markdown"
     subject   = "CRAG · Production VM DOWN — $${metadata.system_labels.name} ($${resource.label.zone})"
-    content   = "**What happened:** No hypervisor metrics for 5 minutes from $${metadata.system_labels.name} ($${resource.label.zone}) — the instance is stopped, crashed, or lost by the project.\n\n**Impact:** an SBC = the zone runs on its standby SBC (NLB failover); a media VM = the zone's Kamailio dispatcher flips NEW calls to the other FS within the probe window, but established calls on the dead FS DROP (media anchored — docs/FS_MEDIA_HA_RUNBOOK.md); BOTH media VMs = ALL in-zone calls fail (zone VIP darkens, Bandwidth retries other zones); the services VM = ALL new-call DID lookups fail + portal/API dark.\n\n**What to do:** check the instance in the GCP console. If it is running, the Ops Agent or the Docker stack is down (`sudo docker ps`)."
+    content   = "**What happened:** No hypervisor metrics for 5 minutes from $${metadata.system_labels.name} ($${resource.label.zone}) — the instance is stopped, crashed, or lost by the project.\n\n**Impact:** an SBC = the zone runs on its standby SBC (NLB failover); a media VM = the zone's Kamailio dispatcher flips NEW calls to the other FS within the probe window, but established calls on the dead FS DROP (media anchored — docs/FS_MEDIA_HA_RUNBOOK.md); BOTH media VMs = ALL in-zone calls fail (zone VIP darkens, Bandwidth retries other zones); the services VM = ALL new-call DID lookups fail + portal/API dark; a Verizon IPsec gateway (*-vz-gw-a/-b) = the zone's gateway ILB moves the Verizon tunnel to the partner gateway (both tunnels stay up), Bandwidth/Sinch unaffected; BOTH gateways of a zone = that zone's Verizon trunk is dark (the VPC route is NOT withdrawn — packets drop; docs/VERIZON_IPSEC_TRUNKS_PLAN.md §2.3, vmalert VzIpsecZoneDown pages it too).\n\n**What to do:** check the instance in the GCP console. If it is running, the Ops Agent or the Docker stack is down (`sudo docker ps`; a gateway has no Docker — `sudo /opt/revup/infra/vz-ipsec/vz-status.sh`)."
   }
 
   user_labels = merge(local.policy_labels, { component = "vm" })

@@ -97,7 +97,7 @@ drill records them. DB restore is proven in a real recovery.
 | Both FS in a zone down | `/healthz` → 503 on both SBCs; SIP OPTIONS from external sources → 503 (`FS_AWARE_OPTIONS`) | Auto | Zone drains at its NLB; carriers retry the remaining zone VIPs. There is no DNS layer today (§3.5) |
 | Entire zone dark | NLB all-backends-unhealthy + GCM VIP uptime CRITICAL | Auto + page | Carrier-side distribution to remaining zone VIPs; also achievable deliberately via the maintenance plane (§4.6) |
 | Carrier PoP failure | Table-driven legs: the negative reply goes back to FS (Kamailio sets flags 8+9 on a validated `X-Carrier-IP`). Legacy `X-Carrier` legs: Kamailio 5xx/408/480/404 in-trunk flip (flag 8) → TC4 cross-trunk (flag 9) | Auto | FS dials the next trunk/SBC attempt down the zone priority list (§5.5); legacy legs retry the alternate Bandwidth PoP |
-| SBC unreachable from FS | TCP pre-check ≤1 s (1 s connect timeout, cached 30 s up / 10 s down) | Auto | Attempt loop (up to 4 trunks × {signaling VIP, SBC-1 direct} = 8 attempts; legacy fallback = 4 attempts, §5.3). The pre-check is the ILB-bypass detector: an active-SBC death is still the ~10–12 s NLB/ILB flip |
+| SBC unreachable from FS | TCP pre-check ≤1 s (1 s connect timeout, cached 30 s up / 10 s down) | Auto | Attempt loop (every eligible trunk, no cap since 2026-10-30, × {signaling VIP, SBC-1 direct}; Verizon rows the VIP only; legacy fallback = 4 attempts, §5.3). The pre-check is the ILB-bypass detector: an active-SBC death is still the ~10–12 s NLB/ILB flip |
 | Redis dies (media VM) | FS reconnect | Auto | Trunk/API caches fall through to PG; RCF path unaffected (already DB-only) |
 | Zone PG replica dies | postgres-exporter / replication guard | Manual repoint | Zone DID lookups fail → zone effectively drains; repoint `DB_HOST` per DB failover runbook |
 | PG primary dies | replication guard + GCM | Manual promote (`docs/runbooks/DB_FAILOVER_RUNBOOK.md`) | Active calls unaffected; provisioning + CDR ingest 503 until promotion (east-db-standby is the HA target) |
@@ -286,7 +286,7 @@ production services, no monitoring enrollment).
 | 8880 | TCP | vmalert | Rule status | Grafana/ops (bridge) |
 | 8429 | TCP | vmagent (every VM) | Agent health/buffer | Local |
 | 8710 | TCP | ops-agent (all roles) | NOC/CRAG command API — bearer token, argv-only verbs (§10.3) | CRAG GKE backend + console hosts (VPC-internal on every role, media VMs included: host-network, binds `0.0.0.0`; access restricted by the `allow-ops-agent` firewall tag rule) |
-| 9100 | TCP | node-exporter (every monitored VM) | Host metrics | Local vmagent |
+| 9100 | TCP | node-exporter (every monitored VM) | Host metrics | Local vmagent; on the Verizon IPsec gateways (NIC IP only), the zone's media vmagents (job `vz_gateway`) |
 | 9103 | TCP (lo) | ops-agent ESL exporter (media) | FS channel/call gauges | Local vmagent |
 | 9104 | TCP (lo) | ops-agent fsdisp exporter (SBC) | Dispatcher group-1 state incl. `fs_dispatcher_disabled` (MAINT) | Local vmagent |
 | 9115 | TCP | blackbox-exporter (services) | HTTP probe module | services vmagent (in-network) |
@@ -709,9 +709,10 @@ Never use `-nonat`; never remove `local-network-acl=loopback.auto` (root
 6. Off-net: the table-driven termination attempt list (§5.5) is bridged as
    `sofia/external/dest@SBC_PROXY_IP:5060` with
    `X-Carrier-IP`/`X-Carrier-Label`.
-   - **Size:** up to 4 trunks (cap applied after the traffic-class filter)
-     × {`SBC_PROXY_IP` signaling VIP, `SBC_PROXY_IP_FAILOVER` SBC-1 direct},
-     so **up to 8 attempts** (`TERM_TRUNKS_MAX = 4`, `inbound_router.lua:466`).
+   - **Size:** every trunk that passes the traffic-class filter (no attempt
+     cap since 2026-10-30; the only bound is the 16-row cache, `M.CACHE_MAX`)
+     × {`SBC_PROXY_IP` signaling VIP, `SBC_PROXY_IP_FAILOVER` SBC-1 direct};
+     `verizon` rows get the signaling-VIP attempt only (`lib/term_trunks.lua`).
    - **Pre-check:** each attempt is guarded by a 1 s TCP pre-check of the SBC
      target, cached 30 s up / 10 s down. A skipped attempt launches no B-leg.
    - **Fallback:** if the DB errors, there are zero usable rows, or
@@ -1043,9 +1044,9 @@ Init scripts run only on first initdb; on prod they're applied on the primary
 | 56 | 56_voicemail_transcription.sql | Voicemail transcription (per-mailbox opt-in, sealed transcripts) |
 | 57 | 57_trunk_dids_trunk_index.sql | `idx_trunk_dids_trunk` — the `number_routing` trunk arm's customer path |
 
-Check state on the primary with `scripts/db/check_migrations.sql` (22..57).
-Since 45, replaying 40/44/45/52 fails on the `carrier_trunk_health` view, so
-re-apply 53 last. Replaying 50 reverts 55, so re-apply 55 after it.
+Check state on the primary with `scripts/db/check_migrations.sql` (22..62).
+Since 45, replaying 40/44/45/52 fails on the `carrier_trunk_health` view, and
+replaying 53 silently drops 62's Verizon arms, so re-apply 53 and then 62 last. Replaying 50 reverts 55, so re-apply 55 after it.
 
 ### 8.4 CDR pipeline
 
@@ -1091,7 +1092,7 @@ Per-VM `vmagent` → remote-write → East VictoriaMetrics `:8428`
 | Role | Scrape config | Jobs |
 |------|---------------|------|
 | SBC | `docker/vmagent/scrape-sbc.yml` | kamailio :8080 `/metrics` (xhttp_prom), node :9100, fsdisp :9104 |
-| Media | `scrape-media.yml` | node :9100, esl-exporter :9103 |
+| Media | `scrape-media.yml` | node :9100, esl-exporter :9103, `vz_gateway`: the zone's two Verizon IPsec gateways' node_exporter on their NIC IP :9100 (no Docker/vmagent on a gateway; `vz_ipsec_*` textfile metrics from vz-healthd; scraped by both media VMs of the zone, so reduce with `max by (zone, node, gw)`) |
 | DB replica | `scrape-db.yml` | node :9100, postgres-exporter :9187 (`db_role=replica`), pgbouncer-exporter :9127 |
 | Services | `scrape-services.yml` | api :8000, postgres-exporter :9187, pgbouncer-exporter :9127, blackbox :9115, node :9100 (+ STIR textfile metrics), heplify :9096 |
 
@@ -1101,7 +1102,7 @@ gauges, `kamailio_maint_drain`, dispatcher/carrier state, STIR sign counters.
 ### 9.2 Recording rules (vmalert, 30s eval)
 
 `docker/vmalert/rules/`: `traffic.yml` (zone reply-class rates → live ASR /
-failure %), `sip_health.yml`, `stir.yml`.
+failure %), `sip_health.yml`, `stir.yml`, `vz_ipsec.yml` (Verizon gateway tunnel/datapath alerts, zone-down guarded so pre-turn-up gateways never page).
 
 ### 9.3 Grafana NOC boards (`docker/homer/grafana/dashboards/`)
 
@@ -1350,8 +1351,8 @@ revision, which still described active/active SBCs, single-zone East, and
 2026-09-04. Changes:
 - Carriers: Sinch is the 8YY and backup-LD termination carrier.
 - §3.5 DNS: today vs PLANNED Infoblox DTC.
-- Attempt loop: up to 8 table-driven attempts, with a 4-attempt legacy
-  fallback.
+- Attempt loop: every eligible trunk × 2 SBCs (no cap since 2026-10-30), with a
+  4-attempt legacy fallback.
 - §1.4: drills noted as unlogged.
 - New §5.9 (voicemail).
 - §8.3: migrations 47–57.
