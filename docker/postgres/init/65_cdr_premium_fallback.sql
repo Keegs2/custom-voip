@@ -12,7 +12,10 @@
 -- (every other CDR's ingest is unchanged). NULL = not a premium fallback
 -- (incl. every CDR before this release). Staff-only (tenant CDR allowlist).
 --
--- Plain SQL, idempotent: ADD COLUMN IF NOT EXISTS with no DEFAULT / CHECK /
+-- One transaction, lock_timeout 3s (CDR inserts queue behind a waiting
+-- ACCESS EXCLUSIVE on cdrs): apply at low traffic, check pg_stat_activity for
+-- idle-in-transaction sessions first (see 63), and on a lock timeout just
+-- re-run it. Plain SQL, idempotent: ADD COLUMN IF NOT EXISTS with no DEFAULT / CHECK /
 -- index (metadata-only on the compressed hypertable — the 47/48/60 form),
 -- COMMENT, role-guarded belt-and-braces grants. Replayed on every scratch
 -- cdrs by tests/cdr_schema.py.
@@ -23,6 +26,12 @@
 --     hostname | grep -q '^services$' && sudo -u postgres psql -d voip -v ON_ERROR_STOP=on -f /opt/revup/docker/postgres/init/65_cdr_premium_fallback.sql
 -- Never DROP COLUMN (rollback = stop writing).
 -- ==========================================================================
+
+BEGIN;
+
+-- The ADD COLUMN takes a brief ACCESS EXCLUSIVE lock on cdrs (every chunk of
+-- the hypertable); CDR inserts from every zone queue behind a WAITING lock.
+SET LOCAL lock_timeout = '3s';
 
 ALTER TABLE cdrs ADD COLUMN IF NOT EXISTS term_premium_fallback BOOLEAN;
 
@@ -39,3 +48,5 @@ BEGIN
     END IF;
 END
 $$;
+
+COMMIT;

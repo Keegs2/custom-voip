@@ -25,11 +25,18 @@
 --      Historic cdrs.traffic_grade values are left alone (no CHECK there).
 --   (Tier 1 carriers, C6, are 64_carrier_tier1.sql: carrier_trunks only.)
 --
--- LOCKING: customers is read on the call path (and the lock is WAL-replayed
--- on every zone replica). The CHECK swap takes a brief ACCESS EXCLUSIVE lock
--- on customers (a tiny table: the validating scan is milliseconds);
--- lock_timeout makes the migration FAIL FAST instead of queueing call-setup
--- reads behind it. If it times out, just re-run it.
+-- LOCKING: customers is read on the call path — East FreeSWITCH and the API
+-- read the PRIMARY directly, and the lock is WAL-replayed on every zone
+-- replica. The CHECK swap takes a brief ACCESS EXCLUSIVE lock on customers
+-- (a tiny table: the validating scan is milliseconds), and a WAITING
+-- ACCESS EXCLUSIVE request already queues every new call-setup read behind
+-- it. lock_timeout = 1s bounds that queue: the migration fails fast instead.
+-- Before applying:
+--   * apply at low traffic;
+--   * check for long or idle-in-transaction sessions holding customers:
+--       sudo -u postgres psql -d voip -c "SELECT pid, state, xact_start, query FROM pg_stat_activity WHERE state LIKE 'idle in transaction%' OR (xact_start < now() - interval '10 seconds' AND state <> 'idle')"
+--   * on "canceling statement due to lock timeout", just re-run the file —
+--     it is one transaction (nothing half-applied) and idempotent.
 --
 -- ORDER: apply BEFORE the API build of the same release (that build creates
 -- customers with traffic_grade 'enterprise', which the old CHECK refuses).
@@ -49,7 +56,7 @@
 
 BEGIN;
 
-SET LOCAL lock_timeout = '5s';
+SET LOCAL lock_timeout = '1s';
 
 -- --------------------------------------------------------------------------
 -- 1. live_trunk_stats: the api role may delete a deleted trunk's rows (C1).

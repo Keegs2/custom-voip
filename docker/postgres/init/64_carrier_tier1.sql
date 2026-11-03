@@ -21,8 +21,11 @@
 --
 -- LOCKING: brief ACCESS EXCLUSIVE lock on the tiny carrier_trunks table
 -- (Kamailio CARRIER_TRUST / X-Carrier-IP lookups and the FS termination
--- fetch read it; the lock is WAL-replayed on every replica). lock_timeout
--- makes it fail fast; if it times out, just re-run it.
+-- fetch read it — East reads the primary — and the lock is WAL-replayed on
+-- every replica). lock_timeout = 1s makes it fail fast instead of queueing
+-- those reads; apply at low traffic, check pg_stat_activity for
+-- idle-in-transaction sessions first (see 63), and on a lock timeout just
+-- re-run it (one transaction, idempotent).
 --
 -- ORDER: apply BEFORE the API build (it SELECTs tier1 on every carrier-trunk
 -- route) and before the media-VM pull. If the Lua runs first it retries the
@@ -38,7 +41,7 @@
 
 BEGIN;
 
-SET LOCAL lock_timeout = '5s';
+SET LOCAL lock_timeout = '1s';
 
 DO $$
 BEGIN
