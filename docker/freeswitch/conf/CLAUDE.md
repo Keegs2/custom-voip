@@ -21,7 +21,7 @@ Every configurable value follows the same pattern -- set a default, then overrid
 - `external_rtp_ip`, `external_sip_ip` -- Public IP for SDP and SIP headers. Default `auto-nat`, overridden by `EXTERNAL_RTP_IP`/`EXTERNAL_SIP_IP` env vars. Auto-nat fails in Docker (resolves to container IP).
 - `homer_ip` -- Homer HEP capture endpoint. From `HOMER_IP` env var.
 - `sbc_proxy_ip` -- The zone's internal **signaling ILB VIP**, which always leads to the ACTIVE SBC (East 10.142.0.250 / West 10.138.0.250 / Central 10.128.0.250 since the 2026-08-27 active/standby cutover; before that, SBC-1's direct IP). From `SBC_PROXY_IP` env var (freeswitch.xml:75).
-- `sbc_proxy_ip_failover` -- SBC-1's **direct** VPC IP, the ILB-bypass fallback for the outbound attempt loops (freeswitch.xml:76). These are the inbound_router.lua table-driven loop (up to 4 `carrier_trunks` trunks × {sbc_proxy_ip, sbc_proxy_ip_failover} = 8 attempts, or the 4-attempt legacy loop on a DB/lib failure) and the trunk/API 8YY loop. From `SBC_PROXY_IP_FAILOVER` env var; falls back to `SBC_PROXY_IP` if unset.
+- `sbc_proxy_ip_failover` -- SBC-1's **direct** VPC IP, the ILB-bypass fallback for the outbound attempt loops (freeswitch.xml:76). These are the inbound_router.lua table-driven loop (every eligible `carrier_trunks` trunk × {sbc_proxy_ip, sbc_proxy_ip_failover}, no cap since 2026-10-30, `verizon` rows sbc_proxy_ip only; or the 4-attempt legacy loop on a DB/lib failure) and the trunk/API 8YY loop. From `SBC_PROXY_IP_FAILOVER` env var; falls back to `SBC_PROXY_IP` if unset.
 
 **SIP Ports:**
 - `internal_sip_port=5080` -- Receives from Kamailio

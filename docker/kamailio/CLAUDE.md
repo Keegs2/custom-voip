@@ -1246,7 +1246,7 @@ on (`t_reply.c:1977` → `2058` → `msg_translator.c:2446-2458`
 
 **FreeSWITCH side.** `inbound_router.lua` / `trunk_outbound.lua` /
 `api_outbound.lua` call `stir_outcome_reset()` before and `stir_outcome_capture()`
-after EVERY bridge attempt (every attempt of the RCF failover loop included — up to 8 table-driven, 4 legacy). The reset
+after EVERY bridge attempt (every attempt of the RCF failover loop included — every eligible trunk table-driven, 4 legacy). The reset
 clears only the RAW `sip_rh_`/`sip_ph_` capture slots, so a header left over from
 attempt N can never be read as N+1's; the CDR variable `stir_outcome` **retains the
 last non-empty outcome** and is overwritten only when a newer non-empty one is

@@ -97,7 +97,7 @@ drill records them. DB restore is proven in a real recovery.
 | Both FS in a zone down | `/healthz` → 503 on both SBCs; SIP OPTIONS from external sources → 503 (`FS_AWARE_OPTIONS`) | Auto | Zone drains at its NLB; carriers retry the remaining zone VIPs. There is no DNS layer today (§3.5) |
 | Entire zone dark | NLB all-backends-unhealthy + GCM VIP uptime CRITICAL | Auto + page | Carrier-side distribution to remaining zone VIPs; also achievable deliberately via the maintenance plane (§4.6) |
 | Carrier PoP failure | Table-driven legs: the negative reply goes back to FS (Kamailio sets flags 8+9 on a validated `X-Carrier-IP`). Legacy `X-Carrier` legs: Kamailio 5xx/408/480/404 in-trunk flip (flag 8) → TC4 cross-trunk (flag 9) | Auto | FS dials the next trunk/SBC attempt down the zone priority list (§5.5); legacy legs retry the alternate Bandwidth PoP |
-| SBC unreachable from FS | TCP pre-check ≤1 s (1 s connect timeout, cached 30 s up / 10 s down) | Auto | Attempt loop (up to 4 trunks × {signaling VIP, SBC-1 direct} = 8 attempts; legacy fallback = 4 attempts, §5.3). The pre-check is the ILB-bypass detector: an active-SBC death is still the ~10–12 s NLB/ILB flip |
+| SBC unreachable from FS | TCP pre-check ≤1 s (1 s connect timeout, cached 30 s up / 10 s down) | Auto | Attempt loop (every eligible trunk, no cap since 2026-10-30, × {signaling VIP, SBC-1 direct}; Verizon rows the VIP only; legacy fallback = 4 attempts, §5.3). The pre-check is the ILB-bypass detector: an active-SBC death is still the ~10–12 s NLB/ILB flip |
 | Redis dies (media VM) | FS reconnect | Auto | Trunk/API caches fall through to PG; RCF path unaffected (already DB-only) |
 | Zone PG replica dies | postgres-exporter / replication guard | Manual repoint | Zone DID lookups fail → zone effectively drains; repoint `DB_HOST` per DB failover runbook |
 | PG primary dies | replication guard + GCM | Manual promote (`docs/runbooks/DB_FAILOVER_RUNBOOK.md`) | Active calls unaffected; provisioning + CDR ingest 503 until promotion (east-db-standby is the HA target) |
@@ -690,9 +690,10 @@ Never use `-nonat`; never remove `local-network-acl=loopback.auto` (root
 6. Off-net: the table-driven termination attempt list (§5.5) is bridged as
    `sofia/external/dest@SBC_PROXY_IP:5060` with
    `X-Carrier-IP`/`X-Carrier-Label`.
-   - **Size:** up to 4 trunks (cap applied after the traffic-class filter)
-     × {`SBC_PROXY_IP` signaling VIP, `SBC_PROXY_IP_FAILOVER` SBC-1 direct},
-     so **up to 8 attempts** (`TERM_TRUNKS_MAX = 4`, `inbound_router.lua:466`).
+   - **Size:** every trunk that passes the traffic-class filter (no attempt
+     cap since 2026-10-30; the only bound is the 16-row cache, `M.CACHE_MAX`)
+     × {`SBC_PROXY_IP` signaling VIP, `SBC_PROXY_IP_FAILOVER` SBC-1 direct};
+     `verizon` rows get the signaling-VIP attempt only (`lib/term_trunks.lua`).
    - **Pre-check:** each attempt is guarded by a 1 s TCP pre-check of the SBC
      target, cached 30 s up / 10 s down. A skipped attempt launches no B-leg.
    - **Fallback:** if the DB errors, there are zero usable rows, or
@@ -1331,8 +1332,8 @@ revision, which still described active/active SBCs, single-zone East, and
 2026-09-04. Changes:
 - Carriers: Sinch is the 8YY and backup-LD termination carrier.
 - §3.5 DNS: today vs PLANNED Infoblox DTC.
-- Attempt loop: up to 8 table-driven attempts, with a 4-attempt legacy
-  fallback.
+- Attempt loop: every eligible trunk × 2 SBCs (no cap since 2026-10-30), with a
+  4-attempt legacy fallback.
 - §1.4: drills noted as unlogged.
 - New §5.9 (voicemail).
 - §8.3: migrations 47–57.
