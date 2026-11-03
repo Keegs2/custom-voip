@@ -1,11 +1,14 @@
-# Maintenance 2026-11-03 — Verizon platform (dark) + CRAG Admin redesign (#168 #169 #170 #171 #172)
+# Maintenance 2026-11-03 — Verizon platform (dark) + CRAG Admin redesign + indexed SIP number search (#168 #169 #170 #171 #172 #174)
 
 One low-traffic window (ET overnight). The owner runs every command by hand. Structure follows
 `docs/runbooks/MAINTENANCE_2026-09-23.md` and `MAINTENANCE_2026-10_ALL_OPEN_PRS.md`.
 
-**Target: `RCF-V1` = `b329831` (`b3298319637eda55fab34696bbd7e2222e2362e9`), the #172 merge commit. Every VM ends on exactly this commit.**
-CI passed on `b329831` [V]. It is `caeb2ff` (#168, #169, #170 with #171) plus #172 head `43c8c89`. Apart from
-#168/#169 docs and `infra/vz-ipsec/`, its tree equals `43c8c89`'s [V].
+> **GATE — set `TARGET_SHA` first.** After #174 merges, run `git -C ~/custom-voip fetch -q origin && git -C ~/custom-voip log --oneline -3 origin/RCF-V1` and confirm the top line is the #174 merge (`Merge pull request #174 …`); then `git -C ~/custom-voip rev-parse origin/RCF-V1` is the full 40-character **`TARGET_SHA`**. Replace every `<TARGET_SHA>` below with it (full SHA in every `merge --ff-only` / `test … =` line; the first 7 characters where a line says "Expect `<TARGET_SHA>`"). Do not start without it.
+
+**Target: `RCF-V1` = `<TARGET_SHA>`, the #174 merge commit. Every VM ends on exactly this commit.**
+It is `b329831` (the #172 merge: `caeb2ff` = #168, #169, #170 with #171, plus #172 head `43c8c89`; CI passed on it [V])
+plus #174. #174 changes only the services VM (API, ClickHouse number index, docs/tests); it touches no SBC,
+media or compose file [V, `git diff --name-only b329831..` of the #174 branch].
 
 Prepared 2026-11-03 read-only.
 Labels: **[V]** = checked in git, a PR body or a local run. **[I]** = inferred and not run against
@@ -17,11 +20,13 @@ production.
 | #169 | `infra/vz-ipsec/` gateway on-box stack | nothing in this window. It is installed later on the 6 `*-vz-gw-*` VMs, when Verizon sends the PSK and peer IPs |
 | #170 (+ #171) | SBC Verizon mode (dark); the 422 retry fix; peer hand-off reply fix; uncapped carrier hunt; migration 62; Homer aliases; `vz_gateway` scrape job; `vz_ipsec` vmalert rules | DB, services (`api`, `heplify-server`, `vmalert`), all 6 SBCs (`kamailio`, `carrier-monitor`), all 6 media VMs (`git pull`, vmagent HUP) |
 | #172 | Admin redesign API (C1–C7); premium (Tier 1) routing; trunk CPS fix; Kamailio header spoof-strip; Equinox `enterprise`→`standard` mapping; migrations 63/64/65 | DB, services (`api`, `cdr-exporter`), all 6 SBCs, all 6 media VMs |
+| #174 | Indexed SIP number search: ClickHouse number index (MV on qryn's `samples_v3`) + backfill; API index path, 24 h scan cap, `GET /v1/homer/search/capabilities`; `materialized_views_ignore_errors=1` in `clickhouse-users.xml` | services only: the API (Phase 2, falls back while the index is absent) and ClickHouse (Phase 2b). Nothing on SBCs or media VMs beyond the pull |
 
 **Pre-window gates (workstation)**
 - #172 is merged (`b329831`), and CI is green on it [V, 2026-11-03].
-- Confirm that `RCF-V1` has not moved: `git -C ~/custom-voip fetch -q origin && git -C ~/custom-voip rev-parse origin/RCF-V1` → `b3298319…`.
-  - If it moved, still deploy `b329831`: the pull lines below fast-forward to that exact SHA.
+- **#174 is merged, CI is green on its merge commit, and `TARGET_SHA` is set** (the GATE above).
+- Confirm that `RCF-V1` has not moved past it: `git -C ~/custom-voip fetch -q origin && git -C ~/custom-voip rev-parse origin/RCF-V1` → `TARGET_SHA`.
+  - If it moved, still deploy `TARGET_SHA`: the pull lines below fast-forward to that exact SHA.
   - Tell the owner what landed after it.
 - TED production shows CRAG Admin › Inventory › **Subscribers** in its "Needs the CRAG update" state.
   TED's CRAG Admin redesign (grteng/ted-next #1475) is in production: the 2026-11-03 17:04Z
@@ -37,7 +42,7 @@ production.
   - #170's body does not require either one before the code. Both monitor or import the gateways,
     which carry no traffic [V, PR body]. Do them on another day.
 - **FreeSWITCH is not restarted.** `docker-compose.media.yml`, the FS Dockerfile and the FS XML conf
-  are unchanged from `29fd90f` to `b329831`; the only change under `conf/` is `CLAUDE.md` [V].
+  are unchanged from `29fd90f` to `b329831`, and #174 changes none of them; the only change under `conf/` is `CLAUDE.md` [V].
 - **The UI rebuild is optional.** It contains type changes and `index.html` only.
 
 **Expected customer impact**
@@ -48,11 +53,14 @@ production.
   new API runs, the old API sends `standard`, which 63's CHECK refuses.
 - Expect and acknowledge "CRAG · SBC failover state — {zone} primary UNHEALTHY (zone on standby)",
   once per zone.
+- **Homer number search, Phase 2 → end of 2b:** the new API has no index yet, so a number search wider
+  than 24 h answers 422 `window_too_wide` (TED slices ≤ 24 h). After 2b, any window up to 7 days uses the
+  index. **No SIP capture pause:** ClickHouse is never restarted.
 
 **Conventions** (CLAUDE.md "Deployment Model")
-- **Pinned pull.** CLAUDE.md's `sudo git pull` is written here as `sudo git fetch -q origin && sudo git merge --ff-only b3298319…`.
+- **Pinned pull.** CLAUDE.md's `sudo git pull` is written here as `sudo git fetch -q origin && sudo git merge --ff-only <TARGET_SHA>`.
   - Like a pull, it moves the VM's `RCF-V1` branch forward.
-  - Unlike a pull, it stops at exactly `b329831` even if `RCF-V1` moves later.
+  - Unlike a pull, it stops at exactly `<TARGET_SHA>` even if `RCF-V1` moves later.
   - The `test "$(sudo git rev-parse HEAD)" = …` that follows fails the line if HEAD is anything else.
 - Every command is one line, uses `sudo`, and runs on the host named in **bold**.
 - Commands are hostname-guarded: if the guard does not match, nothing runs and nothing prints.
@@ -78,10 +86,11 @@ another zone is quieter).
 | 0 Prechecks (read-only; start about 60 min before the window) | 40 min |
 | 1 Migrations 62→65 (including the API pre-build) | 15 min |
 | 2 Services API | 10 min |
+| 2b Services ClickHouse number index (#174) | 25 min (backfill under 10 min) |
 | 3 SBCs (3 zones × about 30 min) | 90 min |
 | 4 Media VMs + services sidecars | 35 min |
 | 5 Post-checks | 30 min |
-| **Total** | **about 3 h 40 min; book 4 h 30 min with buffer** |
+| **Total** | **about 4 h 05 min; book 5 h with buffer** |
 
 **Window record** (fill in as you go)
 
@@ -90,6 +99,7 @@ another zone is quieter).
 | 0 | | | |
 | 1 | | | |
 | 2 | | | |
+| 2b | | | |
 | 3 West / Central / East | | | |
 | 4 | | | |
 | 5 | | | |
@@ -108,10 +118,10 @@ On each host, replace `<HOST>`:
    - **Record the SHA as that VM's `PRE_SHA`.** It is the rollback target.
 2. **<HOST>** `hostname | grep -q '^<HOST>$' && sudo grep -c '^VERIZON_' /opt/revup/.env`
    - Expect `0` on all 13 VMs.
-3. **<HOST>** `hostname | grep -q '^<HOST>$' && sudo git -C /opt/revup fetch -q origin && sudo git -C /opt/revup log --oneline -1 origin/RCF-V1 && sudo git -C /opt/revup rev-list --count HEAD..b329831`
-   - Expect `b329831` (`origin/RCF-V1` may be ahead if someone merged since; we still deploy `b329831`). A fetch changes no files.
+3. **<HOST>** `hostname | grep -q '^<HOST>$' && sudo git -C /opt/revup fetch -q origin && sudo git -C /opt/revup log --oneline -1 origin/RCF-V1 && sudo git -C /opt/revup rev-list --count HEAD..<TARGET_SHA>`
+   - Expect `<TARGET_SHA>` (`origin/RCF-V1` may be ahead if someone merged since; we still deploy `<TARGET_SHA>`). A fetch changes no files.
 4. **Media VMs only** (6). Confirm no FreeSWITCH service definition change:
-   `hostname | grep -q '^<HOST>$' && sudo git -C /opt/revup diff --stat HEAD b329831 -- docker-compose.media.yml docker/freeswitch/Dockerfile docker/freeswitch/patches`
+   `hostname | grep -q '^<HOST>$' && sudo git -C /opt/revup diff --stat HEAD <TARGET_SHA> -- docker-compose.media.yml docker/freeswitch/Dockerfile docker/freeswitch/patches`
    - Expect **empty output**. That is true from `29fd90f` [V].
    - If this VM's `PRE_SHA` is older and the output is not empty, **stop**. That FS needs a planned
      recreate (Gotcha 14), which is not in this runbook.
@@ -146,7 +156,7 @@ also ships every change between `PRE_SHA` and `29fd90f`. Read
 
 ### 0.3 Services VM: database baseline
 
-1. **services** `hostname | grep -q '^services$' && sudo git -C /opt/revup show b329831:scripts/db/check_migrations.sql | sudo -u postgres psql -d voip -f -`
+1. **services** `hostname | grep -q '^services$' && sudo git -C /opt/revup show <TARGET_SHA>:scripts/db/check_migrations.sql | sudo -u postgres psql -d voip -f -`
    - This is the new 22..65 checker, read from the fetched commit; the working tree is not touched.
    - Expect every row up to `61_ivr_assist` `applied`, and `62_verizon_trunks`, `63_admin_redesign`,
      `64_carrier_tier1` and `65_cdr_premium_fallback` `*** MISSING ***`.
@@ -205,8 +215,8 @@ NLB flip compounds call-setup loss.
 
 **Steps:**
 
-1. **services** `hostname | grep -q '^services$' && cd /opt/revup && sudo git fetch -q origin && sudo git merge --ff-only b3298319637eda55fab34696bbd7e2222e2362e9 && test "$(sudo git rev-parse HEAD)" = b3298319637eda55fab34696bbd7e2222e2362e9 && git log --oneline -1`
-   - Expect `b329831 Merge pull request #172 …`. A non-fast-forward or a HEAD mismatch prints an error and stops.
+1. **services** `hostname | grep -q '^services$' && cd /opt/revup && sudo git fetch -q origin && sudo git merge --ff-only <TARGET_SHA> && test "$(sudo git rev-parse HEAD)" = <TARGET_SHA> && git log --oneline -1`
+   - Expect `<TARGET_SHA> Merge pull request #174 …`. A non-fast-forward or a HEAD mismatch prints an error and stops.
    - Code only: running containers are unchanged. heplify, vmalert and the API read their new files
      only on restart.
 2. **Pre-build the API image now**, so the 63→API gap is seconds:
@@ -317,14 +327,67 @@ NLB flip compounds call-setup loss.
   - Then recreate `cdr-exporter` as in 2.4.
 - The old API creates customers as `standard`, which 63's CHECK refuses. Either restore 63 (the
   Phase 1 rollback command), or keep customer creates frozen until you roll forward again.
-- Return to the target with `sudo git checkout RCF-V1 && test "$(sudo git rev-parse HEAD)" = b3298319637eda55fab34696bbd7e2222e2362e9`, plus the same
+- Return to the target with `sudo git checkout RCF-V1 && test "$(sudo git rev-parse HEAD)" = <TARGET_SHA>`, plus the same
   rebuild.
+
+---
+
+## 2b. Services VM: ClickHouse number index (#174) — after Phase 2, before ANY Phase 3 work (`services`)
+
+**Phase 2b completes before Phase 3 starts. Never run any of it during SBC flips.** The API from Phase 2
+already contains #174 and falls back (≤ 24 h scan, 422 above) while the index is absent. Details:
+`docker/homer/CLAUDE.md` → "Number index". All ClickHouse lines below are read-only unless marked.
+
+**Pre-checks — do not deploy 2b if any threshold is exceeded** (skip 2b, continue with Phase 3, and
+report the numbers):
+
+1. Gate: **services** `hostname | grep -q '^services$' && test "$(sudo git -C /opt/revup rev-parse HEAD)" = <TARGET_SHA> && test -f /opt/revup/docker/homer/clickhouse/10_sip_number_index.sql && echo GATE_OK`
+2. qryn insert block sizes and 24 h rate: **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() AS inserts_24h, round(count() / 86400, 2) AS per_s, max(written_rows) AS max_rows, quantile(0.99)(written_rows) AS p99_rows, formatReadableSize(max(written_bytes)) AS max_bytes, max(memory_usage) AS max_mem FROM system.query_log WHERE type = 'QueryFinish' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 1 DAY"`
+   - **Stop if** `max_rows` > 50000, `max_bytes` > 100 MB or `per_s` > 20. `written_rows` also counts
+     qryn's own `metrics_15s_mv` rows, so it overstates (safe).
+3. Peak inserts per minute: **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT max(c) AS peak_inserts_per_min, max(r) AS peak_rows_per_min FROM (SELECT toStartOfMinute(event_time) AS m, count() AS c, sum(written_rows) AS r FROM system.query_log WHERE type = 'QueryFinish' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 1 DAY GROUP BY m)"`
+   - **Stop if** `peak_inserts_per_min` > 1200.
+4. The log sees qryn's inserts (samples in the last hour): **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM qryn.samples_v3 WHERE timestamp_ns > toUnixTimestamp64Nano(now64(9)) - 3600000000000"`
+   - **If 2. shows `inserts_24h` ≈ 0 while this is > 0, qryn uses async inserts and the checks are
+     invalid: stop and ask.**
+5. Schema the MV relies on: **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT name, type FROM system.columns WHERE database = 'qryn' AND table = 'samples_v3' FORMAT PrettyCompact"`
+   - **Stop unless** it lists `timestamp_ns Int64` and `string String`.
+6. The header Call-ID the index stores equals qryn's `call_id` label: **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT countIf(JSONExtractString(ts.labels, 'call_id') = s.cid) AS same, count() AS total FROM (SELECT fingerprint, extract(substring(string, 1, 16384), '(?mi)^(?:call-id|i)[ \t]*:[ \t]*([^\r\n]*[^\r\n \t])') AS cid FROM qryn.samples_v3 WHERE timestamp_ns >= toUnixTimestamp64Nano(now64(9)) - 600000000000 AND cid != '' LIMIT 20000) AS s INNER JOIN (SELECT fingerprint, any(labels) AS labels FROM qryn.time_series WHERE fingerprint IN (SELECT fingerprint FROM qryn.samples_v3 WHERE timestamp_ns >= toUnixTimestamp64Nano(now64(9)) - 600000000000) GROUP BY fingerprint) AS ts USING fingerprint SETTINGS max_memory_usage = 1000000000, max_execution_time = 60"`
+   - **Stop unless** `same` = `total` (> 0).
+
+**Steps:**
+
+7. Users config is valid XML: **services** `hostname | grep -q '^services$' && python3 -c "import sys,xml.dom.minidom;xml.dom.minidom.parse(sys.argv[1])" /opt/revup/docker/homer/clickhouse-users.xml && echo XML_OK`
+8. **(writes)** Write it in place inside the container (the compose mount target is `/etc/clickhouse-server/users.d/custom-users.xml`; the pull gave the host file a new inode the container cannot see; ClickHouse hot-reloads it): **services** `hostname | grep -q '^services$' && sudo docker exec -i voip-clickhouse sh -c 'cat > /etc/clickhouse-server/users.d/custom-users.xml' < /opt/revup/docker/homer/clickhouse-users.xml && echo WRITTEN`
+9. Verify — expect `materialized_views_ignore_errors 1` and `max_memory_usage 4000000000`. **Do not go on to step 10 until it reads 1.** **services** `hostname | grep -q '^services$' && sleep 10 && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT name, value FROM system.settings WHERE name IN ('materialized_views_ignore_errors','max_memory_usage')"`
+   - **Never `docker restart voip-clickhouse` for this:** a restart pauses SIP capture 10–60 s and nothing buffers it (those traces are lost). If it does not read 1 after 30 s, stop 2b.
+10. **(writes)** Apply the DDL (coverage table → index table → MV; idempotent): **services** `hostname | grep -q '^services$' && sudo docker exec -i voip-clickhouse clickhouse-client --multiquery < /opt/revup/docker/homer/clickhouse/10_sip_number_index.sql && echo DDL_OK`
+11. Watch 2 minutes, then all three:
+    - Index filling (grows between runs): **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() AS rows, uniqExact(call_id) AS calls FROM qryn.sip_number_index"`
+    - qryn insert errors (must be 0): **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM system.query_log WHERE type = 'ExceptionWhileProcessing' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 15 MINUTE"`
+    - View duration (no `ExceptionWhileProcessing` row; `p99_ms` < 200): **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT status, count(), quantile(0.99)(view_duration_ms) AS p99_ms, formatReadableSize(max(peak_memory_usage)) AS peak FROM system.query_views_log WHERE view_name = 'qryn.sip_number_index_mv' AND event_time > now() - INTERVAL 15 MINUTE GROUP BY status"`
+    - **Any failure: rollback 2b.R now.**
+12. **(writes)** Backfill, newest day first (5e8 memory per hourly insert, 2 threads; resumable — re-run the same line after any failure; expect about 15–60 s per day, under 10 minutes for 8 days): **services** `hostname | grep -q '^services$' && sudo bash /opt/revup/scripts/homer/backfill_sip_number_index.sh`
+    - Expect `… filled in N s` per day and `backfill finished`. Re-run step 11's insert-errors line afterwards (0).
+13. Capabilities (wait 60 s for the API cache) — expect `"number_index": true` and `index_covered_from` at midnight UTC about 7 days back: **services** `hostname | grep -q '^services$' && sleep 60 && sudo docker exec voip-api python -c "import asyncio,httpx,json; from routers import homer as h; print(json.dumps(h._capabilities_body(asyncio.run(h._get_capability(httpx.AsyncClient(timeout=10))))))"`
+14. **TED check** (browser, TED production, NOC Troubleshooting): a **Last 7d** search for the RCF test DID `+16174544217` returns calls and says "Searched the number index".
+
+**Stop / abort (2b):** any pre-check threshold; the setting not reading 1; a DDL error; qryn insert
+errors > 0 or a view exception after step 10; backfill failing twice on the same day.
+
+**Rollback (2b.R) — DROP THE VIEW FIRST, ALONE:**
+1. **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "DROP VIEW IF EXISTS qryn.sip_number_index_mv"`
+2. Both must print 0 (view gone; qryn inserts not failing): **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM system.tables WHERE database = 'qryn' AND name = 'sip_number_index_mv'"` and **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --query "SELECT count() FROM system.query_log WHERE type = 'ExceptionWhileProcessing' AND query_kind = 'Insert' AND has(tables, 'qryn.samples_v3') AND event_time > now() - INTERVAL 5 MINUTE"`
+3. Only then: **services** `hostname | grep -q '^services$' && sudo docker exec voip-clickhouse clickhouse-client --multiquery --query "DROP TABLE IF EXISTS qryn.sip_number_index; DROP TABLE IF EXISTS qryn.sip_number_index_coverage"`
+- The API falls back to the 24 h scan within 60 s; no API change is needed. The users setting
+  (`materialized_views_ignore_errors=1`) can stay.
 
 ---
 
 ## 3. SBCs: zone by zone, standby first (West → Central → East)
 
-This is one image carrying #170, #171 and #172 together. **Never work on two zones at once.**
+This is one image carrying #170, #171 and #172 together. **Phase 2b must be finished (or skipped) first.**
+**Never work on two zones at once.**
 Carriers spread calls over all 3 VIPs, so the other two zones must be serving.
 
 **Why pull and rebuild are one line:**
@@ -335,7 +398,7 @@ Carriers spread calls over all 3 VIPs, so the other two zones must be serving.
   to pull unless `docker-compose.stir-key.yml` is in that list.
 
 **Per-SBC rebuild line** (`<SBC>` = the host):
-`hostname | grep -q '^<SBC>$' && cd /opt/revup && F=$(sudo docker inspect voip-kamailio --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' | sed 's/,/ -f /g') && echo "F=$F" && echo "$F" | grep -q 'docker-compose.stir-key.yml' && sudo git fetch -q origin && sudo git merge --ff-only b3298319637eda55fab34696bbd7e2222e2362e9 && test "$(sudo git rev-parse HEAD)" = b3298319637eda55fab34696bbd7e2222e2362e9 && sudo docker compose -f $F up -d --build kamailio || echo "STOPPED - read the output above"`
+`hostname | grep -q '^<SBC>$' && cd /opt/revup && F=$(sudo docker inspect voip-kamailio --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' | sed 's/,/ -f /g') && echo "F=$F" && echo "$F" | grep -q 'docker-compose.stir-key.yml' && sudo git fetch -q origin && sudo git merge --ff-only <TARGET_SHA> && test "$(sudo git rev-parse HEAD)" = <TARGET_SHA> && sudo docker compose -f $F up -d --build kamailio || echo "STOPPED - read the output above"`
 
 **Per-SBC gate block** (run each line after the rebuild):
 - G1 `sleep 20; sudo docker exec voip-kamailio kamailio -c -f /etc/kamailio/kamailio.cfg`
@@ -431,7 +494,7 @@ Carriers spread calls over all 3 VIPs, so the other two zones must be serving.
 3. Rebuilding a primary is one flip; do it drained (step 2) if it is still serving.
 4. If that zone's media VMs were already pulled (Phase 4), roll them back too. Their CPS-skip
    trusts `X-Trunk-ID` only because the new SBC strips received copies [V, #172 body].
-5. Return later with `sudo git checkout RCF-V1 && test "$(sudo git rev-parse HEAD)" = b3298319637eda55fab34696bbd7e2222e2362e9` in the same line as the
+5. Return later with `sudo git checkout RCF-V1 && test "$(sudo git rev-parse HEAD)" = <TARGET_SHA>` in the same line as the
    rebuild.
 
 ---
@@ -452,8 +515,8 @@ Order: `west-fs-2` → `west-fs` → `central-fs-2` → `central-fs` → `east-f
 **Per node** (`<FS>`):
 1. **<FS>** `hostname | grep -q '^<FS>$' && sudo docker exec voip-freeswitch sh -c '/usr/local/freeswitch/bin/fs_cli -p "$ESL_PASSWORD" -x "show calls count"'`
    - Record the count.
-2. **<FS>** `hostname | grep -q '^<FS>$' && cd /opt/revup && sudo git fetch -q origin && sudo git merge --ff-only b3298319637eda55fab34696bbd7e2222e2362e9 && test "$(sudo git rev-parse HEAD)" = b3298319637eda55fab34696bbd7e2222e2362e9 && git log --oneline -1`
-   - Expect `b329831`.
+2. **<FS>** `hostname | grep -q '^<FS>$' && cd /opt/revup && sudo git fetch -q origin && sudo git merge --ff-only <TARGET_SHA> && test "$(sudo git rev-parse HEAD)" = <TARGET_SHA> && git log --oneline -1`
+   - Expect `<TARGET_SHA>`.
 3. **<FS>** `hostname | grep -q '^<FS>$' && sudo docker kill -s HUP voip-vmagent && sleep 5 && curl -s http://127.0.0.1:8429/targets | grep -c vz_gateway`
    - Expect ≥ 1: this zone's 2 gateways, `up=0` until #169 is installed, which is harmless.
    - **If `0`:** `scrape-media.yml` is a single-file bind mount. `git pull` replaces the file, and a
@@ -562,6 +625,12 @@ matter [I], and #170 lists them under its services step):
 ## 6. Do NOT
 
 - **Run migrations during Phase 3 SBC flips** (or any SBC drain).
+- **Run any Phase 2b step during Phase 3** (SBC flips): 2b completes before Phase 3 starts.
+- **Drop `qryn.sip_number_index` while `qryn.sip_number_index_mv` exists.** Every qryn insert then
+  fails (Code 60) and SIP capture stops; `materialized_views_ignore_errors` does not cover it. Drop the
+  view first, alone, and verify (2b.R).
+- **Restart ClickHouse (`voip-clickhouse`) for the users setting.** Write the file in place (2b.8);
+  a restart pauses SIP capture 10–60 s with no buffer.
 - **`git pull` an SBC without rebuilding in the same line.** Use the Phase 3 rebuild line only.
 - **Use `-f docker-compose.sbc.yml` alone** on a Kamailio recreate. This includes #171's original
   deploy command and the 2026-10 record's §2.3 form; both drop the STIR key (Gotcha 15).
@@ -584,6 +653,7 @@ matter [I], and #170 lists them under its services step):
 |---|---|---|---|
 | Migrations 62 / 64 / 65 | none | 0 | **yes**: additive and ignored by old code |
 | Migration 63 + `traffic_grade` | the Phase 1 restore line (old CHECK, saved values, default `standard`) | 1 min | yes, unless the API is rolled back |
+| Number index (#174) | 2b.R: `DROP VIEW` alone + verify, then the two tables. The API falls back within 60 s; the users setting can stay | 2 min | **yes** if healthy; the API also works with no index |
 | API (+ cdr-exporter) | 2.R: `git checkout <PRE_SHA>`, then `up -d --build --no-deps api`, then recreate `cdr-exporter` | about 5 min | n/a |
 | An SBC | 3.R: `git checkout <PRE_SHA>`, then the Gotcha 15 rebuild and G1–G3. A primary rebuild is one flip | about 5–8 min per SBC | n/a |
 | FS Lua / vmagent | the Phase 4 rollback line, per node | seconds | n/a |
