@@ -1,0 +1,11 @@
+{
+  "environments": {
+    "ui": {
+      "folder": "docker/ui/app",
+      "command": "if [ ! -x node_modules/.bin/vite ]; then echo 'docker/ui/app/node_modules is missing. Run: tedos lock run heavy --wait -- npm ci (in docker/ui/app), then tedos dev up ui again.'; exit 1; fi; echo \"API proxy: /api/ -> ${VITE_API_PROXY_TARGET:-http://localhost:8000} (set VITE_API_PROXY_TARGET in your shell to change it)\"; exec node_modules/.bin/vite --host 127.0.0.1 --port \"$WEB_PORT\" --strictPort",
+      "ports": ["WEB_PORT"],
+      "url": "http://127.0.0.1:${WEB_PORT}/",
+      "readySeconds": 90
+    }
+  }
+}

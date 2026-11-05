@@ -256,6 +256,25 @@ CI executes PR code, including model-written code from the CRAG Ops agent, so it
 - A new test must run in CI, not skip. If it needs a new tool, install it in the workflow.
 - `npm run lint` is not in CI yet: it fails on existing code (19 errors as of 2026-10-21).
 
+## Working through TED OS
+
+This repository is a TED OS Project (`custom-voip`), so several agents may work on it at once. Read **Where things stand** at session start; the `tedos` skill covers the commands. The Owner's Standing rules there outrank this file on what needs the Owner.
+
+- **Branches:** one worktree per piece of work, branched from `origin/RCF-V1` (`git worktree add -b <branch> .claude/worktrees/<name> origin/RCF-V1`). Declare it first with `tedos intent "<what>" --path <paths>`. Never rewrite files in the main checkout: it holds the Owner's untracked work.
+- **Checks under Locks:** `tedos lock run heavy --wait -- npm run build` (in `docker/ui/app`, after `npm ci` under the same Lock), and `tedos lock run test-run --wait -- env TEST_PG_BIN=/opt/homebrew/opt/postgresql@16/bin python3 -m pytest tests -q -rs`. The Lua harnesses run under `test-run` too. The Mac's `lua` is 5.5, while CI and production are 5.3.
+- **Dev environment:** `tedos dev up ui` runs Vite for `docker/ui/app` on a port TED OS assigns (`.tedos/dev.json`). It proxies `/api/` to `$VITE_API_PROXY_TARGET` (default `http://localhost:8000`, a bare uvicorn). Stop it with `tedos dev down ui`. Don't start the docker-compose `ui` service on the Mac: it binds 8080, which is the TED OS Core's port.
+- **Pipeline:**
+  1. PR against `RCF-V1`. Its body has a **Deploy** section: VMs, containers, migrations, rollback.
+  2. CI goes green.
+  3. The Owner merges with a merge commit.
+  4. An agent adds it to the next window's runbook, `docs/runbooks/MAINTENANCE_<date>.md`, as a docs PR pinned to a target SHA.
+  5. The Owner runs the window on the VMs, one single-line command at a time.
+  6. The Owner makes real test calls (see [Testing](#testing)).
+
+  **Merged is not deployed.** There is no staging. The Project notes say what is merged but still waiting on a window.
+- **Deployments session: off** for this Project. TED OS's staging-then-promote flow doesn't fit hand-run maintenance windows, so agents don't use `tedos deploy request` here.
+- **Codex sessions** read `AGENTS.md`, which points here.
+
 ## Multi-VM SIP Architecture — Hard-Won Lessons
 
 These lessons were learned through production debugging (2026-04-29/30). They are **critical** for any agent modifying SIP routing, Kamailio config, FreeSWITCH config, or GCP infrastructure.
