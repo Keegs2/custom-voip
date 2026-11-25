@@ -111,6 +111,10 @@ services:
       - TED_IVR_ASSIST_TOKEN=${TED_IVR_ASSIST_TOKEN:-}
       - IVR_ASSIST_DAILY_PER_CUSTOMER=${IVR_ASSIST_DAILY_PER_CUSTOMER:-40}
       - IVR_ASSIST_TED_TIMEOUT_SECONDS=${IVR_ASSIST_TED_TIMEOUT_SECONDS:-60}
+      # GET /v1/metrics/calls-active (docs/CALLS_ACTIVE_API.md) reads the
+      # victoriametrics service below by name on services-network (read-only
+      # Prometheus query API, the address Grafana and vmalert already use).
+      - VICTORIAMETRICS_URL=${VICTORIAMETRICS_URL:-http://victoriametrics:8428}
     # Plaintext voicemail audio is RAM-only (build plan D8 / §3.2): anything
     # that does spool to /tmp stays in RAM, and the API never core-dumps
     # decrypted audio to disk.
