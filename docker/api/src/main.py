@@ -22,6 +22,7 @@ from routers import (
     onboarding, freeswitch, carrier_status, live_trunk_stats,
     stir, billing, carrier_trunks, reports, voicemail, ivr, ivr_assist,
 )
+from routers import metrics as fleet_metrics
 from middleware.auth import JWTAuthMiddleware
 from services.ivr.assist import jobs as ivr_assist_jobs
 from services.voicemail import retention as voicemail_retention
@@ -209,6 +210,11 @@ app.include_router(ivr.router, prefix="/ivr", tags=["IVR"])
 app.include_router(ivr_assist.router, prefix="/v1/ivr", tags=["IVR"])
 app.include_router(ivr_assist.router, prefix="/ivr", tags=["IVR"])
 app.add_exception_handler(ivr.IvrApiError, ivr.ivr_error_handler)
+
+# Fleet metrics read from VictoriaMetrics (docs/CALLS_ACTIVE_API.md): admin
+# only, read-only. GET .../calls-active = fleet-wide connected calls over time.
+app.include_router(fleet_metrics.router, prefix="/v1/metrics", tags=["Metrics"])
+app.include_router(fleet_metrics.router, prefix="/metrics", tags=["Metrics"])
 
 # FreeSWITCH mod_xml_curl gateway. Mounted at /freeswitch (auth-exempt in
 # middleware). Always returns HTTP 200 + the FreeSWITCH "not found" XML so

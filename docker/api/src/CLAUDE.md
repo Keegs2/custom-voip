@@ -43,6 +43,7 @@ src/
     tiers.py                 # CPS tier CRUD (admin)
     sipp.py                  # SIPp load-test presets + run (admin; runner not yet deployed)
     sbc.py                   # Per-SBC call distribution stats from cdrs.sbc_id (admin)
+    metrics.py               # Fleet metrics read from VictoriaMetrics: GET /calls-active, connected calls over time (admin; contract docs/CALLS_ACTIVE_API.md)
     homer.py                 # SIP trace search via qryn/ClickHouse (Homer 10) (admin)
     homer_correlation.py     # Pure A/B leg correlation helpers (X-CID parse, windows, ClickHouse SQL, groups)
     homer_index.py           # Pure number-index helpers (lookup SQL w/ query params, coverage, limit errors)
@@ -493,6 +494,15 @@ Admin-only SIPp load-test control. `GET /presets` lists scenarios; `POST /run` t
 
 ### sbc.py
 Admin-only `GET /stats`: per-SBC call distribution over the last N minutes, aggregated from `cdrs.sbc_id` (the column added in `18_sbc_id_column.sql`). Used to monitor SBC failover/load-balancing health.
+
+### metrics.py
+Admin-only `GET /calls-active` (mounted at `/v1/metrics` and `/metrics`; contract `docs/CALLS_ACTIVE_API.md`): the fleet-wide number of connected calls at each `step_seconds` mark of the last `hours` hours, plus the latest value. Reads VictoriaMetrics (`VICTORIAMETRICS_URL`, default `http://victoriametrics:8428` on `services-network`) over the Prometheus query API with ONE constant PromQL text (`CALLS_BY_NODE_QUERY`); the caller's two integers only set `start` / `end` / `step`. The query returns one series per FreeSWITCH node and the router adds them up, so every point also says how many nodes it is made of (`nodes`).
+
+- **Per node:** the newest `freeswitch_calls_active` reading at the mark, at most 60 s old (`FRESH_S`, written into the query as `last_over_time(...[60s])`, so a failed scrape's staleness marker does not drop the node and VictoriaMetrics' own lookback rules do not matter), reduced `max by (freeswitch_node, zone)` (a node scraped twice counts once), and kept only if `freeswitch_esl_scrape_ok` was 1 at least once in those 60 s. That last rule matters because the exporter repeats its last-good count while FreeSWITCH does not answer; the NOC live panel (`sum(freeswitch_calls_active)`) does not apply it.
+- **Snapshot, not average or peak.** The fleet peak has its own recorded series (`fleet:freeswitch_calls_active_peak:sum`).
+- **Time grid:** `end` = newest multiple of the step at least 30 s old (`SETTLE_S`), `start` = first multiple at or after `end - hours`; both ends are points. A mark with no node → `calls: null, nodes: 0`.
+- **Failure:** the two upstream reads (range + "now") share one 5 s limit (`UPSTREAM_TIMEOUT_S`). Unreachable, timeout, non-200, non-JSON, wrong shape, a sample off the grid, a non-finite or negative value → 503 `{detail, code: "metrics_unavailable"}`. Never a 500, never an empty series in its place.
+- Tests swap `_client` (an `httpx.MockTransport`) and `_now`.
 
 ### homer.py
 Admin-only SIP trace search for Homer 10. Queries qryn (Loki-compatible API over ClickHouse) — there is no Homer 7 JWT flow. `GET /aliases` returns a static IP-to-name map for ladder diagrams. `POST /search` runs a phone-number search (qryn) and A/B-leg correlation (`_correlate_legs`; pure helpers in `homer_correlation.py`): (a) X-CID harvested from fetched INVITEs, (b) a ClickHouse `samples_v3` X-CID scan bounded to each A call's setup window + fingerprint -> call_id via `time_series`, (c) the `cdrs` B rows (failure-isolated, 3 s). heplify's `call_id` label is each packet's OWN Call-ID — there is no A-leg label. Leg fetches go to ClickHouse directly via `IN (...)` (qryn's RE2 engine 500s on large Call-ID alternations), chunked + paginated. Additive response fields: `legs` (`{callid: {role, a_callid, attempt}}`), `correlation_status` (`ok`/`partial`/`degraded`), `correlation_reason`; `correlation_truncated` is deprecated. Correlation never fails a search. `GET /pcap?correlated=true` uses the same engine (`X-Pcap-Correlation` header). Tests: `tests/test_homer_leg_correlation.py` (+ shared ClickHouse fake `tests/homer_ch_fake.py`).

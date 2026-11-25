@@ -200,6 +200,10 @@ services:
       - TED_IVR_ASSIST_TOKEN=${TED_IVR_ASSIST_TOKEN:-}
       - IVR_ASSIST_DAILY_PER_CUSTOMER=${IVR_ASSIST_DAILY_PER_CUSTOMER:-40}
       - IVR_ASSIST_TED_TIMEOUT_SECONDS=${IVR_ASSIST_TED_TIMEOUT_SECONDS:-60}
+      # GET /v1/metrics/calls-active (docs/CALLS_ACTIVE_API.md). This dev stack
+      # has no VictoriaMetrics, so the endpoint answers 503 metrics_unavailable
+      # unless you point this at one.
+      - VICTORIAMETRICS_URL=${VICTORIAMETRICS_URL:-http://victoriametrics:8428}
     ports:
       - "${API_PORT:-8088}:8000"
     networks:

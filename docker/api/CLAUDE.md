@@ -101,6 +101,7 @@ CMD: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --ht
 | `TED_IVR_ASSIST_TOKEN` | _(unset)_ | The dedicated assist Trigger token CRAG sends as `X-TED-Trigger-Token` (a secret, `.env` only — never logged, never in an error or response). Printable ASCII without spaces, else treated as unset |
 | `IVR_ASSIST_DAILY_PER_CUSTOMER` | `40` | Assistant jobs per customer per UTC day (clamped 1-100000) → 429 `assist_daily_limit` |
 | `IVR_ASSIST_TED_TIMEOUT_SECONDS` | `60` | HTTP timeout per TED call, clamped 5-90 s (3 calls — propose + 2 repairs — must fit the 300 s staleness window) |
+| `VICTORIAMETRICS_URL` | `http://victoriametrics:8428` | Metrics store read by `GET /v1/metrics/calls-active` (`routers/metrics.py`, read live). The default is the `victoriametrics` service on `services-network`, the address Grafana and vmalert use. Read-only Prometheus query API, no secret. Unreachable / slower than 5 s / unusable answer => that endpoint 503 `metrics_unavailable` (nothing else is affected) |
 
 Visual IVR prompt playback tokens reuse `VOICEMAIL_PLAYBACK_SECRET` (kind `ivr_prompt`; unset => prompt playback 503). The TTS render cache and the preview rate limiter use Redis when it answers and degrade to in-process state when it doesn't.
 
@@ -470,6 +471,12 @@ SIPp load-test control. The runner service is not yet deployed — `POST /run` r
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/sbc/stats` | Per-SBC call distribution over last N minutes (reads `cdrs.sbc_id`) |
+
+### Metrics (Admin only)
+Fleet figures read from VictoriaMetrics. Contract: `docs/CALLS_ACTIVE_API.md` (TED charts this beside MetaSwitch).
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/v1/metrics/calls-active` | `?hours=` (1-168, default 24) `&step_seconds=` (60-3600, default 300) → `{step_seconds, start, end, points: [{t, calls, nodes}], current: {t, calls, nodes} \| null}`. Fleet-wide connected calls at each step mark (`t` = exact multiples of the step since the Unix epoch, UTC, ending at the newest mark at least 30 s old). No reading at a mark → `calls: null`, never 0. Metrics store down / slow / garbage → 503 `{detail, code: "metrics_unavailable"}` |
 
 ### Homer (Admin only)
 SIP trace search via qryn (Loki-compatible API over ClickHouse). Homer 10 — no JWT flow to Homer itself; these endpoints require platform admin auth.

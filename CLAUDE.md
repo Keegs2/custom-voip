@@ -545,6 +545,7 @@ Voicemail on media VMs needs no env var. It needs the ingest header file `/opt/r
 | `TED_IVR_ASSIST_TOKEN` | (secret) | Dedicated token for TED's Flow assistant Trigger; `.env` only, entered with `read -rsp`, never logged |
 | `IVR_ASSIST_DAILY_PER_CUSTOMER` | `40` (default) | Flow assistant jobs per customer per UTC day |
 | `IVR_ASSIST_TED_TIMEOUT_SECONDS` | `60` (default) | Per TED call (clamped 5–90); TED itself answers within 55 s |
+| `VICTORIAMETRICS_URL` | `http://victoriametrics:8428` (default) | Metrics store the API reads for `GET /v1/metrics/calls-active` (`docs/CALLS_ACTIVE_API.md`); the default is the `victoriametrics` service on the services compose network. No secret |
 | `INGEST_SHARED_SECRET` | (secret) | `X-Ingest-Secret` FS sends on `/v1/voicemail/fs/*` (same value as `/opt/revup/secrets/fs-voicemail/vm_ingest.header` on every FS node); ≥ 32 chars, unset ⇒ 503 |
 
 ## GCP Production Topology (3 zones — East / West / Central, all LIVE 2026-07-23)
